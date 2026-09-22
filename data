@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-09-22T03:26:18Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T03:26:18Z
+created: 2026-09-22T00:18:30Z
+depends_on:
+- 14
+estimate: 2h
+id: 17
+priority: high
+started: 2026-09-22T02:11:34Z
+status: done
+tags:
+- plugin
+title: 'Plugin packaging: plugin.json, skilletor skill, CLI on PATH'
+updated: 2026-09-22T03:26:18Z
+---
+
+Spec §8, §10.
+
+- .claude-plugin/plugin.json (name skilletor, Version, Beschreibung, Repo).
+- CLI im PATH des Bash-Tools: nachsehen, wie das manage-skills-Plugin das löst (~/.claude/plugins/cache/getty/manage-skills/…), und denselben Mechanismus nutzen.
+- skills/skilletor/SKILL.md nach skill-authoring: wann triggern (Skills/Agents/Rules aus Sources installieren, Source hinzufügen, "woher kommt dieser Skill"), Config-Format, CLI, Hinweis: verwaltete Dateien nie direkt editieren – in der Source ändern (Autoren-Modus).
+- Lokal testen mit claude --plugin-dir . : Hooks feuern, Meldungen kommen an, CLI ist aufrufbar. Braucht den User für die Live-Session.
+
+Done: Plugin lädt fehlerfrei, beide Hooks in einer echten Session beobachtet, Skill wird gelistet.
+
+2026-09-22 03:26 Live test passed against real Claude Code v2.1.278 (Fable 5.1): plugin loaded cleanly via --plugin-dir; SessionStart:startup fired and displayed the systemMessage 'skilletor: 1 item(s) updated' (confirms real CC accepts top-level systemMessage + hookSpecificOutput.additionalContext); the hook installed AND live-rendered the skill ({{project.name}}->proj, {{host.name}}->reuben), wrote the lock and the gitignore block; skilletor skill discovered (clean plugin load). CLI on PATH via bin/. Scratch env + demo trust entry cleaned up. Done.
