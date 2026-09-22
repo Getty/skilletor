@@ -31,7 +31,13 @@ export const buildOptions = {
     __SKILLETOR_VERSION__: JSON.stringify(pkg.version),
   },
   banner: {
-    js: "// skilletor — generated bundle, do not edit. Rebuild with `npm run build`.",
+    // A real `require` for bundled CJS deps (e.g. nunjucks) that require() node
+    // built-ins — esbuild's require shim uses the global `require` when present.
+    js: [
+      "// skilletor — generated bundle, do not edit. Rebuild with `npm run build`.",
+      'import { createRequire as __sk_createRequire } from "node:module";',
+      "const require = __sk_createRequire(import.meta.url);",
+    ].join("\n"),
   },
 };
 

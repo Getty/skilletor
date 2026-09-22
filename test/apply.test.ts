@@ -143,6 +143,19 @@ test("an invalid item name is rejected", () => {
   }
 });
 
+test("keep preserves a locked item that is absent from the plan", () => {
+  const tmp = makeTmpDir();
+  try {
+    apply([item("skill", "moo", { "skills/moo/SKILL.md": "S" })], { targetDir: tmp.dir });
+    const res = apply([], { targetDir: tmp.dir, keep: ["skills/moo"] });
+    assert.deepEqual(res.removed, []);
+    assert.equal(read(tmp.dir, "skills/moo/SKILL.md"), "S");
+    assert.equal("skills/moo" in readLock(join(tmp.dir, "skilletor.lock.json")), true);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
 test("agent and rule items install as single files", () => {
   const tmp = makeTmpDir();
   try {

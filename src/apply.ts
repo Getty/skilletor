@@ -26,6 +26,9 @@ export interface ApplyOptions {
   /** Scope root (the `.claude` directory). */
   targetDir: string;
   force?: boolean;
+  /** Lock keys to preserve untouched even if absent from the plan (e.g. an
+   *  offline or untrusted source whose items must not be deleted). */
+  keep?: string[];
 }
 
 export interface ApplyResult {
@@ -115,9 +118,14 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
     }
   }
 
-  // Items no longer declared: delete their locked files.
+  const keep = new Set(opts.keep ?? []);
+  // Items no longer declared: delete their locked files (unless kept).
   for (const key of Object.keys(oldLock)) {
     if (planned.has(key)) continue;
+    if (keep.has(key)) {
+      newLock[key] = oldLock[key]!; // preserve untouched
+      continue;
+    }
     for (const rel of Object.keys(oldLock[key]!.files)) {
       removeFile(safeJoin(targetDir, rel), dirsTouched);
     }
