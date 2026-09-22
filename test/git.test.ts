@@ -22,7 +22,7 @@ function git(cwd: string, ...args: string[]): string {
 function makeRepo(tmp: TmpDir) {
   const bare = join(tmp.dir, "bare.git");
   const work = join(tmp.dir, "work");
-  git(tmp.dir, "init", "-q", "--bare", bare);
+  git(tmp.dir, "init", "-q", "-b", "main", "--bare", bare);
   mkdirSync(work);
   git(work, "init", "-q", "-b", "main");
   const url = "file://" + resolvePath(bare);

@@ -45,7 +45,7 @@ test("full lifecycle: add, install, update, re-render, author mode, uninstall", 
     put("rules/style.md.njk", "style foo={{ vars.foo }}\n");
     put("snippets/tag.md", "TAG");
     const bare = join(tmp.dir, "src.git");
-    execFileSync("git", ["init", "-q", "--bare", bare]);
+    execFileSync("git", ["init", "-q", "-b", "main", "--bare", bare]);
     git(work, "init", "-q", "-b", "main");
     git(work, "add", ".");
     git(work, "commit", "-qm", "init");

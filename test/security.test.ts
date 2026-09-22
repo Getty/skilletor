@@ -119,7 +119,7 @@ test("a symlink committed in a git source is rejected after resolve", async () =
     const G = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
     const bare = join(tmp.dir, "r.git");
     const work = join(tmp.dir, "w");
-    execFileSync("git", ["init", "-q", "--bare", bare]);
+    execFileSync("git", ["init", "-q", "-b", "main", "--bare", bare]);
     mkdirSync(join(work, "skills", "x"), { recursive: true });
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: work });
     writeFileSync(join(work, "skills/x/SKILL.md"), "---\ndescription: x\n---\n");

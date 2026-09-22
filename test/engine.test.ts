@@ -119,7 +119,7 @@ test("offline git source falls back to the cache and keeps the item", async () =
     const bare = join(e.tmp.dir, "repo.git");
     const work = join(e.tmp.dir, "work");
     const G = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
-    execFileSync("git", ["init", "-q", "--bare", bare]);
+    execFileSync("git", ["init", "-q", "-b", "main", "--bare", bare]);
     mkdirSync(join(work, "skills", "foo"), { recursive: true });
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: work });
     writeFileSync(join(work, "skills/foo/SKILL.md"), "---\ndescription: foo\n---\nGIT-BODY\n");
