@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-09-22T01:47:03Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T01:47:03Z
+created: 2026-09-22T00:18:27Z
+depends_on:
+- 8
+estimate: 4h
+id: 9
+priority: high
+started: 2026-09-22T01:44:22Z
+status: done
+tags:
+- engine
+title: 'lock.ts + apply.ts: diff, atomic write, ownership, cleanup'
+updated: 2026-09-22T01:47:03Z
+---
+
+Spec §6.1–6.3. TDD gegen Temp-Verzeichnisse.
+
+- Lock pro Scope (skilletor.lock.json): Eintrag "<typverzeichnis>/<name>" → source, version, files{rel → sha256}.
+- apply(plan): gebauten Output mit Platte + Lock vergleichen; nur Unterschiede schreiben (Temp-Datei im selben Verzeichnis + rename); Dateien, die das Item nicht mehr enthält, löschen; leere Verzeichnisse entfernen.
+- Ownership: Zielpfad existiert und steht nicht im Lock → nicht anfassen, Konflikt melden; --force übernimmt.
+- Drift: verwaltete Datei weicht vom Lock-Hash ab → überschreiben, im Ergebnis als "lokale Änderung überschrieben" führen.
+- Aufräumen: Lock-Einträge, die nicht mehr deklariert sind → löschen (nur Lock-Dateien).
+- Zielpfade feste Typ-Tabelle: skill→skills/<name>/, agent→agents/<name>.md, rule→rules/<name>.md; Namen auf [A-Za-z0-9._-] prüfen.
+- Ergebnisobjekt: added/updated/removed/unchanged/conflicts/overwritten pro Item – Grundlage für report.ts.
+
+Done: Tests für Erstinstallation, No-op-Lauf (keine Schreibzugriffe, mtime unverändert), Update, Datei im Item entfernt, Item nicht mehr deklariert, fremder Pfad (mit/ohne --force), Drift.
+
+2026-09-22 01:47 Done, TDD vs temp dirs. src/lock.ts (readLock/writeLock, deterministic sorted serialization, atomic). src/fsutil.ts (hashBuffer sha256, atomicWrite temp+rename). src/apply.ts apply(plan, {targetDir, force}): render-and-compare against disk+lock, write only diffs atomically; foreign path (not in lock) -> conflict, untouched unless --force adopts; managed drift -> overwrite + report; files dropped from item deleted; undeclared items (in lock) removed; empty dirs pruned; name [A-Za-z0-9._-]; no-op = zero writes incl lock (serialize compare). Result: added/updated/removed/unchanged/conflicts/overwritten. 14 tests.
