@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-09-22T01:40:20Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T01:40:20Z
+created: 2026-09-22T00:18:27Z
+depends_on:
+- 5
+estimate: 3h
+id: 7
+priority: medium
+started: 2026-09-22T01:38:05Z
+status: done
+tags:
+- sources
+title: 'sources/url: HTTPS tarball with ETag'
+updated: 2026-09-22T01:40:20Z
+---
+
+Spec §4.4, §9. TDD gegen lokalen HTTP-Server (Test-Hook erlaubt http://127.0.0.1, Produktion nur https).
+
+- resolve(): Conditional GET (If-None-Match), .tar.gz in den Cache entpacken, version = "etag:<…>" bzw. sha256 des Tarballs, wenn kein ETag kommt.
+- check(): HEAD + ETag-Vergleich, Timeout wie git.
+- Entpacken ohne externe tar-Abhängigkeit oder mit System-tar – Entscheidung im Ticket festhalten; in beiden Fällen: Einträge mit .. / absoluten Pfaden / Symlinks / Hardlinks ablehnen, ein einzelnes Top-Level-Verzeichnis (GitHub-Archiv-Stil) transparent strippen.
+- Offline-Fallback wie bei git.
+
+Done: Tests für 200/304, fehlendes ETag, bösartige Tar-Einträge, Top-Level-Strip, http:// in Produktion abgelehnt.
+
+2026-09-22 01:40 Done, TDD vs local http server + hand-built tars. src/sources/url.ts UrlSource: conditional GET (If-None-Match); 304 reuses cache, 200 extracts; version=etag:<etag> or sha256:<hash>. check()=HEAD+ETag. DECISION: unpack dependency-free = zlib gunzip + minimal in-process tar reader (no external/system tar). Security: reject .. / absolute / symlink / hardlink entries + resolved-path escape guard; strip single GitHub-style top-level dir; handles pax 'path=' and GNU 'L' longname. https-only in prod; allowHttp (tests) permits http://127.0.0.1. Offline: cache+warning. 9 tests.
