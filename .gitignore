@@ -11,3 +11,6 @@ config.yml
 /.claude/skilletor.json
 /.claude/skilletor.local.json
 /.claude/skilletor.lock.json
+
+# claude plugin eval output
+evals/results/

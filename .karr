@@ -1,0 +1,9 @@
+claude: true
+prompt: |
+  Drain the skilletor karr board. skilletor is the Claude Code plugin + CLI that
+  installs skills, agents and rules from remote sources. Read
+  .claude/rules/skilletor-rules.md, then pick the top actionable ticket from the
+  board, claim it and drive it to review. Delegate engine code (src/, test/,
+  hooks, dist/) to skilletor-worker, skill/agent/rule text to
+  skilletor-skill-author, and assessments to skilletor-skill-auditor. Rebuild
+  dist/ with every src/ change. Never tag, push or release.
