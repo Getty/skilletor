@@ -3965,7 +3965,7 @@ var require_filters = __commonJS({
       return r.copySafeness(str, res);
     }
     _exports.indent = indent;
-    function join13(arr, del, attr) {
+    function join14(arr, del, attr) {
       del = del || "";
       if (attr) {
         arr = lib.map(arr, function(v) {
@@ -3974,7 +3974,7 @@ var require_filters = __commonJS({
       }
       return arr.join(del);
     }
-    _exports.join = join13;
+    _exports.join = join14;
     function last(arr) {
       return arr[arr.length - 1];
     }
@@ -5739,7 +5739,7 @@ var require_nunjucks = __commonJS({
 // src/cli.ts
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { join as join12 } from "node:path";
+import { join as join13 } from "node:path";
 
 // src/engine.ts
 import { execFileSync } from "node:child_process";
@@ -5747,8 +5747,30 @@ import { hostname, platform, userInfo } from "node:os";
 import { basename, join as join11 } from "node:path";
 
 // src/config.ts
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join as join2 } from "node:path";
+
+// src/fsutil.ts
+import { createHash } from "node:crypto";
+import { mkdirSync, renameSync, writeFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+function hashBuffer(buf) {
+  return "sha256:" + createHash("sha256").update(buf).digest("hex");
+}
+function atomicWrite(path, data) {
+  const dir = dirname(path);
+  mkdirSync(dir, { recursive: true });
+  const tmp = join(dir, `.skilletor-tmp-${process.pid}-${Math.random().toString(36).slice(2)}`);
+  try {
+    writeFileSync(tmp, data);
+    renameSync(tmp, path);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
+}
+
+// src/config.ts
 var INSTALL_KEYS = { skills: "skill", agents: "agent", rules: "rule" };
 var ConfigError = class extends Error {
   name = "ConfigError";
@@ -5885,14 +5907,14 @@ function mergeVars(...objs) {
   return out;
 }
 function loadConfig(opts) {
-  const userPath = join(opts.home, ".claude", "skilletor.json");
+  const userPath = join2(opts.home, ".claude", "skilletor.json");
   const user = readConfigFile(userPath);
   if ("gitignore" in user) {
     throw new ConfigError(`${userPath}: "gitignore" is project-only`);
   }
   const hasProject = opts.projectDir !== void 0;
-  const projectPath = hasProject ? join(opts.projectDir, ".claude", "skilletor.json") : "";
-  const localPath = hasProject ? join(opts.projectDir, ".claude", "skilletor.local.json") : "";
+  const projectPath = hasProject ? join2(opts.projectDir, ".claude", "skilletor.json") : "";
+  const localPath = hasProject ? join2(opts.projectDir, ".claude", "skilletor.local.json") : "";
   const project = hasProject ? readConfigFile(projectPath) : {};
   const local = hasProject ? readConfigFile(localPath) : {};
   for (const [obj, p] of [[project, projectPath], [local, localPath]]) {
@@ -5958,13 +5980,78 @@ function boolOr(value, fallback, path, key) {
   if (typeof value !== "boolean") throw new ConfigError(`${path}: "${key}" must be a boolean`);
   return value;
 }
+function loadRaw(path) {
+  if (!existsSync(path)) return {};
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("top level must be an object");
+    }
+    return value;
+  } catch (err) {
+    throw new ConfigError(`${path}: invalid JSON (${err.message})`);
+  }
+}
+function saveRaw(path, cfg) {
+  atomicWrite(path, JSON.stringify(cfg, null, 2) + "\n");
+}
+function addSource(path, name, def) {
+  const cfg = loadRaw(path);
+  const sources = cfg.sources ?? {};
+  sources[name] = def;
+  cfg.sources = sources;
+  saveRaw(path, cfg);
+}
+function removeSource(path, name) {
+  const cfg = loadRaw(path);
+  const sources = cfg.sources;
+  if (sources && name in sources) {
+    delete sources[name];
+    if (Object.keys(sources).length === 0) delete cfg.sources;
+    saveRaw(path, cfg);
+  }
+}
+var INSTALL_KEY = { skill: "skills", agent: "agents", rule: "rules" };
+function addInstallEntry(path, type, entry) {
+  const cfg = loadRaw(path);
+  const install = cfg.install ?? {};
+  const key = INSTALL_KEY[type];
+  const list = Array.isArray(install[key]) ? install[key] : [];
+  if (!list.includes(entry)) list.push(entry);
+  install[key] = list;
+  cfg.install = install;
+  saveRaw(path, cfg);
+}
+function removeInstallEntries(path, name, source) {
+  const cfg = loadRaw(path);
+  const install = cfg.install;
+  if (!install) return 0;
+  let removed = 0;
+  for (const key of Object.values(INSTALL_KEY)) {
+    const list = install[key];
+    if (!Array.isArray(list)) continue;
+    const kept = list.filter((e) => {
+      const at = e.lastIndexOf("@");
+      const eName = (at > 0 ? e.slice(0, at) : e).replace(/^[a-z]+:/, "");
+      const eSource = at > 0 ? e.slice(at + 1) : void 0;
+      const match = eName === name && (source === void 0 || eSource === source);
+      if (match) removed++;
+      return !match;
+    });
+    if (kept.length) install[key] = kept;
+    else delete install[key];
+  }
+  if (Object.keys(install).length === 0) delete cfg.install;
+  if (removed) saveRaw(path, cfg);
+  return removed;
+}
 
 // src/sources/local.ts
-import { existsSync, statSync } from "node:fs";
-import { join as join2 } from "node:path";
+import { existsSync as existsSync2, statSync } from "node:fs";
+import { join as join3 } from "node:path";
 function expandHome(path, home) {
   if (path === "~") return home;
-  if (path.startsWith("~/")) return join2(home, path.slice(2));
+  if (path.startsWith("~/")) return join3(home, path.slice(2));
   return path;
 }
 var LocalSource = class {
@@ -5980,7 +6067,7 @@ var LocalSource = class {
     }
   }
   async resolve(_cachedVersion) {
-    if (!existsSync(this.dir)) {
+    if (!existsSync2(this.dir)) {
       throw new Error(`local source directory does not exist: ${this.dir}`);
     }
     return { dir: this.dir, version: "local" };
@@ -5992,9 +6079,9 @@ var LocalSource = class {
 
 // src/sources/git.ts
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync } from "node:fs";
-import { join as join3 } from "node:path";
+import { createHash as createHash2 } from "node:crypto";
+import { existsSync as existsSync3, mkdirSync as mkdirSync2 } from "node:fs";
+import { join as join4 } from "node:path";
 var DEFAULT_TIMEOUT_MS = 6e4;
 var GitSource = class {
   opts;
@@ -6002,8 +6089,8 @@ var GitSource = class {
     this.opts = opts;
   }
   cacheDir() {
-    const hash = createHash("sha256").update(this.opts.url).digest("hex").slice(0, 16);
-    return join3(this.opts.cacheRoot, hash);
+    const hash = createHash2("sha256").update(this.opts.url).digest("hex").slice(0, 16);
+    return join4(this.opts.cacheRoot, hash);
   }
   run(cwd, args, timeoutMs) {
     return new Promise((resolvePromise, reject) => {
@@ -6024,14 +6111,14 @@ var GitSource = class {
     });
   }
   isRepo(dir) {
-    return existsSync2(join3(dir, ".git"));
+    return existsSync3(join4(dir, ".git"));
   }
   async resolve(_cachedVersion) {
     const dir = this.cacheDir();
     const ref = this.opts.ref;
     try {
       if (!this.isRepo(dir)) {
-        mkdirSync(dir, { recursive: true });
+        mkdirSync2(dir, { recursive: true });
         await this.run(dir, ["init", "-q"]);
         await this.run(dir, ["remote", "add", "origin", this.opts.url]);
       } else {
@@ -6084,9 +6171,9 @@ function isCommitish(ref) {
 }
 
 // src/sources/url.ts
-import { createHash as createHash2 } from "node:crypto";
-import { existsSync as existsSync3, mkdirSync as mkdirSync2, rmSync, writeFileSync } from "node:fs";
-import { dirname, join as join4, resolve as resolvePath, sep } from "node:path";
+import { createHash as createHash3 } from "node:crypto";
+import { existsSync as existsSync4, mkdirSync as mkdirSync3, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { dirname as dirname2, join as join5, resolve as resolvePath, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 var TarError = class extends Error {
   name = "TarError";
@@ -6098,8 +6185,8 @@ var UrlSource = class {
     this.opts = opts;
   }
   cacheDir() {
-    const hash = createHash2("sha256").update(this.opts.url).digest("hex").slice(0, 16);
-    return join4(this.opts.cacheRoot, hash);
+    const hash = createHash3("sha256").update(this.opts.url).digest("hex").slice(0, 16);
+    return join5(this.opts.cacheRoot, hash);
   }
   assertScheme() {
     const u = new URL(this.opts.url);
@@ -6123,15 +6210,15 @@ var UrlSource = class {
     try {
       const headers = {};
       const etag = cachedVersion?.startsWith("etag:") ? cachedVersion.slice(5) : void 0;
-      if (etag && existsSync3(dir)) headers["If-None-Match"] = etag;
+      if (etag && existsSync4(dir)) headers["If-None-Match"] = etag;
       const res = await this.request("GET", headers);
-      if (res.status === 304 && existsSync3(dir)) {
+      if (res.status === 304 && existsSync4(dir)) {
         return { dir, version: cachedVersion };
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = Buffer.from(await res.arrayBuffer());
       const resEtag = res.headers.get("etag");
-      const version = resEtag ? `etag:${resEtag}` : `sha256:${createHash2("sha256").update(body).digest("hex")}`;
+      const version = resEtag ? `etag:${resEtag}` : `sha256:${createHash3("sha256").update(body).digest("hex")}`;
       const entries = stripTopLevel(parseTar(gunzipSync(body)));
       writeEntries(dir, entries);
       return { dir, version };
@@ -6139,7 +6226,7 @@ var UrlSource = class {
       if (err instanceof TarError) {
         throw new Error(`url source ${this.opts.url} failed: ${err.message}`);
       }
-      if (existsSync3(dir)) {
+      if (existsSync4(dir)) {
         return {
           dir,
           version: cachedVersion ?? "unknown",
@@ -6229,26 +6316,26 @@ function stripTopLevel(entries) {
   return entries.map((e) => ({ ...e, name: e.name === top ? "" : e.name.startsWith(prefix) ? e.name.slice(prefix.length) : e.name })).filter((e) => e.name.length > 0);
 }
 function writeEntries(dir, entries) {
-  rmSync(dir, { recursive: true, force: true });
-  mkdirSync2(dir, { recursive: true });
+  rmSync2(dir, { recursive: true, force: true });
+  mkdirSync3(dir, { recursive: true });
   const root = resolvePath(dir);
   for (const e of entries) {
-    const dest = resolvePath(join4(dir, e.name));
+    const dest = resolvePath(join5(dir, e.name));
     if (dest !== root && !dest.startsWith(root + sep)) {
       throw new TarError(`unsafe tar entry (escapes target): ${e.name}`);
     }
     if (e.type === "dir") {
-      mkdirSync2(dest, { recursive: true });
+      mkdirSync3(dest, { recursive: true });
     } else {
-      mkdirSync2(dirname(dest), { recursive: true });
-      writeFileSync(dest, e.data);
+      mkdirSync3(dirname2(dest), { recursive: true });
+      writeFileSync2(dest, e.data);
     }
   }
 }
 
 // src/catalog.ts
-import { existsSync as existsSync4, lstatSync, readFileSync as readFileSync2, readdirSync } from "node:fs";
-import { join as join5, relative } from "node:path";
+import { existsSync as existsSync5, lstatSync, readFileSync as readFileSync2, readdirSync } from "node:fs";
+import { join as join6, relative } from "node:path";
 var CatalogError = class extends Error {
   name = "CatalogError";
 };
@@ -6267,7 +6354,7 @@ function noSymlink(path) {
 function walkFiles(dir, sourceDir) {
   const out = [];
   for (const entry of readdirSync(dir)) {
-    const p = join5(dir, entry);
+    const p = join6(dir, entry);
     const st = noSymlink(p);
     if (st.isDirectory()) out.push(...walkFiles(p, sourceDir));
     else if (st.isFile()) out.push(relative(sourceDir, p));
@@ -6299,8 +6386,8 @@ function descriptionOf(filePath) {
 }
 function skillFile(dir) {
   for (const candidate of ["SKILL.md", "SKILL.md.njk"]) {
-    const p = join5(dir, candidate);
-    if (existsSync4(p)) {
+    const p = join6(dir, candidate);
+    if (existsSync5(p)) {
       noSymlink(p);
       return p;
     }
@@ -6314,11 +6401,11 @@ function itemName(fileName) {
 function scan(dir) {
   const items = [];
   for (const { dir: sub, type } of TYPE_DIRS) {
-    const typeDir = join5(dir, sub);
-    if (!existsSync4(typeDir)) continue;
+    const typeDir = join6(dir, sub);
+    if (!existsSync5(typeDir)) continue;
     noSymlink(typeDir);
     for (const entry of readdirSync(typeDir)) {
-      const p = join5(typeDir, entry);
+      const p = join6(typeDir, entry);
       const st = noSymlink(p);
       if (type === "skill") {
         if (!st.isDirectory()) continue;
@@ -6336,8 +6423,8 @@ function scan(dir) {
   return { items, meta: readSourceMeta(dir) };
 }
 function readSourceMeta(dir) {
-  const p = join5(dir, "skilletor.json");
-  if (!existsSync4(p)) return {};
+  const p = join6(dir, "skilletor.json");
+  if (!existsSync5(p)) return {};
   noSymlink(p);
   let parsed;
   try {
@@ -6356,7 +6443,7 @@ function readSourceMeta(dir) {
 // src/render.ts
 var import_nunjucks = __toESM(require_nunjucks(), 1);
 import { readFileSync as readFileSync3 } from "node:fs";
-import { join as join6, resolve as resolvePath2, sep as sep2 } from "node:path";
+import { join as join7, resolve as resolvePath2, sep as sep2 } from "node:path";
 var RenderError = class extends Error {
   name = "RenderError";
 };
@@ -6399,35 +6486,15 @@ function build(item, sourceDir, context) {
       }
       out.set(file.slice(0, -".njk".length), Buffer.from(rendered, "utf8"));
     } else {
-      out.set(file, readFileSync3(join6(sourceDir, file)));
+      out.set(file, readFileSync3(join7(sourceDir, file)));
     }
   }
   return out;
 }
 
 // src/apply.ts
-import { existsSync as existsSync5, readFileSync as readFileSync5, readdirSync as readdirSync2, rmdirSync, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync6, readFileSync as readFileSync5, readdirSync as readdirSync2, rmdirSync, rmSync as rmSync3 } from "node:fs";
 import { dirname as dirname3, join as join8, resolve as resolvePath3, sep as sep3 } from "node:path";
-
-// src/fsutil.ts
-import { createHash as createHash3 } from "node:crypto";
-import { mkdirSync as mkdirSync3, renameSync, writeFileSync as writeFileSync2, rmSync as rmSync2 } from "node:fs";
-import { dirname as dirname2, join as join7 } from "node:path";
-function hashBuffer(buf) {
-  return "sha256:" + createHash3("sha256").update(buf).digest("hex");
-}
-function atomicWrite(path, data) {
-  const dir = dirname2(path);
-  mkdirSync3(dir, { recursive: true });
-  const tmp = join7(dir, `.skilletor-tmp-${process.pid}-${Math.random().toString(36).slice(2)}`);
-  try {
-    writeFileSync2(tmp, data);
-    renameSync(tmp, path);
-  } catch (err) {
-    rmSync2(tmp, { force: true });
-    throw err;
-  }
-}
 
 // src/lock.ts
 import { readFileSync as readFileSync4 } from "node:fs";
@@ -6489,7 +6556,7 @@ function apply(plan, opts) {
       const abs = safeJoin(targetDir, rel);
       const desired = hashBuffer(buf);
       const locked = existing?.files[rel];
-      const onDisk = existsSync5(abs);
+      const onDisk = existsSync6(abs);
       if (onDisk) {
         const diskHash = hashBuffer(readFileSync5(abs));
         if (locked === void 0 && !opts.force) {
@@ -6558,7 +6625,7 @@ function safeJoin(root, rel) {
   return abs;
 }
 function removeFile(abs, dirsTouched) {
-  if (existsSync5(abs)) {
+  if (existsSync6(abs)) {
     rmSync3(abs, { force: true });
     dirsTouched.add(dirname3(abs));
   }
@@ -6567,7 +6634,7 @@ function pruneEmptyDirs(dirs, root) {
   const sorted = [...dirs].sort((a, b) => b.length - a.length);
   for (let dir of sorted) {
     while (dir !== root && dir.startsWith(root + sep3)) {
-      if (!existsSync5(dir) || readdirSync2(dir).length > 0) break;
+      if (!existsSync6(dir) || readdirSync2(dir).length > 0) break;
       rmdirSync(dir);
       dir = dirname3(dir);
     }
@@ -6575,7 +6642,7 @@ function pruneEmptyDirs(dirs, root) {
 }
 
 // src/state.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import { existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync6, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join9 } from "node:path";
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
 var State = class {
@@ -6670,19 +6737,19 @@ var State = class {
       if (typeof owner.at !== "number") return true;
       return Date.now() - owner.at > staleMs;
     } catch {
-      return existsSync6(ownerFile) ? false : true;
+      return existsSync7(ownerFile) ? false : true;
     }
   }
 };
 
 // src/gitignore.ts
-import { existsSync as existsSync7, readFileSync as readFileSync7, rmSync as rmSync5 } from "node:fs";
+import { existsSync as existsSync8, readFileSync as readFileSync7, rmSync as rmSync5 } from "node:fs";
 import { join as join10 } from "node:path";
 var BEGIN = "# >>> skilletor >>>";
 var END = "# <<< skilletor <<<";
 function updateGitignore(opts) {
   const path = join10(opts.claudeDir, ".gitignore");
-  const existed = existsSync7(path);
+  const existed = existsSync8(path);
   const existing = existed ? readFileSync7(path, "utf8") : "";
   const lines = existing.length ? existing.split("\n") : [];
   const begin = lines.indexOf(BEGIN);
@@ -6976,6 +7043,293 @@ function status(ctx, opts = {}) {
   return out;
 }
 
+// src/commands.ts
+import { join as join12 } from "node:path";
+
+// src/spec.ts
+var SpecError = class extends Error {
+  name = "SpecError";
+};
+var KNOWN_FORGES = ["github.com", "gitlab.com", "codeberg.org", "hf.co", "huggingface.co"];
+var DEFAULT_REPO = "skills";
+function normalizeName(raw) {
+  return raw.toLowerCase().replace(/\.git$/, "").replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function basename2(path) {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : path;
+}
+function isLocal(spec) {
+  return spec.startsWith("/") || spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("~");
+}
+function hasScheme(spec) {
+  return /^[a-z][a-z0-9+.-]*:\/\//.test(spec);
+}
+function isScpLike(spec) {
+  return /^[^@/]+@[^:/]+:/.test(spec);
+}
+function isTarball(url) {
+  return url.endsWith(".tar.gz") || url.endsWith(".tgz");
+}
+function nameFromUrl(spec, kind) {
+  if (isScpLike(spec)) {
+    const path = spec.slice(spec.indexOf(":") + 1);
+    return normalizeName(basename2(path.split("/")[0] ?? path));
+  }
+  try {
+    const u = new URL(spec);
+    const segs = u.pathname.split("/").filter(Boolean);
+    if (kind === "git" && segs.length > 0) return normalizeName(segs[0]);
+    return normalizeName(u.hostname);
+  } catch {
+    return normalizeName(spec);
+  }
+}
+function resolveSpec(spec, probe) {
+  const s = spec.trim();
+  if (isLocal(s)) {
+    return { kind: "local", value: s, derivedName: normalizeName(basename2(s)) };
+  }
+  if (hasScheme(s) || isScpLike(s)) {
+    const kind = isTarball(s) ? "url" : "git";
+    return { kind, value: s, derivedName: nameFromUrl(s, kind) };
+  }
+  if (s.startsWith("github:")) {
+    const path2 = s.slice("github:".length);
+    const [owner, repo] = path2.split("/");
+    if (!owner) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
+    return {
+      kind: "git",
+      value: `https://github.com/${owner}/${repo ?? DEFAULT_REPO}`,
+      derivedName: normalizeName(owner)
+    };
+  }
+  const slash = s.indexOf("/");
+  const firstSeg = slash === -1 ? s : s.slice(0, slash);
+  const rest = slash === -1 ? "" : s.slice(slash + 1);
+  if (KNOWN_FORGES.includes(firstSeg.toLowerCase()) && slash !== -1) {
+    const segs = rest.split("/").filter(Boolean);
+    const owner = segs[0];
+    if (!owner) throw new SpecError(`cannot resolve "${spec}": expected ${firstSeg}/owner[/repo]`);
+    const repo = segs[1] ?? DEFAULT_REPO;
+    return {
+      kind: "git",
+      value: `https://${firstSeg.toLowerCase()}/${owner}/${repo}`,
+      derivedName: normalizeName(owner)
+    };
+  }
+  if (slash === -1) {
+    if (!firstSeg.includes(".")) {
+      return {
+        kind: "git",
+        value: `https://github.com/${firstSeg}/${DEFAULT_REPO}`,
+        derivedName: normalizeName(firstSeg)
+      };
+    }
+    return probeGeneric(`https://${firstSeg}/${DEFAULT_REPO}`, firstSeg, spec, probe);
+  }
+  if (!firstSeg.includes(".")) {
+    const segs = rest.split("/").filter(Boolean);
+    const repo = segs[0] ?? DEFAULT_REPO;
+    return {
+      kind: "git",
+      value: `https://github.com/${firstSeg}/${repo}`,
+      derivedName: normalizeName(firstSeg)
+    };
+  }
+  const path = rest.replace(/\/+$/, "");
+  const base = path ? `https://${firstSeg}/${path}` : `https://${firstSeg}/${DEFAULT_REPO}`;
+  return probeGeneric(base, firstSeg, spec, probe);
+}
+function probeGeneric(baseUrl, host, original, probe) {
+  const result = probe(baseUrl);
+  if (result.git) {
+    return { kind: "git", value: baseUrl, derivedName: normalizeName(host) };
+  }
+  if (result.tarball) {
+    return { kind: "url", value: `${baseUrl}.tar.gz`, derivedName: normalizeName(host) };
+  }
+  throw new SpecError(
+    `cannot resolve "${original}": neither ${baseUrl} (git) nor ${baseUrl}.tar.gz (tarball) responded`
+  );
+}
+
+// src/probe.ts
+import { execFileSync as execFileSync2 } from "node:child_process";
+function makeProbe(timeoutMs = 5e3) {
+  return (baseUrl) => {
+    try {
+      execFileSync2("git", ["ls-remote", baseUrl], {
+        stdio: "ignore",
+        timeout: timeoutMs,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+      });
+      return { git: true };
+    } catch {
+    }
+    if (headOk(`${baseUrl}.tar.gz`, timeoutMs)) return { tarball: true };
+    return {};
+  };
+}
+function headOk(url, timeoutMs) {
+  const script = `const c=new AbortController();const t=setTimeout(()=>c.abort(),${timeoutMs});fetch(${JSON.stringify(url)},{method:'HEAD',signal:c.signal}).then(r=>{clearTimeout(t);process.exit(r.ok?0:1)}).catch(()=>process.exit(1));`;
+  try {
+    execFileSync2(process.execPath, ["-e", script], { stdio: "ignore", timeout: timeoutMs + 1e3 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// src/commands.ts
+var CommandError = class extends Error {
+  name = "CommandError";
+};
+function configPath(ctx, project) {
+  const root = project ? ctx.projectDir : ctx.home;
+  return join12(root, ".claude", "skilletor.json");
+}
+var TYPE_DIR = { skill: "skills", agent: "agents", rule: "rules" };
+async function cmdAdd(ctx, args) {
+  const resolved = resolveSpec(args.spec, ctx.probe ?? makeProbe());
+  const name = args.name ?? resolved.derivedName;
+  const def = resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };
+  addSource(configPath(ctx, Boolean(args.project)), name, def);
+  new State(ctx.stateRoot).trust(name, resolved.value);
+  const report = await sync(ctx);
+  return { name, def, report };
+}
+function cmdSourceList(ctx) {
+  const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+  return [...config.sources.values()].map((s) => ({
+    name: s.name,
+    def: pickDef(s),
+    origin: s.origin
+  }));
+}
+function pickDef(s) {
+  const def = {};
+  if (s.git) def.git = s.git;
+  if (s.ref) def.ref = s.ref;
+  if (s.url) def.url = s.url;
+  if (s.local) def.local = s.local;
+  return def;
+}
+async function cmdSourceRemove(ctx, args) {
+  const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+  const inUse = declaredItems(config).some((i) => i.source === args.name);
+  if (inUse && !args.force) {
+    throw new CommandError(`source "${args.name}" still has installed items; use --force to remove anyway`);
+  }
+  removeSource(configPath(ctx, Boolean(args.project)), args.name);
+  return sync(ctx);
+}
+async function cmdAvailable(ctx, args = {}) {
+  const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+  const state = new State(ctx.stateRoot);
+  const installedKeys = installedSet(ctx, config);
+  const names = args.source ? [args.source] : [...config.sources.keys()];
+  const out = [];
+  for (const name of names) {
+    const src = config.sources.get(name);
+    if (!src) throw new CommandError(`unknown source: ${name}`);
+    if (!state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
+    const loc = await makeBackend(src, ctx.home, cacheRootOf(ctx)).resolve();
+    for (const item of scan(loc.dir).items) {
+      out.push({
+        type: item.type,
+        name: item.name,
+        description: item.description,
+        source: name,
+        installed: installedKeys.has(`${TYPE_DIR[item.type]}/${item.name}@${name}`)
+      });
+    }
+  }
+  return out;
+}
+async function cmdInstall(ctx, args) {
+  const path = configPath(ctx, Boolean(args.project));
+  const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+  const state = new State(ctx.stateRoot);
+  const catalogs = /* @__PURE__ */ new Map();
+  for (const spec of args.items) {
+    const { type: explicitType, name, source } = parseItemSpec(spec);
+    const src = config.sources.get(source);
+    if (!src) throw new CommandError(`unknown source: ${source}`);
+    if (!state.isTrusted({ name: source, resolved: identityOf(src), origin: src.origin })) {
+      throw new CommandError(`source "${source}" is not trusted; run: skilletor trust ${source}`);
+    }
+    let cat = catalogs.get(source);
+    if (!cat) {
+      cat = scan((await makeBackend(src, ctx.home, cacheRootOf(ctx)).resolve()).dir);
+      catalogs.set(source, cat);
+    }
+    const matches = cat.items.filter((i) => i.name === name && (!explicitType || i.type === explicitType));
+    if (matches.length === 0) {
+      const suggestions = cat.items.map((i) => `${i.type}:${i.name}`).slice(0, 8).join(", ");
+      throw new CommandError(`unknown item "${name}" in ${source}${suggestions ? ` (available: ${suggestions})` : ""}`);
+    }
+    if (matches.length > 1) {
+      const types = matches.map((m) => `${m.type}:${name}@${source}`).join(", ");
+      throw new CommandError(`"${name}" is ambiguous in ${source}; use one of: ${types}`);
+    }
+    addInstallEntry(path, matches[0].type, `${name}@${source}`);
+  }
+  return sync(ctx);
+}
+async function cmdUninstall(ctx, args) {
+  const path = configPath(ctx, Boolean(args.project));
+  for (const spec of args.items) {
+    const { name, source } = parseItemSpec(spec);
+    removeInstallEntries(path, name, source);
+  }
+  return sync(ctx);
+}
+function cmdTrust(ctx, args) {
+  const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+  const src = config.sources.get(args.name);
+  if (!src) throw new CommandError(`unknown source: ${args.name}`);
+  const url = identityOf(src);
+  new State(ctx.stateRoot).trust(args.name, url);
+  return { name: args.name, url };
+}
+function parseItemSpec(spec) {
+  const at = spec.lastIndexOf("@");
+  if (at <= 0 || at === spec.length - 1) {
+    throw new CommandError(`item "${spec}" must be name@source (or type:name@source)`);
+  }
+  const source = spec.slice(at + 1);
+  let name = spec.slice(0, at);
+  let type;
+  const colon = name.indexOf(":");
+  if (colon !== -1) {
+    const prefix = name.slice(0, colon);
+    if (prefix !== "skill" && prefix !== "agent" && prefix !== "rule") {
+      throw new CommandError(`unknown type prefix "${prefix}" in "${spec}"`);
+    }
+    type = prefix;
+    name = name.slice(colon + 1);
+  }
+  return { type, name, source };
+}
+function declaredItems(config) {
+  const items = [...config.user.install];
+  if (config.project) items.push(...config.project.install);
+  return items.map((i) => ({ key: i.target, source: i.source }));
+}
+function installedSet(ctx, config) {
+  const set = /* @__PURE__ */ new Set();
+  for (const i of declaredItems(config)) set.add(`${i.key}@${i.source}`);
+  for (const scope of ["user", "project"]) {
+    const dir = join12(scope === "user" ? ctx.home : ctx.projectDir ?? "", ".claude");
+    if (scope === "project" && !ctx.projectDir) continue;
+    for (const [key, entry] of Object.entries(readLock(join12(dir, "skilletor.lock.json")))) {
+      set.add(`${key}@${entry.source}`);
+    }
+  }
+  return set;
+}
+
 // src/cli.ts
 var VERSION = true ? "0.1.0" : "0.0.0-dev";
 var USAGE = `skilletor ${VERSION}
@@ -7002,11 +7356,12 @@ Options:
   -v, --version         Show the version
 `;
 function parseFlags(args) {
-  const flags = { scope: "all", json: false, force: false, rest: [] };
+  const flags = { scope: "all", json: false, force: false, project: false, rest: [] };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--json") flags.json = true;
     else if (a === "--force") flags.force = true;
+    else if (a === "--project") flags.project = true;
     else if (a === "--scope") flags.scope = args[++i];
     else if (a.startsWith("--scope=")) flags.scope = a.slice(8);
     else if (a === "--project-dir") flags.projectDir = args[++i];
@@ -7020,7 +7375,7 @@ function makeContext2(flags) {
   return {
     home,
     projectDir: flags.projectDir ?? process.cwd(),
-    stateRoot: join12(home, ".claude", "skilletor")
+    stateRoot: join13(home, ".claude", "skilletor")
   };
 }
 function statusText(report) {
@@ -7079,6 +7434,81 @@ async function run(argv) {
         const r = status(ctx, { scope: flags.scope });
         process.stdout.write((flags.json ? JSON.stringify(r, null, 2) : statusText(r)) + "\n");
         return r.error ? 2 : 0;
+      }
+      case "add": {
+        if (flags.rest.length === 0) {
+          process.stderr.write("skilletor: add needs a source spec\n");
+          return 2;
+        }
+        const name = flags.rest.length >= 2 ? flags.rest[0] : void 0;
+        const spec = flags.rest.length >= 2 ? flags.rest[1] : flags.rest[0];
+        const r = await cmdAdd(ctx, { name, spec, project: flags.project });
+        process.stdout.write(`added source ${r.name} (${JSON.stringify(r.def)})
+`);
+        process.stdout.write((reportText(r.report) || "skilletor: up to date") + "\n");
+        return 0;
+      }
+      case "source": {
+        const sub = flags.rest[0];
+        if (sub === "list") {
+          const list = cmdSourceList(ctx);
+          process.stdout.write(
+            (flags.json ? JSON.stringify(list, null, 2) : list.map((s) => `${s.name} [${s.origin}] ${JSON.stringify(s.def)}`).join("\n")) + "\n"
+          );
+          return 0;
+        }
+        if (sub === "remove") {
+          const name = flags.rest[1];
+          if (!name) {
+            process.stderr.write("skilletor: source remove needs a name\n");
+            return 2;
+          }
+          const r = await cmdSourceRemove(ctx, { name, project: flags.project, force: flags.force });
+          process.stdout.write((reportText(r) || `removed source ${name}`) + "\n");
+          return 0;
+        }
+        process.stderr.write("skilletor: usage: source list | source remove <name>\n");
+        return 2;
+      }
+      case "available": {
+        const items = await cmdAvailable(ctx, { source: flags.rest[0] });
+        if (flags.json) {
+          process.stdout.write(JSON.stringify(items, null, 2) + "\n");
+        } else {
+          process.stdout.write(
+            items.map((i) => `${i.installed ? "\u2713" : " "} ${i.type} ${i.name}@${i.source}${i.description ? ` \u2014 ${i.description}` : ""}`).join("\n") + "\n"
+          );
+        }
+        return 0;
+      }
+      case "install": {
+        if (flags.rest.length === 0) {
+          process.stderr.write("skilletor: install needs at least one item\n");
+          return 2;
+        }
+        const r = await cmdInstall(ctx, { items: flags.rest, project: flags.project });
+        process.stdout.write((reportText(r) || "skilletor: up to date") + "\n");
+        return 0;
+      }
+      case "uninstall": {
+        if (flags.rest.length === 0) {
+          process.stderr.write("skilletor: uninstall needs at least one item\n");
+          return 2;
+        }
+        const r = await cmdUninstall(ctx, { items: flags.rest, project: flags.project });
+        process.stdout.write((reportText(r) || "skilletor: up to date") + "\n");
+        return 0;
+      }
+      case "trust": {
+        const name = flags.rest[0];
+        if (!name) {
+          process.stderr.write("skilletor: trust needs a source name\n");
+          return 2;
+        }
+        const r = cmdTrust(ctx, { name });
+        process.stdout.write(`trusted source ${r.name} (${r.url})
+`);
+        return 0;
       }
       default:
         process.stderr.write(`skilletor: unknown command: ${cmd}

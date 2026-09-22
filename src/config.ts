@@ -7,8 +7,9 @@
 //
 // Missing files are not an error; they read as an empty config. Everything
 // that can go wrong throws a ConfigError naming the file and the offending key.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { atomicWrite } from "./fsutil.ts";
 
 export type ItemType = "skill" | "agent" | "rule";
 export const ITEM_TYPES: readonly ItemType[] = ["skill", "agent", "rule"];
@@ -300,4 +301,91 @@ function boolOr(value: unknown, fallback: boolean, path: string, key: string): b
   if (value === undefined) return fallback;
   if (typeof value !== "boolean") throw new ConfigError(`${path}: "${key}" must be a boolean`);
   return value;
+}
+
+// ---- edit operations (spec §7) ----------------------------------------------
+//
+// These mutate a single config file, creating it if needed and writing 2-space
+// JSON with a trailing newline (diff-friendly). They preserve existing key order.
+
+export interface SourceDef {
+  git?: string;
+  ref?: string;
+  url?: string;
+  local?: string;
+}
+
+type RawConfig = Record<string, unknown>;
+
+function loadRaw(path: string): RawConfig {
+  if (!existsSync(path)) return {};
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error("top level must be an object");
+    }
+    return value as RawConfig;
+  } catch (err) {
+    throw new ConfigError(`${path}: invalid JSON (${(err as Error).message})`);
+  }
+}
+
+function saveRaw(path: string, cfg: RawConfig): void {
+  atomicWrite(path, JSON.stringify(cfg, null, 2) + "\n");
+}
+
+export function addSource(path: string, name: string, def: SourceDef): void {
+  const cfg = loadRaw(path);
+  const sources = (cfg.sources as Record<string, unknown>) ?? {};
+  sources[name] = def;
+  cfg.sources = sources;
+  saveRaw(path, cfg);
+}
+
+export function removeSource(path: string, name: string): void {
+  const cfg = loadRaw(path);
+  const sources = cfg.sources as Record<string, unknown> | undefined;
+  if (sources && name in sources) {
+    delete sources[name];
+    if (Object.keys(sources).length === 0) delete cfg.sources;
+    saveRaw(path, cfg);
+  }
+}
+
+const INSTALL_KEY: Record<ItemType, string> = { skill: "skills", agent: "agents", rule: "rules" };
+
+export function addInstallEntry(path: string, type: ItemType, entry: string): void {
+  const cfg = loadRaw(path);
+  const install = (cfg.install as Record<string, unknown>) ?? {};
+  const key = INSTALL_KEY[type];
+  const list = Array.isArray(install[key]) ? (install[key] as string[]) : [];
+  if (!list.includes(entry)) list.push(entry);
+  install[key] = list;
+  cfg.install = install;
+  saveRaw(path, cfg);
+}
+
+/** Remove install entries matching a name (optionally scoped to a source). */
+export function removeInstallEntries(path: string, name: string, source?: string): number {
+  const cfg = loadRaw(path);
+  const install = cfg.install as Record<string, unknown> | undefined;
+  if (!install) return 0;
+  let removed = 0;
+  for (const key of Object.values(INSTALL_KEY)) {
+    const list = install[key];
+    if (!Array.isArray(list)) continue;
+    const kept = (list as string[]).filter((e) => {
+      const at = e.lastIndexOf("@");
+      const eName = (at > 0 ? e.slice(0, at) : e).replace(/^[a-z]+:/, "");
+      const eSource = at > 0 ? e.slice(at + 1) : undefined;
+      const match = eName === name && (source === undefined || eSource === source);
+      if (match) removed++;
+      return !match;
+    });
+    if (kept.length) install[key] = kept;
+    else delete install[key];
+  }
+  if (Object.keys(install).length === 0) delete cfg.install;
+  if (removed) saveRaw(path, cfg);
+  return removed;
 }

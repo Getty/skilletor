@@ -37,19 +37,19 @@ export interface SyncOptions {
 
 type ScopeName = "user" | "project";
 
-function cacheRootOf(ctx: EngineContext): string {
+export function cacheRootOf(ctx: EngineContext): string {
   return ctx.cacheRoot ?? join(ctx.stateRoot, "cache");
 }
 
-function targetDirOf(ctx: EngineContext, scope: ScopeName): string {
+export function targetDirOf(ctx: EngineContext, scope: ScopeName): string {
   return join(scope === "user" ? ctx.home : ctx.projectDir!, ".claude");
 }
 
-function identityOf(src: ResolvedSource): string {
+export function identityOf(src: ResolvedSource): string {
   return src.git ?? src.url ?? src.local ?? "";
 }
 
-function makeBackend(src: ResolvedSource, home: string, cacheRoot: string): Source {
+export function makeBackend(src: ResolvedSource, home: string, cacheRoot: string): Source {
   if (src.local) {
     const ls = new LocalSource(src.local, home);
     if (ls.exists()) return ls; // author mode overrides git/url
