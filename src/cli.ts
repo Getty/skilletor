@@ -1,4 +1,5 @@
 // skilletor CLI entry point: argument parsing and dispatch (spec §7).
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
@@ -258,8 +259,21 @@ async function runHookCommand(event: string | undefined): Promise<number> {
   return 0;
 }
 
+/** True when this module is the executed entry point. Compares real paths so a
+ *  symlinked directory (e.g. macOS /var -> /private/var) does not fool it. */
+function isEntryPoint(): boolean {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  const self = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(argv1) === realpathSync(self);
+  } catch {
+    return argv1 === self;
+  }
+}
+
 // Run only when executed as the entry point, not when imported by a test.
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isEntryPoint()) {
   run(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (err) => {

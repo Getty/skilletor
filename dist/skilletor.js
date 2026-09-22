@@ -5737,6 +5737,7 @@ var require_nunjucks = __commonJS({
 });
 
 // src/cli.ts
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join as join13 } from "node:path";
@@ -7674,7 +7675,17 @@ async function runHookCommand(event) {
   }
   return 0;
 }
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+function isEntryPoint() {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  const self = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(argv1) === realpathSync(self);
+  } catch {
+    return argv1 === self;
+  }
+}
+if (isEntryPoint()) {
   run(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (err) => {
