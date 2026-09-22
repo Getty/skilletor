@@ -1,0 +1,33 @@
+---
+claimed_at: 2026-09-22T03:46:14Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T03:46:14Z
+created: 2026-09-22T00:18:31Z
+depends_on:
+- 15
+- 16
+- 18
+estimate: 2h
+id: 19
+priority: medium
+started: 2026-09-22T02:28:20Z
+status: done
+tags:
+- release
+title: 'Release: Getty/skilletor repo, CI, marketplace entry'
+updated: 2026-09-22T03:46:14Z
+---
+
+Spec §10. Nach außen sichtbar – jeder Schritt hier nur auf ausdrückliche Freigabe des Users (Repo anlegen, pushen, Marketplace-PR).
+
+- GitHub-Repo Getty/skilletor anlegen, main pushen. Vorher klären: sollen refs/karr/* mit auf den öffentlichen Remote?
+- CI (GitHub Actions): npm ci, npm test, check-dist auf Linux + macOS (+ Windows/Git Bash, wenn machbar).
+- Eintrag in Getty/marketplace, Installation per /plugin install skilletor@getty auf frischer Maschine/frischem Home testen.
+- Version taggen; manage-skills-README bekommt einen Hinweis auf skilletor als bevorzugten Nachfolger.
+
+Done: Installation über den Marketplace funktioniert von null.
+
+2026-09-22 02:28 Offline prep done: .github/workflows/ci.yml (Linux+macOS, Node 24), docs/release.md with human-run checklist, Getty/marketplace entry draft, manage-skills successor note, refs/karr push decision (recommend keep board private), social-preview sizing note. BLOCKED on user (external, each needs go-ahead): create Getty/skilletor + push main, verify CI green, add marketplace entry + test /plugin install from a fresh home, tag v0.1.0, add note to manage-skills README.
+
+2026-09-22 03:46 Release shipped: Getty/skilletor public repo created, main pushed (board refs/karr/* kept local). CI green on ubuntu + macos (caught + fixed 2 cross-platform bugs: git init -b main for fixtures; realpathSync entry-point check for macOS /var symlink — a real prod fix). Tag v0.1.0 + GitHub Release (.../releases/tag/v0.1.0) at the CI-green commit. Getty/marketplace updated: skilletor entry added + pushed (after manage-skills). REMAINING FOR USER: upload assets/github.png as GitHub social preview; run /plugin marketplace add Getty/marketplace + /plugin install skilletor@getty on a fresh home to confirm zero-to-installed; optionally add the drafted successor note to the manage-skills README (docs/release.md).
