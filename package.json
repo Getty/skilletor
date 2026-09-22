@@ -1,0 +1,28 @@
+{
+  "name": "skilletor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Remote skills, agents and rules for Claude Code – declared once, synced on every session, templated per project.",
+  "bin": {
+    "skilletor": "bin/skilletor"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check-dist": "node scripts/check-dist.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --disable-warning=ExperimentalWarning \"test/**/*.test.ts\""
+  },
+  "dependencies": {
+    "nunjucks": "^3.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@types/nunjucks": "^3.2.6",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}
