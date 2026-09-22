@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-09-22T02:03:46Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T02:03:46Z
+created: 2026-09-22T00:18:29Z
+depends_on:
+- 4
+- 12
+estimate: 3h
+id: 13
+priority: high
+started: 2026-09-22T01:59:51Z
+status: done
+tags:
+- cli
+title: 'CLI: add, source, available, install, uninstall, trust'
+updated: 2026-09-22T02:03:46Z
+---
+
+Spec §7, §4.3. TDD.
+
+- Edit-Operationen in config.ts: editieren nur die Ziel-Config (Default User, --project → Projekt), erhalten Reihenfolge/Formatierung so gut wie mit JSON möglich (2 Spaces, trailing newline), legen die Datei bei Bedarf an.
+- add [name] <spec> [--project]: Shorthand auflösen (spec.ts, echte Probe), explizite Form speichern, danach sync. add = Trust-Akt. source list | remove <name> (remove verweigert, solange Items der Source installiert sind, außer --force).
+- available [source]: Katalog aller vertrauten Sources – Typ, Name, Beschreibung, installiert-Marker; --json.
+- install <item>… [--project] / uninstall <item>…: name@source; Typ automatisch, typ:name@source bei Mehrdeutigkeit; unbekanntes Item → Fehler mit Vorschlägen aus dem Katalog. Danach sync.
+- trust <source>: bestätigt eine project-only Source, zeigt vorher die aufgelöste URL.
+
+Done: Tests für jeden Befehl inkl. Fehlerfälle; Config-Dateien nach Edit bleiben valide und diff-arm.
+
+2026-09-22 02:03 Done, TDD. config.ts edit ops (addSource/removeSource/addInstallEntry/removeInstallEntries; 2-space + trailing newline, create if missing, order-preserving). src/probe.ts real probe (git ls-remote sync, then HEAD via short-lived child node). src/commands.ts: add (resolveSpec -> store explicit form; add = trust act via state.trust; then sync), source list/remove (remove refuses while items installed unless --force), available (trusted sources catalog + installed markers, --json), install (name@source, type auto from catalog, type:name@source on ambiguity, unknown -> error with suggestions), uninstall, trust (records trust, shows resolved URL). cli.ts dispatch + --project. Verified whole flow via real binary. 9 command tests; 133 total.
