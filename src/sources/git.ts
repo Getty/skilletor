@@ -55,7 +55,7 @@ export class GitSource implements Source {
     return existsSync(join(dir, ".git"));
   }
 
-  async resolve(): Promise<SourceLocation> {
+  async resolve(_cachedVersion?: string): Promise<SourceLocation> {
     const dir = this.cacheDir();
     const ref = this.opts.ref;
     try {

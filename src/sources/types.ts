@@ -13,7 +13,7 @@ export interface SourceLocation {
 
 export interface Source {
   /** Fetch/prepare the source and report where it landed and its version. */
-  resolve(): Promise<SourceLocation>;
+  resolve(cachedVersion?: string): Promise<SourceLocation>;
   /** Cheap check: has the source changed since `cachedVersion`? */
   check(cachedVersion: string | undefined): Promise<boolean>;
 }
