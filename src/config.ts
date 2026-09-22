@@ -50,7 +50,10 @@ export interface ScopeConfig {
 
 export interface LoadedConfig {
   sources: Map<string, ResolvedSource>;
-  /** User-level throttle for the in-session check, in seconds (default 600). */
+  /**
+   * User-level throttle for the in-session check, in seconds (default 1800).
+   * hooks.ts DEFAULT_INTERVAL=600 is only the fallback used if config loading fails.
+   */
   checkInterval: number;
   user: ScopeConfig;
   project?: ScopeConfig;

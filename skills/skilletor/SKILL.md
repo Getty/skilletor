@@ -67,7 +67,7 @@ when a source has changed.
   },
   "vars": { "kubernetes": true },
   "gitignore": true,
-  "checkInterval": 600
+  "checkInterval": 1800
 }
 ```
 
