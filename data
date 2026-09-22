@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-09-22T01:26:15Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T01:26:15Z
+created: 2026-09-22T00:18:25Z
+depends_on:
+- 2
+estimate: 3h
+id: 3
+priority: high
+started: 2026-09-22T01:24:19Z
+status: done
+tags:
+- config
+title: 'config.ts: load, merge, validate config'
+updated: 2026-09-22T01:26:15Z
+---
+
+Spec §3. TDD.
+
+- Liest ~/.claude/skilletor.json, <projekt>/.claude/skilletor.json, <projekt>/.claude/skilletor.local.json (Home und Projektwurzel injizierbar für Tests).
+- Ergebnis pro Scope (user/project): aufgelöste Sources, Install-Liste pro Typ (Einträge name@source bzw. typ:name@source geparst), gemergte vars (User < Projekt < Local; Source-Defaults kommen später in render dazu), gitignore, checkInterval.
+- Source-Merging: User-Sources in Projekt-Configs nutzbar; gleicher Name → User/Local-Felder mergen über Projekt-Definition (Autoren-Modus: local-Feld). Herkunft jeder Source merken (user/project) – Trust braucht das.
+- Validierung mit klaren Fehlermeldungen (Datei + Pfad im JSON): unbekannte Keys, unbekannte Source in install, doppelte Zielnamen pro Typ+Scope, kaputtes JSON, url ohne https.
+
+Done: Tabellentests für Merging und jeden Validierungsfehler; fehlende Dateien sind kein Fehler (leere Config).
+
+2026-09-22 01:26 Done, TDD. src/config.ts: loadConfig({home, projectDir}) reads the three files, merges sources (project<user<local, field-level, origin tracked: user/local=trusted, project-only=untrusted), parses install entries ([type:]name@source -> {type,name,source,target}), merges vars (user scope=user; project scope=user<project<local). Validation w/ file+key in message: invalid JSON, unknown keys, source w/o kind, url not https, unknown source in install (scoped: user install can't see project-only sources), duplicate type+name target, checkInterval user-only, gitignore project-only. 19 tests, all green; tsc clean.
