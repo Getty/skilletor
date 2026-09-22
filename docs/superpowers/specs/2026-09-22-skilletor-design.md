@@ -1,46 +1,46 @@
 # skilletor – Design
 
-Stand: 2026-09-22 · Status: Entwurf zum Review
+Date: 2026-09-22 · Status: draft for review
 
-## 1. Ziel
+## 1. Goal
 
-skilletor ist ein Claude-Code-Plugin plus eigenständiges CLI, das **Skills, Agents und
-Rules** aus konfigurierten Remote-Quellen installiert und aktuell hält:
+skilletor is a Claude Code plugin plus a standalone CLI that installs and keeps
+**skills, agents and rules** up to date from configured remote sources:
 
-- beim Session-Start wird abgeglichen, während der Session gedrosselt nachgeprüft,
-  Neues wird sofort heruntergezogen und dem Modell gemeldet;
-- was installiert wird, deklariert die User- oder Projekt-Config;
-- Items können Templates sein, die mit Instanz-/Projektvariablen gerendert werden;
-- Quellen werden wie Plugin-Marketplaces hinzugefügt (`skilletor add shared Getty`),
-  Items daraus installiert (`skilletor install perl-moo@shared`).
+- it reconciles at session start, re-checks at a throttled rate during the session,
+  pulls anything new immediately, and reports it to the model;
+- what gets installed is declared by the user or project config;
+- items can be templates rendered with instance/project variables;
+- sources are added like plugin marketplaces (`skilletor add shared Getty`), and items
+  are installed from them (`skilletor install perl-moo@shared`).
 
-skilletor lebt in einem eigenen Repo, wird über `Getty/marketplace` verteilt und ist
-der bevorzugte Nachfolger von manage-skills (das bestehen bleibt).
+skilletor lives in its own repo, is distributed via `Getty/marketplace`, and is the
+preferred successor to manage-skills (which stays around).
 
-Der Name ist eine Anspielung auf Skeletor; „Skills" ist der Aufhänger, Agents und Rules
-sind weitere Item-Typen unter demselben Dach.
+The name plays on Skeletor; "skills" is the hook, agents and rules are further item
+types under the same roof.
 
-## 2. Begriffe
+## 2. Terms
 
-| Begriff | Bedeutung |
+| Term | Meaning |
 |---|---|
-| **Source** | Benannte Quelle: Git-Repo, HTTPS-Tarball oder lokales Verzeichnis |
-| **Item** | Ein installierbares Ding aus einer Source, adressiert als `name@source` |
-| **Typ** | `skill`, `agent`, `rule` – feste Tabelle im Code, nicht per Config erweiterbar |
-| **Scope** | `user` (`~/.claude/`) oder `project` (`<projekt>/.claude/`) |
-| **Lock** | Pro Scope: was skilletor installiert hat, mit Output-Hashes |
+| **Source** | A named source: git repo, HTTPS tarball, or local directory |
+| **Item** | An installable thing from a source, addressed as `name@source` |
+| **Type** | `skill`, `agent`, `rule` – a fixed table in code, not config-extensible |
+| **Scope** | `user` (`~/.claude/`) or `project` (`<project>/.claude/`) |
+| **Lock** | Per scope: what skilletor installed, with output hashes |
 
 ## 3. Config
 
-JSON, drei Ebenen:
+JSON, three levels:
 
-| Datei | Zweck | Installiert nach |
+| File | Purpose | Installs into |
 |---|---|---|
-| `~/.claude/skilletor.json` | User-Ebene | `~/.claude/{skills,agents,rules}` |
-| `<projekt>/.claude/skilletor.json` | Projekt-Ebene, committed | `<projekt>/.claude/{skills,agents,rules}` |
-| `<projekt>/.claude/skilletor.local.json` | maschinenlokale Overrides, nicht committed | wie Projekt |
+| `~/.claude/skilletor.json` | User level | `~/.claude/{skills,agents,rules}` |
+| `<project>/.claude/skilletor.json` | Project level, committed | `<project>/.claude/{skills,agents,rules}` |
+| `<project>/.claude/skilletor.local.json` | Machine-local overrides, not committed | Same as project |
 
-Der Scope ergibt sich daraus, welche Datei ein Item deklariert.
+The scope follows from which file declares an item.
 
 ```json
 {
@@ -60,121 +60,122 @@ Der Scope ergibt sich daraus, welche Datei ein Item deklariert.
 }
 ```
 
-- `ref` ist optional (Default: HEAD des Remotes); Tag oder Commit pinnt.
-- `gitignore` (nur Projekt, Default `true`): siehe 6.4.
-- `checkInterval` (nur User, Sekunden, Default 600): Drossel für den In-Session-Check.
-- Doppelte Zielnamen innerhalb eines Typs und Scopes (`foo@shared` + `foo@team`) sind
-  ein Config-Fehler.
+- `ref` is optional (default: the remote's HEAD); a tag or commit pins it.
+- `gitignore` (project only, default `true`): see 6.4.
+- `checkInterval` (user only, seconds, default 600): throttle for the in-session check.
+- Duplicate target names within one type and scope (`foo@shared` + `foo@team`) are a
+  config error.
 
-**Merging der Sources:** User-Sources sind in Projekt-Configs nutzbar. Gleicher Name:
-Felder aus User- bzw. Local-Config mergen *über* die Projekt-Definition.
+**Merging sources:** user sources are usable in project configs. Same name: fields from
+the user or local config merge *over* the project definition.
 
-**Autoren-Modus:** Hat eine Source ein `local`-Feld und das Verzeichnis existiert, wird
-direkt daraus gelesen (kein Fetch, kein Cache); sonst greift `git`/`url`. Typisch:
-Projekt-Config definiert `shared` per `git`, die User-Config des Autors ergänzt
-`"shared": { "local": "~/dev/skills" }`. Editiert wird im Checkout, gepusht per git;
-alle Projekte der Maschine ziehen beim nächsten Check nach. Hardlinks gibt es nicht –
-installierte Dateien sind Build-Artefakte.
+**Author mode:** if a source has a `local` field and the directory exists, it is read
+directly from there (no fetch, no cache); otherwise `git`/`url` applies. Typical setup:
+the project config defines `shared` via `git`, and the author's user config adds
+`"shared": { "local": "~/dev/skills" }`. You edit in the checkout and push via git; all
+projects on the machine pull it in on the next check. There are no hardlinks – installed
+files are build artifacts.
 
 ## 4. Sources
 
-### 4.1 Layout einer Source (Konvention, kein Manifest nötig)
+### 4.1 Source layout (convention, no manifest required)
 
 ```
-skills/<name>/SKILL.md[.njk] + beliebige Begleitdateien
+skills/<name>/SKILL.md[.njk] + any accompanying files
 agents/<name>.md[.njk]
 rules/<name>.md[.njk]
-snippets/…                 # nur für Includes, nicht installierbar
-skilletor.json             # optional: { "description": "…", "vars": { Defaults } }
+snippets/…                 # for includes only, not installable
+skilletor.json             # optional: { "description": "…", "vars": { defaults } }
 ```
 
-Der Katalog (`skilletor available`) entsteht durch Scannen dieses Layouts; Name und
-Beschreibung kommen aus dem Frontmatter der Items.
+The catalog (`skilletor available`) is built by scanning this layout; name and
+description come from the items' frontmatter.
 
-### 4.2 Shorthand-Auflösung bei `skilletor add [name] <spec>`
+### 4.2 Shorthand resolution for `skilletor add [name] <spec>`
 
-Aufgelöst wird **einmalig beim Hinzufügen**; in der Config steht immer die explizite
-Form. Hooks raten und proben nie.
+Resolution happens **once, at add time**; the config always stores the explicit form.
+Hooks never guess or probe.
 
-| `<spec>` | wird zu |
+| `<spec>` | resolves to |
 |---|---|
-| `/pfad`, `./pfad`, `~/pfad` | `local` |
-| `https://…`, `git@…`, `ssh://…` | unverändert; `.tar.gz`/`.tgz` → `url`, sonst `git` |
-| `Getty` (ein Wort) | `git: https://github.com/Getty/skills` |
-| `Getty/repo` (erstes Segment ohne Punkt) | `git: https://github.com/Getty/repo` |
-| `github:Getty/repo` | wie oben (Kompatibilität zu manage-skills) |
+| `/path`, `./path`, `~/path` | `local` |
+| `https://…`, `git@…`, `ssh://…` | unchanged; `.tar.gz`/`.tgz` → `url`, otherwise `git` |
+| `Getty` (single word) | `git: https://github.com/Getty/skills` |
+| `Getty/repo` (first segment has no dot) | `git: https://github.com/Getty/repo` |
+| `github:Getty/repo` | as above (manage-skills compatibility) |
 | `github.com/u`, `gitlab.com/u`, `codeberg.org/u`, `hf.co/u`, `huggingface.co/u` | `git: https://<host>/u/skills` |
-| dieselben Hosts mit `u/repo` | `git: https://<host>/u/repo` |
-| `host.tld` oder `host.tld/` | `https://host.tld/skills` – Probe s. u. |
-| `host.tld/pfad` | `https://host.tld/pfad` – Probe s. u. |
+| the same hosts with `u/repo` | `git: https://<host>/u/repo` |
+| `host.tld` or `host.tld/` | `https://host.tld/skills` – probe below |
+| `host.tld/path` | `https://host.tld/path` – probe below |
 
-**Probe für generische Hosts:** erst `git ls-remote <url>`; antwortet das nicht,
-`HEAD <url>.tar.gz`. Der erste Treffer bestimmt `git` bzw. `url`; kein Treffer →
-Fehler mit beiden versuchten Adressen.
+**Probe for generic hosts:** first `git ls-remote <url>`; if that does not respond,
+`HEAD <url>.tar.gz`. The first hit decides `git` vs. `url`; no hit → error listing both
+attempted addresses.
 
-Fehlt `[name]`, wird er abgeleitet (Owner bzw. Hostname, kleingeschrieben). Der
-Default-Repo-Name ist überall `skills`.
+If `[name]` is omitted, it is derived (owner or hostname, lowercased). The default repo
+name is `skills` everywhere.
 
 ### 4.3 Trust
 
-- Sources, die der User selbst hinzufügt (`skilletor add`, eigene User-Config), sind
-  vertraut – `add` ist der Trust-Akt.
-- Sources, die nur in einer Projekt-Config stehen (geklontes Repo), werden **nicht**
-  automatisch gezogen. Der Hook meldet „Projekt will Source X (<url>) –
-  `skilletor trust X`". Die Bestätigung (Name + aufgelöste URL) liegt in
-  `~/.claude/skilletor/trust.json`; ändert das Projekt die URL, verfällt sie.
-- Trust bedeutet Code-Ausführung: Nunjucks ist keine Sandbox. Das ist dasselbe
-  Vertrauensniveau wie eine Plugin-Installation und steht so in der README.
+- Sources the user adds themselves (`skilletor add`, their own user config) are trusted
+  – `add` is the act of trust.
+- Sources that only appear in a project config (a cloned repo) are **not** pulled
+  automatically. The hook reports "project wants source X (<url>) – `skilletor trust X`".
+  The confirmation (name + resolved URL) lives in `~/.claude/skilletor/trust.json`; if
+  the project changes the URL, it lapses.
+- Trust means code execution: Nunjucks is not a sandbox. This is the same trust level as
+  installing a plugin, and the README says so.
 
-### 4.4 Abruf und Check
+### 4.4 Fetch and check
 
-| Art | `resolve` | `check` (billig) |
+| Kind | `resolve` | `check` (cheap) |
 |---|---|---|
-| `git` | Shallow-Clone/Fetch in den Cache; Auth = git-Setup des Users | `git ls-remote <url> <ref>` vs. gecachter Commit |
-| `url` | HTTPS-only, `.tar.gz`, Conditional GET mit ETag | `HEAD` + ETag-Vergleich |
-| `local` | direkt lesen | entfällt – es wird immer neu gerendert |
+| `git` | Shallow clone/fetch into the cache; auth = the user's git setup | `git ls-remote <url> <ref>` vs. cached commit |
+| `url` | HTTPS-only, `.tar.gz`, conditional GET with ETag | `HEAD` + ETag comparison |
+| `local` | read directly | not applicable – always re-rendered |
 
 ## 5. Templating
 
-- **Opt-in per Endung:** `X.njk` wird durch Nunjucks gerendert und als `X` installiert.
-  Alles andere wird byteweise kopiert (Skills mit eigenem `{{ }}`/`{% %}` bleiben heil).
-- Autoescape aus (Markdown). Undefinierte Variablen sind ein Fehler
-  (`throwOnUndefined`), damit Tippfehler nicht still leere Skills erzeugen.
-- Includes/Imports/Makros lösen relativ zur Wurzel der jeweiligen Source auf und dürfen
-  sie nicht verlassen.
+- **Opt-in by extension:** `X.njk` is rendered by Nunjucks and installed as `X`.
+  Everything else is copied byte for byte (skills with their own `{{ }}`/`{% %}` stay
+  intact).
+- Autoescape off (Markdown). Undefined variables are an error (`throwOnUndefined`), so
+  typos do not silently produce empty skills.
+- Includes/imports/macros resolve relative to the root of their source and may not
+  leave it.
 
-**Kontext:**
+**Context:**
 
-| Variable | Inhalt |
+| Variable | Contents |
 |---|---|
-| `vars.*` | gemerged: Source-Defaults < User < Projekt < Local |
-| `project.dir`, `project.name`, `project.git_remote` | nur im Projekt-Scope |
-| `scope`, `target.dir` | `user`/`project`, Zielwurzel |
-| `host.name`, `host.os`, `user.name`, `user.home` | Instanz |
-| `item.name`, `item.type`, `item.source` | das Item selbst |
+| `vars.*` | merged: source defaults < user < project < local |
+| `project.dir`, `project.name`, `project.git_remote` | project scope only |
+| `scope`, `target.dir` | `user`/`project`, target root |
+| `host.name`, `host.os`, `user.name`, `user.home` | instance |
+| `item.name`, `item.type`, `item.source` | the item itself |
 
-Bewusst nicht enthalten: `env.*` (Secrets landen sonst in Dateien) und der Git-Branch
-(Re-Render bei jedem Wechsel).
+Deliberately excluded: `env.*` (otherwise secrets end up in files) and the git branch
+(would re-render on every switch).
 
 ## 6. Engine
 
-### 6.1 Pipeline von `sync` (pro Scope, User vor Projekt)
+### 6.1 `sync` pipeline (per scope, user before project)
 
-1. Config laden, mergen, validieren.
-2. Sources auflösen (parallel) → lokales Verzeichnis + Version je Source.
-3. Jedes deklarierte Item **im Speicher bauen** (rendern bzw. kopieren).
-4. Output mit Platte und Lock vergleichen; nur Unterschiede schreiben (atomar:
-   Temp-Datei + Rename); Dateien, die das Item nicht mehr enthält, entfernen.
-5. Nicht mehr deklarierte Items laut Lock löschen.
-6. Lock und (im Projekt) gitignore-Block schreiben, Report ausgeben.
+1. Load, merge, validate config.
+2. Resolve sources (in parallel) → local directory + version per source.
+3. **Build each declared item in memory** (render or copy).
+4. Compare output against disk and lock; write only differences (atomically:
+   temp file + rename); remove files the item no longer contains.
+5. Delete items no longer declared, per the lock.
+6. Write the lock and (in a project) the gitignore block, emit the report.
 
-**Render-and-Compare:** Es gibt keine Invalidierungslogik. Jeder Lauf rendert alles und
-difft den Output; geänderte Variablen, Snippets und lokale Checkout-Edits wirken
-dadurch automatisch.
+**Render-and-compare:** there is no invalidation logic. Every run renders everything and
+diffs the output; changed variables, snippets, and local checkout edits take effect
+automatically as a result.
 
 ### 6.2 Lock
 
-`~/.claude/skilletor.lock.json` bzw. `<projekt>/.claude/skilletor.lock.json`:
+`~/.claude/skilletor.lock.json` or `<project>/.claude/skilletor.lock.json`:
 
 ```json
 { "skills/perl-moo": {
@@ -182,124 +183,155 @@ dadurch automatisch.
     "files": { "SKILL.md": "sha256:…", "reference.md": "sha256:…" } } }
 ```
 
-### 6.3 Ownership und Koexistenz mit eigenen Dateien
+### 6.3 Ownership and coexistence with your own files
 
-- Existiert ein Zielpfad, der **nicht** im Lock steht (handgeschriebener Skill,
-  manage-skills-Link), wird er nie überschrieben → Konflikt im Report; `--force`
-  übernimmt ihn.
-- Eigene Skills/Agents/Rules des Users liegen unbehelligt neben den verwalteten.
-- Weicht eine verwaltete Datei vom Lock-Hash ab (lokal editiert), gewinnt die Source;
-  der Report nennt die überschriebene Datei.
-- Gelöscht wird ausschließlich, was im Lock steht.
+- If a target path exists that is **not** in the lock (a hand-written skill, a
+  manage-skills link), it is never overwritten → conflict in the report; `--force`
+  adopts it.
+- The user's own skills/agents/rules sit untouched next to the managed ones.
+- If a managed file diverges from the lock hash (edited locally), the source wins; the
+  report names the overwritten file.
+- Only what is in the lock is ever deleted.
 
-### 6.4 Git-Hygiene im Projekt
+### 6.4 Git hygiene in a project
 
-Bei `"gitignore": true` (Default) pflegt skilletor einen markierten Block in
-`<projekt>/.claude/.gitignore` mit den **exakten** verwalteten Pfaden, dem Lock und
-`skilletor.local.json`. Committed wird nur `skilletor.json`; eigene Skills daneben
-bleiben normal versioniert. Bei `"gitignore": false` wird der Block entfernt und alles
-ist committbar (Teammates ohne Plugin bekommen die Dateien per Clone) – sinnvoll nur
-für Items ohne maschinenspezifische Variablen.
+With `"gitignore": true` (default) skilletor maintains a marked block in
+`<project>/.claude/.gitignore` with the **exact** managed paths, the lock, and
+`skilletor.local.json`. Only `skilletor.json` is committed; your own skills alongside it
+stay version-controlled as usual. With `"gitignore": false` the block is removed and
+everything is committable (teammates without the plugin get the files via clone) –
+sensible only for items without machine-specific variables.
 
 ### 6.5 State
 
-`~/.claude/skilletor/`: `cache/` (löschbar), `trust.json`, `last-check.json`,
-`pending-report.json`, `sync.lock/` (mkdir-Mutex mit Stale-Timeout gegen parallele
-Sessions). `CLAUDE_PLUGIN_DATA` wird nicht benutzt, damit das CLI ohne Claude Code
-identisch läuft.
+`~/.claude/skilletor/`: `cache/` (deletable), `trust.json`, `last-check.json`,
+`pending-report.json`, `sync.lock/` (mkdir mutex with a stale timeout against parallel
+sessions). `CLAUDE_PLUGIN_DATA` is not used, so the CLI runs identically without Claude
+Code.
 
-### 6.6 Fehlerverhalten
+### 6.6 Error behavior
 
-Ein Sync-Fehler bricht nie eine Session ab. Fetch-Fehler/offline → weiter mit Cache,
-eine Warnzeile. Template-Fehler → dieses Item bleibt auf altem Stand, Fehler mit Datei
-und Zeile. Config-Fehler → nichts wird angefasst, klare Meldung.
+A sync error never aborts a session. Fetch error/offline → continue with the cache, one
+warning line. Template error → that item stays at its old state, error with file and
+line. Config error → nothing is touched, clear message.
 
 ## 7. CLI
 
 ```
-skilletor add [name] <spec> [--project]   # Source hinzufügen (= source add), löst Shorthand auf
+skilletor add [name] <spec> [--project]   # add a source (= source add), resolves shorthand
 skilletor source list | remove <name>
-skilletor available [source]              # Katalog: Typ, Name, Beschreibung, installiert?
-skilletor install <item>… [--project]     # name@source, bei Mehrdeutigkeit typ:name@source
+skilletor available [source]              # catalog: type, name, description, installed?
+skilletor install <item>… [--project]     # name@source, or type:name@source when ambiguous
 skilletor uninstall <item>…
 skilletor sync | check | status           # --scope user|project|all, --json, --force
 skilletor trust <source>
-skilletor hook <event>                    # nur für hooks.json
+skilletor hook <event>                    # for hooks.json only
 ```
 
-`add`/`install`/`uninstall` editieren ausschließlich die Config (Default: User-Config)
-und fahren danach `sync`. Die deklarative Config bleibt die einzige Wahrheit.
+`add`/`install`/`uninstall` edit only the config (default: the user config) and then run
+`sync`. The declarative config stays the single source of truth.
 
-## 8. Hooks und Meldungen
+## 8. Hooks and messages
 
-| Event | Verhalten |
+| Event | Behavior |
 |---|---|
-| `SessionStart` (`startup`, `resume`) | synchron: `check` aller Sources parallel (5 s Netz-Timeout je Source), bei Änderung `sync` |
-| `UserPromptSubmit` | nicht fällig → sofort Ende. Fällig → detachten Hintergrund-`sync` starten, sofort zurück. Liegt ein `pending-report.json` vor → als `additionalContext` ausgeben und löschen |
+| `SessionStart` (`startup`, `resume`) | synchronous: `check` all sources in parallel (5 s network timeout per source), `sync` on change |
+| `UserPromptSubmit` | not due → return immediately. Due → start a detached background `sync`, return at once. If a `pending-report.json` exists → emit it as `additionalContext` and delete it |
 
-- Ohne Änderung ist das Plugin still.
-- Mit Änderung: eine `systemMessage`-Zeile für den User, ein knapper
-  `additionalContext` fürs Modell, pro Item mit Aktivierungshinweis („sofort aktiv" /
-  „nach /reload-plugins oder Neustart" / „ab nächster Session") gemäß Spike (Abschnitt 12).
-- Warnungen (unvertraute Source, überschriebene Änderung, Konflikt, Template-Fehler,
-  offline) laufen einzeilig über denselben Kanal.
-- Das Plugin liefert außerdem das CLI im `PATH` des Bash-Tools und einen Skill
-  `skilletor`, der dem Modell Config-Format und CLI erklärt.
+- With no change, the plugin is silent.
+- With a change: one `systemMessage` line for the user, a terse `additionalContext` for
+  the model, per item with an activation hint per the spike (section 12): `skill` →
+  "active now"; `agent` and `rule` → "active after `/reload-plugins` or restart". The
+  `SessionStart` hook thus makes freshly pulled skills usable immediately, while freshly
+  pulled agents/rules become active only in the next session or after `/reload-plugins`
+  – the report states this per item.
+- Warnings (untrusted source, overwritten change, conflict, template error, offline) run
+  as a single line over the same channel.
+- The plugin also puts the CLI on the Bash tool's `PATH` and ships a `skilletor` skill
+  that explains the config format and CLI to the model.
 
-## 9. Sicherheit
+## 9. Security
 
-- Feste Typ-Tabelle mit festen Zielverzeichnissen; Hooks, `settings.json`, MCP-Configs
-  werden nie synchronisiert.
-- Pfad-Härtung: Item-Namen, Tar-Einträge und Includes dürfen Source- bzw. Zielwurzel
-  nicht verlassen; Symlinks in Sources werden abgelehnt; `url` nur HTTPS.
-- Trust-Modell nach 4.3; kein `env.*` im Kontext; Pinning über `ref`.
+- A fixed type table with fixed target directories; hooks, `settings.json`, and MCP
+  configs are never synchronized.
+- Path hardening: item names, tar entries, and includes may not leave the source or
+  target root; symlinks in sources are rejected; `url` is HTTPS-only.
+- Trust model per 4.3; no `env.*` in the context; pinning via `ref`.
 
-## 10. Repo, Build, Verteilung
+## 10. Repo, build, distribution
 
 ```
 .claude-plugin/plugin.json      hooks/hooks.json
-bin/skilletor                   # Shim → node dist/skilletor.js, prüft Node ≥ 18 mit klarer Meldung
-dist/skilletor.js               # esbuild-Bundle inkl. Nunjucks, committed
+bin/skilletor                   # shim → node dist/skilletor.js, checks Node ≥ 18 with a clear message
+dist/skilletor.js               # esbuild bundle incl. Nunjucks, committed
 skills/skilletor/SKILL.md
-src/cli.ts                      # Argumente, Dispatch
-src/config.ts                   # laden/mergen/validieren + Edit-Operationen
-src/spec.ts                     # Shorthand-Auflösung (4.2), Probe injizierbar
+src/cli.ts                      # arguments, dispatch
+src/config.ts                   # load/merge/validate + edit operations
+src/spec.ts                     # shorthand resolution (4.2), injectable probe
 src/sources/{git,url,local}.ts  # resolve(), check()
-src/catalog.ts                  # Source scannen → Items
-src/render.ts                   # Item im Speicher bauen
-src/apply.ts                    # Diff, atomar schreiben, aufräumen, gitignore-Block
-src/lock.ts  src/state.ts       # Lock; Trust, last-check, pending-report, Mutex
+src/catalog.ts                  # scan source → items
+src/render.ts                   # build item in memory
+src/apply.ts                    # diff, write atomically, clean up, gitignore block
+src/lock.ts  src/state.ts       # lock; trust, last-check, pending-report, mutex
 src/hooks.ts  src/report.ts
 test/
 ```
 
-Grenzen: `sources/*` kennt kein Templating, `render` kein Ziel-Dateisystem, `apply`
-keine Sources. TypeScript, einzige Laufzeit-Dependency ist Nunjucks (gebündelt);
-Requirements beim User: `node ≥ 18`, `git`. Eigenes Repo `Getty/skilletor`, Eintrag in
-`Getty/marketplace`; lokal entwickeln mit `claude --plugin-dir .`.
+Boundaries: `sources/*` knows nothing about templating, `render` nothing about the
+target filesystem, `apply` nothing about sources. TypeScript, the only runtime
+dependency is Nunjucks (bundled); user requirements: `node ≥ 18`, `git`. Its own repo
+`Getty/skilletor`, an entry in `Getty/marketplace`; develop locally with
+`claude --plugin-dir .`.
 
 ## 11. Tests
 
-TDD mit `node:test`. Unit-Tests pro Modul gegen Temp-Verzeichnisse; `spec.ts` als
-Tabellentest über alle Shorthand-Zeilen; Git-Sources gegen lokale Bare-Repos
-(`file://`), URL-Sources gegen lokalen HTTP-Server mit ETag; Hooks als Blackbox
-(stdin-JSON → stdout-JSON). End-to-End: Fixture-Source → `sync` → Baum + Lock prüfen,
-dann zweite Runde mit geänderter Source bzw. geänderten Variablen. Security-Fälle:
-Traversal, Symlink, unvertraute Source, fremder Zielpfad. CI prüft, dass `dist/` zum
-Source passt.
+TDD with `node:test`. Unit tests per module against temp directories; `spec.ts` as a
+table test over all shorthand rows; git sources against local bare repos (`file://`),
+URL sources against a local HTTP server with ETag; hooks as a black box (stdin JSON →
+stdout JSON). End-to-end: fixture source → `sync` → verify the tree + lock, then a second
+round with a changed source or changed variables. Security cases: traversal, symlink,
+untrusted source, foreign target path. CI checks that `dist/` matches the source.
 
-## 12. Spike vor der Implementierung
+## 12. Spike – result
 
-Manuell gegen das echte Claude Code, Ergebnis wird hier nachgetragen und bestimmt die
-Meldungstexte:
+Run on 2026-09-22 against real Claude Code (CLI, Opus 4.8), together with the user in a
+live session. Test artifacts (skill/agent/rule) were written with unique sentinels and
+removed again afterward.
 
-1. Neues Skill-Verzeichnis mitten in der Session → ohne Reload nutzbar?
-2. Neue Agent-Datei mitten in der Session → ohne Reload nutzbar?
-3. Neue Rule-Datei (mit und ohne `paths`) mitten in der Session → geladen?
-4. Skills, die der `SessionStart`-Hook selbst schreibt → in derselben Session sichtbar?
+**Methodology note:** "was the rule loaded?" was measured by whether the harness actually
+**injected the rule content into the model context as a `system-reminder`** – not by
+whether the model "knows" the marker string (which was in the self-authored file).
+Otherwise the spike would be measuring itself.
 
-## 13. Nicht-Ziele (vorerst)
+| # | Test | No reload (mid-session) | After `/reload-plugins` |
+|---|---|---|---|
+| 1 | New skill (`~/.claude/skills/` **and** project `.claude/skills/`) | **usable immediately** – the Skill tool resolves the fresh SKILL.md (sentinel confirmed), and the skill listing in the `system-reminder` updates within the same turn | n/a |
+| 2 | New agent file (`~/.claude/agents/`) | **not spawnable** – `Agent type … not found` | **spawnable** – registration takes effect from the **next prompt after** the reload (still `not found` in the reload turn itself) |
+| 3a | New rule without `paths` (user scope) | **not injected** | **injected** – from the next prompt after the reload; unconditionally active |
+| 3b | New rule with `paths` (project scope) | not injected | **loaded, but conditional** – injected only when a file matching the glob is in the active context |
+| 4 | Skill the `SessionStart` hook writes itself | **visible in the same session** – follows necessarily from Test 1: a skill written *mid-session* is usable immediately, so one written at session start is all the more so (not separately verified, a fortiori) | n/a |
 
-Monitor-basierter Timer statt Prompt-Hook · Checksummen-Pins für Tarballs · Aliase
-(`as`) für Items · weitere Typen (`commands`, `output-styles`) · automatischer Import
-einer manage-skills-Konfiguration · Codex-Target.
+**Core finding:** skills are fully dynamic (no reload, usable at once). Agents and rules
+are cached at session start / at the last `/reload-plugins`; an agent/rule file written
+mid-session does **not** take effect on its own, only after `/reload-plugins` (or
+restart), and then from the **next** prompt.
+
+**Activation hints derived for §8:**
+
+| Item type | Hint |
+|---|---|
+| `skill` | "active now" |
+| `agent` | "active after `/reload-plugins` or restart" |
+| `rule`  | "active after `/reload-plugins` or restart" (paths rules additionally only when a matching file is in context) |
+
+Practical consequence for the plugin: the `SessionStart` hook that pulls new items makes
+**skills usable immediately**; newly pulled **agents/rules** are not loaded in the *same*
+session (the hook writes them only after the start scan already ran) and become active in
+the **next** session or after `/reload-plugins`. The report must state this honestly per
+item.
+
+## 13. Non-goals (for now)
+
+Monitor-based timer instead of a prompt hook · checksum pins for tarballs · aliases
+(`as`) for items · further types (`commands`, `output-styles`) · automatic import of a
+manage-skills configuration · Codex target.

@@ -1,13 +1,13 @@
-# skilletor – Branding-Notizen
+# skilletor – branding notes
 
-## Idee
+## Idea
 
-Anspielung auf Skeletor, aber als eigene Figur (keine Kopie der Mattel-Figur: nicht die
-Kombination lila Kapuze + blauer Körper + gelber Schädel + Widderkopf-Stab). Die
-Verbindung zu „Skill": Der Bösewicht hortet keine Macht, sondern **Skills** – er
-sammelt SKILL.md-Schriftrollen und sein Stab ist ein Skill-Tree.
+A play on Skeletor, but as its own character (not a copy of the Mattel figure: not the
+combination of purple hood + blue body + yellow skull + ram-head staff). The tie to
+"skill": the villain hoards not power but **skills** – he collects SKILL.md scrolls and
+his staff is a skill tree.
 
-## Prompt für das Social Preview (1280×640)
+## Prompt for the social preview (1280×640)
 
 > Wide 2:1 banner illustration, bold flat cartoon style with thick outlines, 80s
 > Saturday-morning-cartoon energy. A goofy, over-the-top villainous skeleton sorcerer
@@ -21,33 +21,34 @@ sammelt SKILL.md-Schriftrollen und sein Stab ist ein Skill-Tree.
 > Left third kept calm for a title. Funny, not scary; mischievous, not evil. No text,
 > no logos, original character design.
 
-Titel und Tagline danach selbst setzen (Bildgeneratoren verhunzen Text):
-**skilletor** – *„MYAAH! Your skills are mine… to sync."*
+Set the title and tagline yourself afterward (image generators mangle text):
+**skilletor** – *"MYAAH! Your skills are mine… to sync."*
 
-Varianten für Tagline/README:
-- „By the power of `git pull`!"
-- „I have the power… to keep your skills up to date."
-- „Masters of the Skill-iverse."
+Tagline/README variants:
+- "By the power of `git pull`!"
+- "I have the power… to keep your skills up to date."
+- "Masters of the Skill-iverse."
 
-Kleines Logo/Avatar: nur der grinsende Schädel in der Kapuze, ein Auge als leuchtender
-Skill-Tree-Knoten.
+Small logo/avatar: just the grinning skull in the hood, one eye as a glowing skill-tree
+node.
 
-## README-Gliederung (englisch, da öffentliches Repo)
+## README outline
 
-1. Banner + Tagline + ein Satz: *Remote skills, agents and rules for Claude Code –
+1. Banner + tagline + one sentence: *Remote skills, agents and rules for Claude Code –
    declared once, synced on every session, templated per project.*
-2. **30-second start** – drei Zeilen:
+2. **30-second start** – three lines:
    `/plugin marketplace add Getty/marketplace` · `/plugin install skilletor@getty` ·
    `skilletor add shared Getty && skilletor install perl-moo@shared`
-3. **How it works** – Mini-Diagramm Source → render → `.claude/` + Hook-Timeline
+3. **How it works** – mini diagram source → render → `.claude/` + hook timeline
    (SessionStart, throttled in-session check).
-4. **Sources** – Shorthand-Tabelle (`Getty`, `owner/repo`, `hf.co/user`, `host.tld/`,
-   Tarball, lokaler Pfad) und das Source-Layout.
-5. **Declaring what you want** – `skilletor.json` für User und Projekt, Scopes.
-6. **Templates** – `.njk`-Opt-in, Kontextvariablen, Beispiel mit `{% if vars.kubernetes %}`.
-7. **Authoring mode** – lokaler Checkout als Override.
-8. **Git & your own skills** – gitignore-Block, Koexistenz, `"gitignore": false`.
-9. **Security & trust** – Trust = Code-Ausführung, `skilletor trust`, was nie
-   synchronisiert wird.
-10. **Coming from manage-skills** – Unterschiede (Artefakte statt Hardlinks), Migration.
-11. CLI-Referenz · Requirements (node ≥ 18, git) · License.
+4. **Sources** – shorthand table (`Getty`, `owner/repo`, `hf.co/user`, `host.tld/`,
+   tarball, local path) and the source layout.
+5. **Declaring what you want** – `skilletor.json` for user and project, scopes.
+6. **Templates** – `.njk` opt-in, context variables, example with `{% if vars.kubernetes %}`.
+7. **Authoring mode** – local checkout as an override.
+8. **Git & your own skills** – gitignore block, coexistence, `"gitignore": false`.
+9. **Security & trust** – trust = code execution, `skilletor trust`, what is never
+   synced.
+10. **Coming from manage-skills** – differences (artifacts instead of hardlinks),
+    migration.
+11. CLI reference · requirements (node ≥ 18, git) · license.
