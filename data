@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-22T01:14:23Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T01:14:23Z
+created: 2026-09-22T00:16:33Z
+estimate: 1h
+id: 1
+priority: high
+started: 2026-09-22T01:14:23Z
+status: done
+tags:
+- spike
+- hooks
+title: 'Spike: clarify live-reload behavior of skills, agents and rules'
+updated: 2026-09-22T01:14:23Z
+---
+
+Spec §12. Manuell gegen das echte Claude Code (mit dem User zusammen, braucht eine laufende Session):
+
+1. Neues Skill-Verzeichnis mitten in der Session nach ~/.claude/skills/ und <projekt>/.claude/skills/ schreiben → ohne Reload nutzbar?
+2. Neue Agent-Datei mitten in der Session → ohne Reload spawnbar? Nach /reload-plugins?
+3. Neue Rule-Datei (einmal ohne, einmal mit paths-Frontmatter) mitten in der Session → geladen?
+4. Skill, den ein SessionStart-Hook selbst schreibt → in derselben Session sichtbar?
+
+Done: Ergebnisse als Tabelle in docs/superpowers/specs/2026-09-22-skilletor-design.md §12 nachgetragen; pro Typ steht fest, welcher Aktivierungshinweis (sofort aktiv / nach /reload-plugins / ab nächster Session) in §8 gilt. Kein Produktivcode.
+
+2026-09-22 01:03 Spike durchgeführt gegen echtes Claude Code (Opus 4.8) mit User. Ergebnis in §12 (Tabelle + Methodik) und §8 (Aktivierungshinweise) nachgetragen. Kernbefund: Skill=sofort aktiv (dynamisch, kein Reload); Agent+Rule=erst nach /reload-plugins oder Neustart, greift ab nächstem Prompt; paths-Rule zusätzlich nur bei passender Datei im Kontext; Test4 (SessionStart-Hook-Skill) folgt a-fortiori aus Test1. Alle Test-Artefakte wieder entfernt, keine Produktivcode-Änderung.
+
+2026-09-22 01:14 Done. Results in spec §12 (table + methodology) and §8 (activation hints). Core finding: skill = active now (dynamic, no reload); agent + rule = only after /reload-plugins or restart, effective from the next prompt; paths rule additionally only when a matching file is in context; Test 4 (SessionStart-hook skill) follows a fortiori from Test 1. All test artifacts removed, no production code changed.
