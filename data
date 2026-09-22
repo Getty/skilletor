@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-09-22T01:35:34Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T01:35:34Z
+created: 2026-09-22T00:18:26Z
+depends_on:
+- 5
+estimate: 3h
+id: 6
+priority: high
+started: 2026-09-22T01:33:46Z
+status: done
+tags:
+- sources
+title: 'sources/git: shallow clone, fetch, ls-remote check'
+updated: 2026-09-22T01:35:34Z
+---
+
+Spec §4.4. TDD gegen lokale Bare-Repos (file://), kein Netz in Tests.
+
+- resolve(): Shallow-Clone in ~/.claude/skilletor/cache/<hash-der-url>/ bzw. fetch + hard reset auf ref; ref optional (Default HEAD), Tag/Commit pinnt. version = "git:<shortsha>".
+- check(): git ls-remote <url> <ref> gegen gecachten Commit; Timeout konfigurierbar (Hook nutzt 5 s).
+- git via child_process ohne Shell (execFile), GIT_TERMINAL_PROMPT=0 damit kein Hook an einem Passwort-Prompt hängt.
+- Fehler/offline: vorhandener Cache wird weiter benutzt, Ergebnis trägt eine Warnung; ohne Cache → Fehler für diese Source.
+
+Done: Tests für Erst-Clone, Update nach neuem Commit, gepinnter Tag, check() true/false, Offline-Fallback (URL zeigt ins Leere, Cache vorhanden).
+
+2026-09-22 01:35 Done, TDD vs local file:// bare repos. src/sources/git.ts GitSource: resolve() init+fetch --depth 1 into cache/<sha256(url)[:16]>/ then reset --hard (branch/tag/HEAD via FETCH_HEAD; commit-ish pin via direct fetch, full-fetch fallback). version=git:<shortsha>. check() = ls-remote vs cached sha; pinned commit-ish -> always false. execFile (no shell), GIT_TERMINAL_PROMPT=0. Offline: cache present -> reuse + warning; no cache -> error. GOTCHA: no TS parameter properties (Node strip-types = erasable syntax only). 6 tests.
