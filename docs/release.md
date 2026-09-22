@@ -64,7 +64,7 @@ tracking. If you want the history public for transparency, push it deliberately:
 
 ## Social preview
 
-`assets/github.png` is the banner (used at the top of the README). For GitHub's repo
-**social preview** (Settings → General → Social preview), the recommended size is
-1280×640 and under ~1 MB; the current image is 1774×887 / ~2.8 MB, so consider exporting a
-1280×640 version for that specific slot. The in-README banner is fine as is.
+`assets/github.png` is both the README banner and the GitHub **social preview**: 1280×640,
+461 KB — GitHub's recommended size, comfortably under 1 MB. Upload it at
+Settings → General → Social preview. (The original 1774×887 / 2.8 MB render is in git
+history at the k10 commit if a higher-res version is ever needed.)
