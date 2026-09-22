@@ -5,3 +5,9 @@ node_modules/
 # karr materialized task view -- never commit
 tasks/
 config.yml
+
+# skilletor never manages this repo itself
+/.claude/.gitignore
+/.claude/skilletor.json
+/.claude/skilletor.local.json
+/.claude/skilletor.lock.json
