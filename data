@@ -1,0 +1,33 @@
+---
+claimed_at: 2026-09-22T02:09:35Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T02:09:35Z
+created: 2026-09-22T00:18:29Z
+depends_on:
+- 12
+- 13
+estimate: 2h
+id: 15
+priority: high
+started: 2026-09-22T02:08:41Z
+status: done
+tags:
+- security
+- tests
+title: Security test suite (cross-cutting)
+updated: 2026-09-22T02:09:35Z
+---
+
+Spec §9. Sammelt die Angriffsfälle an einer Stelle, zusätzlich zu den Modul-Tests.
+
+- Traversal: Item-Namen mit ../, Tar-Einträge, include/import aus der Source heraus, Zielpfade außerhalb der Typ-Verzeichnisse.
+- Symlinks in git-, url- und local-Sources.
+- Unvertraute Projekt-Source wird nie gefetcht (auch nicht von check), Trust-Verfall bei URL-Änderung.
+- Typ-Tabelle: Config kann keine Ziele wie hooks/ oder settings.json adressieren.
+- http://-URL abgelehnt; kein env im Template-Kontext.
+- Fremder Zielpfad wird ohne --force nie überschrieben oder gelöscht.
+
+Done: alle Fälle als Tests grün; gefundene Lücken als eigene Tickets.
+
+2026-09-22 02:09 Done. test/security.test.ts consolidates §9 attack cases: config type table (install.hooks -> error), no env.* in template context, include escape rejected, apply rejects ../ item names + target-escaping output paths, symlink rejection across local AND git sources, url non-https rejected, untrusted project source never fetched by sync OR check (no fetch warning, not in check.sources), trust lapse on URL change, foreign file never overwritten/deleted without --force. 11 tests, all green — no gaps found, so no follow-up tickets.
