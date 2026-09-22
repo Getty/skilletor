@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-09-22T01:21:30Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T01:21:30Z
+created: 2026-09-22T00:18:25Z
+estimate: 2h
+id: 2
+priority: high
+started: 2026-09-22T01:21:30Z
+status: done
+tags:
+- scaffold
+- build
+title: 'Project scaffold: TypeScript, esbuild, node:test, bin shim'
+updated: 2026-09-22T01:21:30Z
+---
+
+Spec §10. Grundgerüst, auf dem alle weiteren Tickets aufsetzen.
+
+- package.json (type: module, private), tsconfig (strict), einzige Laufzeit-Dependency: nunjucks; dev: typescript, esbuild, @types/node, @types/nunjucks.
+- npm-Scripts: build (esbuild → dist/skilletor.js, ein File, platform=node, target=node18), test (node:test über kompilierte bzw. per --experimental-strip-types/tsx geladene Tests – eine Variante wählen und im Ticket-Kommentar festhalten), check-dist (baut in Temp und difft gegen committetes dist/).
+- bin/skilletor: POSIX-sh-Shim, prüft node >= 18 mit klarer Fehlermeldung, ruft dist/skilletor.js.
+- src/cli.ts als Stub mit --version und --help; ein erster Test, der das Bundle startet.
+- test/helpers: tmpdir-Fixture-Helfer (anlegen, aufräumen).
+
+Done: npm test grün, npm run build erzeugt lauffähiges dist/skilletor.js, bin/skilletor --version läuft, check-dist schlägt bei veraltetem dist/ fehl.
+
+2026-09-22 01:21 Test variant chosen: run node:test directly on .ts via Node's native type-stripping (Node >=22.6; Node 24 here), no compile step and no tsx. Test glob: node --test "test/**/*.test.ts". Shipped bundle still targets node18 (esbuild target=node18); dev/test require node>=22.6. esbuild config centralized in scripts/esbuild.config.mjs (shared by build, check-dist, and the black-box CLI test); version injected via esbuild define from package.json. Verified: npm test green (4), npm run build -> working dist/skilletor.js, bin/skilletor --version, check-dist passes fresh and fails on stale dist, tsc --noEmit clean. Note: TS 7 + @types/node 26 resolved.
