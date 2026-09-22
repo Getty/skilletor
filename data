@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-09-22T01:42:50Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T01:42:50Z
+created: 2026-09-22T00:18:27Z
+depends_on:
+- 5
+estimate: 3h
+id: 8
+priority: high
+started: 2026-09-22T01:41:41Z
+status: done
+tags:
+- templating
+title: 'render.ts: build items in memory (Nunjucks)'
+updated: 2026-09-22T01:42:50Z
+---
+
+Spec §5. TDD.
+
+- build(item, sourceDir, context) → Map<relPath, Buffer>: X.njk → gerendert als X, alles andere byteweise.
+- Nunjucks-Environment pro Source: autoescape aus, throwOnUndefined an, Loader auf die Source-Wurzel beschränkt (include/import/extends dürfen sie nicht verlassen – eigener Loader, der Pfade normalisiert und prüft).
+- Kontext nach Spec-Tabelle: vars (Source-Defaults < gemergte Config-vars), project.* (nur Projekt-Scope; git_remote best effort), scope, target.dir, host.*, user.*, item.*. Kein env.*.
+- Fehler tragen Datei + Zeile; ein Template-Fehler betrifft nur dieses Item.
+
+Done: Tests für Variablen, if/for, include aus snippets/, Makro-Import, Traversal-Versuch per include, undefinierte Variable → Fehler, Nicht-.njk-Datei mit {{ }} bleibt unverändert, Binärdatei bleibt byte-identisch.
+
+2026-09-22 01:42 Done, TDD. src/render.ts build(item, sourceDir, context) -> Map<relPath,Buffer>: X.njk rendered via Nunjucks and emitted as X, everything else byte-copied (Buffer). Env per build: autoescape off, throwOnUndefined on, custom loader confined to source root (resolve+sep boundary) so include/import/extends can't escape -> RenderError. Errors carry the file path. Context = {vars, project?, scope, target, host, user, item}, no env.*. Verified nunjucks bundles under esbuild (195KB). 6 tests.
