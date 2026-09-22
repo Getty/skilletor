@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-22T01:29:02Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T01:29:02Z
+created: 2026-09-22T00:18:26Z
+depends_on:
+- 2
+estimate: 2h
+id: 4
+priority: high
+started: 2026-09-22T01:27:56Z
+status: done
+tags:
+- sources
+- cli
+title: 'spec.ts: shorthand resolution for skilletor add'
+updated: 2026-09-22T01:29:02Z
+---
+
+Spec §4.2. TDD, reiner Tabellentest über alle Zeilen der Shorthand-Tabelle.
+
+- resolveSpec(spec, probe) → { kind: git|url|local, value, derivedName }.
+- Regeln: /, ./, ~ → local · volle URLs unverändert (.tar.gz/.tgz → url, sonst git) · ein Wort → github.com/<wort>/skills · owner/repo (erstes Segment ohne Punkt) → GitHub · github:owner/repo · bekannte Forges (github.com, gitlab.com, codeberg.org, hf.co, huggingface.co) mit einem Segment → /<user>/skills, mit zwei → Repo · host.tld[/] → https://host.tld/skills · host.tld/pfad → https://host.tld/pfad.
+- Generische Hosts: injizierbare Probe – erst git ls-remote, dann HEAD <url>.tar.gz; kein Treffer → Fehler, der beide versuchten Adressen nennt. Bekannte Forges werden nicht geprobt.
+- derivedName: Owner bzw. Hostname, kleingeschrieben, auf [a-z0-9-] normalisiert.
+
+Done: jede Tabellenzeile + Grenzfälle (Getty/repo vs. mydir.com/x, trailing slash, Groß/Klein) als Test; Probe in Tests gemockt.
+
+2026-09-22 01:29 Done, TDD table test. src/spec.ts: resolveSpec(spec, probe) -> {kind, value, derivedName}. Discriminator owner/repo vs host.tld/path = 'first segment has a dot'. Known forges (github/gitlab/codeberg/hf.co/huggingface) resolve without probing; only dotted generic hosts are probed (git ls-remote then HEAD .tar.gz; neither -> SpecError naming both addresses). derivedName normalized to [a-z0-9-]. 24 tests incl. edge cases (Getty/repo vs mydir.com/x, trailing slash, case).
