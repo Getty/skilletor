@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-09-22T02:11:18Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T02:11:18Z
+created: 2026-09-22T00:18:30Z
+depends_on:
+- 13
+- 14
+estimate: 2h
+id: 16
+priority: medium
+started: 2026-09-22T02:10:25Z
+status: done
+tags:
+- tests
+title: 'End-to-end test: fixture source -> sync -> tree + lock'
+updated: 2026-09-22T02:11:18Z
+---
+
+Spec §11. Über das gebaute dist/skilletor.js, nicht über interne Module.
+
+Szenario: Temp-Home + Temp-Projekt, Bare-Git-Source mit Skill (templated), Agent, Rule und snippets/.
+1. add + install → Baum, Lock, gitignore-Block prüfen, gerenderter Inhalt enthält Projektvariablen.
+2. Neuer Commit in der Source → hook session-start meldet Update, Datei aktualisiert.
+3. vars in der Projekt-Config ändern → nächster sync rendert neu, ohne Source-Änderung.
+4. Autoren-Modus: local-Override in der User-Config → Edit im Checkout landet beim nächsten sync im Projekt.
+5. uninstall → Dateien, Lock-Eintrag und gitignore-Zeilen weg, eigener Skill daneben unberührt.
+
+Done: läuft in npm test mit, ohne Netz.
+
+2026-09-22 02:11 Done. test/e2e.test.ts drives the built bundle (spawned) end-to-end, no network: bare-git source with templated skill + companion + agent + rule + snippets. 1) add (trusts) + install -> tree, 3-entry lock, gitignore block, rendered content has project vars (Hello project foo=bar TAG). 2) new commit -> hook session-start reports update, file -> v2. 3) change project vars -> sync re-renders (foo=CHANGED) with no source change. 4) author-mode user local override -> LOCAL EDIT lands next sync. 5) uninstall -> files/lock/gitignore gone, hand-written own skill beside it untouched. Runs in npm test (~0.9s).
