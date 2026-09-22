@@ -5,8 +5,10 @@
 export interface SourceLocation {
   /** Absolute path of the resolved source tree. */
   dir: string;
-  /** Opaque version marker: "local", "git:<sha>", or "url:<etag>". */
+  /** Opaque version marker: "local", "git:<sha>", or "etag:<…>". */
   version: string;
+  /** Set when resolve fell back to a stale cache (offline); surfaced as a warning. */
+  warning?: string;
 }
 
 export interface Source {
