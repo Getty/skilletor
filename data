@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-22T01:48:41Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T01:48:41Z
+created: 2026-09-22T00:18:28Z
+depends_on:
+- 9
+estimate: 1h
+id: 10
+priority: medium
+started: 2026-09-22T01:47:53Z
+status: done
+tags:
+- engine
+- git
+title: 'apply: managed .gitignore block in the project'
+updated: 2026-09-22T01:48:41Z
+---
+
+Spec §6.4. TDD.
+
+- Markierter Block (# >>> skilletor >>> … # <<< skilletor <<<) in <projekt>/.claude/.gitignore mit exakten verwalteten Pfaden, skilletor.lock.json, skilletor.local.json.
+- Inhalt außerhalb des Blocks bleibt unangetastet; Block wird idempotent neu geschrieben (keine Änderung → kein Schreibzugriff).
+- "gitignore": false → Block entfernen; bleibt die Datei leer, löschen.
+- Nur Projekt-Scope.
+
+Done: Tests für Anlegen, Aktualisieren, Idempotenz, fremder Inhalt davor/danach, Abschalten.
+
+2026-09-22 01:48 Done, TDD. src/gitignore.ts updateGitignore({claudeDir, managedPaths, enabled}): maintains one marked block (# >>> skilletor >>> ... # <<< skilletor <<<) with sorted managed paths + skilletor.lock.json + skilletor.local.json. Replaces the block in place (foreign content before/after preserved), idempotent (no change -> no write), disabled removes the block and deletes the file if only the block remained. Project scope only. 6 tests.
