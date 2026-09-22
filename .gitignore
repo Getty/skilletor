@@ -1,3 +1,7 @@
 node_modules/
 *.tsbuildinfo
 .claude/settings.local.json
+
+# karr materialized task view -- never commit
+tasks/
+config.yml
