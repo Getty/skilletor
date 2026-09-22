@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-22T01:50:40Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T01:50:40Z
+created: 2026-09-22T00:18:28Z
+depends_on:
+- 2
+estimate: 2h
+id: 11
+priority: high
+started: 2026-09-22T01:49:39Z
+status: done
+tags:
+- engine
+- security
+title: 'state.ts: trust, mutex, last-check, pending-report'
+updated: 2026-09-22T01:50:40Z
+---
+
+Spec §4.3, §6.5. TDD, State-Wurzel (~/.claude/skilletor/) injizierbar.
+
+- trust.json: Name + aufgelöste URL/Pfad; isTrusted(source) – user-definierte Sources immer vertraut, project-only Sources nur mit passendem Eintrag; geänderte URL → nicht mehr vertraut.
+- sync.lock/: mkdir-Mutex mit Stale-Timeout (PID + Zeitstempel), withLock(fn), Wartezeit begrenzt; bei Timeout sauberer Abbruch statt Hänger.
+- last-check.json: isDue(scopeKey, interval), markChecked().
+- pending-report.json: atomar schreiben, takePendingReport() liest + löscht (pro Projektpfad getrennt, damit parallele Sessions verschiedener Projekte sich nichts wegnehmen).
+
+Done: Tests inkl. zweier konkurrierender Prozesse am Mutex, Stale-Lock-Übernahme, Trust-Verfall bei URL-Änderung.
+
+2026-09-22 01:50 Done, TDD, injectable state root. src/state.ts State(root): trust.json (trust(name,resolved); isTrusted: user-origin always true, project-only needs matching resolved -> lapses on URL change). last-check.json (isDue(scopeKey,interval)/markChecked). pending-report.json (put/take keyed per project path; take consumes). sync.lock/ mkdir-mutex: withLock(fn,{timeoutMs,staleMs,pollMs}) atomic acquire, PID+timestamp owner, stale takeover, bounded wait -> throws on timeout (no hang). 9 tests incl concurrent serialization, stale takeover, timeout.
