@@ -1,0 +1,38 @@
+---
+claimed_at: 2026-09-22T01:58:46Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T01:58:46Z
+created: 2026-09-22T00:18:28Z
+depends_on:
+- 3
+- 6
+- 7
+- 9
+- 10
+- 11
+estimate: 4h
+id: 12
+priority: high
+started: 2026-09-22T01:52:25Z
+status: done
+tags:
+- engine
+- cli
+title: sync/check/status + report.ts + CLI dispatch
+updated: 2026-09-22T01:58:46Z
+---
+
+Spec §6.1, §6.6, §7. Verdrahtet die Module. TDD mit lokalen Sources und file://-Git.
+
+- sync: pro Scope (User vor Projekt) Config → Sources parallel auflösen (unvertraute überspringen + Warnung) → Items bauen → apply → Lock/gitignore → Report. Läuft unter dem Mutex.
+- check: nur Source-check(), schreibt nichts; Exit-Code/JSON sagt, ob sich etwas geändert hat.
+- status: deklariert vs. installiert vs. Lock, Source-Versionen, offene Konflikte/Trust-Anfragen.
+- Autoren-Modus: local-Feld vorhanden und Verzeichnis existiert → lokale Source, sonst git/url.
+- Fehlerverhalten nach §6.6: nie werfen bis zum Prozessende ohne Meldung; Config-Fehler → nichts anfassen; Fetch-Fehler → Cache + Warnung; Template-Fehler → Item bleibt alt.
+- report.ts: ein Ergebnisobjekt → Text (Mensch), --json, Hook-Formate (systemMessage + additionalContext, Aktivierungshinweis pro Typ als Tabelle, die der Spike füllt).
+- cli.ts: sync|check|status, --scope user|project|all, --json, --force, --project-dir.
+
+Done: Integrationstests für beide Scopes, Autoren-Modus-Override, unvertraute Projekt-Source, Offline-Fall, Report-Snapshots.
+
+2026-09-22 01:58 Done, TDD integration. src/engine.ts sync/check/status wiring all modules; sync runs under state mutex, per scope (user before project): loadConfig -> resolve sources in parallel (skip untrusted -> trustRequest; author mode local-exists overrides git/url; offline -> cache+warning) -> scan+build items (template error -> keep old + warning) -> apply (keep unavailable-source items) -> project gitignore block -> report. Config error touches nothing. src/report.ts text/json/hook(systemMessage+additionalContext) with per-type activation hints. src/cli.ts dispatch sync|check|status + --scope/--json/--force/--project-dir; check exit 1=changed. Added apply keep option. Verified real binary end-to-end. 124 tests total.
