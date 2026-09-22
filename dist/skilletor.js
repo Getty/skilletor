@@ -6804,6 +6804,9 @@ function isNotable(s) {
     s.added.length || s.updated.length || s.removed.length || s.conflicts.length || s.overwritten.length || s.warnings.length || s.trustRequests.length
   );
 }
+function hasNotable(r) {
+  return Boolean(r.error) || r.scopes.some(isNotable);
+}
 function reportJson(r) {
   return JSON.stringify(r, null, 2);
 }
@@ -6823,6 +6826,31 @@ function reportText(r) {
   }
   return lines.join("\n");
 }
+function reportHook(r) {
+  if (!hasNotable(r)) return {};
+  const changed = [];
+  let warnings = 0;
+  for (const s of r.scopes) {
+    changed.push(...s.added, ...s.updated);
+    warnings += s.warnings.length + s.conflicts.length + s.trustRequests.length + s.overwritten.length;
+  }
+  const removed = r.scopes.reduce((n, s) => n + s.removed.length, 0);
+  const parts = [];
+  if (changed.length) parts.push(`${changed.length} item(s) updated`);
+  if (removed) parts.push(`${removed} removed`);
+  if (warnings) parts.push(`${warnings} warning(s)`);
+  const systemMessage = `skilletor: ${parts.join(", ") || "changes applied"}`;
+  const ctx = [];
+  if (changed.length) {
+    ctx.push("skilletor synced items:");
+    for (const it of changed) ctx.push(`- ${it.type} ${it.name}@${it.source}: ${ACTIVATION[it.type]}`);
+  }
+  for (const s of r.scopes) {
+    for (const t of s.trustRequests) ctx.push(`- untrusted source ${t.name} (${t.url}); run: skilletor trust ${t.name}`);
+    for (const w of s.warnings) ctx.push(`- warning: ${w}`);
+  }
+  return { systemMessage, additionalContext: ctx.length ? ctx.join("\n") : void 0 };
+}
 
 // src/engine.ts
 function cacheRootOf(ctx) {
@@ -6834,13 +6862,13 @@ function targetDirOf(ctx, scope) {
 function identityOf(src) {
   return src.git ?? src.url ?? src.local ?? "";
 }
-function makeBackend(src, home, cacheRoot) {
+function makeBackend(src, home, cacheRoot, timeoutMs) {
   if (src.local) {
     const ls = new LocalSource(src.local, home);
     if (ls.exists()) return ls;
   }
-  if (src.git) return new GitSource({ url: src.git, ref: src.ref, cacheRoot });
-  if (src.url) return new UrlSource({ url: src.url, cacheRoot });
+  if (src.git) return new GitSource({ url: src.git, ref: src.ref, cacheRoot, timeoutMs });
+  if (src.url) return new UrlSource({ url: src.url, cacheRoot, timeoutMs });
   if (src.local) return new LocalSource(src.local, home);
   throw new Error(`source ${src.name} has no backend`);
 }
@@ -6912,7 +6940,7 @@ async function syncScope(ctx, config, scopeCfg, scope, opts, state) {
         return;
       }
       try {
-        const loc = await makeBackend(src, ctx.home, cacheRoot).resolve(sourceVersion(oldLock, name));
+        const loc = await makeBackend(src, ctx.home, cacheRoot, ctx.timeoutMs).resolve(sourceVersion(oldLock, name));
         if (loc.warning) rep.warnings.push(loc.warning);
         resolved.set(name, { dir: loc.dir, version: loc.version });
       } catch (err) {
@@ -6997,7 +7025,7 @@ async function check(ctx, opts = {}) {
       const src = config.sources.get(name);
       if (!src || !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
       try {
-        const changed = await makeBackend(src, ctx.home, cacheRoot).check(sourceVersion(oldLock, name));
+        const changed = await makeBackend(src, ctx.home, cacheRoot, ctx.timeoutMs).check(sourceVersion(oldLock, name));
         out.sources.push({ name, scope, changed });
         if (changed) out.changed = true;
       } catch (err) {
@@ -7330,6 +7358,90 @@ function installedSet(ctx, config) {
   return set;
 }
 
+// src/hooks.ts
+import { spawn } from "node:child_process";
+var SESSION_START_TIMEOUT_MS = 5e3;
+var DEFAULT_INTERVAL = 600;
+function projectKeyOf(ctx, input) {
+  return ctx.projectDir ?? input.cwd ?? "";
+}
+function warn(message) {
+  return { systemMessage: `skilletor: ${message}` };
+}
+function toOutput(report, eventName) {
+  const h = reportHook(report);
+  if (!h.systemMessage && !h.additionalContext) return {};
+  return {
+    systemMessage: h.systemMessage,
+    hookSpecificOutput: { hookEventName: eventName, additionalContext: h.additionalContext }
+  };
+}
+async function runHook(event, input, ctx) {
+  try {
+    switch (event) {
+      case "session-start":
+        return await sessionStart(input, ctx);
+      case "user-prompt-submit":
+        return await userPromptSubmit(input, ctx);
+      case "__sync-background":
+        await syncBackground(input, ctx);
+        return {};
+      default:
+        return warn(`unknown hook event: ${event}`);
+    }
+  } catch (err) {
+    return warn(err.message);
+  }
+}
+async function sessionStart(input, ctx) {
+  const engineCtx = { ...ctx, timeoutMs: ctx.timeoutMs ?? SESSION_START_TIMEOUT_MS };
+  const state = new State(ctx.stateRoot);
+  const key = projectKeyOf(ctx, input);
+  const chk = await check(engineCtx);
+  if (chk.error) return warn(chk.error);
+  state.markChecked(key);
+  if (!chk.changed) {
+    return chk.warnings.length ? warn(chk.warnings.join("; ")) : {};
+  }
+  const report = await sync(engineCtx);
+  return toOutput(report, "SessionStart");
+}
+async function userPromptSubmit(input, ctx) {
+  const state = new State(ctx.stateRoot);
+  const key = projectKeyOf(ctx, input);
+  const pending = state.takePendingReport(key);
+  let interval = DEFAULT_INTERVAL;
+  try {
+    interval = loadConfig({ home: ctx.home, projectDir: ctx.projectDir }).checkInterval;
+  } catch {
+  }
+  if (state.isDue(key, interval)) {
+    state.markChecked(key);
+    (ctx.background ?? defaultBackground)(ctx);
+  }
+  return pending ?? {};
+}
+async function syncBackground(input, ctx) {
+  const key = projectKeyOf(ctx, input);
+  const report = await sync(ctx);
+  const output = toOutput(report, "UserPromptSubmit");
+  if (output.systemMessage || output.hookSpecificOutput) {
+    new State(ctx.stateRoot).putPendingReport(key, output);
+  }
+}
+function defaultBackground(ctx) {
+  if (!ctx.binPath) return;
+  const child = spawn(process.execPath, [ctx.binPath, "hook", "__sync-background"], {
+    detached: true,
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      SKILLETOR_PROJECT_DIR: ctx.projectDir ?? ""
+    }
+  });
+  child.unref();
+}
+
 // src/cli.ts
 var VERSION = true ? "0.1.0" : "0.0.0-dev";
 var USAGE = `skilletor ${VERSION}
@@ -7510,6 +7622,8 @@ async function run(argv) {
 `);
         return 0;
       }
+      case "hook":
+        return runHookCommand(flags.rest[0]);
       default:
         process.stderr.write(`skilletor: unknown command: ${cmd}
 `);
@@ -7520,6 +7634,45 @@ async function run(argv) {
 `);
     return 1;
   }
+}
+function readStdin() {
+  return new Promise((resolve) => {
+    let data = "";
+    if (process.stdin.isTTY) {
+      resolve("");
+      return;
+    }
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => data += chunk);
+    process.stdin.on("end", () => resolve(data));
+    process.stdin.on("error", () => resolve(data));
+  });
+}
+async function runHookCommand(event) {
+  if (!event) return 0;
+  let input = {};
+  try {
+    const raw = await readStdin();
+    if (raw.trim()) input = JSON.parse(raw);
+  } catch {
+  }
+  const home = homedir();
+  const projectDir = process.env.SKILLETOR_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
+  const ctx = {
+    home,
+    projectDir,
+    stateRoot: join13(home, ".claude", "skilletor"),
+    binPath: fileURLToPath(import.meta.url)
+  };
+  try {
+    const out = await runHook(event, input, ctx);
+    if (out.systemMessage || out.hookSpecificOutput) {
+      process.stdout.write(JSON.stringify(out) + "\n");
+    }
+  } catch (err) {
+    process.stdout.write(JSON.stringify({ systemMessage: `skilletor: ${err.message}` }) + "\n");
+  }
+  return 0;
 }
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   run(process.argv.slice(2)).then(

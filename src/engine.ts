@@ -28,6 +28,8 @@ export interface EngineContext {
   cacheRoot?: string;
   host?: { name: string; os: string };
   user?: { name: string; home: string };
+  /** Per-source network timeout (the SessionStart hook uses 5 s). */
+  timeoutMs?: number;
 }
 
 export interface SyncOptions {
@@ -49,13 +51,13 @@ export function identityOf(src: ResolvedSource): string {
   return src.git ?? src.url ?? src.local ?? "";
 }
 
-export function makeBackend(src: ResolvedSource, home: string, cacheRoot: string): Source {
+export function makeBackend(src: ResolvedSource, home: string, cacheRoot: string, timeoutMs?: number): Source {
   if (src.local) {
     const ls = new LocalSource(src.local, home);
     if (ls.exists()) return ls; // author mode overrides git/url
   }
-  if (src.git) return new GitSource({ url: src.git, ref: src.ref, cacheRoot });
-  if (src.url) return new UrlSource({ url: src.url, cacheRoot });
+  if (src.git) return new GitSource({ url: src.git, ref: src.ref, cacheRoot, timeoutMs });
+  if (src.url) return new UrlSource({ url: src.url, cacheRoot, timeoutMs });
   if (src.local) return new LocalSource(src.local, home); // missing dir -> resolve errors
   throw new Error(`source ${src.name} has no backend`);
 }
@@ -154,7 +156,7 @@ async function syncScope(
         return;
       }
       try {
-        const loc = await makeBackend(src, ctx.home, cacheRoot).resolve(sourceVersion(oldLock, name));
+        const loc = await makeBackend(src, ctx.home, cacheRoot, ctx.timeoutMs).resolve(sourceVersion(oldLock, name));
         if (loc.warning) rep.warnings.push(loc.warning);
         resolved.set(name, { dir: loc.dir, version: loc.version });
       } catch (err) {
@@ -258,7 +260,7 @@ export async function check(ctx: EngineContext, opts: SyncOptions = {}): Promise
       const src = config.sources.get(name);
       if (!src || !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
       try {
-        const changed = await makeBackend(src, ctx.home, cacheRoot).check(sourceVersion(oldLock, name));
+        const changed = await makeBackend(src, ctx.home, cacheRoot, ctx.timeoutMs).check(sourceVersion(oldLock, name));
         out.sources.push({ name, scope, changed });
         if (changed) out.changed = true;
       } catch (err) {

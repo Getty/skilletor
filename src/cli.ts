@@ -7,6 +7,7 @@ import { reportJson, reportText } from "./report.ts";
 import {
   cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall,
 } from "./commands.ts";
+import { runHook, type HookContext, type HookInput } from "./hooks.ts";
 
 declare const __SKILLETOR_VERSION__: string;
 const VERSION =
@@ -201,6 +202,8 @@ export async function run(argv: string[]): Promise<number> {
         process.stdout.write(`trusted source ${r.name} (${r.url})\n`);
         return 0;
       }
+      case "hook":
+        return runHookCommand(flags.rest[0]);
       default:
         process.stderr.write(`skilletor: unknown command: ${cmd}\n`);
         return 2;
@@ -209,6 +212,50 @@ export async function run(argv: string[]): Promise<number> {
     process.stderr.write(`skilletor: ${(err as Error).message}\n`);
     return 1;
   }
+}
+
+function readStdin(): Promise<string> {
+  return new Promise((resolve) => {
+    let data = "";
+    if (process.stdin.isTTY) {
+      resolve("");
+      return;
+    }
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => (data += chunk));
+    process.stdin.on("end", () => resolve(data));
+    process.stdin.on("error", () => resolve(data));
+  });
+}
+
+/** `skilletor hook <event>`: read stdin JSON, run the hook, print JSON, always exit 0. */
+async function runHookCommand(event: string | undefined): Promise<number> {
+  if (!event) return 0; // nothing to do, never disturb the session
+  let input: HookInput = {};
+  try {
+    const raw = await readStdin();
+    if (raw.trim()) input = JSON.parse(raw) as HookInput;
+  } catch {
+    // ignore malformed hook input
+  }
+  const home = homedir();
+  const projectDir =
+    process.env.SKILLETOR_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
+  const ctx: HookContext = {
+    home,
+    projectDir,
+    stateRoot: join(home, ".claude", "skilletor"),
+    binPath: fileURLToPath(import.meta.url),
+  };
+  try {
+    const out = await runHook(event, input, ctx);
+    if (out.systemMessage || out.hookSpecificOutput) {
+      process.stdout.write(JSON.stringify(out) + "\n");
+    }
+  } catch (err) {
+    process.stdout.write(JSON.stringify({ systemMessage: `skilletor: ${(err as Error).message}` }) + "\n");
+  }
+  return 0;
 }
 
 // Run only when executed as the entry point, not when imported by a test.
