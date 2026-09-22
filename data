@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-09-22T01:32:11Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-22T01:32:11Z
+created: 2026-09-22T00:18:26Z
+depends_on:
+- 2
+estimate: 2h
+id: 5
+priority: high
+started: 2026-09-22T01:30:28Z
+status: done
+tags:
+- sources
+title: 'sources/local + catalog.ts: scan the source layout'
+updated: 2026-09-22T01:32:11Z
+---
+
+Spec §4.1, §4.4. TDD gegen Fixture-Verzeichnisse.
+
+- Source-Interface: resolve() → { dir, version }, check() → changed?. local: dir direkt, version = "local", check entfällt (immer neu rendern); ~ expandieren; fehlendes Verzeichnis → Source fällt auf git/url zurück (Entscheidung liegt beim Aufrufer, hier nur exists()).
+- catalog.scan(dir) → Items { type, name, description, files[] } aus skills/<name>/, agents/<name>.md[.njk], rules/<name>.md[.njk]; snippets/ ist nicht installierbar; optionale skilletor.json der Source (description, vars-Defaults) lesen.
+- Name/Beschreibung aus Frontmatter (bei .njk: Frontmatter roh lesen, nicht rendern).
+- Symlinks in der Source → Fehler (Spec §9).
+
+Done: Tests für alle drei Typen, .njk-Varianten, Begleitdateien in Skill-Verzeichnissen, Symlink-Ablehnung, leere/fehlende Typ-Verzeichnisse.
+
+2026-09-22 01:32 Done, TDD vs fixture dirs. src/sources/types.ts (Source interface: resolve()->{dir,version}, check(cachedVersion)->changed?). src/sources/local.ts (LocalSource: ~ expansion via injected home, exists() for caller fallback, version=local, check always true). src/catalog.ts scan(dir)->{items,meta}: skills/<name>/ dir+companions, agents|rules/<name>.md[.njk] single file, snippets ignored, optional source skilletor.json (description+vars). Names from path, descriptions from frontmatter read raw (njk never rendered). Symlinks anywhere -> CatalogError. 12 tests.
