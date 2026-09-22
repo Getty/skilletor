@@ -91,12 +91,26 @@ skilletor.json             # optional: { "description": "…", "vars": { default
   },
   "vars": { "kubernetes": true },
   "gitignore": true,
-  "checkInterval": 600
+  "checkInterval": 1800
 }
 ```
 
 Only `skill`, `agent` and `rule` are installable — skilletor never syncs hooks,
 `settings.json` or MCP configs.
+
+### The in-session check (and how to quiet it)
+
+skilletor always reconciles at **session start**. During a session it also
+re-checks your sources in the background, throttled by `checkInterval` (user
+config, seconds, **default 1800 = 30 min**). If that's too chatty for you:
+
+```json
+{ "checkInterval": 0 }   // turn the in-session check off entirely
+```
+
+With `0` (or any value ≤ 0) skilletor only syncs at session start — no
+background fetching while you work. Raise the number instead to check less often
+(e.g. `3600` for hourly).
 
 ## Templates
 

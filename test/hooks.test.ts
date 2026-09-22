@@ -73,6 +73,18 @@ test("user-prompt-submit spawns a background sync only when due", async () => {
   }
 });
 
+test("checkInterval: 0 disables the in-session check entirely", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({ checkInterval: 0 });
+    await runHook("user-prompt-submit", {}, e.ctx);
+    await runHook("user-prompt-submit", {}, e.ctx);
+    assert.equal(e.backgroundCalls.length, 0); // never spawns a background sync
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("the non-due path is fast and silent (<100ms)", async () => {
   const e = env();
   try {

@@ -33,7 +33,7 @@ test("missing files are not an error: empty config with defaults", () => {
     const cfg = loadConfig({ home, projectDir });
     assert.equal(cfg.sources.size, 0);
     assert.equal(cfg.user.install.length, 0);
-    assert.equal(cfg.checkInterval, 600); // user default
+    assert.equal(cfg.checkInterval, 1800); // user default (30 min)
     assert.ok(cfg.project);
     assert.equal(cfg.project.gitignore, true); // project default
   } finally {

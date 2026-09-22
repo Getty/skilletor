@@ -62,7 +62,8 @@ The scope follows from which file declares an item.
 
 - `ref` is optional (default: the remote's HEAD); a tag or commit pins it.
 - `gitignore` (project only, default `true`): see 6.4.
-- `checkInterval` (user only, seconds, default 600): throttle for the in-session check.
+- `checkInterval` (user only, seconds, default 1800 = 30 min): throttle for the
+  in-session check. `0` or a negative value disables it (SessionStart still syncs).
 - Duplicate target names within one type and scope (`foo@shared` + `foo@team`) are a
   config error.
 

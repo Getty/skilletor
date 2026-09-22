@@ -97,7 +97,8 @@ async function userPromptSubmit(input: HookInput, ctx: HookContext): Promise<Hoo
     // config error: fall back to the default throttle; the background sync reports it
   }
 
-  if (state.isDue(key, interval)) {
+  // checkInterval <= 0 turns the in-session check off entirely (SessionStart still syncs).
+  if (interval > 0 && state.isDue(key, interval)) {
     state.markChecked(key);
     (ctx.background ?? defaultBackground)(ctx);
   }

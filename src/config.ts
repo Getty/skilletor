@@ -243,7 +243,8 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
   for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s, "user"));
   for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s, "user"));
 
-  const checkInterval = numberOr(user.checkInterval, 600, userPath, "checkInterval");
+  // Default 30 min. 0 (or negative) disables the in-session check; SessionStart still syncs.
+  const checkInterval = numberOr(user.checkInterval, 1800, userPath, "checkInterval");
 
   const userScope: ScopeConfig = {
     scope: "user",

@@ -5930,7 +5930,7 @@ function loadConfig(opts) {
   for (const [name, s] of projectSources) sources.set(name, { ...s, origin: "project" });
   for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s, "user"));
   for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s, "user"));
-  const checkInterval = numberOr(user.checkInterval, 600, userPath, "checkInterval");
+  const checkInterval = numberOr(user.checkInterval, 1800, userPath, "checkInterval");
   const userScope = {
     scope: "user",
     install: parseInstall(user, userPath, "user", userSources),
@@ -7416,7 +7416,7 @@ async function userPromptSubmit(input, ctx) {
     interval = loadConfig({ home: ctx.home, projectDir: ctx.projectDir }).checkInterval;
   } catch {
   }
-  if (state.isDue(key, interval)) {
+  if (interval > 0 && state.isDue(key, interval)) {
     state.markChecked(key);
     (ctx.background ?? defaultBackground)(ctx);
   }
@@ -7444,7 +7444,7 @@ function defaultBackground(ctx) {
 }
 
 // src/cli.ts
-var VERSION = true ? "0.1.0" : "0.0.0-dev";
+var VERSION = true ? "0.1.1" : "0.0.0-dev";
 var USAGE = `skilletor ${VERSION}
 Remote skills, agents and rules for Claude Code.
 

@@ -76,7 +76,9 @@ when a source has changed.
 - `ref` (git) pins a branch, tag or commit; omit for the remote's HEAD.
 - `gitignore` (project only, default true): keep a managed block listing the installed
   paths, the lock and `skilletor.local.json`, so only `skilletor.json` is committed.
-- `checkInterval` (user only, seconds): throttle for the in-session check.
+- `checkInterval` (user only, seconds, default 1800 = 30 min): throttle for the
+  in-session background check. `0` (or ≤ 0) turns it off — skilletor then only syncs at
+  session start.
 
 ## Author mode (local override)
 
