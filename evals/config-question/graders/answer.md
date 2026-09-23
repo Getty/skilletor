@@ -6,8 +6,8 @@ weight: 2
 
 PASS only if the answer (1) puts the install entry in the project file
 `.claude/skilletor.json` (or the machine-local `.claude/skilletor.local.json`, or says to
-run `skilletor install perl-moo@shared --project`), (2) writes the entry as
-`perl-moo@shared` under `install.skills`, and (3) sets `checkInterval` to `0` in the
+run `skilletor install go-lint@platform --project`), (2) writes the entry as
+`go-lint@platform` under `install.skills`, and (3) sets `checkInterval` to `0` in the
 **user** config `~/.claude/skilletor.json`, explaining that the session-start sync still
 happens.
 
