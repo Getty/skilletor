@@ -1,6 +1,6 @@
 ---
 name: skilletor
-description: "skilletor CLI — installs and updates skills, agents and rules from remote sources for Claude Code. Use when adding a source, installing/uninstalling a skill/agent/rule from a source, editing a skilletor.json, running sync/check/status, asking 'where does this skill come from' or 'why did this file change', or before editing a file skilletor manages."
+description: "skilletor CLI — installs and updates skills, agents and rules from remote sources for Claude Code. Use when adding a source, installing/uninstalling a skill/agent/rule or all of a type (`*@source` wildcard) from a source, switching an item on/off per project via vars, editing a skilletor.json, running sync/check/status, asking 'where does this skill come from' or 'why did this file change', or before editing a file skilletor manages."
 ---
 
 # skilletor — remote skills, agents and rules
@@ -34,7 +34,8 @@ skilletor add [name] <spec> [--project]   # add a source (resolves shorthand, tr
 skilletor source list [--json] | source remove <name> [--project] [--force]   # --force: even with installed items
 skilletor available [source] [--json]     # catalog of trusted sources: type, name, description, installed?
 skilletor install <item>... [--project]   # name@source (type:name@source if ambiguous), then sync
-skilletor uninstall <item>... [--project]
+skilletor install 'rule:*@shared' [--project]   # wildcard: type prefix required, quote against shell globbing
+skilletor uninstall <item>... [--project] # 'rule:*@shared' removes the wildcard entry
 skilletor sync | check | status           # --scope user|project|all, --json, --project-dir <dir>
 skilletor sync --force                    # overwrite and adopt unmanaged files reported as conflicts
 skilletor trust <source>                  # confirm a project-declared source (shows the resolved URL)
@@ -83,6 +84,19 @@ when a source has changed.
   session start. In a project or local file it is a config error, not ignored — the
   config fails to load and nothing syncs.
 
+### Wildcards — `*@source`
+
+`"rules": ["*@shared"]` (or `"rule:*@shared"`) declares every rule the source offers; the
+same under `skills`/`agents`. `*` is valid only as the whole name. It is re-expanded on
+every sync: items added upstream get installed, items removed upstream get deleted.
+
+- Same name, per type and scope: explicit entry + wildcard of the same source → explicit,
+  silent; explicit entry beats another source's wildcard, with a warning; two wildcards
+  offering one name → that name is skipped with a warning, an installed copy stays.
+  The same wildcard twice in one scope is a config error.
+- Source unresolvable (offline, untrusted, broken) → everything it installed stays.
+- `status`: `✓ rules/k8s @shared via *@shared` per item, `* rules/* @shared (3 installed)` per wildcard.
+
 ## Author mode (local override)
 
 The project config declares a source with `git`; the author's **user** config overrides
@@ -100,7 +114,29 @@ on every sync — edits in the checkout land immediately.
 A source file ending in `.njk` is rendered with Nunjucks and installed with the `.njk`
 stripped; every other file is copied byte for byte. Context: `vars.*` (source defaults <
 user < project < local), `project.*` (project scope), `scope`, `target.dir`, `host.*`,
-`user.*`, `item.*`. There is deliberately no `env.*`. An undefined variable is an error.
+`user.*`, `item.*`. There is deliberately no `env.*`. Printing an undefined variable
+(`{{ vars.x }}`) is an error; testing one (`{% if vars.x %}`) is just false.
+
+**Empty render = item off.** If the main file (`SKILL.md.njk`, `<name>.md.njk`) renders
+to whitespace once a leading frontmatter block is stripped, the item is skipped in that
+scope: nothing written (for a skill, no companion files either), an installed copy
+removed, no error. A main file without `.njk` is never skipped. Report:
+`· rules/k8s skipped (renders empty)` or `- rules/k8s (removed: renders empty)`; status:
+`(skipped: renders empty)`. Pattern — one rule per concern, body gated:
+
+```njk
+---
+paths: ["**/*.yaml"]
+---
+{% if vars.kubernetes %}
+Use kubectl --context {{ vars.k8s_context }}.
+{% endif %}
+```
+
+Install the set with `"rules": ["*@shared"]`, switch each rule with `"vars": { "kubernetes": true }`;
+a var printed inside the gate (`k8s_context`) needs a default in the source's
+`skilletor.json`. A user-scope item sees only user vars (+ source defaults); project and local `vars`
+switch items installed in project scope.
 
 ## Trust
 

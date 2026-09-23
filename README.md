@@ -98,6 +98,40 @@ skilletor.json             # optional: { "description": "…", "vars": { default
 Only `skill`, `agent` and `rule` are installable — skilletor never syncs hooks,
 `settings.json` or MCP configs.
 
+### Wildcards: everything of one type from a source
+
+`"*@source"` in an install list declares every item of that type the source offers:
+
+```json
+{ "install": { "rules": ["*@shared"] } }
+```
+
+`"rule:*@shared"` is the same with an explicit type; `*` is only valid as the whole name.
+On the command line the type prefix is required, and the argument must be quoted so the
+shell does not glob it:
+
+```bash
+skilletor install 'rule:*@shared' [--project]
+skilletor uninstall 'rule:*@shared' [--project]
+```
+
+A wildcard is expanded against the source on every sync, so items added upstream arrive
+on the next sync and items removed upstream are deleted. When names overlap (per type and
+scope) nothing fails:
+
+- an explicit entry and a wildcard over the **same** source name the same item → the
+  explicit entry is used, silently;
+- an explicit entry and **another** source's wildcard → the explicit entry wins, the
+  report warns;
+- two wildcards offer the same name → that one name is skipped with a warning (an
+  installed copy stays as it is); every other item proceeds.
+
+Declaring the same wildcard twice in one scope is a config error. If a source cannot be
+resolved (offline without cache, untrusted, broken layout), everything it installed —
+explicitly or through a wildcard — stays in place; deletion only follows a successful
+resolve. `skilletor status` marks such items `via *@shared` and adds one line per
+wildcard, e.g. `* rules/* @shared (3 installed)`.
+
 ### The in-session check (and how to quiet it)
 
 skilletor always reconciles at **session start**. During a session it also
@@ -127,7 +161,36 @@ Use the {{ project.name }} cluster in namespace {{ vars.k8s_namespace }}.
 
 Context: `vars.*` (source defaults < user < project < local), `project.*` (project
 scope), `scope`, `target.dir`, `host.*`, `user.*`, `item.*`. There is deliberately no
-`env.*`, and an undefined variable is an error (so a typo can't ship an empty skill).
+`env.*`, and printing an undefined variable (`{{ vars.x }}`) is an error (so a typo can't
+ship an empty skill). Testing one (`{% if vars.x %}`) is not: it is simply false.
+
+### Switching items on and off with vars
+
+If an item's main file is a template — `SKILL.md.njk` for a skill, `<name>.md.njk` for
+an agent or rule — and it renders to nothing but whitespace (a leading frontmatter block
+does not count), the item does not apply in that scope. It is skipped as a whole: nothing
+is written (for a skill, none of its other files either), an already installed copy is
+removed, and it is neither an error nor a warning. A main file that is not a template is
+never skipped, even if empty. The sync report says `· rules/k8s skipped (renders empty)`,
+or `- rules/k8s (removed: renders empty)` when a copy was deleted; `status` shows
+`(skipped: renders empty)`.
+
+That makes a source of small, gated rules — one per concern — switchable per config:
+
+```njk
+---
+paths: ["**/*.yaml"]
+---
+{% if vars.kubernetes %}
+Use kubectl --context {{ vars.k8s_context }}.
+{% endif %}
+```
+
+Install the whole set once with `"rules": ["*@shared"]` and turn individual rules on with
+`"vars": { "kubernetes": true }` in the user, project or local config. `k8s_context`
+is printed inside the gate, so it needs a default in the source's `skilletor.json`.
+Vars follow the item's scope: a user-scope item sees only user vars (plus source
+defaults); project and local vars switch items installed in project scope.
 
 ## Authoring mode
 
@@ -182,7 +245,8 @@ skilletor add [name] <spec> [--project]   # add a source (resolves shorthand, tr
 skilletor source list [--json] | source remove <name> [--project] [--force]   # --force: even with installed items
 skilletor available [source] [--json]     # catalog of trusted sources
 skilletor install <item>... [--project]   # name@source (type:name@source if ambiguous), then sync
-skilletor uninstall <item>... [--project]
+skilletor install 'rule:*@shared' [--project]   # wildcard: every rule of the source (type prefix required)
+skilletor uninstall <item>... [--project] # 'rule:*@shared' removes the wildcard entry
 skilletor sync | check | status           # --scope user|project|all, --json, --project-dir <dir>
 skilletor sync --force                    # overwrite and adopt unmanaged files reported as conflicts
 skilletor trust <source>
