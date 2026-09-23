@@ -620,6 +620,8 @@ Applies when working with files matching: `k8s/**`, `*.yaml`.
   body is blank for Codex (empty render, or an empty file) is skipped for Codex. A rule
   whose body contains a skilletor marker line is not written (warning) – it would corrupt
   the file.
+- The file is wholly skilletor's: an existing file of that name that skilletor did not
+  write is overwritten without a conflict report.
 - The file exists exactly when the scope has at least one Codex rule; it is deleted when
   the last one goes or Codex is switched off (§14.1). The project file is listed in the
   managed block of `<repo>/.codex/.gitignore` (§14.3).
@@ -642,10 +644,11 @@ Its commands pass `--harness codex`; the `SessionStart` handler uses the matcher
 `startup|resume|clear` and sets `"additionalContextLimit": 0`.
 
 - `skilletor hook session-start --harness codex` syncs as before, then – when the input's
-  `source` is `startup` or `clear`, or missing – appends to `additionalContext` the rules
-  file of the user scope, then the one of the project scope (each only when present and
-  Codex is a target of that scope), read from disk, so a failed or timed-out sync still
-  delivers the last good rules. On `resume` no rules are appended: the first copy is still
+  `source` is `startup` or `clear`, or missing – puts at the start of `additionalContext`
+  the rules file of the user scope, then the one of the project scope (each only when
+  present and Codex is a target of that scope), read from disk, so a failed or timed-out
+  sync still delivers the last good rules. The sync report follows the rules, so the
+  message begins with `<!-- skilletor:rules` as the pointer says. On `resume` no rules are appended: the first copy is still
   in the resumed history and a second one would duplicate it.
 - `user-prompt-submit` never appends rules.
 - Without `--harness` (Claude Code) nothing changes.
