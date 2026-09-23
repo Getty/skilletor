@@ -288,6 +288,219 @@ test("uninstall of a wildcard without a type prefix is an error", async () => {
   }
 });
 
+// k36: a type prefix restricts removal to that type's list; no prefix keeps "all lists".
+test("uninstall type:name@source removes only that type's entry", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      skill(d, "dup");
+      agent(d, "dup");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["dup@mine"], agents: ["dup@mine"] } });
+    await cmdInstall(e.ctx, { items: [] });
+    await cmdUninstall(e.ctx, { items: ["skill:dup@mine"] });
+    assert.deepEqual(e.readUserCfg().install, { agents: ["dup@mine"] });
+    assert.equal(existsSync(join(e.home, ".claude/skills/dup")), false);
+    assert.equal(existsSync(join(e.home, ".claude/agents/dup.md")), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall name@source without a prefix still removes the name from every list", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      skill(d, "dup");
+      agent(d, "dup");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["dup@mine"], agents: ["dup@mine"] } });
+    await cmdUninstall(e.ctx, { items: ["dup@mine"] });
+    assert.equal(e.readUserCfg().install, undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall type:name@source declared only under another type is an error naming it", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({ sources: { mine: { local: e.tmp.dir } }, install: { skills: ["foo@mine"] } });
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["agent:foo@mine"] }), (err: unknown) => {
+      assert.ok(err instanceof CommandError);
+      assert.match((err as Error).message, /not declared/);
+      assert.match((err as Error).message, /skill:foo@mine/);
+      return true;
+    });
+    assert.deepEqual(e.readUserCfg().install, { skills: ["foo@mine"] });
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k37: an item that only a wildcard declares cannot be uninstalled by name.
+for (const spec of ["r1@mine", "rule:r1@mine"]) {
+  test(`uninstall ${spec} covered only by a wildcard fails with a hint and changes nothing`, async () => {
+    const e = env();
+    try {
+      const src = makeSource(e.tmp.dir, "s", (d) => rule(d, "r1"));
+      e.writeUserCfg({ sources: { mine: { local: src } }, install: { rules: ["*@mine"] } });
+      await cmdInstall(e.ctx, { items: [] });
+      await assert.rejects(() => cmdUninstall(e.ctx, { items: [spec] }), (err: unknown) => {
+        assert.ok(err instanceof CommandError);
+        const msg = (err as Error).message;
+        assert.match(msg, /wildcard rule:\*@mine/);
+        assert.match(msg, /skilletor uninstall 'rule:\*@mine'/);
+        assert.match(msg, /vars/);
+        return true;
+      });
+      assert.deepEqual(e.readUserCfg().install, { rules: ["*@mine"] });
+      assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), true);
+    } finally {
+      e.cleanup();
+    }
+  });
+}
+
+test("the wildcard hint names only the wildcard of the item's installed type", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "r1");
+      skill(d, "foo");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["*@mine"], rules: ["*@mine"] } });
+    await cmdInstall(e.ctx, { items: [] });
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["r1@mine"] }), (err: unknown) => {
+      const msg = (err as Error).message;
+      assert.match(msg, /rule:\*@mine/);
+      assert.doesNotMatch(msg, /skill:\*@mine/);
+      return true;
+    });
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a name the wildcard has not installed is not claimed as wildcard-installed", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => rule(d, "r1"));
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { rules: ["*@mine"] } });
+    await cmdInstall(e.ctx, { items: [] });
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["nope@mine"] }), (err: unknown) => {
+      const msg = (err as Error).message;
+      assert.match(msg, /nope@mine is not declared in the user config/);
+      assert.doesNotMatch(msg, /installed by/);
+      assert.match(msg, /wildcard rule:\*@mine .*if mine offers it/);
+      return true;
+    });
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall of an explicit item a wildcard also covers removes it and returns a hint", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => rule(d, "r1"));
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { rules: ["r1@mine", "*@mine"] } });
+    await cmdInstall(e.ctx, { items: [] });
+    const res = await cmdUninstall(e.ctx, { items: ["r1@mine"] });
+    assert.deepEqual(e.readUserCfg().install, { rules: ["*@mine"] });
+    assert.equal(res.hints.length, 1);
+    assert.match(res.hints[0]!, /wildcard rule:\*@mine/);
+    assert.match(res.hints[0]!, /next sync|still installs/);
+    // The wildcard keeps it installed.
+    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall without a wildcard in play returns no hints", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => rule(d, "r1"));
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { rules: ["r1@mine"], skills: ["*@mine"] } });
+    const res = await cmdUninstall(e.ctx, { items: ["r1@mine"] });
+    assert.deepEqual(res.hints, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall of an item declared nowhere is an error and touches nothing", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({ sources: { mine: { local: e.tmp.dir } }, install: { skills: ["foo@mine"] } });
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["nope@mine"] }), (err: unknown) => {
+      assert.ok(err instanceof CommandError);
+      assert.match((err as Error).message, /nope@mine is not declared/);
+      return true;
+    });
+    assert.deepEqual(e.readUserCfg().install, { skills: ["foo@mine"] });
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall validates every item before editing: one bad item leaves the config untouched", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({ sources: { mine: { local: e.tmp.dir } }, install: { skills: ["foo@mine"] } });
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["foo@mine", "nope@mine"] }), /nope@mine/);
+    assert.deepEqual(e.readUserCfg().install, { skills: ["foo@mine"] });
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall of a wildcard that is not declared is an error", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({ sources: { mine: { local: e.tmp.dir } }, install: { skills: ["*@mine"] } });
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["rule:*@mine"] }), /rule:\*@mine is not declared/);
+    assert.deepEqual(e.readUserCfg().install, { skills: ["*@mine"] });
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall respects the scope: an item declared in the other config points at --project", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => rule(d, "r1"));
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    const projCfg = join(e.projectDir, ".claude", "skilletor.json");
+    writeFileSync(projCfg, JSON.stringify({ install: { rules: ["r1@mine"] } }));
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["r1@mine"] }), /project config.*--project/);
+    await cmdUninstall(e.ctx, { items: ["r1@mine"], project: true });
+    assert.equal(JSON.parse(readFileSync(projCfg, "utf8")).install, undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall --project hints at a wildcard in the project config", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => rule(d, "r1"));
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    const projCfg = join(e.projectDir, ".claude", "skilletor.json");
+    writeFileSync(projCfg, JSON.stringify({ install: { rules: ["rule:*@mine"] } }));
+    await cmdInstall(e.ctx, { items: [] });
+    await assert.rejects(
+      () => cmdUninstall(e.ctx, { items: ["r1@mine"], project: true }),
+      /wildcard rule:\*@mine.*project config[\s\S]*--project/,
+    );
+    // Without --project the user config has neither an entry nor a wildcard: the plain error, pointing at the project.
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["r1@mine"] }), /not declared in the user config/);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("source remove refuses while a wildcard uses the source", async () => {
   const e = env();
   try {

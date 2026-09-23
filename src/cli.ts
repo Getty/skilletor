@@ -204,7 +204,8 @@ export async function run(argv: string[]): Promise<number> {
           return 2;
         }
         const r = await cmdUninstall(ctx, { items: flags.rest, project: flags.project });
-        process.stdout.write((reportText(r) || "skilletor: up to date") + "\n");
+        for (const h of r.hints) process.stderr.write(`skilletor: warning: ${h}\n`);
+        process.stdout.write((reportText(r.report) || "skilletor: up to date") + "\n");
         return 0;
       }
       case "trust": {

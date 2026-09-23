@@ -3,7 +3,7 @@
 // config.ts so the declarative config stays the single source of truth.
 import { join } from "node:path";
 import {
-  addInstallEntry, addSource, loadConfig, removeInstallEntries, removeSource, WILDCARD,
+  addInstallEntry, addSource, findInstallEntries, loadConfig, removeInstallEntries, removeSource, WILDCARD,
   type ItemType, type LoadedConfig, type SourceDef,
 } from "./config.ts";
 import { resolveSpec, type Probe } from "./spec.ts";
@@ -12,7 +12,7 @@ import { cacheRootOf, identityOf, makeBackend, sync, type EngineContext } from "
 import type { SyncReport } from "./report.ts";
 import { scan } from "./catalog.ts";
 import { State } from "./state.ts";
-import { readLock } from "./lock.ts";
+import { readLock, type Lock } from "./lock.ts";
 
 export interface CommandContext extends EngineContext {
   probe?: Probe;
@@ -158,17 +158,111 @@ export async function cmdInstall(
   return sync(ctx);
 }
 
+export interface UninstallResult {
+  report: SyncReport;
+  /** One line per removed item that a wildcard in the same config still installs. */
+  hints: string[];
+}
+
+/**
+ * Remove install entries from one config (user, or project with --project),
+ * then sync. A type prefix restricts removal to that type's list. Every item is
+ * checked before anything is edited: an item with no explicit entry in that
+ * config is an error (naming the wildcard that installs it, or the other
+ * config that declares it) and leaves the config untouched.
+ */
 export async function cmdUninstall(
   ctx: CommandContext,
   args: { items: string[]; project?: boolean },
-): Promise<SyncReport> {
-  const path = configPath(ctx, Boolean(args.project));
-  for (const spec of args.items) {
-    const { type, name, source } = parseItemSpec(spec);
-    // A wildcard is removed only from its own type's list.
-    removeInstallEntries(path, name, source, name === WILDCARD ? type : undefined);
+): Promise<UninstallResult> {
+  const project = Boolean(args.project);
+  const path = configPath(ctx, project);
+  const scopeName = project ? "project" : "user";
+  const lock = readLock(join(project ? ctx.projectDir! : ctx.home, ".claude", "skilletor.lock.json"));
+  const parsed = args.items.map((spec) => ({ spec, ...parseItemSpec(spec) }));
+
+  const errors: string[] = [];
+  const hints: string[] = [];
+  for (const p of parsed) {
+    const label = p.type ? `${p.type}:${p.name}@${p.source}` : `${p.name}@${p.source}`;
+    const explicit = findInstallEntries(path, p.name, p.source, p.type);
+    const cover = p.name === WILDCARD
+      ? { types: [], confirmed: false }
+      : coveringWildcards(path, lock, p.name, p.source, p.type, explicit.map((e) => e.type));
+    const wild = cover.types.length ? wildcardText(cover.types, p.source) : "";
+    const where = `the ${scopeName} config`;
+    if (explicit.length === 0) {
+      if (wild && cover.confirmed) {
+        errors.push(
+          `${label} is not declared explicitly; it is installed by the ${wild} in ${where}. To drop it, ` +
+            wayOut(cover.types, p.source, project),
+        );
+      } else if (wild) {
+        errors.push(
+          `${label} is not declared in ${where} (${path}); the ${wild} there installs every item of its type ` +
+            `from ${p.source}, so if ${p.source} offers it: ${wayOut(cover.types, p.source, project)}`,
+        );
+      } else {
+        errors.push(`${label} is not declared in ${where} (${path})${declaredElsewhere(ctx, path, p, project)}`);
+      }
+    } else if (wild) {
+      hints.push(
+        `${label} removed, but the ${wild} in ${where} still installs it on the next sync. To drop it, ` +
+          wayOut(cover.types, p.source, project),
+      );
+    }
   }
-  return sync(ctx);
+  if (errors.length) throw new CommandError(errors.join("\n"));
+
+  for (const p of parsed) removeInstallEntries(path, p.name, p.source, p.type);
+  return { report: await sync(ctx), hints };
+}
+
+/**
+ * Wildcards in one config that install `name@source`. The item's type comes from
+ * the prefix, else from the explicit entries being removed plus the scope's lock;
+ * if neither knows it, every wildcard of the source counts. `confirmed` = the
+ * scope's lock shows the item installed (or skipped) under a covering wildcard's type.
+ */
+function coveringWildcards(
+  path: string, lock: Lock, name: string, source: string, type: ItemType | undefined, explicitTypes: ItemType[],
+): { types: ItemType[]; confirmed: boolean } {
+  const found = findInstallEntries(path, WILDCARD, source, type).map((w) => w.type);
+  const inLock = (t: ItemType) => lock[`${TYPE_DIR[t]}/${name}`]?.source === source;
+  const confirmed = found.some(inLock);
+  if (type) return { types: found, confirmed };
+  const known = found.filter((t) => explicitTypes.includes(t) || inLock(t));
+  return { types: known.length || explicitTypes.length ? known : found, confirmed };
+}
+
+function wildcardText(types: ItemType[], source: string): string {
+  const names = types.map((t) => `${t}:${WILDCARD}@${source}`);
+  return names.length === 1 ? `wildcard ${names[0]}` : `wildcards ${names.join(", ")}`;
+}
+
+function wayOut(types: ItemType[], source: string, project: boolean): string {
+  const flag = project ? " --project" : "";
+  const cmds = types.map((t) => `skilletor uninstall '${t}:${WILDCARD}@${source}'${flag}`).join(" or ");
+  return `uninstall the wildcard (${cmds}), or keep it and gate the item via vars ` +
+    `if its template renders empty for some value (an empty render is skipped).`;
+}
+
+/** Where else the item is declared: under another type here, or in the other scope's config. */
+function declaredElsewhere(
+  ctx: CommandContext, path: string, p: { name: string; source: string; type?: ItemType }, project: boolean,
+): string {
+  if (p.type) {
+    const other = findInstallEntries(path, p.name, p.source).map((e) => `${e.type}:${p.name}@${p.source}`);
+    if (other.length) return `; it is declared as ${other.join(", ")}`;
+  }
+  if (!project && !ctx.projectDir) return "";
+  const otherPath = configPath(ctx, !project);
+  const hit = findInstallEntries(otherPath, p.name, p.source, p.type).length > 0 ||
+    (p.name !== WILDCARD && findInstallEntries(otherPath, WILDCARD, p.source, p.type).length > 0);
+  if (!hit) return "";
+  return project
+    ? "; the user config declares it (run without --project)"
+    : "; the project config declares it (use --project)";
 }
 
 // ---- trust ------------------------------------------------------------------

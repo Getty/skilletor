@@ -5772,6 +5772,7 @@ function atomicWrite(path, data) {
 }
 
 // src/config.ts
+var ITEM_TYPES = ["skill", "agent", "rule"];
 var INSTALL_KEYS = { skills: "skill", agents: "agent", rules: "rule" };
 var WILDCARD = "*";
 var ConfigError = class extends Error {
@@ -6049,6 +6050,23 @@ function addInstallEntry(path, type, entry) {
   cfg.install = install;
   saveRaw(path, cfg);
 }
+function entryMatches(e, name, source) {
+  const at = e.lastIndexOf("@");
+  const eName = (at > 0 ? e.slice(0, at) : e).replace(/^[a-z]+:/, "");
+  const eSource = at > 0 ? e.slice(at + 1) : void 0;
+  return eName === name && (source === void 0 || eSource === source);
+}
+function findInstallEntries(path, name, source, type) {
+  const install = loadRaw(path).install;
+  if (!install) return [];
+  const out = [];
+  for (const t of type ? [type] : ITEM_TYPES) {
+    const list = install[INSTALL_KEY[t]];
+    if (!Array.isArray(list)) continue;
+    for (const e of list) if (typeof e === "string" && entryMatches(e, name, source)) out.push({ type: t, entry: e });
+  }
+  return out;
+}
 function removeInstallEntries(path, name, source, type) {
   const cfg = loadRaw(path);
   const install = cfg.install;
@@ -6058,10 +6076,7 @@ function removeInstallEntries(path, name, source, type) {
     const list = install[key];
     if (!Array.isArray(list)) continue;
     const kept = list.filter((e) => {
-      const at = e.lastIndexOf("@");
-      const eName = (at > 0 ? e.slice(0, at) : e).replace(/^[a-z]+:/, "");
-      const eSource = at > 0 ? e.slice(at + 1) : void 0;
-      const match = eName === name && (source === void 0 || eSource === source);
+      const match = entryMatches(e, name, source);
       if (match) removed++;
       return !match;
     });
@@ -7467,12 +7482,68 @@ async function cmdInstall(ctx, args) {
   return sync(ctx);
 }
 async function cmdUninstall(ctx, args) {
-  const path = configPath(ctx, Boolean(args.project));
-  for (const spec of args.items) {
-    const { type, name, source } = parseItemSpec(spec);
-    removeInstallEntries(path, name, source, name === WILDCARD ? type : void 0);
+  const project = Boolean(args.project);
+  const path = configPath(ctx, project);
+  const scopeName = project ? "project" : "user";
+  const lock = readLock(join12(project ? ctx.projectDir : ctx.home, ".claude", "skilletor.lock.json"));
+  const parsed = args.items.map((spec) => ({ spec, ...parseItemSpec(spec) }));
+  const errors = [];
+  const hints = [];
+  for (const p of parsed) {
+    const label = p.type ? `${p.type}:${p.name}@${p.source}` : `${p.name}@${p.source}`;
+    const explicit = findInstallEntries(path, p.name, p.source, p.type);
+    const cover = p.name === WILDCARD ? { types: [], confirmed: false } : coveringWildcards(path, lock, p.name, p.source, p.type, explicit.map((e) => e.type));
+    const wild = cover.types.length ? wildcardText(cover.types, p.source) : "";
+    const where = `the ${scopeName} config`;
+    if (explicit.length === 0) {
+      if (wild && cover.confirmed) {
+        errors.push(
+          `${label} is not declared explicitly; it is installed by the ${wild} in ${where}. To drop it, ` + wayOut(cover.types, p.source, project)
+        );
+      } else if (wild) {
+        errors.push(
+          `${label} is not declared in ${where} (${path}); the ${wild} there installs every item of its type from ${p.source}, so if ${p.source} offers it: ${wayOut(cover.types, p.source, project)}`
+        );
+      } else {
+        errors.push(`${label} is not declared in ${where} (${path})${declaredElsewhere(ctx, path, p, project)}`);
+      }
+    } else if (wild) {
+      hints.push(
+        `${label} removed, but the ${wild} in ${where} still installs it on the next sync. To drop it, ` + wayOut(cover.types, p.source, project)
+      );
+    }
   }
-  return sync(ctx);
+  if (errors.length) throw new CommandError(errors.join("\n"));
+  for (const p of parsed) removeInstallEntries(path, p.name, p.source, p.type);
+  return { report: await sync(ctx), hints };
+}
+function coveringWildcards(path, lock, name, source, type, explicitTypes) {
+  const found = findInstallEntries(path, WILDCARD, source, type).map((w) => w.type);
+  const inLock = (t) => lock[`${TYPE_DIR2[t]}/${name}`]?.source === source;
+  const confirmed = found.some(inLock);
+  if (type) return { types: found, confirmed };
+  const known = found.filter((t) => explicitTypes.includes(t) || inLock(t));
+  return { types: known.length || explicitTypes.length ? known : found, confirmed };
+}
+function wildcardText(types, source) {
+  const names = types.map((t) => `${t}:${WILDCARD}@${source}`);
+  return names.length === 1 ? `wildcard ${names[0]}` : `wildcards ${names.join(", ")}`;
+}
+function wayOut(types, source, project) {
+  const flag = project ? " --project" : "";
+  const cmds = types.map((t) => `skilletor uninstall '${t}:${WILDCARD}@${source}'${flag}`).join(" or ");
+  return `uninstall the wildcard (${cmds}), or keep it and gate the item via vars if its template renders empty for some value (an empty render is skipped).`;
+}
+function declaredElsewhere(ctx, path, p, project) {
+  if (p.type) {
+    const other = findInstallEntries(path, p.name, p.source).map((e) => `${e.type}:${p.name}@${p.source}`);
+    if (other.length) return `; it is declared as ${other.join(", ")}`;
+  }
+  if (!project && !ctx.projectDir) return "";
+  const otherPath = configPath(ctx, !project);
+  const hit = findInstallEntries(otherPath, p.name, p.source, p.type).length > 0 || p.name !== WILDCARD && findInstallEntries(otherPath, WILDCARD, p.source, p.type).length > 0;
+  if (!hit) return "";
+  return project ? "; the user config declares it (run without --project)" : "; the project config declares it (use --project)";
 }
 function cmdTrust(ctx, args) {
   const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
@@ -7794,7 +7865,9 @@ async function run(argv) {
           return 2;
         }
         const r = await cmdUninstall(ctx, { items: flags.rest, project: flags.project });
-        process.stdout.write((reportText(r) || "skilletor: up to date") + "\n");
+        for (const h of r.hints) process.stderr.write(`skilletor: warning: ${h}
+`);
+        process.stdout.write((reportText(r.report) || "skilletor: up to date") + "\n");
         return 0;
       }
       case "trust": {

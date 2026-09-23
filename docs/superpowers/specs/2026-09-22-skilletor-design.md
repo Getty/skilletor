@@ -275,6 +275,16 @@ skilletor hook <event>                    # for hooks.json only
 `add`/`install`/`uninstall` edit only the config (default: the user config) and then run
 `sync`. The declarative config stays the single source of truth.
 
+`uninstall` removes explicit entries from that one config only: `type:name@source` from
+that type's list, `name@source` from every list. All items are checked before anything
+is edited; an item with no explicit entry there fails the command (exit 1, config
+untouched). If a wildcard in the same config installs it, the error names the wildcard
+and the ways out: uninstall `type:*@source`, or gate the item through `vars` when its
+template can render empty (§5 skip). Otherwise the error says where else it is declared
+(another type's list, or the other scope's config → `--project`). An item that is
+removed but still covered by a wildcard in the same config is removed (exit 0) with a
+warning that the wildcard brings it back on the next sync.
+
 `status` shows a declared item that rendered empty at the last sync as skipped
 (`skipped: "renders-empty"` in `--json`, `installed: false`), distinct from an item that
 is not installed yet. It marks items that were declared through a wildcard (`via *@shared`, and a `via`

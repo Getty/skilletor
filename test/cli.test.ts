@@ -92,6 +92,37 @@ test("install 'rule:*@src' and status text marks wildcard items", () => {
   assert.match(st.stdout, /\* rules\/\* @shared \(1 installed\)/);
 });
 
+// k37: uninstall through the real binary: wildcard-only exits 1 with the hint,
+// explicit-plus-wildcard exits 0 and still warns.
+test("uninstall of a wildcard-covered item: exit 1 alone, exit 0 with a warning when explicit", () => {
+  const home = join(tmp.dir, "unwild-home");
+  const proj = join(tmp.dir, "unwild-proj");
+  const src = join(tmp.dir, "unwild-src");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(proj, { recursive: true });
+  mkdirSync(join(src, "rules"), { recursive: true });
+  writeFileSync(join(src, "rules", "r1.md"), "---\ndescription: r1\n---\nR1\n");
+  const cfg = join(home, ".claude", "skilletor.json");
+  writeFileSync(cfg, JSON.stringify({ sources: { shared: { local: src } }, install: { rules: ["*@shared"] } }));
+  const env = { ...process.env, HOME: home };
+  const common = ["--project-dir", proj];
+
+  const only = runCli(["uninstall", "r1@shared", ...common], env);
+  assert.equal(only.status, 1);
+  assert.match(only.stderr, /wildcard rule:\*@shared/);
+  assert.match(only.stderr, /skilletor uninstall 'rule:\*@shared'/);
+
+  const none = runCli(["uninstall", "nope@shared", ...common], env);
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /nope@shared is not declared/);
+
+  writeFileSync(cfg, JSON.stringify({ sources: { shared: { local: src } }, install: { rules: ["r1@shared", "*@shared"] } }));
+  const both = runCli(["uninstall", "r1@shared", ...common], env);
+  assert.equal(both.status, 0, both.stderr);
+  assert.match(both.stderr, /warning: .*wildcard rule:\*@shared/);
+  assert.deepEqual(JSON.parse(readFileSync(cfg, "utf8")).install, { rules: ["*@shared"] });
+});
+
 // k35: a gated-off rule through the real binary: exit 0, skip line, status marker.
 test("sync reports a rule that renders empty as skipped and exits 0", () => {
   const home = join(tmp.dir, "empty-home");

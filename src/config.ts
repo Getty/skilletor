@@ -414,6 +414,32 @@ export function addInstallEntry(path: string, type: ItemType, entry: string): vo
   saveRaw(path, cfg);
 }
 
+/** Does raw install entry `e` (`[type:]name@source`) declare `name` (from `source`, if given)? */
+function entryMatches(e: string, name: string, source?: string): boolean {
+  const at = e.lastIndexOf("@");
+  const eName = (at > 0 ? e.slice(0, at) : e).replace(/^[a-z]+:/, "");
+  const eSource = at > 0 ? e.slice(at + 1) : undefined;
+  return eName === name && (source === undefined || eSource === source);
+}
+
+/**
+ * Install entries in one config file matching a name (optionally scoped to a
+ * source and to one type's list), without changing anything. `entry` is raw.
+ */
+export function findInstallEntries(
+  path: string, name: string, source?: string, type?: ItemType,
+): { type: ItemType; entry: string }[] {
+  const install = loadRaw(path).install as Record<string, unknown> | undefined;
+  if (!install) return [];
+  const out: { type: ItemType; entry: string }[] = [];
+  for (const t of type ? [type] : ITEM_TYPES) {
+    const list = install[INSTALL_KEY[t]];
+    if (!Array.isArray(list)) continue;
+    for (const e of list as string[]) if (typeof e === "string" && entryMatches(e, name, source)) out.push({ type: t, entry: e });
+  }
+  return out;
+}
+
 /** Remove install entries matching a name (optionally scoped to a source and to one type's list). */
 export function removeInstallEntries(path: string, name: string, source?: string, type?: ItemType): number {
   const cfg = loadRaw(path);
@@ -424,10 +450,7 @@ export function removeInstallEntries(path: string, name: string, source?: string
     const list = install[key];
     if (!Array.isArray(list)) continue;
     const kept = (list as string[]).filter((e) => {
-      const at = e.lastIndexOf("@");
-      const eName = (at > 0 ? e.slice(0, at) : e).replace(/^[a-z]+:/, "");
-      const eSource = at > 0 ? e.slice(at + 1) : undefined;
-      const match = eName === name && (source === undefined || eSource === source);
+      const match = entryMatches(e, name, source);
       if (match) removed++;
       return !match;
     });
