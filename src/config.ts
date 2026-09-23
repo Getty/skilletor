@@ -86,6 +86,9 @@ export interface LoadedConfig {
   checkInterval: number;
   user: ScopeConfig;
   project?: ScopeConfig;
+  /** Sources the user config declares: the ones visible to the user scope (spec §15.6).
+   *  The project scope sees every source. */
+  userSources: Set<string>;
 }
 
 export interface LoadOptions {
@@ -384,7 +387,7 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
     if (localTargets ?? projectTargets) projectScope.targets = localTargets ?? projectTargets;
   }
 
-  return { sources, checkInterval, user: userScope, project: projectScope };
+  return { sources, checkInterval, user: userScope, project: projectScope, userSources: new Set(userSources.keys()) };
 }
 
 /** Concatenate two install lists, rejecting duplicate targets across them. */

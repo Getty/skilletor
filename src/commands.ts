@@ -6,18 +6,25 @@ import {
   addBundleEntry, addInstallEntry, addSource, bundleEntries, findInstallEntries, findWildcardEntries, loadConfig,
   removeBundleEntries, removeInstallEntries, removeSource, WILDCARD, type ItemType, type LoadedConfig, type SourceDef,
 } from "./config.ts";
-import { BundleError, expandBundle, matchesPattern } from "./bundles.ts";
+import { BundleError, expandBundle, matchesPattern, sameIdentity, type ForeignEntry } from "./bundles.ts";
 import { resolveSpec, type Probe } from "./spec.ts";
 import { makeProbe } from "./probe.ts";
-import { bundleLabel, cacheRootOf, identityOf, makeBackend, projectDirOf, sync, type EngineContext } from "./engine.ts";
+import { bundleLabel, servingSource, cacheRootOf, identityOf, makeBackend, projectDirOf, sync, type EngineContext } from "./engine.ts";
 import type { SyncReport } from "./report.ts";
 import { scan, type Catalog } from "./catalog.ts";
 import { State } from "./state.ts";
 import { readLock, type Lock } from "./lock.ts";
 import { parseLockKey } from "./targets.ts";
 
+/** Asks the user one question and returns the answer line (spec §15.6). */
+export interface Prompter {
+  ask(question: string): Promise<string>;
+}
+
 export interface CommandContext extends EngineContext {
   probe?: Probe;
+  /** Interactive questions; absent = no TTY (the CLI sets it only when stdin and stderr are TTYs). */
+  prompt?: Prompter;
 }
 
 export class CommandError extends Error {
@@ -149,7 +156,9 @@ export async function cmdAvailable(ctx: CommandContext, args: { source?: string 
         installed: declaredBundles.has(bundleLabel({ name: b.name, source: name })),
       };
       try {
-        entry.members = expandBundle(cat, b.name).items.map((m) => `${m.type}:${m.name}`).sort();
+        const e = expandBundle(cat, b.name);
+        // Members of other sources as written, with their address (spec §15.6).
+        entry.members = [...e.items.map((m) => `${m.type}:${m.name}`), ...e.foreign.map((f) => `${f.type}:${f.entry}`)].sort();
         entry.vars = b.def!.vars;
       } catch (err) {
         if (!(err instanceof BundleError)) throw err;
@@ -181,6 +190,9 @@ export async function cmdInstall(
     return cat;
   };
 
+  // Plan every edit first: a failure (or a missing source without a TTY) edits nothing.
+  const edits: (() => void)[] = [];
+  const bundles: { name: string; foreign: ForeignEntry[] }[] = [];
   for (const spec of args.items) {
     const { type: explicitType, bundle, name, source } = parseItemSpec(spec);
     const src = config.sources.get(source);
@@ -190,7 +202,7 @@ export async function cmdInstall(
     }
     if (name.includes(WILDCARD)) {
       // Expanded at sync time; an empty match is fine here (items may arrive later).
-      addInstallEntry(path, explicitType!, `${name}@${source}`);
+      edits.push(() => addInstallEntry(path, explicitType!, `${name}@${source}`));
       continue;
     }
     const cat = await catalogOf(source, src);
@@ -198,8 +210,8 @@ export async function cmdInstall(
     const matches = bundle ? [] : cat.items.filter((i) => i.name === name && (!explicitType || i.type === explicitType));
     // Without a prefix, a name only a bundle has is that bundle (spec §15.5).
     if (bundle || (!explicitType && hasBundle && matches.length === 0)) {
-      checkBundle(cat, name, source);
-      addBundleEntry(path, `${name}@${source}`);
+      bundles.push({ name, foreign: checkBundle(cat, name, source) });
+      edits.push(() => addBundleEntry(path, `${name}@${source}`));
       continue;
     }
     if (matches.length === 0) {
@@ -211,19 +223,89 @@ export async function cmdInstall(
       if (!explicitType && hasBundle) options.push(`bundle:${name}@${source}`);
       throw new CommandError(`"${name}" is ambiguous in ${source}; use one of: ${options.join(", ")}`);
     }
-    addInstallEntry(path, matches[0]!.type, `${name}@${source}`);
+    const type = matches[0]!.type;
+    edits.push(() => addInstallEntry(path, type, `${name}@${source}`));
   }
+  const additions = await missingSources(ctx, config, bundles, Boolean(args.project));
+  for (const a of additions) {
+    edits.push(() => {
+      addSource(path, a.name, a.def);
+      new State(ctx.stateRoot).trust(a.name, a.url); // as `add`: adding is the act of trust (§4.3)
+    });
+  }
+  for (const edit of edits) edit();
   return sync(ctx);
 }
 
-/** A bundle must exist and expand before it is declared (errors of spec §15.4). */
-function checkBundle(cat: Catalog, name: string, source: string): void {
+/**
+ * Sources the bundles name by address that no visible configured source serves
+ * (spec §15.6). On a TTY each is offered for adding; without one the command fails,
+ * printing the `skilletor add` commands. Returns the sources to add.
+ */
+async function missingSources(
+  ctx: CommandContext, config: LoadedConfig, bundles: { name: string; foreign: ForeignEntry[] }[], project: boolean,
+): Promise<{ name: string; def: SourceDef; url: string }[]> {
+  const scope = project ? "project" : "user";
+  const missing: { bundle: string; f: ForeignEntry }[] = [];
+  for (const b of bundles) {
+    for (const f of b.foreign) {
+      if (servingSource(config, scope, f.url) !== undefined) continue;
+      if (!missing.some((m) => sameIdentity(m.f.url, f.url))) missing.push({ bundle: b.name, f });
+    }
+  }
+  if (missing.length === 0) return [];
+  const taken = new Map([...config.sources.values()].map((s) => [s.name, s.git ?? s.url ?? s.local ?? ""]));
+  /** A name is free unless a source with another address holds it. */
+  const free = (name: string, url: string) => !taken.has(name) || sameIdentity(taken.get(name)!, url);
+  const suggest = (f: ForeignEntry) => {
+    if (free(f.derivedName, f.url)) return f.derivedName;
+    let n = 2;
+    while (!free(`${f.derivedName}-${n}`, f.url)) n++;
+    return `${f.derivedName}-${n}`;
+  };
+  const flag = project ? " --project" : "";
+  if (!ctx.prompt) {
+    const lines = missing.map((m) => `  skilletor add ${suggest(m.f)} ${m.f.spec}${flag}`);
+    const names = [...new Set(missing.map((m) => m.bundle))].join(", ");
+    throw new CommandError(
+      `bundle ${names} needs sources you don't have yet; nothing was changed. Add them, then install again:\n${lines.join("\n")}`,
+    );
+  }
+  const out: { name: string; def: SourceDef; url: string }[] = [];
+  for (const { bundle, f } of missing) {
+    const fallback = suggest(f);
+    const question = `bundle ${bundle} needs a source you don't have yet: ${f.spec} → ${f.url} — ` +
+      `add it as [${fallback}]? (name, or n to skip)`;
+    let note = "";
+    for (;;) {
+      const answer = (await ctx.prompt.ask(note + question)).trim();
+      if (/^(n|no)$/i.test(answer)) break;
+      const name = answer || fallback;
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+        note = `"${name}" is not a valid source name. `;
+        continue;
+      }
+      if (!free(name, f.url)) {
+        note = `"${name}" is already a source with another address (${taken.get(name)}). `;
+        continue;
+      }
+      out.push({ name, def: f.kind === "git" ? { git: f.url } : { url: f.url }, url: f.url });
+      taken.set(name, f.url);
+      break;
+    }
+  }
+  return out;
+}
+
+/** A bundle must exist and expand before it is declared (errors of spec §15.4); returns
+ *  its entries of other sources. */
+function checkBundle(cat: Catalog, name: string, source: string): ForeignEntry[] {
   if (!cat.bundles.some((b) => b.name === name)) {
     const known = cat.bundles.map((b) => b.name).slice(0, 8).join(", ");
     throw new CommandError(`unknown bundle "${name}" in ${source}${known ? ` (available bundles: ${known})` : ""}`);
   }
   try {
-    expandBundle(cat, name);
+    return expandBundle(cat, name).foreign;
   } catch (err) {
     if (err instanceof BundleError) throw new CommandError(`${source}: ${err.message}`);
     throw err;

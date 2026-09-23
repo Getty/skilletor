@@ -8,10 +8,12 @@ import { hostname, platform, userInfo } from "node:os";
 import { existsSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import {
-  loadConfig, type BundleItem, type Harness, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig,
+  loadConfig, WILDCARD, type BundleItem, type Harness, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig,
   type WildcardItem,
 } from "./config.ts";
-import { BundleError, expandBundle, matchesPattern, type Chain } from "./bundles.ts";
+import {
+  BundleError, entryMiss, expandBundle, matchEntry, matchesPattern, sameIdentity, type Chain,
+} from "./bundles.ts";
 import {
   defaultMarkers, detectHarnesses, lockKey, parseLockKey, rootOf, rootOfKey, selectTargets, supports, targetDrift,
   allRoots, isBlockType, type HarnessMarkers, type RootContext, type TargetSelection,
@@ -186,6 +188,21 @@ function makeContext(
 }
 
 /**
+ * The configured source that serves a bundle entry of another source (spec §15.6): the one
+ * whose `git`/`url` identity is `url`, among the sources visible to the scope (the user
+ * scope sees the user config's sources, the project scope all). Config names do not
+ * matter; with several matches the first in config order serves.
+ */
+export function servingSource(config: LoadedConfig, scope: ScopeName, url: string): string | undefined {
+  for (const src of config.sources.values()) {
+    if (scope === "user" && !config.userSources.has(src.name)) continue;
+    const id = src.git ?? src.url;
+    if (id !== undefined && sameIdentity(id, url)) return src.name;
+  }
+  return undefined;
+}
+
+/**
  * Bundle vars for one item from every chain it was reached through (spec §15.3): a key
  * every setting chain agrees on applies; a key set to different values applies from no
  * chain, and `conflict` gets the key and the bundles (labels) that set it.
@@ -279,8 +296,8 @@ async function syncScope(
   // Resolve every needed source in parallel (skip untrusted, warn on failure).
   const needed = scopeSources(scopeCfg);
   const resolved = new Map<string, { dir: string; version: string } | null>();
-  await Promise.all(
-    needed.map(async (name) => {
+  const resolveAll = (names: string[]) => Promise.all(
+    names.filter((n) => !resolved.has(n)).map(async (name) => {
       const src = config.sources.get(name);
       if (!src) {
         rep.warnings.push(`unknown source: ${name}`);
@@ -302,6 +319,7 @@ async function syncScope(
       }
     }),
   );
+  await resolveAll(needed);
 
   // Build each declared item; keep (don't delete) items whose source is unavailable.
   const plan: PlanItem[] = [];
@@ -424,7 +442,8 @@ async function syncScope(
     const cat = catalogOf(w.source);
     if (cat) {
       const hits = cat.items.filter((ci) => ci.type === w.type && matchesPattern(w.pattern, ci.name));
-      if (hits.length === 0) rep.warnings.push(`${w.type} wildcard ${w.raw} matches nothing in source ${w.source}`);
+      // A bare `*` may legitimately match nothing (a source without rules): silent (spec §3).
+      if (hits.length === 0 && w.pattern !== WILDCARD) rep.warnings.push(`${w.type} wildcard ${w.raw} matches nothing in source ${w.source}`);
       for (const ci of hits) offer(w.type, ci.name, { from: w.raw, source: w.source, live: true });
     } else {
       for (const l of lockedItems) {
@@ -434,7 +453,9 @@ async function syncScope(
       }
     }
   }
-  for (const b of scopeCfg.bundles) {
+  // Bundles: expand against their own source first; entries of other sources (spec
+  // §15.6) are served by a configured source with the same identity, resolved next.
+  const expansions = scopeCfg.bundles.map((b) => {
     const label = bundleLabel(b);
     const cat = catalogOf(b.source);
     let expanded: ReturnType<typeof expandBundle> | undefined;
@@ -446,14 +467,46 @@ async function syncScope(
         rep.warnings.push(`${label}: ${err.message}; its installed items are kept`);
       }
     }
-    if (expanded) {
-      for (const w of expanded.warnings) rep.warnings.push(`bundle ${w.bundle}@${b.source}: ${w.message}`);
-      for (const m of expanded.items) {
-        offer(m.type, m.name, { from: label, source: b.source, live: true, via: label, chains: m.chains });
-      }
-    } else {
+    const foreign = (expanded?.foreign ?? []).map((f) => ({ f, served: servingSource(config, scope, f.url) }));
+    return { b, label, expanded, foreign };
+  });
+  await resolveAll(expansions.flatMap((x) => x.foreign.flatMap((y) => (y.served ? [y.served] : []))));
+
+  for (const { b, label, expanded, foreign } of expansions) {
+    /** Keep what the bundle installed (from `from`, when given) while it cannot offer it live. */
+    const keepFromLock = (match: (l: (typeof lockedItems)[number]) => boolean) => {
       for (const l of lockedItems) {
-        if (l.entry.via?.includes(label)) offer(l.type, l.name, { from: label, source: l.entry.source, live: false, via: label });
+        if (l.entry.via?.includes(label) && match(l)) offer(l.type, l.name, { from: label, source: l.entry.source, live: false, via: label });
+      }
+    };
+    if (!expanded) {
+      keepFromLock(() => true);
+      continue;
+    }
+    for (const w of expanded.warnings) rep.warnings.push(`bundle ${w.bundle}@${b.source}: ${w.message}`);
+    for (const m of expanded.items) {
+      offer(m.type, m.name, { from: label, source: b.source, live: true, via: label, chains: m.chains });
+    }
+    const missing: string[] = []; // identities already warned about for this bundle
+    for (const { f, served } of foreign) {
+      const cat = served ? catalogOf(served) : null;
+      if (!served) {
+        if (!missing.some((u) => sameIdentity(u, f.url))) {
+          missing.push(f.url);
+          rep.warnings.push(`bundle ${b.name}@${b.source} needs ${f.spec} (${f.url}): run skilletor install ${label}`);
+        }
+      }
+      if (!cat) {
+        // Missing, untrusted or unresolvable: installed copies stay (spec §15.6).
+        keepFromLock((l) => l.type === f.type && l.entry.source !== b.source && matchesPattern(f.name, l.name) &&
+          (!served || l.entry.source === served));
+        continue;
+      }
+      const hits = matchEntry(cat, f.type, f.name);
+      const miss = entryMiss(f.type, f.name, hits.length);
+      if (miss) rep.warnings.push(`bundle ${f.chain.path.at(-1)}@${b.source}: ${miss.replace(/ in the source$/, "")} in ${served}`);
+      for (const ci of hits) {
+        offer(ci.type, ci.name, { from: label, source: served!, live: true, via: label, chains: [f.chain] });
       }
     }
   }
@@ -657,7 +710,9 @@ export async function check(given: EngineContext, opts: SyncOptions = {}): Promi
       out.changed = true;
       (out.targetsChanged ??= []).push(scope);
     }
-    for (const name of scopeSources(scopeCfg)) {
+    // Sources a bundle pulled items from (spec §15.6) are not declared here; the lock names them.
+    const viaSources = Object.values(oldLock).flatMap((e) => (e.via?.length ? [e.source] : []));
+    for (const name of new Set([...scopeSources(scopeCfg), ...viaSources])) {
       const src = config.sources.get(name);
       if (!src || !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
       try {

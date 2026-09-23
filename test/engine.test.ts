@@ -642,6 +642,19 @@ test("a pattern wildcard installs only matching items; a pattern matching nothin
   }
 });
 
+test("the bare * matching nothing stays silent; a type prefix does not change that", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "norules");
+    putItem(src, "skill", "s1");
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { rules: ["*@shared"], agents: ["agent:*@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("two patterns of the same source yielding one name install it once, silently", async () => {
   const e = env();
   try {
@@ -848,7 +861,8 @@ test("bundle warnings (missing name, other source not supported yet) reach the r
     assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["rules/r1"]);
     assert.equal(r.scopes[0]!.warnings.length, 2);
     assert.match(r.scopes[0]!.warnings.join("\n"), /nope/);
-    assert.match(r.scopes[0]!.warnings.join("\n"), /x@Getty.*not supported yet/);
+    assert.match(r.scopes[0]!.warnings.join("\n"),
+      /bundle a@shared needs Getty \(https:\/\/github\.com\/Getty\/skills\): run skilletor install bundle:a@shared/);
   } finally {
     e.cleanup();
   }
@@ -861,6 +875,141 @@ test("check covers sources referenced only by a bundle", async () => {
     e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["a@shared"] } });
     const chk = await check(e.ctx, { scope: "user" });
     assert.deepEqual(chk.sources.map((s) => s.name), ["shared"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// ---- bundles naming items of other sources (k48 phase B, spec §15.6) -----------
+
+/** A source with an identity (`git`) served offline by an author-mode `local` checkout. */
+function foreignSource(root: string, name: string, rules: string[], meta?: unknown): string {
+  const dir = join(root, name);
+  for (const r of rules) putItem(dir, "rule", r, `${r.toUpperCase()}-FROM-${name}`);
+  putRaw(dir, "rules/ft.md.njk", "---\ndescription: ft\n---\nv={{ vars.v }} d={{ vars.d }}\n");
+  if (meta) putRaw(dir, "skilletor.json", JSON.stringify(meta));
+  return dir;
+}
+
+test("a foreign entry is served by the source with the same identity, whatever its config name", async () => {
+  const e = env();
+  try {
+    const own = bundleSource(e.tmp.dir, "fown", {
+      perl: "description: P\nrules: [r1, \"p-*@gitlab.com/peter\", ft@gitlab.com/peter]\nvars:\n  v: bundle\n",
+    }, { vars: { d: "own-default" } });
+    const peter = foreignSource(e.tmp.dir, "fpeter", ["p-one", "p-two", "other"], { vars: { d: "peter-default", v: "peter" } });
+    e.writeCfg("user", {
+      sources: { shared: { local: own }, pm: { git: "https://GitLab.com/peter/skills.git", local: peter } },
+      install: { bundles: ["perl@shared"] },
+    });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+    assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`).sort(),
+      ["rules/ft@pm", "rules/p-one@pm", "rules/p-two@pm", "rules/r1@shared"]);
+    assert.match(readFileSync(join(e.home, ".claude/rules/p-one.md"), "utf8"), /P-ONE-FROM-fpeter/);
+    // Bundle vars apply; source defaults are the item's own source's (spec §15.3).
+    assert.match(readFileSync(join(e.home, ".claude/rules/ft.md"), "utf8"), /v=bundle d=peter-default/);
+    const lock = readLock(join(e.home, ".claude/skilletor.lock.json"));
+    assert.deepEqual(lock["rules/p-one"]!.via, ["bundle:perl@shared"]);
+    const st = status(e.ctx, { scope: "user" }).scopes[0]!;
+    assert.equal(st.declared.find((d) => d.key === "rules/p-one")!.via, "bundle:perl@shared");
+    assert.deepEqual(st.bundles.map((b) => b.installed), [4]);
+    const chk = await check(e.ctx, { scope: "user" });
+    assert.deepEqual(chk.sources.map((s) => s.name).sort(), ["pm", "shared"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a foreign entry served by a file:// git source", async () => {
+  const e = env();
+  try {
+    const bare = join(e.tmp.dir, "peter.git");
+    const work = join(e.tmp.dir, "pwork");
+    const G = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
+    execFileSync("git", ["init", "-q", "-b", "main", "--bare", bare]);
+    putItem(work, "rule", "g1", "G1-FROM-GIT");
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: work });
+    execFileSync("git", ["add", "."], { cwd: work, env: { ...process.env, ...G } });
+    execFileSync("git", ["commit", "-qm", "init"], { cwd: work, env: { ...process.env, ...G } });
+    const url = "file://" + resolvePath(bare);
+    execFileSync("git", ["push", "-q", url, "main"], { cwd: work, env: { ...process.env, ...G } });
+
+    const own = bundleSource(e.tmp.dir, "gown", { b: `description: B\nrules: [g1@${url}]\n` });
+    e.writeCfg("user", { sources: { shared: { local: own }, whatever: { git: url } }, install: { bundles: ["b@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+    assert.match(readFileSync(join(e.home, ".claude/rules/g1.md"), "utf8"), /G1-FROM-GIT/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a missing foreign source: one warning per source and bundle, its items skipped, the rest proceeds", async () => {
+  const e = env();
+  try {
+    const own = bundleSource(e.tmp.dir, "mown", {
+      a: "description: A\nrules: [r1, x@gitlab.com/peter, y@gitlab.com/peter]\n",
+      b: "description: B\nrules: [r2, z@gitlab.com/peter]\n",
+    });
+    e.writeCfg("user", { sources: { shared: { local: own } }, install: { bundles: ["a@shared", "b@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key).sort(), ["rules/r1", "rules/r2"]);
+    assert.deepEqual(r.scopes[0]!.warnings, [
+      "bundle a@shared needs gitlab.com/peter (https://gitlab.com/peter/skills): run skilletor install bundle:a@shared",
+      "bundle b@shared needs gitlab.com/peter (https://gitlab.com/peter/skills): run skilletor install bundle:b@shared",
+    ]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a foreign source removed from the config keeps what the bundle installed from it", async () => {
+  const e = env();
+  try {
+    const own = bundleSource(e.tmp.dir, "kown", { a: "description: A\nrules: [\"p-*@gitlab.com/peter\"]\n" });
+    const peter = foreignSource(e.tmp.dir, "kpeter", ["p-one"]);
+    const cfg = { shared: { local: own }, pm: { git: "https://gitlab.com/peter/skills", local: peter } };
+    e.writeCfg("user", { sources: cfg, install: { bundles: ["a@shared"] } });
+    await sync(e.ctx, { scope: "user" });
+    e.writeCfg("user", { sources: { shared: { local: own } }, install: { bundles: ["a@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.removed, []);
+    assert.equal(existsSync(join(e.home, ".claude/rules/p-one.md")), true);
+    assert.equal(r.scopes[0]!.warnings.length, 1);
+    // Dropping the bundle removes it.
+    e.writeCfg("user", { sources: { shared: { local: own } } });
+    const r2 = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r2.scopes[0]!.removed.map((i) => i.key), ["rules/p-one"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a foreign entry matching nothing in its source warns; an untrusted project source asks for trust", async () => {
+  const e = env();
+  try {
+    const own = bundleSource(e.tmp.dir, "town", { a: "description: A\nrules: [\"zz-*@gitlab.com/peter\", q@Getty]\n" });
+    const peter = foreignSource(e.tmp.dir, "tpeter", ["p-one"]);
+    e.writeCfg("user", { sources: { shared: { local: own }, pm: { git: "https://gitlab.com/peter/skills", local: peter } } });
+    e.writeCfg("project", { sources: { team: { git: "https://github.com/Getty/skills" } }, install: { bundles: ["a@shared"] } });
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(r.scopes[0]!.trustRequests.map((t) => t.name), ["team"]);
+    assert.deepEqual(r.scopes[0]!.warnings, ["bundle a@shared: pattern rule:zz-* matches nothing in pm"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a user-scope bundle does not see a source only the project declares", async () => {
+  const e = env();
+  try {
+    const own = bundleSource(e.tmp.dir, "vown", { a: "description: A\nrules: [p-one@gitlab.com/peter]\n" });
+    const peter = foreignSource(e.tmp.dir, "vpeter", ["p-one"]);
+    e.writeCfg("user", { sources: { shared: { local: own } }, install: { bundles: ["a@shared"] } });
+    e.writeCfg("local", { sources: { pm: { git: "https://gitlab.com/peter/skills", local: peter } } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.match(r.scopes[0]!.warnings.join("\n"), /bundle a@shared needs gitlab\.com\/peter/);
   } finally {
     e.cleanup();
   }

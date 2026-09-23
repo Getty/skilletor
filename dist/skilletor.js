@@ -5738,6 +5738,7 @@ var require_nunjucks = __commonJS({
 
 // src/cli.ts
 import { realpathSync as realpathSync2 } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join as join15 } from "node:path";
@@ -6056,7 +6057,7 @@ function loadConfig(opts) {
     const localTargets = targetsOf(local.targets, localPath);
     if (localTargets ?? projectTargets) projectScope.targets = localTargets ?? projectTargets;
   }
-  return { sources, checkInterval, user: userScope, project: projectScope };
+  return { sources, checkInterval, user: userScope, project: projectScope, userSources: new Set(userSources.keys()) };
 }
 function dedupeAcross(a, b, path) {
   const seen = /* @__PURE__ */ new Map();
@@ -6717,6 +6718,18 @@ function matchesPattern(pattern, name) {
   const re = pattern.split(PATTERN_CHAR).map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
   return new RegExp(`^${re}$`).test(name);
 }
+function sameIdentity(a, b) {
+  return normalizeIdentity(a) === normalizeIdentity(b);
+}
+function normalizeIdentity(u) {
+  let s = u.trim().replace(/\/+$/, "").replace(/\.git$/, "");
+  const m = /^([a-z][a-z0-9+.-]*:\/\/)([^/]*)(.*)$/i.exec(s);
+  if (m) s = m[1].toLowerCase() + m[2].toLowerCase() + m[3];
+  return s;
+}
+function matchEntry(cat, type, entry) {
+  return isPattern(entry) ? cat.items.filter((i) => i.type === type && matchesPattern(entry, i.name)) : cat.items.filter((i) => i.type === type && i.name === entry);
+}
 var TYPE_KEYS = { skills: "skill", agents: "agent", rules: "rule" };
 var KEYS = /* @__PURE__ */ new Set(["description", "skills", "agents", "rules", "bundles", "vars"]);
 var noProbe = () => {
@@ -6745,12 +6758,16 @@ function foreignEntry(type, entry, key) {
   const spec = entry.slice(at + 1);
   if (name === "" || spec === "") throw new BundleError(`${key}: "${entry}" has an empty name or address`);
   let url;
+  let kind;
+  let derivedName;
   try {
     const r = resolveSpec(spec, noProbe);
     if (r.kind === "local") {
       throw new BundleError(`${key}: "${entry}" names a local path; a bundle can only name remote sources`);
     }
     url = r.value;
+    kind = r.kind;
+    derivedName = r.derivedName;
   } catch (err) {
     if (err instanceof BundleError) throw err;
     if (err instanceof SpecError && err.message === "probe") {
@@ -6758,7 +6775,7 @@ function foreignEntry(type, entry, key) {
     }
     throw new BundleError(`${key}: "${entry}": ${err.message}`);
   }
-  return { type, entry, name, spec, url };
+  return { type, entry, name, spec, url, kind, derivedName };
 }
 function parseBundle(text) {
   let data;
@@ -6795,6 +6812,10 @@ function parseBundle(text) {
   }
   return def;
 }
+function entryMiss(type, entry, count) {
+  if (count > 0 || entry === PATTERN_CHAR) return void 0;
+  return isPattern(entry) ? `pattern ${type}:${entry} matches nothing` : `${type} ${entry} not found in the source`;
+}
 function expandBundle(cat, name) {
   const byName = new Map(cat.bundles.map((b) => [b.name, b]));
   const members = /* @__PURE__ */ new Map();
@@ -6815,13 +6836,9 @@ function expandBundle(cat, name) {
       Object.assign(chain.setters, outer.setters);
     }
     for (const { type, entry } of cb.def.items) {
-      const found = isPattern(entry) ? cat.items.filter((i) => i.type === type && matchesPattern(entry, i.name)) : cat.items.filter((i) => i.type === type && i.name === entry);
-      if (found.length === 0) {
-        out.warnings.push({
-          bundle,
-          message: isPattern(entry) ? `pattern ${type}:${entry} matches nothing` : `${type} ${entry} not found in the source`
-        });
-      }
+      const found = matchEntry(cat, type, entry);
+      const miss = entryMiss(type, entry, found.length);
+      if (miss) out.warnings.push({ bundle, message: miss });
       for (const ci of found) {
         const key = `${ci.type}/${ci.name}`;
         const m = members.get(key) ?? { type: ci.type, name: ci.name, chains: [] };
@@ -6829,10 +6846,7 @@ function expandBundle(cat, name) {
         members.set(key, m);
       }
     }
-    for (const f of cb.def.foreign) {
-      out.foreign.push({ ...f, path: here });
-      out.warnings.push({ bundle, message: `${f.type}:${f.entry} skipped: items of other sources are not supported yet` });
-    }
+    for (const f of cb.def.foreign) out.foreign.push({ ...f, chain });
     for (const inner of cb.def.bundles) {
       if (here.includes(inner)) throw new BundleError(`bundle cycle ${[...here.slice(here.indexOf(inner)), inner].join(" \u2192 ")}`);
       visit(inner, here, { ...chain, path: here });
@@ -8266,6 +8280,14 @@ function makeContext(ctx, scope, harness, targetDir, item, scopeVars, sourceVars
     item: { name: item.name, type: item.type, source: item.source }
   };
 }
+function servingSource(config, scope, url) {
+  for (const src of config.sources.values()) {
+    if (scope === "user" && !config.userSources.has(src.name)) continue;
+    const id = src.git ?? src.url;
+    if (id !== void 0 && sameIdentity(id, url)) return src.name;
+  }
+  return void 0;
+}
 function mergeChainVars(chains, source, conflict) {
   const values = /* @__PURE__ */ new Map();
   for (const c of chains) {
@@ -8331,8 +8353,8 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
   const oldLock = readLock(lockPath);
   const needed = scopeSources(scopeCfg);
   const resolved = /* @__PURE__ */ new Map();
-  await Promise.all(
-    needed.map(async (name) => {
+  const resolveAll = (names) => Promise.all(
+    names.filter((n) => !resolved.has(n)).map(async (name) => {
       const src = config.sources.get(name);
       if (!src) {
         rep.warnings.push(`unknown source: ${name}`);
@@ -8354,6 +8376,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
       }
     })
   );
+  await resolveAll(needed);
   const plan = [];
   const keep = Object.keys(oldLock).filter((key) => rootOfKey(rc, key) === void 0);
   const catalogs = /* @__PURE__ */ new Map();
@@ -8448,7 +8471,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
     const cat = catalogOf(w.source);
     if (cat) {
       const hits = cat.items.filter((ci) => ci.type === w.type && matchesPattern(w.pattern, ci.name));
-      if (hits.length === 0) rep.warnings.push(`${w.type} wildcard ${w.raw} matches nothing in source ${w.source}`);
+      if (hits.length === 0 && w.pattern !== WILDCARD) rep.warnings.push(`${w.type} wildcard ${w.raw} matches nothing in source ${w.source}`);
       for (const ci of hits) offer(w.type, ci.name, { from: w.raw, source: w.source, live: true });
     } else {
       for (const l of lockedItems) {
@@ -8458,7 +8481,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
       }
     }
   }
-  for (const b of scopeCfg.bundles) {
+  const expansions = scopeCfg.bundles.map((b) => {
     const label = bundleLabel(b);
     const cat = catalogOf(b.source);
     let expanded;
@@ -8470,14 +8493,42 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
         rep.warnings.push(`${label}: ${err.message}; its installed items are kept`);
       }
     }
-    if (expanded) {
-      for (const w of expanded.warnings) rep.warnings.push(`bundle ${w.bundle}@${b.source}: ${w.message}`);
-      for (const m of expanded.items) {
-        offer(m.type, m.name, { from: label, source: b.source, live: true, via: label, chains: m.chains });
-      }
-    } else {
+    const foreign = (expanded?.foreign ?? []).map((f) => ({ f, served: servingSource(config, scope, f.url) }));
+    return { b, label, expanded, foreign };
+  });
+  await resolveAll(expansions.flatMap((x) => x.foreign.flatMap((y) => y.served ? [y.served] : [])));
+  for (const { b, label, expanded, foreign } of expansions) {
+    const keepFromLock = (match) => {
       for (const l of lockedItems) {
-        if (l.entry.via?.includes(label)) offer(l.type, l.name, { from: label, source: l.entry.source, live: false, via: label });
+        if (l.entry.via?.includes(label) && match(l)) offer(l.type, l.name, { from: label, source: l.entry.source, live: false, via: label });
+      }
+    };
+    if (!expanded) {
+      keepFromLock(() => true);
+      continue;
+    }
+    for (const w of expanded.warnings) rep.warnings.push(`bundle ${w.bundle}@${b.source}: ${w.message}`);
+    for (const m of expanded.items) {
+      offer(m.type, m.name, { from: label, source: b.source, live: true, via: label, chains: m.chains });
+    }
+    const missing = [];
+    for (const { f, served } of foreign) {
+      const cat = served ? catalogOf(served) : null;
+      if (!served) {
+        if (!missing.some((u) => sameIdentity(u, f.url))) {
+          missing.push(f.url);
+          rep.warnings.push(`bundle ${b.name}@${b.source} needs ${f.spec} (${f.url}): run skilletor install ${label}`);
+        }
+      }
+      if (!cat) {
+        keepFromLock((l) => l.type === f.type && l.entry.source !== b.source && matchesPattern(f.name, l.name) && (!served || l.entry.source === served));
+        continue;
+      }
+      const hits = matchEntry(cat, f.type, f.name);
+      const miss = entryMiss(f.type, f.name, hits.length);
+      if (miss) rep.warnings.push(`bundle ${f.chain.path.at(-1)}@${b.source}: ${miss.replace(/ in the source$/, "")} in ${served}`);
+      for (const ci of hits) {
+        offer(ci.type, ci.name, { from: label, source: served, live: true, via: label, chains: [f.chain] });
       }
     }
   }
@@ -8642,7 +8693,8 @@ async function check(given, opts = {}) {
       out.changed = true;
       (out.targetsChanged ??= []).push(scope);
     }
-    for (const name of scopeSources(scopeCfg)) {
+    const viaSources = Object.values(oldLock).flatMap((e) => e.via?.length ? [e.source] : []);
+    for (const name of /* @__PURE__ */ new Set([...scopeSources(scopeCfg), ...viaSources])) {
       const src = config.sources.get(name);
       if (!src || !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
       try {
@@ -8855,7 +8907,8 @@ async function cmdAvailable(ctx, args = {}) {
         installed: declaredBundles.has(bundleLabel({ name: b.name, source: name }))
       };
       try {
-        entry.members = expandBundle(cat, b.name).items.map((m) => `${m.type}:${m.name}`).sort();
+        const e = expandBundle(cat, b.name);
+        entry.members = [...e.items.map((m) => `${m.type}:${m.name}`), ...e.foreign.map((f) => `${f.type}:${f.entry}`)].sort();
         entry.vars = b.def.vars;
       } catch (err) {
         if (!(err instanceof BundleError)) throw err;
@@ -8879,6 +8932,8 @@ async function cmdInstall(ctx, args) {
     }
     return cat;
   };
+  const edits = [];
+  const bundles = [];
   for (const spec of args.items) {
     const { type: explicitType, bundle, name, source } = parseItemSpec(spec);
     const src = config.sources.get(source);
@@ -8887,15 +8942,15 @@ async function cmdInstall(ctx, args) {
       throw new CommandError(`source "${source}" is not trusted; run: skilletor trust ${source}`);
     }
     if (name.includes(WILDCARD)) {
-      addInstallEntry(path, explicitType, `${name}@${source}`);
+      edits.push(() => addInstallEntry(path, explicitType, `${name}@${source}`));
       continue;
     }
     const cat = await catalogOf(source, src);
     const hasBundle = cat.bundles.some((b) => b.name === name);
     const matches = bundle ? [] : cat.items.filter((i) => i.name === name && (!explicitType || i.type === explicitType));
     if (bundle || !explicitType && hasBundle && matches.length === 0) {
-      checkBundle(cat, name, source);
-      addBundleEntry(path, `${name}@${source}`);
+      bundles.push({ name, foreign: checkBundle(cat, name, source) });
+      edits.push(() => addBundleEntry(path, `${name}@${source}`));
       continue;
     }
     if (matches.length === 0) {
@@ -8907,9 +8962,69 @@ async function cmdInstall(ctx, args) {
       if (!explicitType && hasBundle) options.push(`bundle:${name}@${source}`);
       throw new CommandError(`"${name}" is ambiguous in ${source}; use one of: ${options.join(", ")}`);
     }
-    addInstallEntry(path, matches[0].type, `${name}@${source}`);
+    const type = matches[0].type;
+    edits.push(() => addInstallEntry(path, type, `${name}@${source}`));
   }
+  const additions = await missingSources(ctx, config, bundles, Boolean(args.project));
+  for (const a of additions) {
+    edits.push(() => {
+      addSource(path, a.name, a.def);
+      new State(ctx.stateRoot).trust(a.name, a.url);
+    });
+  }
+  for (const edit of edits) edit();
   return sync(ctx);
+}
+async function missingSources(ctx, config, bundles, project) {
+  const scope = project ? "project" : "user";
+  const missing = [];
+  for (const b of bundles) {
+    for (const f of b.foreign) {
+      if (servingSource(config, scope, f.url) !== void 0) continue;
+      if (!missing.some((m) => sameIdentity(m.f.url, f.url))) missing.push({ bundle: b.name, f });
+    }
+  }
+  if (missing.length === 0) return [];
+  const taken = new Map([...config.sources.values()].map((s) => [s.name, s.git ?? s.url ?? s.local ?? ""]));
+  const free = (name, url) => !taken.has(name) || sameIdentity(taken.get(name), url);
+  const suggest = (f) => {
+    if (free(f.derivedName, f.url)) return f.derivedName;
+    let n = 2;
+    while (!free(`${f.derivedName}-${n}`, f.url)) n++;
+    return `${f.derivedName}-${n}`;
+  };
+  const flag = project ? " --project" : "";
+  if (!ctx.prompt) {
+    const lines = missing.map((m) => `  skilletor add ${suggest(m.f)} ${m.f.spec}${flag}`);
+    const names = [...new Set(missing.map((m) => m.bundle))].join(", ");
+    throw new CommandError(
+      `bundle ${names} needs sources you don't have yet; nothing was changed. Add them, then install again:
+${lines.join("\n")}`
+    );
+  }
+  const out = [];
+  for (const { bundle, f } of missing) {
+    const fallback = suggest(f);
+    const question = `bundle ${bundle} needs a source you don't have yet: ${f.spec} \u2192 ${f.url} \u2014 add it as [${fallback}]? (name, or n to skip)`;
+    let note = "";
+    for (; ; ) {
+      const answer = (await ctx.prompt.ask(note + question)).trim();
+      if (/^(n|no)$/i.test(answer)) break;
+      const name = answer || fallback;
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+        note = `"${name}" is not a valid source name. `;
+        continue;
+      }
+      if (!free(name, f.url)) {
+        note = `"${name}" is already a source with another address (${taken.get(name)}). `;
+        continue;
+      }
+      out.push({ name, def: f.kind === "git" ? { git: f.url } : { url: f.url }, url: f.url });
+      taken.set(name, f.url);
+      break;
+    }
+  }
+  return out;
 }
 function checkBundle(cat, name, source) {
   if (!cat.bundles.some((b) => b.name === name)) {
@@ -8917,7 +9032,7 @@ function checkBundle(cat, name, source) {
     throw new CommandError(`unknown bundle "${name}" in ${source}${known ? ` (available bundles: ${known})` : ""}`);
   }
   try {
-    expandBundle(cat, name);
+    return expandBundle(cat, name).foreign;
   } catch (err) {
     if (err instanceof BundleError) throw new CommandError(`${source}: ${err.message}`);
     throw err;
@@ -9207,7 +9322,9 @@ Commands:
                         type:*@source installs every item of that type,
                         type:perl-*@source every one whose name matches;
                         bundle:name@source installs a bundle (a bare
-                        name@source does too when no item has that name)
+                        name@source does too when no item has that name);
+                        sources a bundle needs are offered for adding
+                        (on a terminal; otherwise the add commands are shown)
   uninstall <item>...   Remove entries ([type:]name@source, type:*@source,
                         type:perl-*@source or bundle:name@source), then sync
   trust <source>        Trust a project-declared source
@@ -9246,6 +9363,19 @@ function makeContext2(flags) {
     // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd.
     projectDir: flags.projectDir ?? projectRootOf(process.cwd()),
     stateRoot: join15(home, ".claude", "skilletor")
+  };
+}
+function ttyPrompter() {
+  if (!process.stdin.isTTY || !process.stderr.isTTY) return void 0;
+  return {
+    ask: async (question) => {
+      const rl = createInterface({ input: process.stdin, output: process.stderr });
+      try {
+        return await rl.question(`${question} `);
+      } finally {
+        rl.close();
+      }
+    }
   };
 }
 function statusText(report) {
@@ -9371,7 +9501,7 @@ async function run(argv) {
           process.stderr.write("skilletor: install needs at least one item\n");
           return 2;
         }
-        const r = await cmdInstall(ctx, { items: flags.rest, project: flags.project });
+        const r = await cmdInstall({ ...ctx, prompt: ttyPrompter() }, { items: flags.rest, project: flags.project });
         process.stdout.write((reportText(r) || "skilletor: up to date") + "\n");
         return 0;
       }

@@ -38,6 +38,29 @@ export interface ForeignEntry {
   spec: string;
   /** The resolved `git`/`url` identity of that source. */
   url: string;
+  /** How `skilletor add` would store it (§4.2). */
+  kind: "git" | "url";
+  /** The source name `skilletor add` would derive (§4.2). */
+  derivedName: string;
+}
+
+/** Two source identities (`git`/`url` values) are the same modulo a trailing `/`, `.git` and host case. */
+export function sameIdentity(a: string, b: string): boolean {
+  return normalizeIdentity(a) === normalizeIdentity(b);
+}
+
+function normalizeIdentity(u: string): string {
+  let s = u.trim().replace(/\/+$/, "").replace(/\.git$/, "");
+  const m = /^([a-z][a-z0-9+.-]*:\/\/)([^/]*)(.*)$/i.exec(s);
+  if (m) s = m[1]!.toLowerCase() + m[2]!.toLowerCase() + m[3];
+  return s;
+}
+
+/** Catalog items of `type` a name or pattern names (spec §3). */
+export function matchEntry(cat: Catalog, type: ItemType, entry: string): Catalog["items"] {
+  return isPattern(entry)
+    ? cat.items.filter((i) => i.type === type && matchesPattern(entry, i.name))
+    : cat.items.filter((i) => i.type === type && i.name === entry);
 }
 
 export interface BundleDef {
@@ -85,12 +108,16 @@ function foreignEntry(type: ItemType, entry: string, key: string): ForeignEntry 
   const spec = entry.slice(at + 1);
   if (name === "" || spec === "") throw new BundleError(`${key}: "${entry}" has an empty name or address`);
   let url: string;
+  let kind: "git" | "url";
+  let derivedName: string;
   try {
     const r = resolveSpec(spec, noProbe);
     if (r.kind === "local") {
       throw new BundleError(`${key}: "${entry}" names a local path; a bundle can only name remote sources`);
     }
     url = r.value;
+    kind = r.kind;
+    derivedName = r.derivedName;
   } catch (err) {
     if (err instanceof BundleError) throw err;
     if (err instanceof SpecError && err.message === "probe") {
@@ -98,7 +125,7 @@ function foreignEntry(type: ItemType, entry: string, key: string): ForeignEntry 
     }
     throw new BundleError(`${key}: "${entry}": ${(err as Error).message}`);
   }
-  return { type, entry, name, spec, url };
+  return { type, entry, name, spec, url, kind, derivedName };
 }
 
 /** Parse and validate one bundle file (spec §15.1). Throws a BundleError. */
@@ -157,11 +184,18 @@ export interface BundleMember {
 
 export interface Expansion {
   items: BundleMember[];
-  /** Entries of other sources (spec §15.6), with the bundle path they were found on. */
-  foreign: (ForeignEntry & { path: string[] })[];
+  /** Entries of other sources (spec §15.6), with the chain they were found on; the
+   *  caller serves them from a configured source with the same identity. */
+  foreign: (ForeignEntry & { chain: Chain })[];
   /** A missing name, a pattern matching nothing, an unsupported entry: one each,
    *  with the bundle (declared or included) whose file has the entry. */
   warnings: { bundle: string; message: string }[];
+}
+
+/** The warning for an entry that matched `count` items, if any (a bare `*` stays silent, spec §3). */
+export function entryMiss(type: ItemType, entry: string, count: number): string | undefined {
+  if (count > 0 || entry === PATTERN_CHAR) return undefined;
+  return isPattern(entry) ? `pattern ${type}:${entry} matches nothing` : `${type} ${entry} not found in the source`;
 }
 
 /** Expand a bundle of `cat` (spec §15.2). A bundle error (§15.4) throws a BundleError. */
@@ -187,15 +221,9 @@ export function expandBundle(cat: Catalog, name: string): Expansion {
       Object.assign(chain.setters, outer.setters);
     }
     for (const { type, entry } of cb.def!.items) {
-      const found = isPattern(entry)
-        ? cat.items.filter((i) => i.type === type && matchesPattern(entry, i.name))
-        : cat.items.filter((i) => i.type === type && i.name === entry);
-      if (found.length === 0) {
-        out.warnings.push({
-          bundle,
-          message: isPattern(entry) ? `pattern ${type}:${entry} matches nothing` : `${type} ${entry} not found in the source`,
-        });
-      }
+      const found = matchEntry(cat, type, entry);
+      const miss = entryMiss(type, entry, found.length);
+      if (miss) out.warnings.push({ bundle, message: miss });
       for (const ci of found) {
         const key = `${ci.type}/${ci.name}`;
         const m = members.get(key) ?? { type: ci.type, name: ci.name, chains: [] };
@@ -203,10 +231,7 @@ export function expandBundle(cat: Catalog, name: string): Expansion {
         members.set(key, m);
       }
     }
-    for (const f of cb.def!.foreign) {
-      out.foreign.push({ ...f, path: here });
-      out.warnings.push({ bundle, message: `${f.type}:${f.entry} skipped: items of other sources are not supported yet` });
-    }
+    for (const f of cb.def!.foreign) out.foreign.push({ ...f, chain });
     for (const inner of cb.def!.bundles) {
       if (here.includes(inner)) throw new BundleError(`bundle cycle ${[...here.slice(here.indexOf(inner)), inner].join(" → ")}`);
       visit(inner, here, { ...chain, path: here });

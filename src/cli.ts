@@ -1,12 +1,13 @@
 // skilletor CLI entry point: argument parsing and dispatch (spec §7).
 import { realpathSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { sync, check, status, type EngineContext } from "./engine.ts";
 import { reportJson, reportText } from "./report.ts";
 import {
-  cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall,
+  cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall, type Prompter,
 } from "./commands.ts";
 import { projectRootOf, runHook, type HookContext, type HookInput } from "./hooks.ts";
 
@@ -32,7 +33,9 @@ Commands:
                         type:*@source installs every item of that type,
                         type:perl-*@source every one whose name matches;
                         bundle:name@source installs a bundle (a bare
-                        name@source does too when no item has that name)
+                        name@source does too when no item has that name);
+                        sources a bundle needs are offered for adding
+                        (on a terminal; otherwise the add commands are shown)
   uninstall <item>...   Remove entries ([type:]name@source, type:*@source,
                         type:perl-*@source or bundle:name@source), then sync
   trust <source>        Trust a project-declared source
@@ -82,6 +85,21 @@ function makeContext(flags: Flags): EngineContext {
     // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd.
     projectDir: flags.projectDir ?? projectRootOf(process.cwd()),
     stateRoot: join(home, ".claude", "skilletor"),
+  };
+}
+
+/** Questions on the terminal (stdin in, stderr out, so stdout stays clean); none without a TTY. */
+function ttyPrompter(): Prompter | undefined {
+  if (!process.stdin.isTTY || !process.stderr.isTTY) return undefined;
+  return {
+    ask: async (question) => {
+      const rl = createInterface({ input: process.stdin, output: process.stderr });
+      try {
+        return await rl.question(`${question} `);
+      } finally {
+        rl.close();
+      }
+    },
   };
 }
 
@@ -209,7 +227,7 @@ export async function run(argv: string[]): Promise<number> {
           process.stderr.write("skilletor: install needs at least one item\n");
           return 2;
         }
-        const r = await cmdInstall(ctx, { items: flags.rest, project: flags.project });
+        const r = await cmdInstall({ ...ctx, prompt: ttyPrompter() }, { items: flags.rest, project: flags.project });
         process.stdout.write((reportText(r) || "skilletor: up to date") + "\n");
         return 0;
       }

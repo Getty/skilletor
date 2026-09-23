@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
-import { BundleError, expandBundle, matchesPattern, parseBundle } from "../src/bundles.ts";
+import { BundleError, expandBundle, matchesPattern, parseBundle, sameIdentity } from "../src/bundles.ts";
 import { scan, type Catalog } from "../src/catalog.ts";
 
 test("matchesPattern: * matches any run of characters anywhere, everything else literally", () => {
@@ -216,17 +216,40 @@ test("expandBundle: chain vars, the outer bundle wins over the included one; set
   }
 });
 
-test("expandBundle: an entry of another source is skipped with a not-supported-yet warning (phase A)", () => {
+test("expandBundle: entries of other sources come back with their chain, unexpanded and unwarned", () => {
   const { cat, cleanup } = catalogOf({
     "rules/r1.md": item("r1"),
-    "bundles/b.yaml": "description: B\nrules: [r1, x@Getty]\n",
+    "bundles/b.yaml": "description: B\nrules: [r1]\nbundles: [inner]\nvars:\n  v: outer\n",
+    "bundles/inner.yaml": "description: I\nrules: [x@Getty, \"p-*@gitlab.com/peter\"]\nvars:\n  v: inner\n  w: inner\n",
   });
   try {
     const e = expandBundle(cat, "b");
     assert.deepEqual(members(e), ["rule:r1"]);
-    assert.equal(e.warnings.length, 1);
-    assert.match(e.warnings[0]!.message, /rule:x@Getty/);
-    assert.match(e.warnings[0]!.message, /not supported yet/);
+    assert.deepEqual(e.warnings, []);
+    assert.deepEqual(e.foreign.map((f) => [f.type, f.name, f.spec, f.url, f.kind, f.derivedName, f.chain.path]), [
+      ["rule", "x", "Getty", "https://github.com/Getty/skills", "git", "getty", ["b", "inner"]],
+      ["rule", "p-*", "gitlab.com/peter", "https://gitlab.com/peter/skills", "git", "peter", ["b", "inner"]],
+    ]);
+    assert.deepEqual(e.foreign[0]!.chain.vars, { v: "outer", w: "inner" });
+  } finally {
+    cleanup();
+  }
+});
+
+test("sameIdentity ignores a trailing slash, .git and host case", () => {
+  assert.equal(sameIdentity("https://GitHub.com/Getty/skills", "https://github.com/Getty/skills.git/"), true);
+  assert.equal(sameIdentity("https://github.com/Getty/skills", "https://github.com/getty/skills"), false);
+  assert.equal(sameIdentity("file:///a/b.git", "file:///a/b"), true);
+  assert.equal(sameIdentity("https://h/x.tar.gz", "https://h/x.tar.gz"), true);
+});
+
+test("expandBundle: a bare * that matches nothing stays silent, as in config (spec §3)", () => {
+  const { cat, cleanup } = catalogOf({
+    "rules/r1.md": item("r1"),
+    "bundles/b.yaml": "description: B\nrules: [r1]\nagents: [\"*\"]\n",
+  });
+  try {
+    assert.deepEqual(expandBundle(cat, "b").warnings, []);
   } finally {
     cleanup();
   }

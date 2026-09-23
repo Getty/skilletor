@@ -135,6 +135,30 @@ test("install bundle:name@src and a pattern; status and available show bundles; 
   assert.match(un.stdout, /- rules\/perl-a/);
 });
 
+// k48 phase B: without a TTY, a bundle needing an unknown source exits 1 and edits nothing.
+test("install bundle: with a missing source and no TTY exits 1, prints the add command, edits nothing", () => {
+  const home = join(tmp.dir, "foreign-home");
+  const proj = join(tmp.dir, "foreign-proj");
+  const src = join(tmp.dir, "foreign-src");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(proj, { recursive: true });
+  mkdirSync(join(src, "bundles"), { recursive: true });
+  writeFileSync(join(src, "bundles", "perl.yaml"), "description: Perl\nrules: [\"p-*@gitlab.com/peter\"]\n");
+  const cfgPath = join(home, ".claude", "skilletor.json");
+  const cfg = JSON.stringify({ sources: { shared: { local: src } } });
+  writeFileSync(cfgPath, cfg);
+  const env = claudeOnlyEnv(home);
+  const common = ["--project-dir", proj];
+
+  const r = runCli(["install", "bundle:perl@shared", ...common], env, "");
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /skilletor add peter gitlab\.com\/peter/);
+  assert.equal(readFileSync(cfgPath, "utf8"), cfg);
+
+  const av = runCli(["available", "shared", ...common], env);
+  assert.match(av.stdout, /bundle perl@shared — Perl\n\s+rule:p-\*@gitlab\.com\/peter/);
+});
+
 // k37: uninstall through the real binary: wildcard-only exits 1 with the hint,
 // explicit-plus-wildcard exits 0 and still warns.
 test("uninstall of a wildcard-covered item: exit 1 alone, exit 0 with a warning when explicit", () => {

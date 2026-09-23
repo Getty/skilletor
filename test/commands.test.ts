@@ -1,6 +1,7 @@
 // Tests for the CLI edit commands (spec §7, §4.3).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
@@ -9,7 +10,8 @@ import {
   cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall, CommandError,
   type CommandContext,
 } from "../src/commands.ts";
-import type { Probe } from "../src/spec.ts";
+import { resolveSpec, type Probe } from "../src/spec.ts";
+import { State } from "../src/state.ts";
 
 const noProbe: Probe = () => {
   throw new Error("probe must not run");
@@ -737,6 +739,135 @@ test("source remove refuses while a bundle uses the source", async () => {
     const src = makeSource(e.tmp.dir, "s", (d) => bundleFile(d, "perl", "description: P\n"));
     e.writeUserCfg({ sources: { mine: { local: src } }, install: { bundles: ["perl@mine"] } });
     await assert.rejects(() => cmdSourceRemove(e.ctx, { name: "mine" }), /still has installed items/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// ---- bundles naming items of other sources (k48 phase B, spec §15.6) -----------
+
+/** A bare git repo (file:// URL) with the given rules: a remote that resolves offline. */
+function gitRepo(root: string, name: string, rules: string[]): string {
+  const bare = join(root, `${name}.git`);
+  const work = join(root, `${name}-work`);
+  const G = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
+  execFileSync("git", ["init", "-q", "-b", "main", "--bare", bare]);
+  for (const r of rules) rule(work, r);
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: work });
+  execFileSync("git", ["add", "."], { cwd: work, env: G });
+  execFileSync("git", ["commit", "-qm", "init"], { cwd: work, env: G });
+  const url = "file://" + resolvePath(bare);
+  execFileSync("git", ["push", "-q", url, "main"], { cwd: work, env: G });
+  return url;
+}
+
+/** A prompter answering from a list and recording the questions. */
+function answers(...list: string[]) {
+  const questions: string[] = [];
+  return {
+    questions,
+    prompt: { ask: async (q: string) => { questions.push(q); return list.shift() ?? "n"; } },
+  };
+}
+
+test("install bundle: without a TTY fails before editing anything and prints the add commands", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "r1");
+      bundleFile(d, "perl", "description: P\nrules: [r1, x@gitlab.com/peter, y@gitlab.com/peter, z@Getty/repo]\n");
+    });
+    const cfg = { sources: { mine: { local: src }, getty: { git: "https://example.com/other" } } };
+    e.writeUserCfg(cfg);
+    await assert.rejects(() => cmdInstall(e.ctx, { items: ["bundle:perl@mine"] }), (err: unknown) => {
+      assert.ok(err instanceof CommandError);
+      const msg = (err as Error).message;
+      assert.match(msg, /bundle perl needs sources you don't have yet/);
+      assert.match(msg, /^  skilletor add peter gitlab\.com\/peter$/m);
+      assert.match(msg, /^  skilletor add getty-2 Getty\/repo$/m); // "getty" is taken by another identity
+      assert.equal(msg.match(/skilletor add peter /g)!.length, 1); // once per source
+      return true;
+    });
+    assert.deepEqual(e.readUserCfg(), cfg);
+    await assert.rejects(() => cmdInstall(e.ctx, { items: ["bundle:perl@mine"], project: true }), /skilletor add peter gitlab\.com\/peter --project/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("install bundle: on a TTY asks per missing source; accepting adds and trusts it like add", async () => {
+  const e = env();
+  try {
+    const url = gitRepo(e.tmp.dir, "peter", ["p-one"]);
+    const src = makeSource(e.tmp.dir, "s", (d) => bundleFile(d, "perl", `description: P\nrules: ["p-*@${url}"]\n`));
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    const derived = resolveSpec(url, noProbe).derivedName;
+    const a = answers("");
+    const r = await cmdInstall({ ...e.ctx, prompt: a.prompt }, { items: ["bundle:perl@mine"] });
+    assert.deepEqual(a.questions, [
+      `bundle perl needs a source you don't have yet: ${url} → ${url} — add it as [${derived}]? (name, or n to skip)`,
+    ]);
+    const cfg = e.readUserCfg();
+    assert.deepEqual(cfg.sources[derived], { git: url });
+    assert.deepEqual(cfg.install, { bundles: ["perl@mine"] });
+    assert.equal(new State(e.ctx.stateRoot).isTrusted({ name: derived, resolved: url, origin: "user" }), true);
+    assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`), [`rules/p-one@${derived}`]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("install bundle: a taken name is refused and asked again; n skips; --project adds to the project", async () => {
+  const e = env();
+  try {
+    const url = gitRepo(e.tmp.dir, "peter", ["p-one"]);
+    const src = makeSource(e.tmp.dir, "s", (d) => bundleFile(d, "perl", `description: P\nrules: [p-one@${url}]\n`));
+    e.writeUserCfg({ sources: { mine: { local: src }, taken: { git: "https://example.com/other" } } });
+    const a = answers("taken", "pete");
+    await cmdInstall({ ...e.ctx, prompt: a.prompt }, { items: ["bundle:perl@mine"], project: true });
+    assert.equal(a.questions.length, 2);
+    assert.match(a.questions[1]!, /"taken" is already a source with another address/);
+    const proj = JSON.parse(readFileSync(join(e.projectDir, ".claude/skilletor.json"), "utf8"));
+    assert.deepEqual(proj.sources, { pete: { git: url } });
+    assert.deepEqual(proj.install, { bundles: ["perl@mine"] });
+    assert.equal(e.readUserCfg().sources.pete, undefined);
+
+    const b = answers("n");
+    const r = await cmdInstall({ ...e.ctx, prompt: b.prompt }, { items: ["bundle:perl@mine"] });
+    assert.equal(b.questions.length, 1);
+    assert.equal(e.readUserCfg().sources.pete, undefined); // user scope does not see the project's source
+    assert.deepEqual(e.readUserCfg().install, { bundles: ["perl@mine"] });
+    assert.match(r.scopes[0]!.warnings.join("\n"), /bundle perl@mine needs/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("install bundle: a source already configured under any name is not asked for", async () => {
+  const e = env();
+  try {
+    const url = gitRepo(e.tmp.dir, "peter", ["p-one"]);
+    const src = makeSource(e.tmp.dir, "s", (d) => bundleFile(d, "perl", `description: P\nrules: [p-one@${url}]\n`));
+    e.writeUserCfg({ sources: { mine: { local: src }, whatever: { git: url } } });
+    const a = answers();
+    await cmdInstall({ ...e.ctx, prompt: a.prompt }, { items: ["bundle:perl@mine"] });
+    assert.deepEqual(a.questions, []);
+    assert.equal(existsSync(join(e.home, ".claude/rules/p-one.md")), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("available lists a bundle's members of other sources with their address", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "r1");
+      bundleFile(d, "perl", "description: P\nrules: [r1, \"p-*@gitlab.com/peter\"]\n");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    const perl = (await cmdAvailable(e.ctx, { source: "mine" })).find((i) => i.type === "bundle")!;
+    assert.deepEqual(perl.members, ["rule:p-*@gitlab.com/peter", "rule:r1"]);
   } finally {
     e.cleanup();
   }
