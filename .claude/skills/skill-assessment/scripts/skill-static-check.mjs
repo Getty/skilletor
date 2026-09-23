@@ -6,8 +6,9 @@
 //
 // A path may be a SKILL.md, an agent/rule .md, a skill directory, or a
 // directory holding skills/, agents/, rules/ (a .claude dir or a skilletor
-// source). One line per finding: "<path>: ERROR|WARN: <message>". Exit 1 when
-// any ERROR was found. No dependencies; Node >= 18.
+// source). Eval suites (`evals/`, a case dir, `graders/`) are checked as eval
+// files — prompt body present, grader `type:` set — never as skills. One line
+// per finding: "<path>: ERROR|WARN: <message>". Exit 1 when any ERROR was found. No dependencies; Node >= 18.
 import { readFileSync, statSync, readdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -101,6 +102,8 @@ function safeReaddir(dir) { try { return readdirSync(dir); } catch { return []; 
 function classify(file) {
   const parts = resolve(file).split("/");
   if (basename(file) === "SKILL.md") return "skill";
+  if (basename(dirname(file)) === "graders") return "eval-grader";
+  if (basename(file) === "prompt.md" && (existsSync(join(dirname(file), "graders")) || parts.includes("evals"))) return "eval-prompt";
   if (parts.includes("agents")) return "agent";
   if (parts.includes("rules")) return "rule";
   return "unknown";
@@ -131,6 +134,12 @@ function checkFile(file) {
   const description = fmValue(fm, "description") ?? "";
   if (inventory) {
     findings.push(`${file}\t${type}\t${bodyLines} lines\t${Buffer.byteLength(text)} B\tdescription ${description.length} chars`);
+  }
+  if (type === "eval-grader" || type === "eval-prompt") {
+    // plugin-eval case files: frontmatter drives the runner, there is no router to judge
+    if (type === "eval-grader" && !fmValue(fm, "type")) report(file, "ERROR", "grader has no 'type:' (tool_used, llm, regex, file_exists …)");
+    if (!body.trim() && (type === "eval-prompt" || fmValue(fm, "type") === "llm")) report(file, "ERROR", `empty body — the ${type === "eval-prompt" ? "prompt" : "llm grader"} has nothing to say`);
+    return { type, name: basename(file), description: "" };
   }
   if (type === "rule") {
     if (bodyLines > RULES_MAX_LINES) report(file, "WARN", `rules file is ${bodyLines} lines (budget ~${RULES_MAX_LINES}, loaded every turn)`);
@@ -179,6 +188,11 @@ function collect(p) {
   const out = [];
   const skillMd = join(p, "SKILL.md");
   if (existsSync(skillMd)) return [skillMd];
+  const isCase = (d) => existsSync(join(d, "prompt.md")) || existsSync(join(d, "graders"));
+  const caseFiles = (d) => [join(d, "prompt.md"), ...safeReaddir(join(d, "graders")).filter((e) => e.endsWith(".md")).map((e) => join(d, "graders", e))].filter((f) => existsSync(f));
+  if (isCase(p)) return caseFiles(p);
+  if (basename(p) === "graders") return safeReaddir(p).filter((e) => e.endsWith(".md")).map((e) => join(p, e));
+  if (basename(p) === "evals") return safeReaddir(p).map((e) => join(p, e)).filter((d) => statSync(d).isDirectory() && isCase(d)).flatMap(caseFiles);
   for (const sub of ["skills", "agents", "rules"]) {
     const d = join(p, sub);
     if (!existsSync(d)) continue;
