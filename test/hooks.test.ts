@@ -219,3 +219,23 @@ test("no harness detected: session-start warns in one line, never throws", async
     e.cleanup();
   }
 });
+
+test("k44: session-start started in ~ syncs the user scope only, once", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    const ctx: HookContext = { ...e.ctx, projectDir: undefined };
+    const out = await runHook("session-start", { cwd: e.home }, ctx);
+    assert.match(out.hookSpecificOutput?.additionalContext ?? "", /skill foo@mine/);
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo/SKILL.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/.gitignore")), false);
+    // With CLAUDE_PROJECT_DIR=~ the same.
+    const again = await runHook("session-start", { cwd: e.home }, { ...e.ctx, projectDir: e.home });
+    assert.deepEqual(again, {});
+    assert.equal(existsSync(join(e.home, ".claude/.gitignore")), false);
+    assert.deepEqual(await runHook("user-prompt-submit", { cwd: e.home }, ctx), {});
+  } finally {
+    e.cleanup();
+  }
+});

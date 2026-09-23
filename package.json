@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "private": true,
   "type": "module",
-  "description": "Remote skills, agents and rules for Claude Code – declared once, synced on every session, templated per project.",
+  "description": "Remote skills, agents and rules for Claude Code and Codex – declared once, synced on every session, templated per project.",
   "bin": {
     "skilletor": "bin/skilletor"
   },

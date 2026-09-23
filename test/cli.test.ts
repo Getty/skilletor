@@ -20,8 +20,8 @@ before(async () => {
 
 after(() => tmp.cleanup());
 
-function runCli(args: string[], env?: NodeJS.ProcessEnv, input?: string) {
-  return spawnSync(process.execPath, [bundle, ...args], { encoding: "utf8", env: env ?? process.env, input });
+function runCli(args: string[], env?: NodeJS.ProcessEnv, input?: string, cwd?: string) {
+  return spawnSync(process.execPath, [bundle, ...args], { encoding: "utf8", env: env ?? process.env, input, cwd });
 }
 
 test("--version prints the package version", () => {
@@ -202,4 +202,68 @@ test("no harness on the machine: sync fails with the fix named, exit 2", () => {
   const r = runCli(["sync", "--scope", "user"], { ...process.env, HOME: home, CODEX_HOME: join(home, "nope") });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /no agent harness detected.*set "targets"/);
+});
+
+// k44: run from ~ (or with --project-dir ~) there is no project scope.
+test("project dir = home: status says so in one line, --project edits fail", () => {
+  const home = join(tmp.dir, "hp-home");
+  const src = join(tmp.dir, "hp-src");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(src, "skills", "foo"), { recursive: true });
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), "---\nname: foo\ndescription: foo\n---\nF\n");
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } }, install: { skills: ["foo@s"] } }));
+  const env = claudeOnlyEnv(home);
+
+  const sy = runCli(["sync", "--project-dir", home], env);
+  assert.equal(sy.status, 0, sy.stderr);
+  assert.doesNotMatch(sy.stdout, /project/);
+  const st = runCli(["status", "--project-dir", home], env);
+  assert.equal(st.status, 0, st.stderr);
+  assert.match(st.stdout, /^user scope:$/m);
+  assert.doesNotMatch(st.stdout, /^project scope:$/m);
+  assert.match(st.stdout, /^project scope: none \(the project directory is the home directory\)$/m);
+  assert.equal(JSON.parse(runCli(["status", "--json", "--project-dir", home], env).stdout).projectIsHome, true);
+
+  const inst = runCli(["install", "foo@s", "--project", "--project-dir", home], env);
+  assert.equal(inst.status, 1);
+  assert.match(inst.stderr, /no project scope: the project directory is the home directory/);
+});
+
+// k43: without --project-dir the CLI takes the git top level of cwd, like the hooks.
+test("default project dir: git top level of cwd; a subdir of a git ~ has no project scope", () => {
+  const home = join(tmp.dir, "top-home");
+  const repo = join(tmp.dir, "top-repo");
+  const src = join(tmp.dir, "top-src");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(src, "skills", "bar"), { recursive: true });
+  writeFileSync(join(src, "skills", "bar", "SKILL.md"), "---\nname: bar\ndescription: bar\n---\nB\n");
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } } }));
+  mkdirSync(join(repo, ".claude"), { recursive: true });
+  mkdirSync(join(repo, "sub", "deep"), { recursive: true });
+  writeFileSync(join(repo, ".claude", "skilletor.json"), JSON.stringify({ install: { skills: ["bar@s"] } }));
+  execFileSync("git", ["init", "-q", "-b", "main", repo]);
+  const env = claudeOnlyEnv(home);
+  delete env.CLAUDE_PROJECT_DIR;
+  delete env.SKILLETOR_PROJECT_DIR;
+
+  const r = runCli(["sync"], env, undefined, join(repo, "sub", "deep"));
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(existsSync(join(repo, ".claude/skills/bar/SKILL.md")), true);
+  assert.equal(existsSync(join(repo, "sub", "deep", ".claude")), false);
+  const st = runCli(["status"], env, undefined, join(repo, "sub"));
+  assert.match(st.stdout, /✓ skills\/bar @s/);
+
+  // Outside git, cwd itself stays the project.
+  const plain = join(tmp.dir, "top-plain");
+  mkdirSync(join(plain, ".claude"), { recursive: true });
+  writeFileSync(join(plain, ".claude", "skilletor.json"), JSON.stringify({ install: { skills: ["bar@s"] } }));
+  assert.equal(runCli(["sync"], env, undefined, plain).status, 0);
+  assert.equal(existsSync(join(plain, ".claude/skills/bar/SKILL.md")), true);
+
+  // ~ as a git checkout (dotfiles): from a subdir of ~ the project is ~, so no project scope.
+  execFileSync("git", ["init", "-q", "-b", "main", home]);
+  mkdirSync(join(home, "notes"), { recursive: true });
+  const hs = runCli(["status"], env, undefined, join(home, "notes"));
+  assert.equal(hs.status, 0, hs.stderr);
+  assert.match(hs.stdout, /^project scope: none/m);
 });

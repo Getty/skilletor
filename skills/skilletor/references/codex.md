@@ -56,9 +56,9 @@ becomes a leading "Applies when working with files matching: …" line.
   A section edited or deleted by hand is restored and reported as overwritten.
 - Refused (warning, nothing written for Codex rules in that scope, `--force` does not help):
   malformed markers (`begin` without `end`, `end` first, either twice), or `AGENTS.md` is a
-  symlink (e.g. to `CLAUDE.md`), a directory or unreadable. A `CLAUDE.md` symlinked to a
-  regular `AGENTS.md` is not caught: the block is written and Claude Code sees each rule
-  twice — narrow that project's `targets` to one harness.
+  symlink (e.g. to `CLAUDE.md`), a directory or unreadable, or — with Claude also a target —
+  a `CLAUDE.md` Claude reads is that same file (`CLAUDE.md`/`.claude/CLAUDE.md` in the
+  project, `~/.claude/CLAUDE.md` for the user file), since Claude would see each rule twice.
 - Warnings: an `AGENTS.override.md` beside it (Codex reads that instead); a project
   `AGENTS.md` over Codex's `project_doc_max_bytes` (default 32768 — the block is cut).
 - `AGENTS.md` is not gitignored: a project's Codex rules show in its diff. Opt a project

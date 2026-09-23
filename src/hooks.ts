@@ -11,7 +11,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { loadConfig } from "./config.ts";
 import { State } from "./state.ts";
-import { check, sync, type EngineContext } from "./engine.ts";
+import { check, projectDirOf, sync, type EngineContext } from "./engine.ts";
 import { reportHook, type SyncReport } from "./report.ts";
 
 export interface HookInput {
@@ -112,7 +112,7 @@ async function userPromptSubmit(input: HookInput, ctx: HookContext): Promise<Hoo
 
   let interval = DEFAULT_INTERVAL;
   try {
-    interval = loadConfig({ home: ctx.home, projectDir: ctx.projectDir }).checkInterval;
+    interval = loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx) }).checkInterval;
   } catch {
     // config error: fall back to the default throttle; the background sync reports it
   }

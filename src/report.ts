@@ -12,7 +12,7 @@ export const ACTIVATION: Record<ItemType, string> = {
   rule: "active after /reload-plugins or restart",
 };
 
-/** Codex: only skills are written in phase 1 (spec §14.2). */
+/** Codex: every item type, unmeasured, so conservatively the next session (spec §14.4). */
 export const CODEX_ACTIVATION = "active from the next Codex session";
 
 function activationOf(it: ItemChange): string {

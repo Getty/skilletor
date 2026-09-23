@@ -365,11 +365,11 @@ Use kubectl carefully.
   recorded, and warns; `--force` does not override:
   - the markers are malformed: `begin` without `end`, `end` before `begin`, either twice;
   - `AGENTS.md` is a symlink (commonly `AGENTS.md` → `CLAUDE.md`: writing through it would
-    show Claude Code the rules twice), a directory, or unreadable.
-
-  The other direction is not caught: if `CLAUDE.md` is a symlink to a regular `AGENTS.md`,
-  the block is written and Claude Code sees each rule twice (once from `.claude/rules/`).
-  Such a project is better off with `"targets": ["claude"]` or `["codex"]`.
+    show Claude Code the rules twice), a directory, or unreadable;
+  - Claude Code is a target too and a `CLAUDE.md` it reads is the same file as that
+    `AGENTS.md` (`CLAUDE.md` or `.claude/CLAUDE.md` in a project, `~/.claude/CLAUDE.md` for
+    `$CODEX_HOME/AGENTS.md`; linked or hard-linked) — the other direction of the same double
+    read. Narrow `targets` to one harness if you want the block there.
 - **Warnings:** an `AGENTS.override.md` next to the file (Codex reads the override
   instead, so the block is not seen); a project `AGENTS.md` larger than Codex's
   `project_doc_max_bytes` (default 32768, read from `$CODEX_HOME/config.toml`) — Codex cuts

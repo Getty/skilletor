@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
@@ -588,6 +588,33 @@ test("status tells a skipped item from one that is not installed, also when offl
     rmSync(src, { recursive: true, force: true }); // unresolvable: the skip marker is kept
     await sync(e.ctx, { scope: "user" });
     assert.deepEqual(pick(), expected);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k44: a project dir that is the home dir (session started in ~, or ~ is a git
+// checkout) must not read ~/.claude/skilletor.json a second time as project config.
+test("a project dir equal to home has no project scope (sync, check, status)", async () => {
+  const e = env();
+  try {
+    const src = localSource(e.tmp.dir, "srcH", "foo", "FOO");
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    const link = join(e.tmp.dir, "home-link");
+    symlinkSync(e.home, link);
+    for (const projectDir of [e.home, link]) {
+      const ctx: EngineContext = { ...e.ctx, projectDir };
+      const report = await sync(ctx);
+      assert.deepEqual(report.scopes.map((s) => s.scope), ["user"], projectDir);
+      assert.equal(existsSync(join(e.home, ".claude/.gitignore")), false, "no project gitignore in ~/.claude");
+      const chk = await check(ctx);
+      assert.deepEqual([...new Set(chk.sources.map((s) => s.scope))], ["user"]);
+      const st = status(ctx);
+      assert.deepEqual(st.scopes.map((s) => s.scope), ["user"]);
+      assert.equal(st.projectIsHome, true);
+      assert.equal((await sync(ctx, { scope: "project" })).scopes.length, 0);
+    }
+    assert.equal(status(e.ctx).projectIsHome, undefined);
   } finally {
     e.cleanup();
   }

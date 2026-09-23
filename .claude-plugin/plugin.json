@@ -1,6 +1,6 @@
 {
   "name": "skilletor",
-  "description": "Remote skills, agents and rules for Claude Code — declared once in skilletor.json, synced on every session, templated per project. Adds sources like marketplaces and puts the skilletor CLI on PATH.",
+  "description": "Remote skills, agents and rules for Claude Code and Codex — declared once in skilletor.json, synced on every session, templated per project. Adds sources like marketplaces and puts the skilletor CLI on PATH.",
   "version": "0.1.1",
   "author": {
     "name": "Torsten Raudssus",

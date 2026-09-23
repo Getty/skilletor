@@ -44,6 +44,13 @@ JSON, three levels:
 
 The scope follows from which file declares an item.
 
+**No project scope in `~`.** When the project root is the home directory itself (same real
+path – a session started in `~`, or `~` a git checkout), there is no project scope:
+`~/.claude/skilletor.json` is read once, as the user config. `sync`, `check` and the hooks
+work on the user scope alone, `status` adds the line `project scope: none (the project
+directory is the home directory)` (`projectIsHome: true` in `--json`), and the project-scope
+edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with an error.
+
 ```json
 {
   "sources": {
@@ -278,6 +285,11 @@ skilletor hook <event>                    # for hooks.json only
 
 `add`/`install`/`uninstall` edit only the config (default: the user config) and then run
 `sync`. The declarative config stays the single source of truth.
+
+The project root is `--project-dir`, else the git top level of the current directory, else
+the current directory – the resolution the hooks use without `CLAUDE_PROJECT_DIR` (§14.5),
+so the CLI run from a subdirectory sees the same project as the session. A root that is
+`~` itself has no project scope (§3).
 
 `uninstall` removes explicit entries from that one config only: `type:name@source` from
 that type's list, `name@source` from every list. All items are checked before anything
@@ -597,7 +609,12 @@ Applies when working with files matching: `k8s/**`, `*.yaml`.
   entries kept, `--force` does not override:
   - malformed markers: `begin` without `end`, `end` before `begin`, either one twice;
   - `AGENTS.md` is a symlink (commonly `CLAUDE.md` ↔ `AGENTS.md`: writing through it would
-    show Claude the rules twice), a directory, or unreadable.
+    show Claude the rules twice), a directory, or unreadable;
+  - `claude` is also a target of the scope and a Claude memory file is the same file as the
+    `AGENTS.md` (the other direction: `CLAUDE.md` → `AGENTS.md`, or a hard link). Checked:
+    `<repo>/CLAUDE.md` and `<repo>/.claude/CLAUDE.md` (project), `~/.claude/CLAUDE.md` against
+    `$CODEX_HOME/AGENTS.md` (user); compared by real path (a dangling link counts by its
+    target) or device + inode. With Claude not a target, the block is written.
 - **Lock and ownership:** each rule keeps an entry `codex:rules/<name>` with
   `"block": true` and `files: { "AGENTS.md": <hash of its section> }`. `apply` records such
   entries (added / updated / unchanged / removed by hash) but never touches disk for them;

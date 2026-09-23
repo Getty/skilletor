@@ -8,7 +8,7 @@ import { reportJson, reportText } from "./report.ts";
 import {
   cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall,
 } from "./commands.ts";
-import { runHook, type HookContext, type HookInput } from "./hooks.ts";
+import { projectRootOf, runHook, type HookContext, type HookInput } from "./hooks.ts";
 
 declare const __SKILLETOR_VERSION__: string;
 const VERSION =
@@ -42,7 +42,7 @@ Options:
                         (sync, check, status, source list, available)
   --force               sync: adopt foreign files on conflict;
                         source remove: remove even if items are installed
-  --project-dir <dir>   Project root (default: cwd)
+  --project-dir <dir>   Project root (default: git top level of cwd, else cwd)
   -h, --help            Show this help
   -v, --version         Show the version
 `;
@@ -76,7 +76,8 @@ function makeContext(flags: Flags): EngineContext {
   const home = homedir();
   return {
     home,
-    projectDir: flags.projectDir ?? process.cwd(),
+    // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd.
+    projectDir: flags.projectDir ?? projectRootOf(process.cwd()),
     stateRoot: join(home, ".claude", "skilletor"),
   };
 }
@@ -97,6 +98,7 @@ function statusText(report: ReturnType<typeof status>): string {
     for (const o of s.orphans) lines.push(`  ? ${o} (in lock, not declared)`);
     for (const t of s.trustRequests) lines.push(`  trust: ${t.name} (${t.url})`);
   }
+  if (report.projectIsHome) lines.push("project scope: none (the project directory is the home directory)");
   return lines.join("\n");
 }
 

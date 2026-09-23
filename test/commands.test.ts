@@ -526,3 +526,25 @@ test("available marks items installed through a wildcard", async () => {
     e.cleanup();
   }
 });
+
+test("k44: project-scope edits fail when the project dir is the home dir", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "srcH", (d) => skill(d, "foo"));
+    await cmdAdd(e.ctx, { name: "mine", spec: src });
+    const before = readFileSync(e.userCfgPath, "utf8");
+    const ctx: CommandContext = { ...e.ctx, projectDir: e.home };
+    const noProject = (err: unknown) =>
+      err instanceof CommandError && /no project scope/.test((err as Error).message) && (err as Error).message.includes(e.home);
+    await assert.rejects(() => cmdInstall(ctx, { items: ["foo@mine"], project: true }), noProject);
+    await assert.rejects(() => cmdUninstall(ctx, { items: ["foo@mine"], project: true }), noProject);
+    await assert.rejects(() => cmdAdd(ctx, { name: "x", spec: src, project: true }), noProject);
+    await assert.rejects(() => cmdSourceRemove(ctx, { name: "mine", project: true }), noProject);
+    assert.equal(readFileSync(e.userCfgPath, "utf8"), before, "user config untouched");
+    // The user scope still works from ~.
+    const r = await cmdInstall(ctx, { items: ["foo@mine"] });
+    assert.deepEqual(r.scopes.map((s) => s.scope), ["user"]);
+  } finally {
+    e.cleanup();
+  }
+});

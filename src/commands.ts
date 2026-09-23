@@ -1,14 +1,14 @@
 // CLI edit commands (spec §7, §4.3). Each edits only the target config file
 // (user by default, project with --project), then syncs. Editing goes through
 // config.ts so the declarative config stays the single source of truth.
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   addInstallEntry, addSource, findInstallEntries, loadConfig, removeInstallEntries, removeSource, WILDCARD,
   type ItemType, type LoadedConfig, type SourceDef,
 } from "./config.ts";
 import { resolveSpec, type Probe } from "./spec.ts";
 import { makeProbe } from "./probe.ts";
-import { cacheRootOf, identityOf, makeBackend, sync, type EngineContext } from "./engine.ts";
+import { cacheRootOf, identityOf, makeBackend, projectDirOf, sync, type EngineContext } from "./engine.ts";
 import type { SyncReport } from "./report.ts";
 import { scan } from "./catalog.ts";
 import { State } from "./state.ts";
@@ -23,9 +23,26 @@ export class CommandError extends Error {
   override name = "CommandError";
 }
 
+/** The project root for --project edits; the home dir as project dir has no project scope. */
+function projectRoot(ctx: CommandContext): string {
+  const dir = projectDirOf(ctx);
+  if (dir) return dir;
+  throw new CommandError(
+    ctx.projectDir
+      ? `no project scope: the project directory is the home directory (${ctx.home}); ` +
+          "run from a project, pass --project-dir, or drop --project to edit the user config"
+      : "no project scope: no project directory",
+  );
+}
+
 function configPath(ctx: CommandContext, project: boolean): string {
-  const root = project ? ctx.projectDir! : ctx.home;
+  const root = project ? projectRoot(ctx) : ctx.home;
   return join(root, ".claude", "skilletor.json");
+}
+
+/** Config as the engine sees it: no project config when the project dir is the home dir. */
+function load(ctx: CommandContext): LoadedConfig {
+  return loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx) });
 }
 
 const TYPE_DIR: Record<ItemType, string> = { skill: "skills", agent: "agents", rule: "rules" };
@@ -36,12 +53,13 @@ export async function cmdAdd(
   ctx: CommandContext,
   args: { name?: string; spec: string; project?: boolean },
 ): Promise<{ name: string; def: SourceDef; report: SyncReport }> {
+  const path = configPath(ctx, Boolean(args.project));
   const resolved = resolveSpec(args.spec, ctx.probe ?? makeProbe());
   const name = args.name ?? resolved.derivedName;
   const def: SourceDef =
     resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };
 
-  addSource(configPath(ctx, Boolean(args.project)), name, def);
+  addSource(path, name, def);
   // add is the trust act.
   new State(ctx.stateRoot).trust(name, resolved.value);
 
@@ -52,7 +70,7 @@ export async function cmdAdd(
 // ---- source list / remove ---------------------------------------------------
 
 export function cmdSourceList(ctx: CommandContext): { name: string; def: SourceDef; origin: "user" | "project" }[] {
-  const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+  const config = load(ctx);
   return [...config.sources.values()].map((s) => ({
     name: s.name,
     def: pickDef(s),
@@ -73,12 +91,13 @@ export async function cmdSourceRemove(
   ctx: CommandContext,
   args: { name: string; project?: boolean; force?: boolean },
 ): Promise<SyncReport> {
-  const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+  const path = configPath(ctx, Boolean(args.project));
+  const config = load(ctx);
   const inUse = usedSources(config).has(args.name);
   if (inUse && !args.force) {
     throw new CommandError(`source "${args.name}" still has installed items; use --force to remove anyway`);
   }
-  removeSource(configPath(ctx, Boolean(args.project)), args.name);
+  removeSource(path, args.name);
   return sync(ctx);
 }
 
@@ -93,7 +112,7 @@ export interface AvailableItem {
 }
 
 export async function cmdAvailable(ctx: CommandContext, args: { source?: string } = {}): Promise<AvailableItem[]> {
-  const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+  const config = load(ctx);
   const state = new State(ctx.stateRoot);
   const installedKeys = installedSet(ctx, config);
   const names = args.source ? [args.source] : [...config.sources.keys()];
@@ -124,7 +143,7 @@ export async function cmdInstall(
   args: { items: string[]; project?: boolean },
 ): Promise<SyncReport> {
   const path = configPath(ctx, Boolean(args.project));
-  const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+  const config = load(ctx);
   const state = new State(ctx.stateRoot);
   const catalogs = new Map<string, ReturnType<typeof scan>>();
 
@@ -179,7 +198,7 @@ export async function cmdUninstall(
   const project = Boolean(args.project);
   const path = configPath(ctx, project);
   const scopeName = project ? "project" : "user";
-  const lock = readLock(join(project ? ctx.projectDir! : ctx.home, ".claude", "skilletor.lock.json"));
+  const lock = readLock(join(dirname(path), "skilletor.lock.json"));
   const parsed = args.items.map((spec) => ({ spec, ...parseItemSpec(spec) }));
 
   const errors: string[] = [];
@@ -260,7 +279,7 @@ function declaredElsewhere(
     const other = findInstallEntries(path, p.name, p.source).map((e) => `${e.type}:${p.name}@${p.source}`);
     if (other.length) return `; it is declared as ${other.join(", ")}`;
   }
-  if (!project && !ctx.projectDir) return "";
+  if (!project && !projectDirOf(ctx)) return "";
   const otherPath = configPath(ctx, !project);
   const hit = findInstallEntries(otherPath, p.name, p.source, p.type).length > 0 ||
     (p.name !== WILDCARD && findInstallEntries(otherPath, WILDCARD, p.source, p.type).length > 0);
@@ -273,7 +292,7 @@ function declaredElsewhere(
 // ---- trust ------------------------------------------------------------------
 
 export function cmdTrust(ctx: CommandContext, args: { name: string }): { name: string; url: string } {
-  const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+  const config = load(ctx);
   const src = config.sources.get(args.name);
   if (!src) throw new CommandError(`unknown source: ${args.name}`);
   const url = identityOf(src);
@@ -325,9 +344,10 @@ function usedSources(config: LoadedConfig): Set<string> {
 function installedSet(ctx: CommandContext, config: LoadedConfig): Set<string> {
   const set = new Set<string>();
   for (const i of declaredItems(config)) set.add(`${i.key}@${i.source}`);
+  const projectDir = projectDirOf(ctx);
   for (const scope of ["user", "project"] as const) {
-    const dir = join(scope === "user" ? ctx.home : ctx.projectDir ?? "", ".claude");
-    if (scope === "project" && !ctx.projectDir) continue;
+    const dir = join(scope === "user" ? ctx.home : projectDir ?? "", ".claude");
+    if (scope === "project" && !projectDir) continue;
     for (const [key, entry] of Object.entries(readLock(join(dir, "skilletor.lock.json")))) {
       if (entry.skipped) continue; // renders empty here: nothing installed
       set.add(`${parseLockKey(key).target}@${entry.source}`); // any target counts

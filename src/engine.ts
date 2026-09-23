@@ -15,7 +15,7 @@ import {
   allRoots, isBlockType, type HarnessMarkers, type RootContext, type TargetSelection,
 } from "./targets.ts";
 import { inspectAgentsMd, projectDocLimit, withBlock, type Inspection, type Section } from "./agentsmd.ts";
-import { atomicWrite, hashBuffer } from "./fsutil.ts";
+import { atomicWrite, hashBuffer, sameFile, samePath } from "./fsutil.ts";
 import { convertForTarget } from "./convert.ts";
 import { LocalSource } from "./sources/local.ts";
 import { GitSource } from "./sources/git.ts";
@@ -65,6 +65,32 @@ export function targetDirOf(ctx: EngineContext, scope: ScopeName): string {
 /** The directory every target root of a scope lives under: `~` or the project root. */
 function baseOf(ctx: EngineContext, scope: ScopeName): string {
   return scope === "user" ? ctx.home : ctx.projectDir!;
+}
+
+/**
+ * The project dir, unless it is the home dir itself (a session started in `~`, or `~`
+ * a git checkout): then there is no project scope (spec §6.1) – its config, lock and
+ * target dir would be the user scope's.
+ */
+export function projectDirOf(ctx: EngineContext): string | undefined {
+  if (!ctx.projectDir || samePath(ctx.projectDir, ctx.home)) return undefined;
+  return ctx.projectDir;
+}
+
+/** True when a project dir was given but it is the home dir (no project scope). */
+export function projectIsHome(ctx: EngineContext): boolean {
+  return Boolean(ctx.projectDir) && projectDirOf(ctx) === undefined;
+}
+
+/** `ctx` with the project scope dropped when the project dir is the home dir. */
+function scoped(ctx: EngineContext): EngineContext {
+  return projectIsHome(ctx) ? { ...ctx, projectDir: undefined } : ctx;
+}
+
+/** The CLAUDE.md files Claude Code reads for a scope (spec §14.8). */
+function claudeMemoryFiles(ctx: EngineContext, scope: ScopeName): string[] {
+  const base = baseOf(ctx, scope);
+  return scope === "user" ? [join(base, ".claude", "CLAUDE.md")] : [join(base, "CLAUDE.md"), join(base, ".claude", "CLAUDE.md")];
 }
 
 /** `$CODEX_HOME`, injected or from the environment; empty means unset. */
@@ -154,7 +180,7 @@ function makeContext(
 
 export async function sync(ctx: EngineContext, opts: SyncOptions = {}): Promise<SyncReport> {
   const state = new State(ctx.stateRoot);
-  return state.withLock(() => syncInner(ctx, opts, state));
+  return state.withLock(() => syncInner(scoped(ctx), opts, state));
 }
 
 async function syncInner(ctx: EngineContext, opts: SyncOptions, state: State): Promise<SyncReport> {
@@ -400,6 +426,15 @@ async function syncScope(
   let blockState: Inspection | undefined;
   if (oldBlockKeys.length > 0 || plan.some((p) => p.inBlock)) {
     blockState = inspectAgentsMd(blockFile);
+    // Claude Code reads CLAUDE.md: when that is this AGENTS.md, it would see every
+    // rule twice (block + its own rules dir), so the block is refused like a symlink.
+    const memory = harnesses.includes("claude") ? claudeMemoryFiles(ctx, scope).find((f) => sameFile(f, blockFile)) : undefined;
+    if (blockState.ok && memory) {
+      blockState = {
+        ok: false,
+        reason: `is the same file as ${labelOf(memory)} (Claude Code would read the rules twice)`,
+      };
+    }
     if (!blockState.ok) {
       const why = blockState.reason;
       rep.warnings.push(`${blockLabel}${why.startsWith("is ") ? " " : ": "}${why}; rules for Codex not written`);
@@ -508,7 +543,8 @@ export interface CheckReport {
   error?: string;
 }
 
-export async function check(ctx: EngineContext, opts: SyncOptions = {}): Promise<CheckReport> {
+export async function check(given: EngineContext, opts: SyncOptions = {}): Promise<CheckReport> {
+  const ctx = scoped(given);
   const loaded = loadWithTargets(ctx);
   if ("error" in loaded) return { changed: false, sources: [], warnings: [], error: loaded.error };
   const { config, targets } = loaded;
@@ -557,10 +593,13 @@ export interface StatusReport {
     trustRequests: { name: string; url: string }[];
     sourceVersions: Record<string, string>;
   }[];
+  /** The project dir is the home dir, so there is no project scope. Absent otherwise. */
+  projectIsHome?: true;
   error?: string;
 }
 
-export function status(ctx: EngineContext, opts: SyncOptions = {}): StatusReport {
+export function status(given: EngineContext, opts: SyncOptions = {}): StatusReport {
+  const ctx = scoped(given);
   const loaded = loadWithTargets(ctx);
   if ("error" in loaded) return { scopes: [], error: loaded.error };
   const { config, targets } = loaded;
@@ -571,6 +610,7 @@ export function status(ctx: EngineContext, opts: SyncOptions = {}): StatusReport
   if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
 
   const out: StatusReport = { scopes: [] };
+  if (sel !== "user" && projectIsHome(given)) out.projectIsHome = true;
   for (const [scope, scopeCfg] of scopes) {
     const lock = readLock(join(targetDirOf(ctx, scope), "skilletor.lock.json"));
     const active = targets[scope];

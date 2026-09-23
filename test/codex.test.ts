@@ -2,7 +2,7 @@
 // one lock per scope with codex:-prefixed keys, per-target render and removal.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { check, status, sync, type EngineContext } from "../src/engine.ts";
@@ -699,6 +699,92 @@ test("status lists codex rules; drift notices a newly enabled Codex", async () =
     assert.deepEqual(status(e.ctx, { scope: "user" }).scopes[0]!.declared.map((d) => [d.key, d.installed]),
       [["rules/r", true], ["codex:rules/r", true]]);
     assert.equal((await check(e.ctx, { scope: "user" })).targetsChanged, undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k46: Claude Code reads CLAUDE.md; when that is the AGENTS.md skilletor would write
+// the Codex block into, Claude sees every rule twice (block + .claude/rules/).
+const SAME_FILE = /AGENTS\.md is the same file as (\.claude\/)?CLAUDE\.md \(Claude Code would read the rules twice\); rules for Codex not written/;
+
+test("k46: CLAUDE.md -> AGENTS.md with Claude a target: block refused, --force too", async () => {
+  const layouts: [string, (p: string) => void][] = [
+    ["CLAUDE.md symlink", (p) => symlinkSync("AGENTS.md", join(p, "CLAUDE.md"))],
+    [".claude/CLAUDE.md symlink", (p) => symlinkSync("../AGENTS.md", join(p, ".claude", "CLAUDE.md"))],
+    ["hard link", (p) => linkSync(join(p, "AGENTS.md"), join(p, "CLAUDE.md"))],
+  ];
+  for (const [what, link] of layouts) {
+    const e = env(["claude", "codex"]);
+    try {
+      writeFileSync(join(e.projectDir, "AGENTS.md"), "shared\n");
+      link(e.projectDir);
+      const src = source(e.tmp.dir, "s", { "rules/r1.md": "R1.\n" });
+      e.writeCfg("user", { sources: { mine: { local: src } } });
+      e.writeCfg("project", { install: { rules: ["r1@mine"] } });
+      const r = await sync(e.ctx, { scope: "project", force: true });
+      assert.equal(readFileSync(join(e.projectDir, "AGENTS.md"), "utf8"), "shared\n", what);
+      assert.equal(r.scopes[0]!.warnings.length, 1, what);
+      assert.match(r.scopes[0]!.warnings[0]!, SAME_FILE, what);
+      assert.equal(existsSync(join(e.projectDir, ".claude/rules/r1.md")), true, what);
+    } finally {
+      e.cleanup();
+    }
+  }
+});
+
+test("k46: a dangling CLAUDE.md -> AGENTS.md is refused too (the block would create it)", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    symlinkSync("AGENTS.md", join(e.projectDir, "CLAUDE.md"));
+    const src = source(e.tmp.dir, "s", { "rules/r1.md": "R1.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { rules: ["r1@mine"] } });
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.match(r.scopes[0]!.warnings.join("\n"), SAME_FILE);
+    assert.equal(existsSync(join(e.projectDir, "AGENTS.md")), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k46: CLAUDE.md -> AGENTS.md without Claude as a target: the block is written", async () => {
+  const e = env(["codex"]);
+  try {
+    writeFileSync(join(e.projectDir, "AGENTS.md"), "shared\n");
+    symlinkSync("AGENTS.md", join(e.projectDir, "CLAUDE.md"));
+    const src = source(e.tmp.dir, "s", { "rules/r1.md": "R1.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { rules: ["r1@mine"] } });
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+    assert.match(readFileSync(join(e.projectDir, "AGENTS.md"), "utf8"), /^shared\n\n<!-- skilletor:begin -->/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k46: user scope ~/.claude/CLAUDE.md -> $CODEX_HOME/AGENTS.md: refused, existing entries kept", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "rules/r.md": "R.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { rules: ["r@mine"] } });
+    await sync(e.ctx, { scope: "user" });
+    const agents = join(e.home, ".codex/AGENTS.md");
+    const written = readFileSync(agents, "utf8");
+    // The user now points Claude's memory at the Codex file.
+    symlinkSync(agents, join(e.home, ".claude", "CLAUDE.md"));
+    writeFileSync(join(src, "rules/r.md"), "R changed.\n");
+    const r = await sync(e.ctx, { scope: "user", force: true });
+    assert.match(r.scopes[0]!.warnings.join("\n"), /\.codex\/AGENTS\.md is the same file as \.claude\/CLAUDE\.md/);
+    assert.equal(readFileSync(agents, "utf8"), written);
+    assert.ok("codex:rules/r" in readLock(join(e.home, ".claude/skilletor.lock.json")));
+    // A regular ~/.claude/CLAUDE.md is a different file: writing resumes.
+    rmSync(join(e.home, ".claude", "CLAUDE.md"));
+    writeFileSync(join(e.home, ".claude", "CLAUDE.md"), "mine\n");
+    const ok = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(ok.scopes[0]!.warnings, []);
+    assert.match(readFileSync(agents, "utf8"), /R changed\./);
   } finally {
     e.cleanup();
   }
