@@ -3,14 +3,15 @@
 // config.ts so the declarative config stays the single source of truth.
 import { dirname, join } from "node:path";
 import {
-  addInstallEntry, addSource, findInstallEntries, loadConfig, removeInstallEntries, removeSource, WILDCARD,
-  type ItemType, type LoadedConfig, type SourceDef,
+  addBundleEntry, addInstallEntry, addSource, bundleEntries, findInstallEntries, findWildcardEntries, loadConfig,
+  removeBundleEntries, removeInstallEntries, removeSource, WILDCARD, type ItemType, type LoadedConfig, type SourceDef,
 } from "./config.ts";
+import { BundleError, expandBundle, matchesPattern } from "./bundles.ts";
 import { resolveSpec, type Probe } from "./spec.ts";
 import { makeProbe } from "./probe.ts";
-import { cacheRootOf, identityOf, makeBackend, projectDirOf, sync, type EngineContext } from "./engine.ts";
+import { bundleLabel, cacheRootOf, identityOf, makeBackend, projectDirOf, sync, type EngineContext } from "./engine.ts";
 import type { SyncReport } from "./report.ts";
-import { scan } from "./catalog.ts";
+import { scan, type Catalog } from "./catalog.ts";
 import { State } from "./state.ts";
 import { readLock, type Lock } from "./lock.ts";
 import { parseLockKey } from "./targets.ts";
@@ -104,17 +105,26 @@ export async function cmdSourceRemove(
 // ---- available --------------------------------------------------------------
 
 export interface AvailableItem {
-  type: ItemType;
+  /** `bundle` for a bundle of the source (spec §15.5). */
+  type: ItemType | "bundle";
   name: string;
   description?: string;
   source: string;
+  /** Items: installed in some scope. Bundles: declared in some scope's config. */
   installed: boolean;
+  /** Bundles: the expanded members of this source, `type:name`, sorted. */
+  members?: string[];
+  /** Bundles: the var defaults the bundle file declares. */
+  vars?: Record<string, unknown>;
+  /** Bundles: why the bundle cannot be expanded (spec §15.4). */
+  error?: string;
 }
 
 export async function cmdAvailable(ctx: CommandContext, args: { source?: string } = {}): Promise<AvailableItem[]> {
   const config = load(ctx);
   const state = new State(ctx.stateRoot);
   const installedKeys = installedSet(ctx, config);
+  const declaredBundles = new Set([...config.user.bundles, ...(config.project?.bundles ?? [])].map(bundleLabel));
   const names = args.source ? [args.source] : [...config.sources.keys()];
 
   const out: AvailableItem[] = [];
@@ -123,7 +133,8 @@ export async function cmdAvailable(ctx: CommandContext, args: { source?: string 
     if (!src) throw new CommandError(`unknown source: ${name}`);
     if (!state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue; // only trusted
     const loc = await makeBackend(src, ctx.home, cacheRootOf(ctx)).resolve();
-    for (const item of scan(loc.dir).items) {
+    const cat = scan(loc.dir);
+    for (const item of cat.items) {
       out.push({
         type: item.type,
         name: item.name,
@@ -131,6 +142,20 @@ export async function cmdAvailable(ctx: CommandContext, args: { source?: string 
         source: name,
         installed: installedKeys.has(`${TYPE_DIR[item.type]}/${item.name}@${name}`),
       });
+    }
+    for (const b of cat.bundles) {
+      const entry: AvailableItem = {
+        type: "bundle", name: b.name, description: b.def?.description, source: name,
+        installed: declaredBundles.has(bundleLabel({ name: b.name, source: name })),
+      };
+      try {
+        entry.members = expandBundle(cat, b.name).items.map((m) => `${m.type}:${m.name}`).sort();
+        entry.vars = b.def!.vars;
+      } catch (err) {
+        if (!(err instanceof BundleError)) throw err;
+        entry.error = err.message;
+      }
+      out.push(entry);
     }
   }
   return out;
@@ -147,35 +172,62 @@ export async function cmdInstall(
   const state = new State(ctx.stateRoot);
   const catalogs = new Map<string, ReturnType<typeof scan>>();
 
-  for (const spec of args.items) {
-    const { type: explicitType, name, source } = parseItemSpec(spec);
-    const src = config.sources.get(source);
-    if (!src) throw new CommandError(`unknown source: ${source}`);
-    if (!state.isTrusted({ name: source, resolved: identityOf(src), origin: src.origin })) {
-      throw new CommandError(`source "${source}" is not trusted; run: skilletor trust ${source}`);
-    }
-    if (name === WILDCARD) {
-      // Expanded at sync time; an empty type is fine (items may arrive later).
-      addInstallEntry(path, explicitType!, `${WILDCARD}@${source}`);
-      continue;
-    }
+  const catalogOf = async (source: string, src: Parameters<typeof makeBackend>[0]): Promise<Catalog> => {
     let cat = catalogs.get(source);
     if (!cat) {
       cat = scan((await makeBackend(src, ctx.home, cacheRootOf(ctx)).resolve()).dir);
       catalogs.set(source, cat);
     }
-    const matches = cat.items.filter((i) => i.name === name && (!explicitType || i.type === explicitType));
+    return cat;
+  };
+
+  for (const spec of args.items) {
+    const { type: explicitType, bundle, name, source } = parseItemSpec(spec);
+    const src = config.sources.get(source);
+    if (!src) throw new CommandError(`unknown source: ${source}`);
+    if (!state.isTrusted({ name: source, resolved: identityOf(src), origin: src.origin })) {
+      throw new CommandError(`source "${source}" is not trusted; run: skilletor trust ${source}`);
+    }
+    if (name.includes(WILDCARD)) {
+      // Expanded at sync time; an empty match is fine here (items may arrive later).
+      addInstallEntry(path, explicitType!, `${name}@${source}`);
+      continue;
+    }
+    const cat = await catalogOf(source, src);
+    const hasBundle = cat.bundles.some((b) => b.name === name);
+    const matches = bundle ? [] : cat.items.filter((i) => i.name === name && (!explicitType || i.type === explicitType));
+    // Without a prefix, a name only a bundle has is that bundle (spec §15.5).
+    if (bundle || (!explicitType && hasBundle && matches.length === 0)) {
+      checkBundle(cat, name, source);
+      addBundleEntry(path, `${name}@${source}`);
+      continue;
+    }
     if (matches.length === 0) {
       const suggestions = cat.items.map((i) => `${i.type}:${i.name}`).slice(0, 8).join(", ");
       throw new CommandError(`unknown item "${name}" in ${source}${suggestions ? ` (available: ${suggestions})` : ""}`);
     }
-    if (matches.length > 1) {
-      const types = matches.map((m) => `${m.type}:${name}@${source}`).join(", ");
-      throw new CommandError(`"${name}" is ambiguous in ${source}; use one of: ${types}`);
+    if (matches.length > 1 || (!explicitType && hasBundle)) {
+      const options = matches.map((m) => `${m.type}:${name}@${source}`);
+      if (!explicitType && hasBundle) options.push(`bundle:${name}@${source}`);
+      throw new CommandError(`"${name}" is ambiguous in ${source}; use one of: ${options.join(", ")}`);
     }
     addInstallEntry(path, matches[0]!.type, `${name}@${source}`);
   }
   return sync(ctx);
+}
+
+/** A bundle must exist and expand before it is declared (errors of spec §15.4). */
+function checkBundle(cat: Catalog, name: string, source: string): void {
+  if (!cat.bundles.some((b) => b.name === name)) {
+    const known = cat.bundles.map((b) => b.name).slice(0, 8).join(", ");
+    throw new CommandError(`unknown bundle "${name}" in ${source}${known ? ` (available bundles: ${known})` : ""}`);
+  }
+  try {
+    expandBundle(cat, name);
+  } catch (err) {
+    if (err instanceof BundleError) throw new CommandError(`${source}: ${err.message}`);
+    throw err;
+  }
 }
 
 export interface UninstallResult {
@@ -203,72 +255,129 @@ export async function cmdUninstall(
 
   const errors: string[] = [];
   const hints: string[] = [];
+  const where = `the ${scopeName} config`;
+  const bundlesHere = bundleEntries(path);
   for (const p of parsed) {
+    const explicit = p.bundle ? [] : findInstallEntries(path, p.name, p.source, p.type);
+    const bundleHit = bundlesHere.some((b) => b.name === p.name && b.source === p.source);
+    // Without a prefix, a name declared only as a bundle here is that bundle (spec §15.5).
+    if (!p.bundle && !p.type && !p.name.includes(WILDCARD) && bundleHit) {
+      if (explicit.length) {
+        errors.push(`${p.name}@${p.source} is ambiguous in ${where}: it names a bundle and ` +
+          `${explicit.map((e) => `${e.type}:${p.name}@${p.source}`).join(", ")}; use a prefix (bundle:${p.name}@${p.source})`);
+      } else {
+        p.bundle = true;
+      }
+      continue;
+    }
+    if (p.bundle) {
+      if (!bundleHit) {
+        errors.push(`bundle:${p.name}@${p.source} is not declared in ${where} (${path})${bundleElsewhere(ctx, p, project)}`);
+      }
+      continue;
+    }
     const label = p.type ? `${p.type}:${p.name}@${p.source}` : `${p.name}@${p.source}`;
-    const explicit = findInstallEntries(path, p.name, p.source, p.type);
-    const cover = p.name === WILDCARD
-      ? { types: [], confirmed: false }
-      : coveringWildcards(path, lock, p.name, p.source, p.type, explicit.map((e) => e.type));
-    const wild = cover.types.length ? wildcardText(cover.types, p.source) : "";
-    const where = `the ${scopeName} config`;
+    const cover = p.name.includes(WILDCARD)
+      ? { source: p.source, wilds: [], bundles: [], confirmed: false }
+      : covering(path, lock, bundlesHere, p.name, p.source, p.type, explicit.map((e) => e.type));
+    const text = coverText(cover);
     if (explicit.length === 0) {
-      if (wild && cover.confirmed) {
+      if (text && cover.confirmed) {
         errors.push(
-          `${label} is not declared explicitly; it is installed by the ${wild} in ${where}. To drop it, ` +
-            wayOut(cover.types, p.source, project),
+          `${label} is not declared explicitly; it is installed by the ${text} in ${where}. To drop it, ` +
+            wayOut(cover, project),
         );
-      } else if (wild) {
+      } else if (text) {
         errors.push(
-          `${label} is not declared in ${where} (${path}); the ${wild} there installs every item of its type ` +
-            `from ${p.source}, so if ${p.source} offers it: ${wayOut(cover.types, p.source, project)}`,
+          `${label} is not declared in ${where} (${path}); the ${text} there installs every matching item of its type ` +
+            `from ${p.source}, so if ${p.source} offers it: ${wayOut(cover, project)}`,
         );
       } else {
         errors.push(`${label} is not declared in ${where} (${path})${declaredElsewhere(ctx, path, p, project)}`);
       }
-    } else if (wild) {
+    } else if (text) {
       hints.push(
-        `${label} removed, but the ${wild} in ${where} still installs it on the next sync. To drop it, ` +
-          wayOut(cover.types, p.source, project),
+        `${label} removed, but the ${text} in ${where} still installs it on the next sync. To drop it, ` +
+          wayOut(cover, project),
       );
     }
   }
   if (errors.length) throw new CommandError(errors.join("\n"));
 
-  for (const p of parsed) removeInstallEntries(path, p.name, p.source, p.type);
+  for (const p of parsed) {
+    if (p.bundle) removeBundleEntries(path, p.name, p.source);
+    else removeInstallEntries(path, p.name, p.source, p.type);
+  }
   return { report: await sync(ctx), hints };
 }
 
+interface Cover {
+  source: string;
+  /** Wildcards (patterns) of this config that match the item, per type. */
+  wilds: { type: ItemType; pattern: string }[];
+  /** Bundle labels of this config that the lock records as declaring the item. */
+  bundles: string[];
+  /** The scope's lock shows the item installed (or skipped) under a covering entry. */
+  confirmed: boolean;
+}
+
 /**
- * Wildcards in one config that install `name@source`. The item's type comes from
- * the prefix, else from the explicit entries being removed plus the scope's lock;
- * if neither knows it, every wildcard of the source counts. `confirmed` = the
- * scope's lock shows the item installed (or skipped) under a covering wildcard's type.
+ * Wildcards and bundles in one config that install `name@source`. A wildcard's type
+ * comes from the prefix, else from the explicit entries being removed plus the scope's
+ * lock; if neither knows it, every matching wildcard of the source counts. A bundle
+ * counts when the lock records it in the item's `via` (spec §15.5).
  */
-function coveringWildcards(
-  path: string, lock: Lock, name: string, source: string, type: ItemType | undefined, explicitTypes: ItemType[],
-): { types: ItemType[]; confirmed: boolean } {
-  const found = findInstallEntries(path, WILDCARD, source, type).map((w) => w.type);
+function covering(
+  path: string, lock: Lock, bundlesHere: { name: string; source: string }[],
+  name: string, source: string, type: ItemType | undefined, explicitTypes: ItemType[],
+): Cover {
+  const found = findWildcardEntries(path, source, type)
+    .filter((w) => matchesPattern(w.pattern, name))
+    .map((w) => ({ type: w.type, pattern: w.pattern }));
   // Any target's entry counts (claude `skills/x`, codex `codex:skills/x`, spec §14.3).
-  const inLock = (t: ItemType) => Object.entries(lock).some(([key, e]) => {
+  const locked = (t?: ItemType) => Object.entries(lock).filter(([key, e]) => {
     const k = parseLockKey(key);
-    return k.target === `${TYPE_DIR[t]}/${name}` && e.source === source;
+    return k.name === name && (!t || k.type === t) && e.source === source;
   });
-  const confirmed = found.some(inLock);
-  if (type) return { types: found, confirmed };
-  const known = found.filter((t) => explicitTypes.includes(t) || inLock(t));
-  return { types: known.length || explicitTypes.length ? known : found, confirmed };
+  const inLock = (t: ItemType) => locked(t).length > 0;
+  const labels = new Set(bundlesHere.map(bundleLabel));
+  const bundles = [...new Set(locked(type).flatMap(([, e]) => (e.via ?? []).filter((v) => labels.has(v))))];
+  const confirmed = bundles.length > 0 || found.some((w) => inLock(w.type));
+  if (type) return { source, wilds: found, bundles, confirmed };
+  const known = found.filter((w) => explicitTypes.includes(w.type) || inLock(w.type));
+  return { source, wilds: known.length || explicitTypes.length ? known : found, bundles, confirmed };
 }
 
-function wildcardText(types: ItemType[], source: string): string {
-  const names = types.map((t) => `${t}:${WILDCARD}@${source}`);
-  return names.length === 1 ? `wildcard ${names[0]}` : `wildcards ${names.join(", ")}`;
+/** The covering wildcards as written with their type (`rule:perl-*@shared`), then the bundles. */
+function coverEntries(c: Cover): string[] {
+  return [...c.wilds.map((w) => `${w.type}:${w.pattern}@${c.source}`), ...c.bundles];
 }
 
-function wayOut(types: ItemType[], source: string, project: boolean): string {
+function coverText(c: Cover): string {
+  const plural = (n: number, word: string) => (n === 1 ? word : `${word}s`);
+  const parts: string[] = [];
+  const wilds = coverEntries(c).slice(0, c.wilds.length);
+  if (wilds.length) parts.push(`${plural(wilds.length, "wildcard")} ${wilds.join(", ")}`);
+  if (c.bundles.length) parts.push(`${plural(c.bundles.length, "bundle")} ${c.bundles.join(", ")}`);
+  return parts.join(" and ");
+}
+
+function wayOut(c: Cover, project: boolean): string {
   const flag = project ? " --project" : "";
-  const cmds = types.map((t) => `skilletor uninstall '${t}:${WILDCARD}@${source}'${flag}`).join(" or ");
-  return `uninstall the wildcard (${cmds}), or keep it and gate the item via vars ` +
+  const cmds = coverEntries(c).map((e) => `skilletor uninstall '${e}'${flag}`).join(" or ");
+  const what = !c.bundles.length ? "the wildcard" : !c.wilds.length ? "the bundle" : "them";
+  return `uninstall ${what} (${cmds}), or keep it and gate the item via vars ` +
     `if its template renders empty for some value (an empty render is skipped).`;
+}
+
+/** Where else a bundle is declared: the other scope's config. */
+function bundleElsewhere(ctx: CommandContext, p: { name: string; source: string }, project: boolean): string {
+  if (!project && !projectDirOf(ctx)) return "";
+  const hit = bundleEntries(configPath(ctx, !project)).some((b) => b.name === p.name && b.source === p.source);
+  if (!hit) return "";
+  return project
+    ? "; the user config declares it (run without --project)"
+    : "; the project config declares it (use --project)";
 }
 
 /** Where else the item is declared: under another type here, or in the other scope's config. */
@@ -282,7 +391,8 @@ function declaredElsewhere(
   if (!project && !projectDirOf(ctx)) return "";
   const otherPath = configPath(ctx, !project);
   const hit = findInstallEntries(otherPath, p.name, p.source, p.type).length > 0 ||
-    (p.name !== WILDCARD && findInstallEntries(otherPath, WILDCARD, p.source, p.type).length > 0);
+    (!p.name.includes(WILDCARD) &&
+      findWildcardEntries(otherPath, p.source, p.type).some((w) => matchesPattern(w.pattern, p.name)));
   if (!hit) return "";
   return project
     ? "; the user config declares it (run without --project)"
@@ -302,7 +412,8 @@ export function cmdTrust(ctx: CommandContext, args: { name: string }): { name: s
 
 // ---- helpers ----------------------------------------------------------------
 
-function parseItemSpec(spec: string): { type?: ItemType; name: string; source: string } {
+/** `[type:]name@source`, `type:pattern@source` or `bundle:name@source` (spec §7, §15.5). */
+function parseItemSpec(spec: string): { type?: ItemType; bundle?: boolean; name: string; source: string } {
   const at = spec.lastIndexOf("@");
   if (at <= 0 || at === spec.length - 1) {
     throw new CommandError(`item "${spec}" must be name@source (or type:name@source)`);
@@ -310,18 +421,23 @@ function parseItemSpec(spec: string): { type?: ItemType; name: string; source: s
   const source = spec.slice(at + 1);
   let name = spec.slice(0, at);
   let type: ItemType | undefined;
+  let bundle: boolean | undefined;
   const colon = name.indexOf(":");
   if (colon !== -1) {
     const prefix = name.slice(0, colon);
-    if (prefix !== "skill" && prefix !== "agent" && prefix !== "rule") {
-      throw new CommandError(`unknown type prefix "${prefix}" in "${spec}"`);
-    }
-    type = prefix;
+    if (prefix === "bundle") bundle = true;
+    else if (prefix === "skill" || prefix === "agent" || prefix === "rule") type = prefix;
+    else throw new CommandError(`unknown type prefix "${prefix}" in "${spec}"`);
     name = name.slice(colon + 1);
   }
-  if (name === WILDCARD && !type) {
+  if (name === "") throw new CommandError(`item "${spec}" has an empty name`);
+  if (bundle) {
+    if (name.includes(WILDCARD)) throw new CommandError(`"${spec}": patterns over bundle names are not supported`);
+    return { bundle, name, source };
+  }
+  if (name.includes(WILDCARD) && !type) {
     throw new CommandError(
-      `wildcard "${spec}" needs a type prefix: rule:*@${source}, skill:*@${source} or agent:*@${source}`,
+      `wildcard "${spec}" needs a type prefix: rule:${name}@${source}, skill:${name}@${source} or agent:${name}@${source}`,
     );
   }
   return { type, name, source };
@@ -333,10 +449,12 @@ function declaredItems(config: LoadedConfig): { key: string; source: string }[] 
   return items.map((i) => ({ key: i.target, source: i.source }));
 }
 
-/** Sources referenced by an explicit entry or a wildcard, in any scope. */
+/** Sources referenced by an explicit entry, a wildcard or a bundle, in any scope. */
 function usedSources(config: LoadedConfig): Set<string> {
   const used = new Set(declaredItems(config).map((i) => i.source));
-  for (const w of [...config.user.wildcards, ...(config.project?.wildcards ?? [])]) used.add(w.source);
+  for (const scope of [config.user, config.project]) {
+    for (const w of [...(scope?.wildcards ?? []), ...(scope?.bundles ?? [])]) used.add(w.source);
+  }
   return used;
 }
 

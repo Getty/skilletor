@@ -85,7 +85,8 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
   are installed on the next sync and items removed upstream are deleted via the lock
   like any undeclared item. `*` matches any run of characters (including none) anywhere
   in the name: `*@shared`, `perl-*@shared`, `*-style@shared`. A name without `*` is an
-  explicit entry. A pattern that matches nothing yields a warning, not an error.
+  explicit entry. A pattern that matches nothing yields a warning, not an error – except
+  the bare `*`, which may legitimately match nothing (a source without rules) and stays silent.
 - **Bundles:** `install.bundles` lists `name@source` entries naming a bundle in that
   source (§15). A bundle is expanded at sync time like a wildcard; the items it yields
   follow the overlap rules below exactly as wildcard-yielded items do. Patterns over
@@ -741,7 +742,9 @@ An unresolvable or untrusted source keeps what its bundles installed, as for wil
   `--json` includes the members and the bundle's vars.
 - `status` marks items `via bundle:perl@shared` (`via` in `--json`) and prints one line per
   bundle with the number of items it currently has installed, like wildcards.
-- The lock records items only; a bundle itself has no lock entry. `check` treats a changed
+- The lock records items only; a bundle itself has no lock entry. An item a bundle declares
+  carries `"via": ["bundle:perl@shared"]` in its lock entry, so `status`, the §15.4 keep rule
+  and `uninstall` know the bundle offline. `check` treats a changed
   source as today, so an edited bundle file triggers a sync like any other upstream change.
 
 ### 15.6 Items of other sources

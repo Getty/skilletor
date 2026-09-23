@@ -29,9 +29,12 @@ Commands:
   source remove <name>  Remove a source, then sync
   available [source]    List items offered by trusted sources
   install <item>...     Install items ([type:]name@source), then sync;
-                        type:*@source installs every item of that type
-  uninstall <item>...   Remove items ([type:]name@source or type:*@source),
-                        then sync
+                        type:*@source installs every item of that type,
+                        type:perl-*@source every one whose name matches;
+                        bundle:name@source installs a bundle (a bare
+                        name@source does too when no item has that name)
+  uninstall <item>...   Remove entries ([type:]name@source, type:*@source,
+                        type:perl-*@source or bundle:name@source), then sync
   trust <source>        Trust a project-declared source
 
 Options:
@@ -94,7 +97,11 @@ function statusText(report: ReturnType<typeof status>): string {
       const note = d.skipped ? " (skipped: renders empty)" : "";
       lines.push(`  ${mark} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}${note}`);
     }
-    for (const w of s.wildcards) lines.push(`  * ${w.type}s/* @${w.source} (${w.installed} installed)`);
+    for (const w of s.wildcards) {
+      const pattern = w.entry.slice(0, w.entry.lastIndexOf("@")).replace(/^[a-z]+:/, "");
+      lines.push(`  * ${w.type}s/${pattern} @${w.source} (${w.installed} installed)`);
+    }
+    for (const b of s.bundles) lines.push(`  * bundle:${b.name}@${b.source} (${b.installed} installed)`);
     for (const o of s.orphans) lines.push(`  ? ${o} (in lock, not declared)`);
     for (const t of s.trustRequests) lines.push(`  trust: ${t.name} (${t.url})`);
   }
@@ -187,9 +194,13 @@ export async function run(argv: string[]): Promise<number> {
         if (flags.json) {
           process.stdout.write(JSON.stringify(items, null, 2) + "\n");
         } else {
-          process.stdout.write(
-            items.map((i) => `${i.installed ? "✓" : " "} ${i.type} ${i.name}@${i.source}${i.description ? ` — ${i.description}` : ""}`).join("\n") + "\n",
-          );
+          const lines = items.map((i) => {
+            const line = `${i.installed ? "✓" : " "} ${i.type} ${i.name}@${i.source}${i.description ? ` — ${i.description}` : ""}`;
+            if (i.type !== "bundle") return line;
+            // A bundle's members (spec §15.5) on the next line, or why it cannot be expanded.
+            return `${line}\n    ${i.error !== undefined ? `error: ${i.error}` : i.members!.join(", ") || "(no items)"}`;
+          });
+          process.stdout.write(lines.join("\n") + "\n");
         }
         return 0;
       }

@@ -20,6 +20,10 @@ export interface LockEntry {
   /** A section of a shared file's managed block (Codex rules in AGENTS.md, spec §14.8):
    *  `files` maps that file to the section's hash; the engine, not apply, writes it. */
   block?: boolean;
+  /** The bundle entries (`bundle:perl@shared`) that declared the item, when bundles did
+   *  (spec §15.5): lets `status` name them offline, and keeps the item while a bundle
+   *  cannot be expanded (spec §15.4). Absent for explicit and wildcard items. */
+  via?: string[];
 }
 
 export type SkipReason = "renders-empty";
@@ -59,6 +63,7 @@ export function serializeLock(lock: Lock): string {
     out[key] = { source: entry.source, version: entry.version, files };
     if (entry.skipped) out[key].skipped = entry.skipped;
     if (entry.block) out[key].block = true;
+    if (entry.via?.length) out[key].via = [...entry.via];
   }
   return JSON.stringify(out, null, 2) + "\n";
 }

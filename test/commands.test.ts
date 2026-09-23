@@ -548,3 +548,196 @@ test("k44: project-scope edits fail when the project dir is the home dir", async
     e.cleanup();
   }
 });
+
+// ---- patterns and bundles (k48, spec §3, §7, §15.5) ---------------------------
+
+function bundleFile(dir: string, name: string, text: string) {
+  mkdirSync(join(dir, "bundles"), { recursive: true });
+  writeFileSync(join(dir, "bundles", `${name}.yaml`), text);
+}
+
+test("install type:perl-*@source stores the pattern; a pattern without a type prefix is an error", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "perl-a");
+      rule(d, "go-b");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    await assert.rejects(() => cmdInstall(e.ctx, { items: ["perl-*@mine"] }), /type prefix.*rule:perl-\*@mine/);
+    const r = await cmdInstall(e.ctx, { items: ["rule:perl-*@mine"] });
+    assert.deepEqual(e.readUserCfg().install, { rules: ["perl-*@mine"] });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["rules/perl-a"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("install bundle:name@source adds it to install.bundles and installs its items", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "r1");
+      skill(d, "s1");
+      bundleFile(d, "perl", "description: Perl\nrules: [r1]\nskills: [s1]\n");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    const r = await cmdInstall(e.ctx, { items: ["bundle:perl@mine"] });
+    assert.deepEqual(e.readUserCfg().install, { bundles: ["perl@mine"] });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key).sort(), ["rules/r1", "skills/s1"]);
+    await cmdInstall(e.ctx, { items: ["bundle:perl@mine"], project: true });
+    assert.deepEqual(JSON.parse(readFileSync(join(e.projectDir, ".claude/skilletor.json"), "utf8")).install, { bundles: ["perl@mine"] });
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("install of an unknown or broken bundle is an error and edits nothing", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "r1");
+      bundleFile(d, "broken", "rules: [r1]\n");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    await assert.rejects(() => cmdInstall(e.ctx, { items: ["bundle:ghost@mine"] }), /unknown bundle "ghost" in mine/);
+    await assert.rejects(() => cmdInstall(e.ctx, { items: ["bundle:broken@mine"] }), /broken.*description/);
+    assert.equal(e.readUserCfg().install, undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("install name@source resolves to a bundle when no item has that name, else it is ambiguous", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "r1");
+      rule(d, "dup");
+      bundleFile(d, "perl", "description: Perl\nrules: [r1]\n");
+      bundleFile(d, "dup", "description: Dup\nrules: [r1]\n");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    await cmdInstall(e.ctx, { items: ["perl@mine"] });
+    assert.deepEqual(e.readUserCfg().install, { bundles: ["perl@mine"] });
+    await assert.rejects(() => cmdInstall(e.ctx, { items: ["dup@mine"] }), (err: unknown) => {
+      const msg = (err as Error).message;
+      assert.match(msg, /ambiguous/);
+      assert.match(msg, /bundle:dup@mine/);
+      assert.match(msg, /rule:dup@mine/);
+      return true;
+    });
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall bundle:name@source removes the entry and its items; bare name works when unambiguous", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "r1");
+      bundleFile(d, "perl", "description: Perl\nrules: [r1]\n");
+      bundleFile(d, "go", "description: Go\nrules: [r1]\n");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { bundles: ["perl@mine", "bundle:go@mine"] } });
+    await cmdInstall(e.ctx, { items: [] });
+    await cmdUninstall(e.ctx, { items: ["bundle:perl@mine"] });
+    assert.deepEqual(e.readUserCfg().install, { bundles: ["bundle:go@mine"] });
+    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), true); // go still yields it
+    await cmdUninstall(e.ctx, { items: ["go@mine"] });
+    assert.equal(e.readUserCfg().install, undefined);
+    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), false);
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["bundle:perl@mine"] }), /bundle:perl@mine is not declared/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall of an item only a bundle declares fails naming the bundle; explicit + bundle warns", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "r1");
+      bundleFile(d, "perl", "description: Perl\nrules: [r1]\n");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { bundles: ["perl@mine"] } });
+    await cmdInstall(e.ctx, { items: [] });
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["r1@mine"] }), (err: unknown) => {
+      const msg = (err as Error).message;
+      assert.match(msg, /installed by the bundle bundle:perl@mine/);
+      assert.match(msg, /skilletor uninstall 'bundle:perl@mine'/);
+      assert.match(msg, /vars/);
+      return true;
+    });
+    assert.deepEqual(e.readUserCfg().install, { bundles: ["perl@mine"] });
+
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { rules: ["r1@mine"], bundles: ["perl@mine"] } });
+    await cmdInstall(e.ctx, { items: [] });
+    const res = await cmdUninstall(e.ctx, { items: ["rule:r1@mine"] });
+    assert.deepEqual(e.readUserCfg().install, { bundles: ["perl@mine"] });
+    assert.equal(res.hints.length, 1);
+    assert.match(res.hints[0]!, /bundle bundle:perl@mine in the user config still installs it/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("the wildcard hint honours patterns: it names the matching pattern, not others", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "perl-a");
+      rule(d, "go-b");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { rules: ["perl-*@mine", "go-*@mine"] } });
+    await cmdInstall(e.ctx, { items: [] });
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["perl-a@mine"] }), (err: unknown) => {
+      const msg = (err as Error).message;
+      assert.match(msg, /wildcard rule:perl-\*@mine/);
+      assert.match(msg, /skilletor uninstall 'rule:perl-\*@mine'/);
+      assert.doesNotMatch(msg, /go-\*/);
+      return true;
+    });
+    await cmdUninstall(e.ctx, { items: ["rule:go-*@mine"] });
+    assert.deepEqual(e.readUserCfg().install, { rules: ["perl-*@mine"] });
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("available lists bundles with description, expanded members, vars and installed marker", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "perl-a");
+      skill(d, "s1");
+      bundleFile(d, "perl", "description: Perl\nrules: [\"perl-*\"]\nbundles: [base]\nvars:\n  v: 1\n");
+      bundleFile(d, "base", "description: Base\nskills: [s1]\n");
+      bundleFile(d, "broken", "nope: 1\n");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { bundles: ["perl@mine"] } });
+    const items = await cmdAvailable(e.ctx, { source: "mine" });
+    const bundles = items.filter((i) => i.type === "bundle");
+    const perl = bundles.find((b) => b.name === "perl")!;
+    assert.equal(perl.description, "Perl");
+    assert.deepEqual(perl.members, ["rule:perl-a", "skill:s1"]);
+    assert.deepEqual(perl.vars, { v: 1 });
+    assert.equal(perl.installed, true);
+    assert.equal(bundles.find((b) => b.name === "base")!.installed, false);
+    assert.match(bundles.find((b) => b.name === "broken")!.error!, /description|unknown key/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("source remove refuses while a bundle uses the source", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => bundleFile(d, "perl", "description: P\n"));
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { bundles: ["perl@mine"] } });
+    await assert.rejects(() => cmdSourceRemove(e.ctx, { name: "mine" }), /still has installed items/);
+  } finally {
+    e.cleanup();
+  }
+});

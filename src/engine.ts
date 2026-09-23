@@ -8,8 +8,10 @@ import { hostname, platform, userInfo } from "node:os";
 import { existsSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import {
-  loadConfig, type Harness, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig, type WildcardItem,
+  loadConfig, type BundleItem, type Harness, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig,
+  type WildcardItem,
 } from "./config.ts";
+import { BundleError, expandBundle, matchesPattern, type Chain } from "./bundles.ts";
 import {
   defaultMarkers, detectHarnesses, lockKey, parseLockKey, rootOf, rootOfKey, selectTargets, supports, targetDrift,
   allRoots, isBlockType, type HarnessMarkers, type RootContext, type TargetSelection,
@@ -129,9 +131,14 @@ export function makeBackend(src: ResolvedSource, home: string, cacheRoot: string
   throw new Error(`source ${src.name} has no backend`);
 }
 
-/** Every source a scope references, through explicit entries or wildcards. */
+/** Every source a scope references, through explicit entries, wildcards or bundles. */
 export function scopeSources(scopeCfg: ScopeConfig): string[] {
-  return [...new Set([...scopeCfg.install, ...scopeCfg.wildcards].map((i) => i.source))];
+  return [...new Set([...scopeCfg.install, ...scopeCfg.wildcards, ...scopeCfg.bundles].map((i) => i.source))];
+}
+
+/** How a bundle entry is named in reports, `status` and the lock's `via`: `bundle:perl@shared`. */
+export function bundleLabel(b: { name: string; source: string }): string {
+  return `bundle:${b.name}@${b.source}`;
 }
 
 const TYPE_DIR: Record<ItemType, string> = { skill: "skills", agent: "agents", rule: "rules" };
@@ -160,9 +167,11 @@ function makeContext(
   item: { type: ItemType; name: string; source: string },
   scopeVars: Record<string, unknown>,
   sourceVars: Record<string, unknown>,
+  bundleVars: Record<string, unknown> = {},
 ): RenderContext {
   return {
-    vars: { ...sourceVars, ...scopeVars },
+    // source defaults < bundle vars (bundle items only) < user < project < local (spec §5, §15.3)
+    vars: { ...sourceVars, ...bundleVars, ...scopeVars },
     project:
       scope === "project"
         ? { dir: ctx.projectDir!, name: basename(ctx.projectDir!), git_remote: gitRemote(ctx.projectDir!) }
@@ -174,6 +183,32 @@ function makeContext(
     user: ctx.user ?? { name: userInfo().username, home: ctx.home },
     item: { name: item.name, type: item.type, source: item.source },
   };
+}
+
+/**
+ * Bundle vars for one item from every chain it was reached through (spec §15.3): a key
+ * every setting chain agrees on applies; a key set to different values applies from no
+ * chain, and `conflict` gets the key and the bundles (labels) that set it.
+ */
+function mergeChainVars(
+  chains: Chain[], source: string, conflict: (key: string, setters: string[]) => void,
+): Record<string, unknown> {
+  const values = new Map<string, { value: unknown; setter: string }[]>();
+  for (const c of chains) {
+    for (const [key, value] of Object.entries(c.vars)) {
+      const setter = bundleLabel({ name: c.setters[key]!, source });
+      values.set(key, [...(values.get(key) ?? []), { value, setter }]);
+    }
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, list] of values) {
+    if (new Set(list.map((v) => JSON.stringify(v.value))).size === 1) {
+      out[key] = list[0]!.value;
+    } else {
+      conflict(key, [...new Set(list.map((v) => v.setter))]);
+    }
+  }
+  return out;
 }
 
 // ---- sync -------------------------------------------------------------------
@@ -300,7 +335,10 @@ async function syncScope(
     }
   };
 
-  const buildItem = (item: { type: ItemType; name: string; source: string; target: string }) => {
+  const buildItem = (
+    item: { type: ItemType; name: string; source: string; target: string },
+    extra: { bundleVars?: Record<string, unknown>; via?: string[] } = {},
+  ) => {
     const targets = harnessesFor(item.type);
     if (targets.length === 0) return;
     for (const h of targets) {
@@ -325,7 +363,9 @@ async function syncScope(
       const root = rootOf(rc, h, item.type)!;
       let output: Map<string, Buffer>;
       try {
-        output = build(catItem, r.dir, makeContext(ctx, scope, h, root, item, scopeCfg.vars, cat.meta.vars ?? {}));
+        output = build(
+          catItem, r.dir, makeContext(ctx, scope, h, root, item, scopeCfg.vars, cat.meta.vars ?? {}, extra.bundleVars),
+        );
       } catch (err) {
         const where = harnesses.length > 1 ? ` (${h})` : "";
         rep.warnings.push(`template error in ${item.type} ${item.name}${where}: ${(err as Error).message}`);
@@ -333,6 +373,7 @@ async function syncScope(
         continue;
       }
       const planItem: PlanItem = { key, type: item.type, name: item.name, source: item.source, version: r.version, output };
+      if (extra.via?.length) planItem.via = extra.via;
       if (isBlockType(h, item.type)) planItem.inBlock = true;
       // Main template renders empty: not applicable here (spec §5).
       if (rendersEmpty(catItem, output)) {
@@ -357,58 +398,111 @@ async function syncScope(
     }
   };
 
-  const explicit = new Map<string, { source: string; raw: string }>();
-  for (const item of scopeCfg.install) {
-    explicit.set(item.target, { source: item.source, raw: item.raw });
-    buildItem(item);
+  // Expand wildcards and bundles (spec §3, §6.1, §15.2) into offers per target. An
+  // unresolvable source (or a bundle that cannot be expanded) offers what it installed
+  // before, so those items are kept and still count for collisions.
+  interface Offer {
+    /** The declaring entry as shown in warnings: `*@shared`, `bundle:perl@shared`. */
+    from: string;
+    source: string;
+    live: boolean;
+    /** Bundle offers: the label recorded in the lock's `via`. */
+    via?: string;
+    /** Live bundle offers: the chains the item was reached through. */
+    chains?: Chain[];
   }
-
-  // Expand wildcards (spec §3, §6.1). An unresolvable source offers what it
-  // installed before (for any target), so its items are kept and still count
-  // for collisions.
-  const offers = new Map<string, { type: ItemType; name: string; from: WildcardItem[]; live: boolean }>();
-  const offer = (w: WildcardItem, name: string, live: boolean) => {
-    const target = `${TYPE_DIR[w.type]}/${name}`;
-    const o = offers.get(target) ?? { type: w.type, name, from: [], live };
-    if (!o.from.includes(w)) o.from.push(w);
-    offers.set(target, o);
+  const offers = new Map<string, { type: ItemType; name: string; offers: Offer[] }>();
+  const offer = (type: ItemType, name: string, o: Offer) => {
+    const target = `${TYPE_DIR[type]}/${name}`;
+    const entry = offers.get(target) ?? { type, name, offers: [] };
+    if (!entry.offers.some((x) => x.from === o.from)) entry.offers.push(o);
+    offers.set(target, entry);
   };
+  /** Lock entries of this scope, per item (any target), as type + name. */
+  const lockedItems = Object.entries(oldLock).map(([key, entry]) => ({ ...keyToTypeName(key), entry }));
   for (const w of scopeCfg.wildcards) {
     const cat = catalogOf(w.source);
     if (cat) {
-      for (const ci of cat.items) if (ci.type === w.type) offer(w, ci.name, true);
+      const hits = cat.items.filter((ci) => ci.type === w.type && matchesPattern(w.pattern, ci.name));
+      if (hits.length === 0) rep.warnings.push(`${w.type} wildcard ${w.raw} matches nothing in source ${w.source}`);
+      for (const ci of hits) offer(w.type, ci.name, { from: w.raw, source: w.source, live: true });
     } else {
-      for (const [key, entry] of Object.entries(oldLock)) {
-        const tn = keyToTypeName(key);
-        if (entry.source === w.source && tn.type === w.type) offer(w, tn.name, false);
+      for (const l of lockedItems) {
+        if (l.entry.source === w.source && l.type === w.type && matchesPattern(w.pattern, l.name)) {
+          offer(l.type, l.name, { from: w.raw, source: w.source, live: false });
+        }
       }
     }
   }
+  for (const b of scopeCfg.bundles) {
+    const label = bundleLabel(b);
+    const cat = catalogOf(b.source);
+    let expanded: ReturnType<typeof expandBundle> | undefined;
+    if (cat) {
+      try {
+        expanded = expandBundle(cat, b.name);
+      } catch (err) {
+        if (!(err instanceof BundleError)) throw err;
+        rep.warnings.push(`${label}: ${err.message}; its installed items are kept`);
+      }
+    }
+    if (expanded) {
+      for (const w of expanded.warnings) rep.warnings.push(`bundle ${w.bundle}@${b.source}: ${w.message}`);
+      for (const m of expanded.items) {
+        offer(m.type, m.name, { from: label, source: b.source, live: true, via: label, chains: m.chains });
+      }
+    } else {
+      for (const l of lockedItems) {
+        if (l.entry.via?.includes(label)) offer(l.type, l.name, { from: label, source: l.entry.source, live: false, via: label });
+      }
+    }
+  }
+  // Explicit entries win over every offer; they get no bundle vars (spec §15.3), but the
+  // lock records the same-source bundles that also yield them, for `uninstall` hints.
+  const explicit = new Map<string, { source: string; raw: string }>();
+  for (const item of scopeCfg.install) {
+    explicit.set(item.target, { source: item.source, raw: item.raw });
+    const via = (offers.get(item.target)?.offers ?? []).flatMap((x) => (x.via && x.source === item.source ? [x.via] : []));
+    buildItem(item, { via });
+  }
+  // Bundle var conflicts (spec §15.3), reported once per key and pair of bundles.
+  const varConflicts = new Map<string, string[]>();
   for (const [target, o] of offers) {
     const claim = explicit.get(target);
     if (claim) {
-      for (const w of o.from) {
-        if (w.source !== claim.source) {
-          rep.warnings.push(`${o.type} "${o.name}" from ${w.raw} ignored: explicitly declared as ${claim.raw}`);
+      for (const x of o.offers) {
+        if (x.source !== claim.source) {
+          rep.warnings.push(`${o.type} "${o.name}" from ${x.from} ignored: explicitly declared as ${claim.raw}`);
         }
       }
       continue;
     }
-    if (o.from.length > 1) {
-      rep.warnings.push(`${o.type} "${o.name}" offered by ${o.from.map((w) => w.raw).join(" and ")}; skipped`);
+    if (new Set(o.offers.map((x) => x.source)).size > 1) {
+      rep.warnings.push(`${o.type} "${o.name}" offered by ${o.offers.map((x) => x.from).join(" and ")}; skipped`);
       keepIfLocked(target, o.type);
       continue;
     }
-    const w = o.from[0]!;
-    if (!o.live) {
+    // One source: installed once, however many of its wildcards and bundles yield it.
+    const source = o.offers[0]!.source;
+    const live = o.offers.filter((x) => x.live);
+    if (live.length === 0) {
       keepIfLocked(target, o.type);
       continue;
     }
     if (!isValidItemName(o.name)) {
-      rep.warnings.push(`${o.type} "${o.name}" from ${w.raw} skipped: invalid item name`);
+      rep.warnings.push(`${o.type} "${o.name}" from ${live[0]!.from} skipped: invalid item name`);
       continue;
     }
-    buildItem({ type: o.type, name: o.name, source: w.source, target });
+    const via = o.offers.flatMap((x) => (x.via ? [x.via] : []));
+    const chains = live.flatMap((x) => x.chains ?? []);
+    const bundleVars = mergeChainVars(chains, source, (key, setters) => {
+      const k = `"${key}": ${setters.join(" and ")}`;
+      varConflicts.set(k, [...(varConflicts.get(k) ?? []), `${o.type} ${o.name}`]);
+    });
+    buildItem({ type: o.type, name: o.name, source, target }, { bundleVars, via });
+  }
+  for (const [k, items] of varConflicts) {
+    rep.warnings.push(`bundle vars conflict on ${k} set different values; neither applies to ${items.join(", ")}`);
   }
 
   /** A path for the report: relative to the scope base when under it, else absolute. */
@@ -585,11 +679,13 @@ export interface StatusReport {
     scope: ScopeName;
     /** The harnesses this scope installs for (spec §14.1). */
     targets: Harness[];
-    /** `via` names the wildcard entry an item was installed through. */
+    /** `via` names the wildcard entry or bundle (`bundle:perl@shared`) an item was installed through. */
     declared: { key: string; source: string; installed: boolean; via?: string; skipped?: SkipReason }[];
     orphans: string[];
     /** Each wildcard with the number of items currently installed through it. */
     wildcards: { type: ItemType; source: string; entry: string; installed: number }[];
+    /** Each bundle entry with the number of items currently installed through it (spec §15.5). */
+    bundles: { name: string; source: string; entry: string; installed: number }[];
     trustRequests: { name: string; url: string }[];
     sourceVersions: Record<string, string>;
   }[];
@@ -636,25 +732,29 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
       if (entry?.skipped) d.skipped = entry.skipped;
       return d;
     });
-    const via = new Map<WildcardItem, Set<string>>(); // distinct item names per wildcard
+    const via = new Map<WildcardItem | BundleItem, Set<string>>(); // distinct item targets per entry
     const orphans: string[] = [];
     for (const [key, entry] of Object.entries(lock)) {
       if (declaredKeys.has(key)) continue;
       const k = parseLockKey(key);
-      const type = k.type;
-      const w = k.harness && active.includes(k.harness)
-        ? scopeCfg.wildcards.find((x) => x.source === entry.source && x.type === type)
-        : undefined;
-      if (!w) {
+      const covering: (WildcardItem | BundleItem)[] = [];
+      if (k.harness && active.includes(k.harness)) {
+        covering.push(...scopeCfg.bundles.filter((b) => entry.via?.includes(bundleLabel(b))));
+        covering.push(...scopeCfg.wildcards.filter((x) =>
+          x.source === entry.source && x.type === k.type && matchesPattern(x.pattern, k.name)));
+      }
+      const first = covering[0];
+      if (!first) {
         orphans.push(key);
         continue;
       }
+      const label = "pattern" in first ? first.raw : bundleLabel(first);
       if (entry.skipped) {
-        declared.push({ key, source: entry.source, installed: false, via: w.raw, skipped: entry.skipped });
+        declared.push({ key, source: entry.source, installed: false, via: label, skipped: entry.skipped });
         continue;
       }
-      declared.push({ key, source: entry.source, installed: true, via: w.raw });
-      via.set(w, (via.get(w) ?? new Set()).add(k.target));
+      declared.push({ key, source: entry.source, installed: true, via: label });
+      for (const c of covering) via.set(c, (via.get(c) ?? new Set()).add(k.target));
     }
     out.scopes.push({
       scope,
@@ -663,6 +763,9 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
       orphans,
       wildcards: scopeCfg.wildcards.map((w) => ({
         type: w.type, source: w.source, entry: w.raw, installed: via.get(w)?.size ?? 0,
+      })),
+      bundles: scopeCfg.bundles.map((b) => ({
+        name: b.name, source: b.source, entry: b.raw, installed: via.get(b)?.size ?? 0,
       })),
       trustRequests,
       sourceVersions,

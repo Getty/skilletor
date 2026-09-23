@@ -363,14 +363,92 @@ test("wildcards from two sources in one type are not a config error", () => {
   }
 });
 
-test("a partial wildcard name is rejected", () => {
+// k48: `*` anywhere in the name is a pattern (spec §3).
+test("patterns parse into wildcards with their pattern; different patterns of one source coexist", () => {
   const { home, projectDir, cleanup } = setup({
-    user: { sources: { s: { git: "https://example.com/s" } }, install: { rules: ["foo*@s"] } },
+    user: {
+      sources: { s: { git: "https://example.com/s" } },
+      install: { rules: ["perl-*@s", "rule:*-style@s", "*@s", "plain@s"] },
+    },
   });
   try {
-    assert.throws(() => loadConfig({ home, projectDir }), /\*/);
+    const cfg = loadConfig({ home, projectDir });
+    assert.deepEqual(cfg.user.wildcards.map((w) => [w.pattern, w.raw]), [
+      ["perl-*", "perl-*@s"], ["*-style", "rule:*-style@s"], ["*", "*@s"],
+    ]);
+    assert.deepEqual(cfg.user.install.map((i) => i.name), ["plain"]);
   } finally {
     cleanup();
+  }
+});
+
+test("the same pattern twice in one scope is rejected, also across project and local", () => {
+  const one = setup({
+    user: { sources: { s: { git: "https://example.com/s" } }, install: { rules: ["perl-*@s", "rule:perl-*@s"] } },
+  });
+  try {
+    assert.throws(() => loadConfig({ home: one.home, projectDir: one.projectDir }), /duplicate/i);
+  } finally {
+    one.cleanup();
+  }
+  const two = setup({
+    project: { sources: { s: { git: "https://example.com/s" } }, install: { rules: ["perl-*@s"] } },
+    local: { install: { rules: ["perl-*@s"] } },
+  });
+  try {
+    assert.throws(() => loadConfig({ home: two.home, projectDir: two.projectDir }), /duplicate/i);
+  } finally {
+    two.cleanup();
+  }
+});
+
+// ---- bundles (k48, spec §15) ------------------------------------------------
+
+test("install.bundles parses name@source, with or without a bundle: prefix", () => {
+  const { home, projectDir, cleanup } = setup({
+    user: { sources: { s: { git: "https://example.com/s" } }, install: { bundles: ["perl@s", "bundle:go@s"] } },
+    project: { install: { bundles: ["perl@s"] } },
+    local: { install: { bundles: ["base@s"] } },
+  });
+  try {
+    const cfg = loadConfig({ home, projectDir });
+    assert.deepEqual(cfg.user.bundles, [
+      { name: "perl", source: "s", raw: "perl@s" },
+      { name: "go", source: "s", raw: "bundle:go@s" },
+    ]);
+    assert.deepEqual(cfg.project?.bundles.map((b) => b.raw), ["perl@s", "base@s"]);
+    assert.deepEqual(cfg.user.install, []);
+    assert.deepEqual(cfg.user.wildcards, []);
+  } finally {
+    cleanup();
+  }
+});
+
+test("install.bundles errors: unknown source, pattern, wrong prefix, not a list, duplicate", () => {
+  const cases: [unknown, RegExp][] = [
+    [{ bundles: ["perl@ghost"] }, /unknown source.*ghost/],
+    [{ bundles: ["perl-*@s"] }, /pattern/],
+    [{ bundles: ["rule:perl@s"] }, /bundle/],
+    [{ bundles: "perl@s" }, /array/],
+    [{ bundles: ["perl"] }, /name@source/],
+    [{ bundles: ["perl@s", "bundle:perl@s"] }, /duplicate/],
+  ];
+  for (const [install, re] of cases) {
+    const { home, projectDir, cleanup } = setup({ user: { sources: { s: { git: "https://example.com/s" } }, install } });
+    try {
+      assert.throws(() => loadConfig({ home, projectDir }), re, JSON.stringify(install));
+    } finally {
+      cleanup();
+    }
+  }
+  const across = setup({
+    project: { sources: { s: { git: "https://example.com/s" } }, install: { bundles: ["perl@s"] } },
+    local: { install: { bundles: ["perl@s"] } },
+  });
+  try {
+    assert.throws(() => loadConfig({ home: across.home, projectDir: across.projectDir }), /duplicate/);
+  } finally {
+    across.cleanup();
   }
 });
 

@@ -5746,7 +5746,7 @@ import { join as join15 } from "node:path";
 import { execFileSync } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
 import { existsSync as existsSync10, rmSync as rmSync6 } from "node:fs";
-import { basename as basename2, dirname as dirname4, isAbsolute, join as join13, relative as relative2 } from "node:path";
+import { basename as basename3, dirname as dirname4, isAbsolute, join as join13, relative as relative2 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -5886,11 +5886,12 @@ function mergeSource(base, incoming, origin) {
   merged.origin = base?.origin === "user" || origin === "user" ? "user" : "project";
   return merged;
 }
+var BUNDLES_KEY = "bundles";
 function parseInstall(obj, path, scope, known) {
   const install = asObject(obj.install, path, "install");
   for (const key of Object.keys(install)) {
-    if (!(key in INSTALL_KEYS)) {
-      throw new ConfigError(`${path}: install.${key} is not a valid type (skills, agents, rules)`);
+    if (!(key in INSTALL_KEYS) && key !== BUNDLES_KEY) {
+      throw new ConfigError(`${path}: install.${key} is not a valid type (skills, agents, rules, bundles)`);
     }
   }
   const items = [];
@@ -5918,14 +5919,63 @@ function parseInstall(obj, path, scope, known) {
         );
       }
       seen.set(targetKey, entry);
-      if (item.name === WILDCARD) wildcards.push({ type: item.type, source: item.source, raw: entry });
-      else items.push(item);
+      if (item.name.includes(WILDCARD)) {
+        wildcards.push({ type: item.type, source: item.source, pattern: item.name, raw: entry });
+      } else {
+        items.push(item);
+      }
     });
   }
-  return { install: items, wildcards };
+  return { install: items, wildcards, bundles: parseBundles(install[BUNDLES_KEY], path, scope, known) };
+}
+function parseBundles(list, path, scope, known) {
+  if (list === void 0) return [];
+  if (!Array.isArray(list)) throw new ConfigError(`${path}: install.${BUNDLES_KEY} must be an array`);
+  const out = [];
+  list.forEach((entry, i) => {
+    const where = `install.${BUNDLES_KEY}[${i}]`;
+    if (typeof entry !== "string") throw new ConfigError(`${path}: ${where} must be a string`);
+    const b = parseBundleEntry(entry, path, where);
+    if (!known.has(b.source)) {
+      throw new ConfigError(`${path}: ${scope} install "${entry}" references unknown source "${b.source}"`);
+    }
+    out.push(b);
+  });
+  return dedupeBundles(out, [], path);
+}
+function parseBundleEntry(entry, path, where) {
+  const at = entry.lastIndexOf("@");
+  if (at <= 0 || at === entry.length - 1) {
+    throw new ConfigError(`${path}: ${where} "${entry}" must be name@source`);
+  }
+  let name = entry.slice(0, at);
+  const colon = name.indexOf(":");
+  if (colon !== -1) {
+    const prefix = name.slice(0, colon);
+    if (prefix !== "bundle") {
+      throw new ConfigError(`${path}: ${where} "${entry}" declares type "${prefix}" but is under bundles`);
+    }
+    name = name.slice(colon + 1);
+  }
+  if (name.length === 0) throw new ConfigError(`${path}: ${where} "${entry}" has an empty name`);
+  if (name.includes(WILDCARD)) {
+    throw new ConfigError(`${path}: ${where} "${entry}": patterns over bundle names are not supported`);
+  }
+  return { name, source: entry.slice(at + 1), raw: entry };
+}
+function dedupeBundles(a, b, path) {
+  const seen = /* @__PURE__ */ new Map();
+  for (const x of [...a, ...b]) {
+    const prev = seen.get(`${x.name}@${x.source}`);
+    if (prev !== void 0) {
+      throw new ConfigError(`${path}: duplicate bundle "${x.name}@${x.source}" declared as ${prev} and ${x.raw}`);
+    }
+    seen.set(`${x.name}@${x.source}`, x.raw);
+  }
+  return [...a, ...b];
 }
 function seenKey(item) {
-  return item.name === WILDCARD ? `${item.type}/*@${item.source}` : `${item.type}/${item.name}`;
+  return item.name.includes(WILDCARD) ? `${item.type}/${item.name}@${item.source}` : `${item.type}/${item.name}`;
 }
 function parseEntry(entry, type, path, where) {
   const at = entry.lastIndexOf("@");
@@ -5945,9 +5995,6 @@ function parseEntry(entry, type, path, where) {
     name = name.slice(colon + 1);
   }
   if (name.length === 0) throw new ConfigError(`${path}: ${where} "${entry}" has an empty name`);
-  if (name !== WILDCARD && name.includes(WILDCARD)) {
-    throw new ConfigError(`${path}: ${where} "${entry}": "*" is only valid as the whole name (*@source)`);
-  }
   return { type, name, source, target: `${type}s/${name}`, raw: entry };
 }
 function mergeVars(...objs) {
@@ -5984,6 +6031,7 @@ function loadConfig(opts) {
     scope: "user",
     install: userInstall.install,
     wildcards: userInstall.wildcards,
+    bundles: userInstall.bundles,
     vars: mergeVars(asObject(user.vars, userPath, "vars"))
   };
   const userTargets = targetsOf(user.targets, userPath);
@@ -5996,6 +6044,7 @@ function loadConfig(opts) {
       scope: "project",
       install: dedupeAcross(projectInstall.install, localInstall.install, projectPath),
       wildcards: dedupeWildcards(projectInstall.wildcards, localInstall.wildcards, projectPath),
+      bundles: dedupeBundles(projectInstall.bundles, localInstall.bundles, projectPath),
       vars: mergeVars(
         asObject(user.vars, userPath, "vars"),
         asObject(project.vars, projectPath, "vars"),
@@ -6029,7 +6078,7 @@ function dedupeWildcards(a, b, path) {
   const seen = /* @__PURE__ */ new Map();
   const out = [];
   for (const w of [...a, ...b]) {
-    const key = seenKey({ type: w.type, name: WILDCARD, source: w.source });
+    const key = seenKey({ type: w.type, name: w.pattern, source: w.source });
     const prev = seen.get(key);
     if (prev !== void 0) {
       throw new ConfigError(`${path}: duplicate ${w.type} wildcard for "${w.source}" declared as ${prev} and ${w.raw}`);
@@ -6146,220 +6195,65 @@ function removeInstallEntries(path, name, source, type) {
   if (removed) saveRaw(path, cfg);
   return removed;
 }
-
-// src/targets.ts
-import { existsSync as existsSync2 } from "node:fs";
-import { join as join3 } from "node:path";
-var TargetError = class extends Error {
-  name = "TargetError";
-};
-var under = (dir) => (r) => join3(r.base, dir);
-var codexHomeDir = (r) => r.codexHome || join3(r.base, ".codex");
-var LAYOUTS = {
-  claude: { harness: "claude", keyPrefix: "", roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") } },
-  // Skills (phase 1), agents as TOML (phase 2, convert.ts), rules as sections of
-  // the managed AGENTS.md block (phase 3, agentsmd.ts).
-  codex: {
-    harness: "codex",
-    keyPrefix: "codex:",
-    roots: {
-      skill: under(".agents"),
-      agent: (r) => r.scope === "user" ? codexHomeDir(r) : join3(r.base, ".codex"),
-      rule: (r) => r.scope === "user" ? codexHomeDir(r) : r.base
-    },
-    blockTypes: ["rule"]
-  }
-};
-function defaultMarkers(home, codexHome) {
-  const cx = codexHome || join3(home, ".codex");
-  return {
-    claude: [join3(home, ".claude.json"), join3(home, ".claude", "settings.json"), join3(home, ".claude", "projects")],
-    codex: ["config.toml", "auth.json", "sessions", "installation_id"].map((f) => join3(cx, f))
-  };
-}
-function detectHarnesses(markers) {
-  return HARNESSES.filter((h) => markers[h].some((p) => existsSync2(p)));
-}
-function selectTargets(configured, detected, markers) {
-  const machine = configured.user ?? detected;
-  if (machine.length === 0) {
-    const looked = markers ? ` (looked for ${HARNESSES.map((h) => `${h}: ${markers[h].join(", ")}`).join("; ")})` : "";
-    throw new TargetError(
-      `no agent harness detected${looked}; set "targets": ["claude"] and/or "codex" in ~/.claude/skilletor.json`
-    );
-  }
-  const warnings = [];
-  let project = machine;
-  if (configured.project) {
-    project = machine.filter((h) => configured.project.includes(h));
-    if (project.length === 0) {
-      warnings.push(
-        `project targets (${configured.project.join(", ")}) are not in use on this machine (${machine.join(", ")}); nothing is installed for the project`
-      );
+function findWildcardEntries(path, source, type) {
+  const install = loadRaw(path).install;
+  if (!install) return [];
+  const out = [];
+  for (const t of type ? [type] : ITEM_TYPES) {
+    const list = install[INSTALL_KEY[t]];
+    if (!Array.isArray(list)) continue;
+    for (const e of list) {
+      if (typeof e !== "string") continue;
+      const at = e.lastIndexOf("@");
+      if (at <= 0 || e.slice(at + 1) !== source) continue;
+      const pattern = e.slice(0, at).replace(/^[a-z]+:/, "");
+      if (pattern.includes(WILDCARD)) out.push({ type: t, entry: e, pattern });
     }
   }
-  return { user: [...machine], project, warnings };
-}
-var TYPE_OF_DIR = { skills: "skill", agents: "agent", rules: "rule" };
-function lockKey(harness, target) {
-  return LAYOUTS[harness].keyPrefix + target;
-}
-function parseLockKey(key) {
-  const colon = key.indexOf(":");
-  const slash = key.indexOf("/");
-  let harness = "claude";
-  let target = key;
-  if (colon !== -1 && (slash === -1 || colon < slash)) {
-    const prefix = key.slice(0, colon + 1);
-    harness = HARNESSES.find((h) => LAYOUTS[h].keyPrefix === prefix);
-    target = key.slice(colon + 1);
-  }
-  const [dir, ...rest] = target.split("/");
-  return { harness, target, type: TYPE_OF_DIR[dir] ?? "rule", name: rest.join("/") };
-}
-function supports(harness, type) {
-  return LAYOUTS[harness].roots[type] !== void 0;
-}
-function rootOf(r, harness, type) {
-  return LAYOUTS[harness].roots[type]?.(r);
-}
-function rootOfKey(r, key) {
-  const k = parseLockKey(key);
-  return k.harness ? rootOf(r, k.harness, k.type) : void 0;
-}
-function isBlockType(harness, type) {
-  return LAYOUTS[harness].blockTypes?.includes(type) ?? false;
-}
-function allRoots(r) {
-  const roots = /* @__PURE__ */ new Set();
-  for (const h of HARNESSES) {
-    for (const [type, f] of Object.entries(LAYOUTS[h].roots)) {
-      if (f && !isBlockType(h, type)) roots.add(f(r));
-    }
-  }
-  return [...roots];
-}
-function targetDrift(keys, active) {
-  const set = new Set(keys);
-  for (const key of keys) {
-    const k = parseLockKey(key);
-    if (!k.harness || !supports(k.harness, k.type)) continue;
-    if (!active.includes(k.harness)) return true;
-    for (const h of active) if (supports(h, k.type) && !set.has(lockKey(h, k.target))) return true;
-  }
-  return false;
-}
-
-// src/agentsmd.ts
-import { lstatSync as lstatSync2, readFileSync as readFileSync2 } from "node:fs";
-import { join as join4 } from "node:path";
-var BEGIN = "<!-- skilletor:begin -->";
-var END = "<!-- skilletor:end -->";
-var NOTE = "<!-- managed by skilletor \u2014 edits inside are overwritten -->";
-var RULE_RE = /^<!-- skilletor:rule (\S+) source=(.*) -->$/;
-var MARKER_LINE = /^<!-- skilletor:(begin|end|rule)\b/;
-var BlockError = class extends Error {
-  name = "BlockError";
-};
-function normalizeSection(text) {
-  return text.replace(/^(?:[ \t]*\r?\n)+/, "").replace(/\s+$/, "") + "\n";
-}
-function parseBlock(text) {
-  const lines = text.split("\n");
-  const begins = [];
-  const ends = [];
-  lines.forEach((l, i) => {
-    const t = l.trim();
-    if (t === BEGIN) begins.push(i);
-    else if (t === END) ends.push(i);
-  });
-  if (begins.length === 0 && ends.length === 0) return null;
-  if (begins.length > 1) throw new BlockError(`"${BEGIN}" appears ${begins.length} times`);
-  if (ends.length > 1) throw new BlockError(`"${END}" appears ${ends.length} times`);
-  if (begins.length === 0) throw new BlockError(`"${END}" without "${BEGIN}"`);
-  if (ends.length === 0) throw new BlockError(`"${BEGIN}" without "${END}"`);
-  const begin = begins[0];
-  const end = ends[0];
-  if (end < begin) throw new BlockError(`"${END}" before "${BEGIN}"`);
-  const sections = /* @__PURE__ */ new Map();
-  let current;
-  const flush = () => {
-    if (current) sections.set(current.name, { source: current.source, text: normalizeSection(current.lines.join("\n")) });
-  };
-  for (const line of lines.slice(begin + 1, end)) {
-    const m = RULE_RE.exec(line.trim());
-    if (m) {
-      flush();
-      current = { name: m[1], source: m[2], lines: [] };
-    } else if (current) {
-      current.lines.push(line);
-    }
-  }
-  flush();
-  return { begin, end, sections };
-}
-function blockLines(sections) {
-  const out = [BEGIN, NOTE, ""];
-  for (const s of sections) {
-    out.push(`<!-- skilletor:rule ${s.name} source=${s.source} -->`, ...s.text.replace(/\n$/, "").split("\n"), "");
-  }
-  out.push(END);
   return out;
 }
-function withBlock(text, sections) {
-  const block = sections.length ? blockLines(sections) : null;
-  if (text === null) return block ? block.join("\n") + "\n" : null;
-  const parsed = parseBlock(text);
-  const lines = text.split("\n");
-  let out;
-  if (parsed) {
-    const before = lines.slice(0, parsed.begin);
-    const after = lines.slice(parsed.end + 1);
-    out = [...before, ...block ?? [], ...after].join("\n");
-    if (!block && after.every((l) => l.trim() === "")) out = out.replace(/\s*$/, "\n");
-  } else {
-    if (!block) return text;
-    const base = text.replace(/\s*$/, "");
-    out = (base.length ? base + "\n\n" : "") + block.join("\n") + "\n";
-  }
-  return out.trim() === "" ? null : out;
+function bundleParts(e) {
+  const at = e.lastIndexOf("@");
+  if (at <= 0) return void 0;
+  return { name: e.slice(0, at).replace(/^bundle:/, ""), source: e.slice(at + 1) };
 }
-function inspectAgentsMd(path) {
-  let st;
-  try {
-    st = lstatSync2(path);
-  } catch (err) {
-    if (err.code === "ENOENT") return { ok: true, text: null, parsed: null };
-    return { ok: false, reason: `unreadable (${err.message})` };
-  }
-  if (st.isSymbolicLink()) return { ok: false, reason: "is a symlink (skilletor does not write through it)" };
-  if (st.isDirectory()) return { ok: false, reason: "is a directory" };
-  if (!st.isFile()) return { ok: false, reason: "is not a regular file" };
-  let text;
-  try {
-    text = readFileSync2(path, "utf8");
-  } catch (err) {
-    return { ok: false, reason: `unreadable (${err.message})` };
-  }
-  try {
-    return { ok: true, text, parsed: parseBlock(text) };
-  } catch (err) {
-    return { ok: false, reason: `malformed skilletor markers: ${err.message}` };
-  }
+function bundleEntries(path) {
+  const list = loadRaw(path).install?.[BUNDLES_KEY];
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((e) => {
+    const p = typeof e === "string" ? bundleParts(e) : void 0;
+    return p ? [{ ...p, entry: e }] : [];
+  });
 }
-function projectDocLimit(codexHome) {
-  let text;
-  try {
-    text = readFileSync2(join4(codexHome, "config.toml"), "utf8");
-  } catch {
-    return 32768;
-  }
-  for (const line of text.split("\n")) {
-    if (/^\s*\[/.test(line)) break;
-    const m = /^\s*project_doc_max_bytes\s*=\s*(\d+)\s*(?:#.*)?$/.exec(line);
-    if (m) return Number(m[1]);
-  }
-  return 32768;
+function addBundleEntry(path, entry) {
+  const cfg = loadRaw(path);
+  const install = cfg.install ?? {};
+  const list = Array.isArray(install[BUNDLES_KEY]) ? install[BUNDLES_KEY] : [];
+  const p = bundleParts(entry);
+  if (!list.some((e) => {
+    const q = bundleParts(e);
+    return q?.name === p.name && q.source === p.source;
+  })) list.push(entry);
+  install[BUNDLES_KEY] = list;
+  cfg.install = install;
+  saveRaw(path, cfg);
+}
+function removeBundleEntries(path, name, source) {
+  const cfg = loadRaw(path);
+  const install = cfg.install;
+  const list = install?.[BUNDLES_KEY];
+  if (!install || !Array.isArray(list)) return 0;
+  const kept = list.filter((e) => {
+    const p = typeof e === "string" ? bundleParts(e) : void 0;
+    return !(p && p.name === name && p.source === source);
+  });
+  const removed = list.length - kept.length;
+  if (!removed) return 0;
+  if (kept.length) install[BUNDLES_KEY] = kept;
+  else delete install[BUNDLES_KEY];
+  if (Object.keys(install).length === 0) delete cfg.install;
+  saveRaw(path, cfg);
+  return removed;
 }
 
 // src/frontmatter.ts
@@ -6382,10 +6276,13 @@ function splitFrontmatter(text) {
   if (!close) throw new FrontmatterError("frontmatter: no closing --- line");
   const yaml = text.slice(open[0].length, close.index);
   const body = text.slice(close.index + close[0].length).replace(/^(?:[ \t]*\r?\n)+/, "");
-  return { data: parseYaml(yaml), body };
+  return { data: parseYaml(yaml, 2, "frontmatter line"), body };
+}
+function parseYamlDocument(text) {
+  return parseYaml(text, 1, "line");
 }
 function fail(line, message) {
-  throw new FrontmatterError(`frontmatter line ${line?.no ?? "?"}: ${message}`);
+  throw new FrontmatterError(`${line?.label ?? "line"} ${line?.no ?? "?"}: ${message}`);
 }
 function indentOf(line) {
   const m = /^[ \t]*/.exec(line.raw)[0];
@@ -6400,8 +6297,8 @@ function isSeqItem(text) {
   return text === "-" || text.startsWith("- ");
 }
 var KEY_RE = /^(?:"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'|([^\s"'#&*!|>[\]{},?:-][^:#]*?))[ \t]*:(?:[ \t]+(.*))?$/;
-function parseYaml(yaml) {
-  const lines = yaml.split(/\r?\n/).map((raw, i) => ({ no: i + 2, raw }));
+function parseYaml(yaml, firstLine, label) {
+  const lines = yaml.split(/\r?\n/).map((raw, i) => ({ no: i + firstLine, raw, label }));
   const p = new Parser(lines);
   const [value2, pos] = p.mapping(0, 0);
   if (pos < lines.length) fail(lines[pos], "unexpected content");
@@ -6698,6 +6595,467 @@ function inline(value2, line) {
     return obj;
   }
   return typedPlain(stripComment(s));
+}
+
+// src/spec.ts
+var SpecError = class extends Error {
+  name = "SpecError";
+};
+var KNOWN_FORGES = ["github.com", "gitlab.com", "codeberg.org", "hf.co", "huggingface.co"];
+var DEFAULT_REPO = "skills";
+function normalizeName(raw) {
+  return raw.toLowerCase().replace(/\.git$/, "").replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function basename2(path) {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : path;
+}
+function isLocal(spec) {
+  return spec.startsWith("/") || spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("~");
+}
+function hasScheme(spec) {
+  return /^[a-z][a-z0-9+.-]*:\/\//.test(spec);
+}
+function isScpLike(spec) {
+  return /^[^@/]+@[^:/]+:/.test(spec);
+}
+function isTarball(url) {
+  return url.endsWith(".tar.gz") || url.endsWith(".tgz");
+}
+function nameFromUrl(spec, kind) {
+  if (isScpLike(spec)) {
+    const path = spec.slice(spec.indexOf(":") + 1);
+    return normalizeName(basename2(path.split("/")[0] ?? path));
+  }
+  try {
+    const u = new URL(spec);
+    const segs = u.pathname.split("/").filter(Boolean);
+    if (kind === "git" && segs.length > 0) return normalizeName(segs[0]);
+    return normalizeName(u.hostname);
+  } catch {
+    return normalizeName(spec);
+  }
+}
+function resolveSpec(spec, probe) {
+  const s = spec.trim();
+  if (isLocal(s)) {
+    return { kind: "local", value: s, derivedName: normalizeName(basename2(s)) };
+  }
+  if (hasScheme(s) || isScpLike(s)) {
+    const kind = isTarball(s) ? "url" : "git";
+    return { kind, value: s, derivedName: nameFromUrl(s, kind) };
+  }
+  if (s.startsWith("github:")) {
+    const path2 = s.slice("github:".length);
+    const [owner, repo] = path2.split("/");
+    if (!owner) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
+    return {
+      kind: "git",
+      value: `https://github.com/${owner}/${repo ?? DEFAULT_REPO}`,
+      derivedName: normalizeName(owner)
+    };
+  }
+  const slash = s.indexOf("/");
+  const firstSeg = slash === -1 ? s : s.slice(0, slash);
+  const rest = slash === -1 ? "" : s.slice(slash + 1);
+  if (KNOWN_FORGES.includes(firstSeg.toLowerCase()) && slash !== -1) {
+    const segs = rest.split("/").filter(Boolean);
+    const owner = segs[0];
+    if (!owner) throw new SpecError(`cannot resolve "${spec}": expected ${firstSeg}/owner[/repo]`);
+    const repo = segs[1] ?? DEFAULT_REPO;
+    return {
+      kind: "git",
+      value: `https://${firstSeg.toLowerCase()}/${owner}/${repo}`,
+      derivedName: normalizeName(owner)
+    };
+  }
+  if (slash === -1) {
+    if (!firstSeg.includes(".")) {
+      return {
+        kind: "git",
+        value: `https://github.com/${firstSeg}/${DEFAULT_REPO}`,
+        derivedName: normalizeName(firstSeg)
+      };
+    }
+    return probeGeneric(`https://${firstSeg}/${DEFAULT_REPO}`, firstSeg, spec, probe);
+  }
+  if (!firstSeg.includes(".")) {
+    const segs = rest.split("/").filter(Boolean);
+    const repo = segs[0] ?? DEFAULT_REPO;
+    return {
+      kind: "git",
+      value: `https://github.com/${firstSeg}/${repo}`,
+      derivedName: normalizeName(firstSeg)
+    };
+  }
+  const path = rest.replace(/\/+$/, "");
+  const base = path ? `https://${firstSeg}/${path}` : `https://${firstSeg}/${DEFAULT_REPO}`;
+  return probeGeneric(base, firstSeg, spec, probe);
+}
+function probeGeneric(baseUrl, host, original, probe) {
+  const result = probe(baseUrl);
+  if (result.git) {
+    return { kind: "git", value: baseUrl, derivedName: normalizeName(host) };
+  }
+  if (result.tarball) {
+    return { kind: "url", value: `${baseUrl}.tar.gz`, derivedName: normalizeName(host) };
+  }
+  throw new SpecError(
+    `cannot resolve "${original}": neither ${baseUrl} (git) nor ${baseUrl}.tar.gz (tarball) responded`
+  );
+}
+
+// src/bundles.ts
+var BundleError = class extends Error {
+  name = "BundleError";
+};
+var PATTERN_CHAR = "*";
+function isPattern(name) {
+  return name.includes(PATTERN_CHAR);
+}
+function matchesPattern(pattern, name) {
+  const re = pattern.split(PATTERN_CHAR).map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*");
+  return new RegExp(`^${re}$`).test(name);
+}
+var TYPE_KEYS = { skills: "skill", agents: "agent", rules: "rule" };
+var KEYS = /* @__PURE__ */ new Set(["description", "skills", "agents", "rules", "bundles", "vars"]);
+var noProbe = () => {
+  throw new SpecError("probe");
+};
+function plain(v) {
+  if (v instanceof YamlFloat) return v.value;
+  if (Array.isArray(v)) return v.map(plain);
+  if (v !== null && typeof v === "object") {
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, plain(x)]));
+  }
+  return v;
+}
+function stringList(value2, key) {
+  if (value2 === void 0 || value2 === null) return [];
+  if (!Array.isArray(value2)) throw new BundleError(`${key} must be a list`);
+  return value2.map((v) => {
+    if (typeof v !== "string") throw new BundleError(`${key} entries must be strings (got ${JSON.stringify(plain(v))})`);
+    if (v.trim() === "") throw new BundleError(`${key} has an empty entry`);
+    return v.trim();
+  });
+}
+function foreignEntry(type, entry, key) {
+  const at = entry.indexOf("@");
+  const name = entry.slice(0, at);
+  const spec = entry.slice(at + 1);
+  if (name === "" || spec === "") throw new BundleError(`${key}: "${entry}" has an empty name or address`);
+  let url;
+  try {
+    const r = resolveSpec(spec, noProbe);
+    if (r.kind === "local") {
+      throw new BundleError(`${key}: "${entry}" names a local path; a bundle can only name remote sources`);
+    }
+    url = r.value;
+  } catch (err) {
+    if (err instanceof BundleError) throw err;
+    if (err instanceof SpecError && err.message === "probe") {
+      throw new BundleError(`${key}: "${entry}": a generic host must be written as a full https:// URL`);
+    }
+    throw new BundleError(`${key}: "${entry}": ${err.message}`);
+  }
+  return { type, entry, name, spec, url };
+}
+function parseBundle(text) {
+  let data;
+  try {
+    data = parseYamlDocument(text);
+  } catch (err) {
+    if (err instanceof FrontmatterError) throw new BundleError(err.message);
+    throw err;
+  }
+  for (const key of Object.keys(data)) {
+    if (!KEYS.has(key)) throw new BundleError(`unknown key "${key}" (allowed: ${[...KEYS].join(", ")})`);
+  }
+  if (typeof data.description !== "string" || data.description.trim() === "") {
+    throw new BundleError("description is required (a string)");
+  }
+  const def = { description: data.description, items: [], foreign: [], bundles: [], vars: {} };
+  for (const [key, type] of Object.entries(TYPE_KEYS)) {
+    for (const entry of stringList(data[key], key)) {
+      if (entry.includes("@")) def.foreign.push(foreignEntry(type, entry, key));
+      else def.items.push({ type, entry });
+    }
+  }
+  for (const name of stringList(data.bundles, "bundles")) {
+    if (name.includes("@")) throw new BundleError(`bundles: "${name}" must be a bare name of this source`);
+    if (isPattern(name)) throw new BundleError(`bundles: "${name}": patterns over bundle names are not supported`);
+    def.bundles.push(name);
+  }
+  const vars = data.vars;
+  if (vars !== void 0 && vars !== null) {
+    if (typeof vars !== "object" || Array.isArray(vars) || vars instanceof YamlFloat) {
+      throw new BundleError("vars must be a mapping");
+    }
+    def.vars = plain(vars);
+  }
+  return def;
+}
+function expandBundle(cat, name) {
+  const byName = new Map(cat.bundles.map((b) => [b.name, b]));
+  const members = /* @__PURE__ */ new Map();
+  const out = { items: [], foreign: [], warnings: [] };
+  const visit = (bundle, path, outer) => {
+    const cb = byName.get(bundle);
+    if (!cb) {
+      throw new BundleError(path.length === 0 ? `bundle ${bundle} not found` : `bundle ${bundle} (included by ${path.at(-1)}) not found`);
+    }
+    if (cb.error !== void 0) {
+      throw new BundleError(path.length === 0 ? `bundle ${bundle}: ${cb.error}` : `bundle ${bundle} (included by ${path.at(-1)}): ${cb.error}`);
+    }
+    const here = [...path, bundle];
+    const chain = { path: here, vars: { ...cb.def.vars }, setters: {} };
+    for (const k of Object.keys(cb.def.vars)) chain.setters[k] = bundle;
+    if (outer) {
+      Object.assign(chain.vars, outer.vars);
+      Object.assign(chain.setters, outer.setters);
+    }
+    for (const { type, entry } of cb.def.items) {
+      const found = isPattern(entry) ? cat.items.filter((i) => i.type === type && matchesPattern(entry, i.name)) : cat.items.filter((i) => i.type === type && i.name === entry);
+      if (found.length === 0) {
+        out.warnings.push({
+          bundle,
+          message: isPattern(entry) ? `pattern ${type}:${entry} matches nothing` : `${type} ${entry} not found in the source`
+        });
+      }
+      for (const ci of found) {
+        const key = `${ci.type}/${ci.name}`;
+        const m = members.get(key) ?? { type: ci.type, name: ci.name, chains: [] };
+        if (!m.chains.some((c) => c.path.join("/") === here.join("/"))) m.chains.push(chain);
+        members.set(key, m);
+      }
+    }
+    for (const f of cb.def.foreign) {
+      out.foreign.push({ ...f, path: here });
+      out.warnings.push({ bundle, message: `${f.type}:${f.entry} skipped: items of other sources are not supported yet` });
+    }
+    for (const inner of cb.def.bundles) {
+      if (here.includes(inner)) throw new BundleError(`bundle cycle ${[...here.slice(here.indexOf(inner)), inner].join(" \u2192 ")}`);
+      visit(inner, here, { ...chain, path: here });
+    }
+  };
+  visit(name, [], void 0);
+  out.items = [...members.values()];
+  return out;
+}
+
+// src/targets.ts
+import { existsSync as existsSync2 } from "node:fs";
+import { join as join3 } from "node:path";
+var TargetError = class extends Error {
+  name = "TargetError";
+};
+var under = (dir) => (r) => join3(r.base, dir);
+var codexHomeDir = (r) => r.codexHome || join3(r.base, ".codex");
+var LAYOUTS = {
+  claude: { harness: "claude", keyPrefix: "", roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") } },
+  // Skills (phase 1), agents as TOML (phase 2, convert.ts), rules as sections of
+  // the managed AGENTS.md block (phase 3, agentsmd.ts).
+  codex: {
+    harness: "codex",
+    keyPrefix: "codex:",
+    roots: {
+      skill: under(".agents"),
+      agent: (r) => r.scope === "user" ? codexHomeDir(r) : join3(r.base, ".codex"),
+      rule: (r) => r.scope === "user" ? codexHomeDir(r) : r.base
+    },
+    blockTypes: ["rule"]
+  }
+};
+function defaultMarkers(home, codexHome) {
+  const cx = codexHome || join3(home, ".codex");
+  return {
+    claude: [join3(home, ".claude.json"), join3(home, ".claude", "settings.json"), join3(home, ".claude", "projects")],
+    codex: ["config.toml", "auth.json", "sessions", "installation_id"].map((f) => join3(cx, f))
+  };
+}
+function detectHarnesses(markers) {
+  return HARNESSES.filter((h) => markers[h].some((p) => existsSync2(p)));
+}
+function selectTargets(configured, detected, markers) {
+  const machine = configured.user ?? detected;
+  if (machine.length === 0) {
+    const looked = markers ? ` (looked for ${HARNESSES.map((h) => `${h}: ${markers[h].join(", ")}`).join("; ")})` : "";
+    throw new TargetError(
+      `no agent harness detected${looked}; set "targets": ["claude"] and/or "codex" in ~/.claude/skilletor.json`
+    );
+  }
+  const warnings = [];
+  let project = machine;
+  if (configured.project) {
+    project = machine.filter((h) => configured.project.includes(h));
+    if (project.length === 0) {
+      warnings.push(
+        `project targets (${configured.project.join(", ")}) are not in use on this machine (${machine.join(", ")}); nothing is installed for the project`
+      );
+    }
+  }
+  return { user: [...machine], project, warnings };
+}
+var TYPE_OF_DIR = { skills: "skill", agents: "agent", rules: "rule" };
+function lockKey(harness, target) {
+  return LAYOUTS[harness].keyPrefix + target;
+}
+function parseLockKey(key) {
+  const colon = key.indexOf(":");
+  const slash = key.indexOf("/");
+  let harness = "claude";
+  let target = key;
+  if (colon !== -1 && (slash === -1 || colon < slash)) {
+    const prefix = key.slice(0, colon + 1);
+    harness = HARNESSES.find((h) => LAYOUTS[h].keyPrefix === prefix);
+    target = key.slice(colon + 1);
+  }
+  const [dir, ...rest] = target.split("/");
+  return { harness, target, type: TYPE_OF_DIR[dir] ?? "rule", name: rest.join("/") };
+}
+function supports(harness, type) {
+  return LAYOUTS[harness].roots[type] !== void 0;
+}
+function rootOf(r, harness, type) {
+  return LAYOUTS[harness].roots[type]?.(r);
+}
+function rootOfKey(r, key) {
+  const k = parseLockKey(key);
+  return k.harness ? rootOf(r, k.harness, k.type) : void 0;
+}
+function isBlockType(harness, type) {
+  return LAYOUTS[harness].blockTypes?.includes(type) ?? false;
+}
+function allRoots(r) {
+  const roots = /* @__PURE__ */ new Set();
+  for (const h of HARNESSES) {
+    for (const [type, f] of Object.entries(LAYOUTS[h].roots)) {
+      if (f && !isBlockType(h, type)) roots.add(f(r));
+    }
+  }
+  return [...roots];
+}
+function targetDrift(keys, active) {
+  const set = new Set(keys);
+  for (const key of keys) {
+    const k = parseLockKey(key);
+    if (!k.harness || !supports(k.harness, k.type)) continue;
+    if (!active.includes(k.harness)) return true;
+    for (const h of active) if (supports(h, k.type) && !set.has(lockKey(h, k.target))) return true;
+  }
+  return false;
+}
+
+// src/agentsmd.ts
+import { lstatSync as lstatSync2, readFileSync as readFileSync2 } from "node:fs";
+import { join as join4 } from "node:path";
+var BEGIN = "<!-- skilletor:begin -->";
+var END = "<!-- skilletor:end -->";
+var NOTE = "<!-- managed by skilletor \u2014 edits inside are overwritten -->";
+var RULE_RE = /^<!-- skilletor:rule (\S+) source=(.*) -->$/;
+var MARKER_LINE = /^<!-- skilletor:(begin|end|rule)\b/;
+var BlockError = class extends Error {
+  name = "BlockError";
+};
+function normalizeSection(text) {
+  return text.replace(/^(?:[ \t]*\r?\n)+/, "").replace(/\s+$/, "") + "\n";
+}
+function parseBlock(text) {
+  const lines = text.split("\n");
+  const begins = [];
+  const ends = [];
+  lines.forEach((l, i) => {
+    const t = l.trim();
+    if (t === BEGIN) begins.push(i);
+    else if (t === END) ends.push(i);
+  });
+  if (begins.length === 0 && ends.length === 0) return null;
+  if (begins.length > 1) throw new BlockError(`"${BEGIN}" appears ${begins.length} times`);
+  if (ends.length > 1) throw new BlockError(`"${END}" appears ${ends.length} times`);
+  if (begins.length === 0) throw new BlockError(`"${END}" without "${BEGIN}"`);
+  if (ends.length === 0) throw new BlockError(`"${BEGIN}" without "${END}"`);
+  const begin = begins[0];
+  const end = ends[0];
+  if (end < begin) throw new BlockError(`"${END}" before "${BEGIN}"`);
+  const sections = /* @__PURE__ */ new Map();
+  let current;
+  const flush = () => {
+    if (current) sections.set(current.name, { source: current.source, text: normalizeSection(current.lines.join("\n")) });
+  };
+  for (const line of lines.slice(begin + 1, end)) {
+    const m = RULE_RE.exec(line.trim());
+    if (m) {
+      flush();
+      current = { name: m[1], source: m[2], lines: [] };
+    } else if (current) {
+      current.lines.push(line);
+    }
+  }
+  flush();
+  return { begin, end, sections };
+}
+function blockLines(sections) {
+  const out = [BEGIN, NOTE, ""];
+  for (const s of sections) {
+    out.push(`<!-- skilletor:rule ${s.name} source=${s.source} -->`, ...s.text.replace(/\n$/, "").split("\n"), "");
+  }
+  out.push(END);
+  return out;
+}
+function withBlock(text, sections) {
+  const block = sections.length ? blockLines(sections) : null;
+  if (text === null) return block ? block.join("\n") + "\n" : null;
+  const parsed = parseBlock(text);
+  const lines = text.split("\n");
+  let out;
+  if (parsed) {
+    const before = lines.slice(0, parsed.begin);
+    const after = lines.slice(parsed.end + 1);
+    out = [...before, ...block ?? [], ...after].join("\n");
+    if (!block && after.every((l) => l.trim() === "")) out = out.replace(/\s*$/, "\n");
+  } else {
+    if (!block) return text;
+    const base = text.replace(/\s*$/, "");
+    out = (base.length ? base + "\n\n" : "") + block.join("\n") + "\n";
+  }
+  return out.trim() === "" ? null : out;
+}
+function inspectAgentsMd(path) {
+  let st;
+  try {
+    st = lstatSync2(path);
+  } catch (err) {
+    if (err.code === "ENOENT") return { ok: true, text: null, parsed: null };
+    return { ok: false, reason: `unreadable (${err.message})` };
+  }
+  if (st.isSymbolicLink()) return { ok: false, reason: "is a symlink (skilletor does not write through it)" };
+  if (st.isDirectory()) return { ok: false, reason: "is a directory" };
+  if (!st.isFile()) return { ok: false, reason: "is not a regular file" };
+  let text;
+  try {
+    text = readFileSync2(path, "utf8");
+  } catch (err) {
+    return { ok: false, reason: `unreadable (${err.message})` };
+  }
+  try {
+    return { ok: true, text, parsed: parseBlock(text) };
+  } catch (err) {
+    return { ok: false, reason: `malformed skilletor markers: ${err.message}` };
+  }
+}
+function projectDocLimit(codexHome) {
+  let text;
+  try {
+    text = readFileSync2(join4(codexHome, "config.toml"), "utf8");
+  } catch {
+    return 32768;
+  }
+  for (const line of text.split("\n")) {
+    if (/^\s*\[/.test(line)) break;
+    const m = /^\s*project_doc_max_bytes\s*=\s*(\d+)\s*(?:#.*)?$/.exec(line);
+    if (m) return Number(m[1]);
+  }
+  return 32768;
 }
 
 // src/toml.ts
@@ -7286,7 +7644,34 @@ function scan(dir) {
       }
     }
   }
-  return { items, meta: readSourceMeta(dir) };
+  return { items, bundles: scanBundles(dir), meta: readSourceMeta(dir) };
+}
+function scanBundles(dir) {
+  const bdir = join8(dir, "bundles");
+  if (!existsSync6(bdir)) return [];
+  noSymlink(bdir);
+  const byName = /* @__PURE__ */ new Map();
+  for (const entry of readdirSync(bdir).sort()) {
+    const m = /^(.+)\.ya?ml$/.exec(entry);
+    if (!m) continue;
+    const p = join8(bdir, entry);
+    if (!noSymlink(p).isFile()) continue;
+    byName.set(m[1], [...byName.get(m[1]) ?? [], relative(dir, p)]);
+  }
+  const out = [];
+  for (const [name, files] of byName) {
+    if (files.length > 1) {
+      out.push({ name, files, error: `both ${files.join(" and ")} exist` });
+      continue;
+    }
+    try {
+      out.push({ name, files, def: parseBundle(readFileSync3(join8(dir, files[0]), "utf8")) });
+    } catch (err) {
+      if (!(err instanceof BundleError)) throw err;
+      out.push({ name, files, error: `${files[0]}: ${err.message}` });
+    }
+  }
+  return out;
 }
 function readSourceMeta(dir) {
   const p = join8(dir, "skilletor.json");
@@ -7402,6 +7787,7 @@ function serializeLock(lock) {
     out[key] = { source: entry.source, version: entry.version, files };
     if (entry.skipped) out[key].skipped = entry.skipped;
     if (entry.block) out[key].block = true;
+    if (entry.via?.length) out[key].via = [...entry.via];
   }
   return JSON.stringify(out, null, 2) + "\n";
 }
@@ -7443,7 +7829,7 @@ function apply(plan, opts) {
       for (const rel of files) removeFile(safeJoin(root, rel), touched(root));
       if (files.length > 0) res.removed.push(it.key);
       res.skipped.push(it.key);
-      newLock[it.key] = { source: it.source, version: it.version, files: {}, skipped: it.skipped };
+      newLock[it.key] = withVia({ source: it.source, version: it.version, files: {}, skipped: it.skipped }, it);
       continue;
     }
     const existing = oldLock[it.key]?.skipped ? void 0 : oldLock[it.key];
@@ -7486,7 +7872,7 @@ function apply(plan, opts) {
       }
     }
     if (Object.keys(entryFiles).length > 0) {
-      newLock[it.key] = { source: it.source, version: it.version, files: entryFiles };
+      newLock[it.key] = withVia({ source: it.source, version: it.version, files: entryFiles }, it);
     }
     if (existing === void 0) {
       if (wrote) res.added.push(it.key);
@@ -7523,15 +7909,19 @@ function recordBlockItem(it, prev, newLock, res) {
   if (it.skipped) {
     if (had) res.removed.push(it.key);
     res.skipped.push(it.key);
-    newLock[it.key] = { source: it.source, version: it.version, files: {}, skipped: it.skipped, block: true };
+    newLock[it.key] = withVia({ source: it.source, version: it.version, files: {}, skipped: it.skipped, block: true }, it);
     return;
   }
   const files = {};
   for (const [rel, buf] of it.output) files[rel] = hashBuffer(buf);
-  newLock[it.key] = { source: it.source, version: it.version, files, block: true };
+  newLock[it.key] = withVia({ source: it.source, version: it.version, files, block: true }, it);
   if (!had) res.added.push(it.key);
   else if (JSON.stringify(prev.files) !== JSON.stringify(files)) res.updated.push(it.key);
   else res.unchanged.push(it.key);
+}
+function withVia(entry, it) {
+  if (it.via?.length) entry.via = [...it.via];
+  return entry;
 }
 function safeJoin(root, rel) {
   const abs = resolvePath3(join10(root, rel));
@@ -7843,7 +8233,10 @@ function makeBackend(src, home, cacheRoot, timeoutMs) {
   throw new Error(`source ${src.name} has no backend`);
 }
 function scopeSources(scopeCfg) {
-  return [...new Set([...scopeCfg.install, ...scopeCfg.wildcards].map((i) => i.source))];
+  return [...new Set([...scopeCfg.install, ...scopeCfg.wildcards, ...scopeCfg.bundles].map((i) => i.source))];
+}
+function bundleLabel(b) {
+  return `bundle:${b.name}@${b.source}`;
 }
 var TYPE_DIR = { skill: "skills", agent: "agents", rule: "rules" };
 function sourceVersion(lock, sourceName) {
@@ -7860,10 +8253,11 @@ function gitRemote(dir) {
     return "";
   }
 }
-function makeContext(ctx, scope, harness, targetDir, item, scopeVars, sourceVars) {
+function makeContext(ctx, scope, harness, targetDir, item, scopeVars, sourceVars, bundleVars = {}) {
   return {
-    vars: { ...sourceVars, ...scopeVars },
-    project: scope === "project" ? { dir: ctx.projectDir, name: basename2(ctx.projectDir), git_remote: gitRemote(ctx.projectDir) } : void 0,
+    // source defaults < bundle vars (bundle items only) < user < project < local (spec §5, §15.3)
+    vars: { ...sourceVars, ...bundleVars, ...scopeVars },
+    project: scope === "project" ? { dir: ctx.projectDir, name: basename3(ctx.projectDir), git_remote: gitRemote(ctx.projectDir) } : void 0,
     scope,
     harness,
     target: { dir: targetDir },
@@ -7871,6 +8265,24 @@ function makeContext(ctx, scope, harness, targetDir, item, scopeVars, sourceVars
     user: ctx.user ?? { name: userInfo().username, home: ctx.home },
     item: { name: item.name, type: item.type, source: item.source }
   };
+}
+function mergeChainVars(chains, source, conflict) {
+  const values = /* @__PURE__ */ new Map();
+  for (const c of chains) {
+    for (const [key, value2] of Object.entries(c.vars)) {
+      const setter = bundleLabel({ name: c.setters[key], source });
+      values.set(key, [...values.get(key) ?? [], { value: value2, setter }]);
+    }
+  }
+  const out = {};
+  for (const [key, list] of values) {
+    if (new Set(list.map((v) => JSON.stringify(v.value))).size === 1) {
+      out[key] = list[0].value;
+    } else {
+      conflict(key, [...new Set(list.map((v) => v.setter))]);
+    }
+  }
+  return out;
 }
 async function sync(ctx, opts = {}) {
   const state = new State(ctx.stateRoot);
@@ -7967,7 +8379,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
       if (key in oldLock) keep.push(key);
     }
   };
-  const buildItem = (item) => {
+  const buildItem = (item, extra = {}) => {
     const targets = harnessesFor(item.type);
     if (targets.length === 0) return;
     for (const h of targets) {
@@ -7991,7 +8403,11 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
       const root = rootOf(rc, h, item.type);
       let output;
       try {
-        output = build(catItem, r.dir, makeContext(ctx, scope, h, root, item, scopeCfg.vars, cat.meta.vars ?? {}));
+        output = build(
+          catItem,
+          r.dir,
+          makeContext(ctx, scope, h, root, item, scopeCfg.vars, cat.meta.vars ?? {}, extra.bundleVars)
+        );
       } catch (err) {
         const where = harnesses.length > 1 ? ` (${h})` : "";
         rep.warnings.push(`template error in ${item.type} ${item.name}${where}: ${err.message}`);
@@ -7999,6 +8415,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
         continue;
       }
       const planItem = { key, type: item.type, name: item.name, source: item.source, version: r.version, output };
+      if (extra.via?.length) planItem.via = extra.via;
       if (isBlockType(h, item.type)) planItem.inBlock = true;
       if (rendersEmpty(catItem, output)) {
         planItem.output = /* @__PURE__ */ new Map();
@@ -8019,54 +8436,93 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
       plan.push(planItem);
     }
   };
-  const explicit = /* @__PURE__ */ new Map();
-  for (const item of scopeCfg.install) {
-    explicit.set(item.target, { source: item.source, raw: item.raw });
-    buildItem(item);
-  }
   const offers = /* @__PURE__ */ new Map();
-  const offer = (w, name, live) => {
-    const target = `${TYPE_DIR[w.type]}/${name}`;
-    const o = offers.get(target) ?? { type: w.type, name, from: [], live };
-    if (!o.from.includes(w)) o.from.push(w);
-    offers.set(target, o);
+  const offer = (type, name, o) => {
+    const target = `${TYPE_DIR[type]}/${name}`;
+    const entry = offers.get(target) ?? { type, name, offers: [] };
+    if (!entry.offers.some((x) => x.from === o.from)) entry.offers.push(o);
+    offers.set(target, entry);
   };
+  const lockedItems = Object.entries(oldLock).map(([key, entry]) => ({ ...keyToTypeName(key), entry }));
   for (const w of scopeCfg.wildcards) {
     const cat = catalogOf(w.source);
     if (cat) {
-      for (const ci of cat.items) if (ci.type === w.type) offer(w, ci.name, true);
+      const hits = cat.items.filter((ci) => ci.type === w.type && matchesPattern(w.pattern, ci.name));
+      if (hits.length === 0) rep.warnings.push(`${w.type} wildcard ${w.raw} matches nothing in source ${w.source}`);
+      for (const ci of hits) offer(w.type, ci.name, { from: w.raw, source: w.source, live: true });
     } else {
-      for (const [key, entry] of Object.entries(oldLock)) {
-        const tn = keyToTypeName(key);
-        if (entry.source === w.source && tn.type === w.type) offer(w, tn.name, false);
+      for (const l of lockedItems) {
+        if (l.entry.source === w.source && l.type === w.type && matchesPattern(w.pattern, l.name)) {
+          offer(l.type, l.name, { from: w.raw, source: w.source, live: false });
+        }
       }
     }
   }
+  for (const b of scopeCfg.bundles) {
+    const label = bundleLabel(b);
+    const cat = catalogOf(b.source);
+    let expanded;
+    if (cat) {
+      try {
+        expanded = expandBundle(cat, b.name);
+      } catch (err) {
+        if (!(err instanceof BundleError)) throw err;
+        rep.warnings.push(`${label}: ${err.message}; its installed items are kept`);
+      }
+    }
+    if (expanded) {
+      for (const w of expanded.warnings) rep.warnings.push(`bundle ${w.bundle}@${b.source}: ${w.message}`);
+      for (const m of expanded.items) {
+        offer(m.type, m.name, { from: label, source: b.source, live: true, via: label, chains: m.chains });
+      }
+    } else {
+      for (const l of lockedItems) {
+        if (l.entry.via?.includes(label)) offer(l.type, l.name, { from: label, source: l.entry.source, live: false, via: label });
+      }
+    }
+  }
+  const explicit = /* @__PURE__ */ new Map();
+  for (const item of scopeCfg.install) {
+    explicit.set(item.target, { source: item.source, raw: item.raw });
+    const via = (offers.get(item.target)?.offers ?? []).flatMap((x) => x.via && x.source === item.source ? [x.via] : []);
+    buildItem(item, { via });
+  }
+  const varConflicts = /* @__PURE__ */ new Map();
   for (const [target, o] of offers) {
     const claim = explicit.get(target);
     if (claim) {
-      for (const w2 of o.from) {
-        if (w2.source !== claim.source) {
-          rep.warnings.push(`${o.type} "${o.name}" from ${w2.raw} ignored: explicitly declared as ${claim.raw}`);
+      for (const x of o.offers) {
+        if (x.source !== claim.source) {
+          rep.warnings.push(`${o.type} "${o.name}" from ${x.from} ignored: explicitly declared as ${claim.raw}`);
         }
       }
       continue;
     }
-    if (o.from.length > 1) {
-      rep.warnings.push(`${o.type} "${o.name}" offered by ${o.from.map((w2) => w2.raw).join(" and ")}; skipped`);
+    if (new Set(o.offers.map((x) => x.source)).size > 1) {
+      rep.warnings.push(`${o.type} "${o.name}" offered by ${o.offers.map((x) => x.from).join(" and ")}; skipped`);
       keepIfLocked(target, o.type);
       continue;
     }
-    const w = o.from[0];
-    if (!o.live) {
+    const source = o.offers[0].source;
+    const live = o.offers.filter((x) => x.live);
+    if (live.length === 0) {
       keepIfLocked(target, o.type);
       continue;
     }
     if (!isValidItemName(o.name)) {
-      rep.warnings.push(`${o.type} "${o.name}" from ${w.raw} skipped: invalid item name`);
+      rep.warnings.push(`${o.type} "${o.name}" from ${live[0].from} skipped: invalid item name`);
       continue;
     }
-    buildItem({ type: o.type, name: o.name, source: w.source, target });
+    const via = o.offers.flatMap((x) => x.via ? [x.via] : []);
+    const chains = live.flatMap((x) => x.chains ?? []);
+    const bundleVars = mergeChainVars(chains, source, (key, setters) => {
+      const k = `"${key}": ${setters.join(" and ")}`;
+      varConflicts.set(k, [...varConflicts.get(k) ?? [], `${o.type} ${o.name}`]);
+    });
+    buildItem({ type: o.type, name: o.name, source, target }, { bundleVars, via });
+  }
+  for (const [k, items] of varConflicts) {
+    rep.warnings.push(`bundle vars conflict on ${k} set different values; neither applies to ${items.join(", ")}`);
   }
   const labelOf = (abs) => {
     const rel = relative2(base, abs);
@@ -8241,18 +8697,23 @@ function status(given, opts = {}) {
     for (const [key, entry] of Object.entries(lock)) {
       if (declaredKeys.has(key)) continue;
       const k = parseLockKey(key);
-      const type = k.type;
-      const w = k.harness && active.includes(k.harness) ? scopeCfg.wildcards.find((x) => x.source === entry.source && x.type === type) : void 0;
-      if (!w) {
+      const covering2 = [];
+      if (k.harness && active.includes(k.harness)) {
+        covering2.push(...scopeCfg.bundles.filter((b) => entry.via?.includes(bundleLabel(b))));
+        covering2.push(...scopeCfg.wildcards.filter((x) => x.source === entry.source && x.type === k.type && matchesPattern(x.pattern, k.name)));
+      }
+      const first = covering2[0];
+      if (!first) {
         orphans.push(key);
         continue;
       }
+      const label = "pattern" in first ? first.raw : bundleLabel(first);
       if (entry.skipped) {
-        declared.push({ key, source: entry.source, installed: false, via: w.raw, skipped: entry.skipped });
+        declared.push({ key, source: entry.source, installed: false, via: label, skipped: entry.skipped });
         continue;
       }
-      declared.push({ key, source: entry.source, installed: true, via: w.raw });
-      via.set(w, (via.get(w) ?? /* @__PURE__ */ new Set()).add(k.target));
+      declared.push({ key, source: entry.source, installed: true, via: label });
+      for (const c of covering2) via.set(c, (via.get(c) ?? /* @__PURE__ */ new Set()).add(k.target));
     }
     out.scopes.push({
       scope,
@@ -8265,6 +8726,12 @@ function status(given, opts = {}) {
         entry: w.raw,
         installed: via.get(w)?.size ?? 0
       })),
+      bundles: scopeCfg.bundles.map((b) => ({
+        name: b.name,
+        source: b.source,
+        entry: b.raw,
+        installed: via.get(b)?.size ?? 0
+      })),
       trustRequests,
       sourceVersions
     });
@@ -8274,114 +8741,6 @@ function status(given, opts = {}) {
 
 // src/commands.ts
 import { dirname as dirname5, join as join14 } from "node:path";
-
-// src/spec.ts
-var SpecError = class extends Error {
-  name = "SpecError";
-};
-var KNOWN_FORGES = ["github.com", "gitlab.com", "codeberg.org", "hf.co", "huggingface.co"];
-var DEFAULT_REPO = "skills";
-function normalizeName(raw) {
-  return raw.toLowerCase().replace(/\.git$/, "").replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
-}
-function basename3(path) {
-  const parts = path.split("/").filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : path;
-}
-function isLocal(spec) {
-  return spec.startsWith("/") || spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("~");
-}
-function hasScheme(spec) {
-  return /^[a-z][a-z0-9+.-]*:\/\//.test(spec);
-}
-function isScpLike(spec) {
-  return /^[^@/]+@[^:/]+:/.test(spec);
-}
-function isTarball(url) {
-  return url.endsWith(".tar.gz") || url.endsWith(".tgz");
-}
-function nameFromUrl(spec, kind) {
-  if (isScpLike(spec)) {
-    const path = spec.slice(spec.indexOf(":") + 1);
-    return normalizeName(basename3(path.split("/")[0] ?? path));
-  }
-  try {
-    const u = new URL(spec);
-    const segs = u.pathname.split("/").filter(Boolean);
-    if (kind === "git" && segs.length > 0) return normalizeName(segs[0]);
-    return normalizeName(u.hostname);
-  } catch {
-    return normalizeName(spec);
-  }
-}
-function resolveSpec(spec, probe) {
-  const s = spec.trim();
-  if (isLocal(s)) {
-    return { kind: "local", value: s, derivedName: normalizeName(basename3(s)) };
-  }
-  if (hasScheme(s) || isScpLike(s)) {
-    const kind = isTarball(s) ? "url" : "git";
-    return { kind, value: s, derivedName: nameFromUrl(s, kind) };
-  }
-  if (s.startsWith("github:")) {
-    const path2 = s.slice("github:".length);
-    const [owner, repo] = path2.split("/");
-    if (!owner) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
-    return {
-      kind: "git",
-      value: `https://github.com/${owner}/${repo ?? DEFAULT_REPO}`,
-      derivedName: normalizeName(owner)
-    };
-  }
-  const slash = s.indexOf("/");
-  const firstSeg = slash === -1 ? s : s.slice(0, slash);
-  const rest = slash === -1 ? "" : s.slice(slash + 1);
-  if (KNOWN_FORGES.includes(firstSeg.toLowerCase()) && slash !== -1) {
-    const segs = rest.split("/").filter(Boolean);
-    const owner = segs[0];
-    if (!owner) throw new SpecError(`cannot resolve "${spec}": expected ${firstSeg}/owner[/repo]`);
-    const repo = segs[1] ?? DEFAULT_REPO;
-    return {
-      kind: "git",
-      value: `https://${firstSeg.toLowerCase()}/${owner}/${repo}`,
-      derivedName: normalizeName(owner)
-    };
-  }
-  if (slash === -1) {
-    if (!firstSeg.includes(".")) {
-      return {
-        kind: "git",
-        value: `https://github.com/${firstSeg}/${DEFAULT_REPO}`,
-        derivedName: normalizeName(firstSeg)
-      };
-    }
-    return probeGeneric(`https://${firstSeg}/${DEFAULT_REPO}`, firstSeg, spec, probe);
-  }
-  if (!firstSeg.includes(".")) {
-    const segs = rest.split("/").filter(Boolean);
-    const repo = segs[0] ?? DEFAULT_REPO;
-    return {
-      kind: "git",
-      value: `https://github.com/${firstSeg}/${repo}`,
-      derivedName: normalizeName(firstSeg)
-    };
-  }
-  const path = rest.replace(/\/+$/, "");
-  const base = path ? `https://${firstSeg}/${path}` : `https://${firstSeg}/${DEFAULT_REPO}`;
-  return probeGeneric(base, firstSeg, spec, probe);
-}
-function probeGeneric(baseUrl, host, original, probe) {
-  const result = probe(baseUrl);
-  if (result.git) {
-    return { kind: "git", value: baseUrl, derivedName: normalizeName(host) };
-  }
-  if (result.tarball) {
-    return { kind: "url", value: `${baseUrl}.tar.gz`, derivedName: normalizeName(host) };
-  }
-  throw new SpecError(
-    `cannot resolve "${original}": neither ${baseUrl} (git) nor ${baseUrl}.tar.gz (tarball) responded`
-  );
-}
 
 // src/probe.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
@@ -8469,6 +8828,7 @@ async function cmdAvailable(ctx, args = {}) {
   const config = load(ctx);
   const state = new State(ctx.stateRoot);
   const installedKeys = installedSet(ctx, config);
+  const declaredBundles = new Set([...config.user.bundles, ...config.project?.bundles ?? []].map(bundleLabel));
   const names = args.source ? [args.source] : [...config.sources.keys()];
   const out = [];
   for (const name of names) {
@@ -8476,7 +8836,8 @@ async function cmdAvailable(ctx, args = {}) {
     if (!src) throw new CommandError(`unknown source: ${name}`);
     if (!state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
     const loc = await makeBackend(src, ctx.home, cacheRootOf(ctx)).resolve();
-    for (const item of scan(loc.dir).items) {
+    const cat = scan(loc.dir);
+    for (const item of cat.items) {
       out.push({
         type: item.type,
         name: item.name,
@@ -8484,6 +8845,23 @@ async function cmdAvailable(ctx, args = {}) {
         source: name,
         installed: installedKeys.has(`${TYPE_DIR2[item.type]}/${item.name}@${name}`)
       });
+    }
+    for (const b of cat.bundles) {
+      const entry = {
+        type: "bundle",
+        name: b.name,
+        description: b.def?.description,
+        source: name,
+        installed: declaredBundles.has(bundleLabel({ name: b.name, source: name }))
+      };
+      try {
+        entry.members = expandBundle(cat, b.name).items.map((m) => `${m.type}:${m.name}`).sort();
+        entry.vars = b.def.vars;
+      } catch (err) {
+        if (!(err instanceof BundleError)) throw err;
+        entry.error = err.message;
+      }
+      out.push(entry);
     }
   }
   return out;
@@ -8493,34 +8871,57 @@ async function cmdInstall(ctx, args) {
   const config = load(ctx);
   const state = new State(ctx.stateRoot);
   const catalogs = /* @__PURE__ */ new Map();
-  for (const spec of args.items) {
-    const { type: explicitType, name, source } = parseItemSpec(spec);
-    const src = config.sources.get(source);
-    if (!src) throw new CommandError(`unknown source: ${source}`);
-    if (!state.isTrusted({ name: source, resolved: identityOf(src), origin: src.origin })) {
-      throw new CommandError(`source "${source}" is not trusted; run: skilletor trust ${source}`);
-    }
-    if (name === WILDCARD) {
-      addInstallEntry(path, explicitType, `${WILDCARD}@${source}`);
-      continue;
-    }
+  const catalogOf = async (source, src) => {
     let cat = catalogs.get(source);
     if (!cat) {
       cat = scan((await makeBackend(src, ctx.home, cacheRootOf(ctx)).resolve()).dir);
       catalogs.set(source, cat);
     }
-    const matches = cat.items.filter((i) => i.name === name && (!explicitType || i.type === explicitType));
+    return cat;
+  };
+  for (const spec of args.items) {
+    const { type: explicitType, bundle, name, source } = parseItemSpec(spec);
+    const src = config.sources.get(source);
+    if (!src) throw new CommandError(`unknown source: ${source}`);
+    if (!state.isTrusted({ name: source, resolved: identityOf(src), origin: src.origin })) {
+      throw new CommandError(`source "${source}" is not trusted; run: skilletor trust ${source}`);
+    }
+    if (name.includes(WILDCARD)) {
+      addInstallEntry(path, explicitType, `${name}@${source}`);
+      continue;
+    }
+    const cat = await catalogOf(source, src);
+    const hasBundle = cat.bundles.some((b) => b.name === name);
+    const matches = bundle ? [] : cat.items.filter((i) => i.name === name && (!explicitType || i.type === explicitType));
+    if (bundle || !explicitType && hasBundle && matches.length === 0) {
+      checkBundle(cat, name, source);
+      addBundleEntry(path, `${name}@${source}`);
+      continue;
+    }
     if (matches.length === 0) {
       const suggestions = cat.items.map((i) => `${i.type}:${i.name}`).slice(0, 8).join(", ");
       throw new CommandError(`unknown item "${name}" in ${source}${suggestions ? ` (available: ${suggestions})` : ""}`);
     }
-    if (matches.length > 1) {
-      const types = matches.map((m) => `${m.type}:${name}@${source}`).join(", ");
-      throw new CommandError(`"${name}" is ambiguous in ${source}; use one of: ${types}`);
+    if (matches.length > 1 || !explicitType && hasBundle) {
+      const options = matches.map((m) => `${m.type}:${name}@${source}`);
+      if (!explicitType && hasBundle) options.push(`bundle:${name}@${source}`);
+      throw new CommandError(`"${name}" is ambiguous in ${source}; use one of: ${options.join(", ")}`);
     }
     addInstallEntry(path, matches[0].type, `${name}@${source}`);
   }
   return sync(ctx);
+}
+function checkBundle(cat, name, source) {
+  if (!cat.bundles.some((b) => b.name === name)) {
+    const known = cat.bundles.map((b) => b.name).slice(0, 8).join(", ");
+    throw new CommandError(`unknown bundle "${name}" in ${source}${known ? ` (available bundles: ${known})` : ""}`);
+  }
+  try {
+    expandBundle(cat, name);
+  } catch (err) {
+    if (err instanceof BundleError) throw new CommandError(`${source}: ${err.message}`);
+    throw err;
+  }
 }
 async function cmdUninstall(ctx, args) {
   const project = Boolean(args.project);
@@ -8530,53 +8931,89 @@ async function cmdUninstall(ctx, args) {
   const parsed = args.items.map((spec) => ({ spec, ...parseItemSpec(spec) }));
   const errors = [];
   const hints = [];
+  const where = `the ${scopeName} config`;
+  const bundlesHere = bundleEntries(path);
   for (const p of parsed) {
+    const explicit = p.bundle ? [] : findInstallEntries(path, p.name, p.source, p.type);
+    const bundleHit = bundlesHere.some((b) => b.name === p.name && b.source === p.source);
+    if (!p.bundle && !p.type && !p.name.includes(WILDCARD) && bundleHit) {
+      if (explicit.length) {
+        errors.push(`${p.name}@${p.source} is ambiguous in ${where}: it names a bundle and ${explicit.map((e) => `${e.type}:${p.name}@${p.source}`).join(", ")}; use a prefix (bundle:${p.name}@${p.source})`);
+      } else {
+        p.bundle = true;
+      }
+      continue;
+    }
+    if (p.bundle) {
+      if (!bundleHit) {
+        errors.push(`bundle:${p.name}@${p.source} is not declared in ${where} (${path})${bundleElsewhere(ctx, p, project)}`);
+      }
+      continue;
+    }
     const label = p.type ? `${p.type}:${p.name}@${p.source}` : `${p.name}@${p.source}`;
-    const explicit = findInstallEntries(path, p.name, p.source, p.type);
-    const cover = p.name === WILDCARD ? { types: [], confirmed: false } : coveringWildcards(path, lock, p.name, p.source, p.type, explicit.map((e) => e.type));
-    const wild = cover.types.length ? wildcardText(cover.types, p.source) : "";
-    const where = `the ${scopeName} config`;
+    const cover = p.name.includes(WILDCARD) ? { source: p.source, wilds: [], bundles: [], confirmed: false } : covering(path, lock, bundlesHere, p.name, p.source, p.type, explicit.map((e) => e.type));
+    const text = coverText(cover);
     if (explicit.length === 0) {
-      if (wild && cover.confirmed) {
+      if (text && cover.confirmed) {
         errors.push(
-          `${label} is not declared explicitly; it is installed by the ${wild} in ${where}. To drop it, ` + wayOut(cover.types, p.source, project)
+          `${label} is not declared explicitly; it is installed by the ${text} in ${where}. To drop it, ` + wayOut(cover, project)
         );
-      } else if (wild) {
+      } else if (text) {
         errors.push(
-          `${label} is not declared in ${where} (${path}); the ${wild} there installs every item of its type from ${p.source}, so if ${p.source} offers it: ${wayOut(cover.types, p.source, project)}`
+          `${label} is not declared in ${where} (${path}); the ${text} there installs every matching item of its type from ${p.source}, so if ${p.source} offers it: ${wayOut(cover, project)}`
         );
       } else {
         errors.push(`${label} is not declared in ${where} (${path})${declaredElsewhere(ctx, path, p, project)}`);
       }
-    } else if (wild) {
+    } else if (text) {
       hints.push(
-        `${label} removed, but the ${wild} in ${where} still installs it on the next sync. To drop it, ` + wayOut(cover.types, p.source, project)
+        `${label} removed, but the ${text} in ${where} still installs it on the next sync. To drop it, ` + wayOut(cover, project)
       );
     }
   }
   if (errors.length) throw new CommandError(errors.join("\n"));
-  for (const p of parsed) removeInstallEntries(path, p.name, p.source, p.type);
+  for (const p of parsed) {
+    if (p.bundle) removeBundleEntries(path, p.name, p.source);
+    else removeInstallEntries(path, p.name, p.source, p.type);
+  }
   return { report: await sync(ctx), hints };
 }
-function coveringWildcards(path, lock, name, source, type, explicitTypes) {
-  const found = findInstallEntries(path, WILDCARD, source, type).map((w) => w.type);
-  const inLock = (t) => Object.entries(lock).some(([key, e]) => {
+function covering(path, lock, bundlesHere, name, source, type, explicitTypes) {
+  const found = findWildcardEntries(path, source, type).filter((w) => matchesPattern(w.pattern, name)).map((w) => ({ type: w.type, pattern: w.pattern }));
+  const locked = (t) => Object.entries(lock).filter(([key, e]) => {
     const k = parseLockKey(key);
-    return k.target === `${TYPE_DIR2[t]}/${name}` && e.source === source;
+    return k.name === name && (!t || k.type === t) && e.source === source;
   });
-  const confirmed = found.some(inLock);
-  if (type) return { types: found, confirmed };
-  const known = found.filter((t) => explicitTypes.includes(t) || inLock(t));
-  return { types: known.length || explicitTypes.length ? known : found, confirmed };
+  const inLock = (t) => locked(t).length > 0;
+  const labels = new Set(bundlesHere.map(bundleLabel));
+  const bundles = [...new Set(locked(type).flatMap(([, e]) => (e.via ?? []).filter((v) => labels.has(v))))];
+  const confirmed = bundles.length > 0 || found.some((w) => inLock(w.type));
+  if (type) return { source, wilds: found, bundles, confirmed };
+  const known = found.filter((w) => explicitTypes.includes(w.type) || inLock(w.type));
+  return { source, wilds: known.length || explicitTypes.length ? known : found, bundles, confirmed };
 }
-function wildcardText(types, source) {
-  const names = types.map((t) => `${t}:${WILDCARD}@${source}`);
-  return names.length === 1 ? `wildcard ${names[0]}` : `wildcards ${names.join(", ")}`;
+function coverEntries(c) {
+  return [...c.wilds.map((w) => `${w.type}:${w.pattern}@${c.source}`), ...c.bundles];
 }
-function wayOut(types, source, project) {
+function coverText(c) {
+  const plural = (n, word) => n === 1 ? word : `${word}s`;
+  const parts = [];
+  const wilds = coverEntries(c).slice(0, c.wilds.length);
+  if (wilds.length) parts.push(`${plural(wilds.length, "wildcard")} ${wilds.join(", ")}`);
+  if (c.bundles.length) parts.push(`${plural(c.bundles.length, "bundle")} ${c.bundles.join(", ")}`);
+  return parts.join(" and ");
+}
+function wayOut(c, project) {
   const flag = project ? " --project" : "";
-  const cmds = types.map((t) => `skilletor uninstall '${t}:${WILDCARD}@${source}'${flag}`).join(" or ");
-  return `uninstall the wildcard (${cmds}), or keep it and gate the item via vars if its template renders empty for some value (an empty render is skipped).`;
+  const cmds = coverEntries(c).map((e) => `skilletor uninstall '${e}'${flag}`).join(" or ");
+  const what = !c.bundles.length ? "the wildcard" : !c.wilds.length ? "the bundle" : "them";
+  return `uninstall ${what} (${cmds}), or keep it and gate the item via vars if its template renders empty for some value (an empty render is skipped).`;
+}
+function bundleElsewhere(ctx, p, project) {
+  if (!project && !projectDirOf(ctx)) return "";
+  const hit = bundleEntries(configPath(ctx, !project)).some((b) => b.name === p.name && b.source === p.source);
+  if (!hit) return "";
+  return project ? "; the user config declares it (run without --project)" : "; the project config declares it (use --project)";
 }
 function declaredElsewhere(ctx, path, p, project) {
   if (p.type) {
@@ -8585,7 +9022,7 @@ function declaredElsewhere(ctx, path, p, project) {
   }
   if (!project && !projectDirOf(ctx)) return "";
   const otherPath = configPath(ctx, !project);
-  const hit = findInstallEntries(otherPath, p.name, p.source, p.type).length > 0 || p.name !== WILDCARD && findInstallEntries(otherPath, WILDCARD, p.source, p.type).length > 0;
+  const hit = findInstallEntries(otherPath, p.name, p.source, p.type).length > 0 || !p.name.includes(WILDCARD) && findWildcardEntries(otherPath, p.source, p.type).some((w) => matchesPattern(w.pattern, p.name));
   if (!hit) return "";
   return project ? "; the user config declares it (run without --project)" : "; the project config declares it (use --project)";
 }
@@ -8605,18 +9042,23 @@ function parseItemSpec(spec) {
   const source = spec.slice(at + 1);
   let name = spec.slice(0, at);
   let type;
+  let bundle;
   const colon = name.indexOf(":");
   if (colon !== -1) {
     const prefix = name.slice(0, colon);
-    if (prefix !== "skill" && prefix !== "agent" && prefix !== "rule") {
-      throw new CommandError(`unknown type prefix "${prefix}" in "${spec}"`);
-    }
-    type = prefix;
+    if (prefix === "bundle") bundle = true;
+    else if (prefix === "skill" || prefix === "agent" || prefix === "rule") type = prefix;
+    else throw new CommandError(`unknown type prefix "${prefix}" in "${spec}"`);
     name = name.slice(colon + 1);
   }
-  if (name === WILDCARD && !type) {
+  if (name === "") throw new CommandError(`item "${spec}" has an empty name`);
+  if (bundle) {
+    if (name.includes(WILDCARD)) throw new CommandError(`"${spec}": patterns over bundle names are not supported`);
+    return { bundle, name, source };
+  }
+  if (name.includes(WILDCARD) && !type) {
     throw new CommandError(
-      `wildcard "${spec}" needs a type prefix: rule:*@${source}, skill:*@${source} or agent:*@${source}`
+      `wildcard "${spec}" needs a type prefix: rule:${name}@${source}, skill:${name}@${source} or agent:${name}@${source}`
     );
   }
   return { type, name, source };
@@ -8628,7 +9070,9 @@ function declaredItems(config) {
 }
 function usedSources(config) {
   const used = new Set(declaredItems(config).map((i) => i.source));
-  for (const w of [...config.user.wildcards, ...config.project?.wildcards ?? []]) used.add(w.source);
+  for (const scope of [config.user, config.project]) {
+    for (const w of [...scope?.wildcards ?? [], ...scope?.bundles ?? []]) used.add(w.source);
+  }
   return used;
 }
 function installedSet(ctx, config) {
@@ -8760,9 +9204,12 @@ Commands:
   source remove <name>  Remove a source, then sync
   available [source]    List items offered by trusted sources
   install <item>...     Install items ([type:]name@source), then sync;
-                        type:*@source installs every item of that type
-  uninstall <item>...   Remove items ([type:]name@source or type:*@source),
-                        then sync
+                        type:*@source installs every item of that type,
+                        type:perl-*@source every one whose name matches;
+                        bundle:name@source installs a bundle (a bare
+                        name@source does too when no item has that name)
+  uninstall <item>...   Remove entries ([type:]name@source, type:*@source,
+                        type:perl-*@source or bundle:name@source), then sync
   trust <source>        Trust a project-declared source
 
 Options:
@@ -8812,7 +9259,11 @@ function statusText(report) {
       const note = d.skipped ? " (skipped: renders empty)" : "";
       lines.push(`  ${mark} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}${note}`);
     }
-    for (const w of s.wildcards) lines.push(`  * ${w.type}s/* @${w.source} (${w.installed} installed)`);
+    for (const w of s.wildcards) {
+      const pattern = w.entry.slice(0, w.entry.lastIndexOf("@")).replace(/^[a-z]+:/, "");
+      lines.push(`  * ${w.type}s/${pattern} @${w.source} (${w.installed} installed)`);
+    }
+    for (const b of s.bundles) lines.push(`  * bundle:${b.name}@${b.source} (${b.installed} installed)`);
     for (const o of s.orphans) lines.push(`  ? ${o} (in lock, not declared)`);
     for (const t of s.trustRequests) lines.push(`  trust: ${t.name} (${t.url})`);
   }
@@ -8905,9 +9356,13 @@ async function run(argv) {
         if (flags.json) {
           process.stdout.write(JSON.stringify(items, null, 2) + "\n");
         } else {
-          process.stdout.write(
-            items.map((i) => `${i.installed ? "\u2713" : " "} ${i.type} ${i.name}@${i.source}${i.description ? ` \u2014 ${i.description}` : ""}`).join("\n") + "\n"
-          );
+          const lines = items.map((i) => {
+            const line = `${i.installed ? "\u2713" : " "} ${i.type} ${i.name}@${i.source}${i.description ? ` \u2014 ${i.description}` : ""}`;
+            if (i.type !== "bundle") return line;
+            return `${line}
+    ${i.error !== void 0 ? `error: ${i.error}` : i.members.join(", ") || "(no items)"}`;
+          });
+          process.stdout.write(lines.join("\n") + "\n");
         }
         return 0;
       }

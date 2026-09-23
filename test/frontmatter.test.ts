@@ -2,7 +2,7 @@
 // and a clear error for anything outside it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FrontmatterError, splitFrontmatter, YamlFloat } from "../src/frontmatter.ts";
+import { FrontmatterError, parseYamlDocument, splitFrontmatter, YamlFloat } from "../src/frontmatter.ts";
 
 const fm = (yaml: string, body = "BODY\n") => splitFrontmatter(`---\n${yaml}\n---\n${body}`);
 
@@ -116,4 +116,12 @@ test("outside the subset: a FrontmatterError naming the line", () => {
   ]) {
     assert.throws(() => fm(bad), (err: Error) => err instanceof FrontmatterError && /line \d+/.test(err.message), bad);
   }
+});
+
+// k48: bundle files (spec §15.1) are whole YAML documents read with the same subset.
+test("parseYamlDocument reads a whole file and numbers lines from 1", () => {
+  assert.deepEqual(parseYamlDocument("description: D\nskills: [perl-*, testing]\nvars:\n  k: \"5.40\"\n"), {
+    description: "D", skills: ["perl-*", "testing"], vars: { k: "5.40" },
+  });
+  assert.throws(() => parseYamlDocument("a: 1\nb: &x 2\n"), /^FrontmatterError: line 2: anchors/);
 });

@@ -36,7 +36,12 @@ export function splitFrontmatter(text: string): Frontmatter {
   if (!close) throw new FrontmatterError("frontmatter: no closing --- line");
   const yaml = text.slice(open[0].length, close.index);
   const body = text.slice(close.index + close[0].length).replace(/^(?:[ \t]*\r?\n)+/, "");
-  return { data: parseYaml(yaml), body };
+  return { data: parseYaml(yaml, 2, "frontmatter line"), body };
+}
+
+/** A whole YAML document in the same subset (a bundle file, spec §15.1); lines count from 1. */
+export function parseYamlDocument(text: string): Record<string, YamlValue> {
+  return parseYaml(text, 1, "line");
 }
 
 // ---- the parser -------------------------------------------------------------
@@ -45,10 +50,12 @@ interface Line {
   /** 1-based line number in the file (the opening fence is line 1). */
   no: number;
   raw: string;
+  /** How an error names the line: "frontmatter line" or "line". */
+  label: string;
 }
 
 function fail(line: Line | undefined, message: string): never {
-  throw new FrontmatterError(`frontmatter line ${line?.no ?? "?"}: ${message}`);
+  throw new FrontmatterError(`${line?.label ?? "line"} ${line?.no ?? "?"}: ${message}`);
 }
 
 function indentOf(line: Line): number {
@@ -69,8 +76,8 @@ function isSeqItem(text: string): boolean {
 // "key": / 'key': / plain key, then `:` followed by whitespace or the end.
 const KEY_RE = /^(?:"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'|([^\s"'#&*!|>[\]{},?:-][^:#]*?))[ \t]*:(?:[ \t]+(.*))?$/;
 
-function parseYaml(yaml: string): Record<string, YamlValue> {
-  const lines: Line[] = yaml.split(/\r?\n/).map((raw, i) => ({ no: i + 2, raw }));
+function parseYaml(yaml: string, firstLine: number, label: string): Record<string, YamlValue> {
+  const lines: Line[] = yaml.split(/\r?\n/).map((raw, i) => ({ no: i + firstLine, raw, label }));
   const p = new Parser(lines);
   const [value, pos] = p.mapping(0, 0);
   if (pos < lines.length) fail(lines[pos], "unexpected content");

@@ -4,6 +4,7 @@
 //   agents/<name>.md[.njk]
 //   rules/<name>.md[.njk]
 //   snippets/…            (not installable)
+//   bundles/<name>.yaml|.yml  (optional: named item sets, spec §15)
 //   skilletor.json        (optional: { description, vars })
 //
 // Names come from the path; descriptions from item frontmatter (read raw for
@@ -11,6 +12,7 @@
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { ItemType } from "./config.ts";
+import { BundleError, parseBundle, type BundleDef } from "./bundles.ts";
 
 export class CatalogError extends Error {
   override name = "CatalogError";
@@ -29,8 +31,19 @@ export interface SourceMeta {
   vars?: Record<string, unknown>;
 }
 
+/** A bundle file (spec §15.1). A broken one carries `error` instead of `def`: that
+ *  error belongs to the bundle, never to the scan (spec §15.4). */
+export interface CatalogBundle {
+  name: string;
+  /** The bundle file(s), relative to the source dir. */
+  files: string[];
+  def?: BundleDef;
+  error?: string;
+}
+
 export interface Catalog {
   items: CatalogItem[];
+  bundles: CatalogBundle[];
   meta: SourceMeta;
 }
 
@@ -132,7 +145,36 @@ export function scan(dir: string): Catalog {
     }
   }
 
-  return { items, meta: readSourceMeta(dir) };
+  return { items, bundles: scanBundles(dir), meta: readSourceMeta(dir) };
+}
+
+/** `bundles/<name>.yaml|.yml`; both for one name is an error of that bundle. */
+function scanBundles(dir: string): CatalogBundle[] {
+  const bdir = join(dir, "bundles");
+  if (!existsSync(bdir)) return [];
+  noSymlink(bdir);
+  const byName = new Map<string, string[]>();
+  for (const entry of readdirSync(bdir).sort()) {
+    const m = /^(.+)\.ya?ml$/.exec(entry);
+    if (!m) continue;
+    const p = join(bdir, entry);
+    if (!noSymlink(p).isFile()) continue;
+    byName.set(m[1]!, [...(byName.get(m[1]!) ?? []), relative(dir, p)]);
+  }
+  const out: CatalogBundle[] = [];
+  for (const [name, files] of byName) {
+    if (files.length > 1) {
+      out.push({ name, files, error: `both ${files.join(" and ")} exist` });
+      continue;
+    }
+    try {
+      out.push({ name, files, def: parseBundle(readFileSync(join(dir, files[0]!), "utf8")) });
+    } catch (err) {
+      if (!(err instanceof BundleError)) throw err;
+      out.push({ name, files, error: `${files[0]}: ${err.message}` });
+    }
+  }
+  return out;
 }
 
 function readSourceMeta(dir: string): SourceMeta {

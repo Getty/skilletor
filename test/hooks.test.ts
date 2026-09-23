@@ -239,3 +239,21 @@ test("k44: session-start started in ~ syncs the user scope only, once", async ()
     e.cleanup();
   }
 });
+
+// k48: bundle expansion runs inside the hook's sync; a broken bundle is one warning.
+test("session-start with a broken bundle and a good one: installs the good one, warns, never throws", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "b", "foo");
+    mkdirSync(join(src, "bundles"), { recursive: true });
+    writeFileSync(join(src, "bundles", "good.yaml"), "description: G\nskills: [foo]\n");
+    writeFileSync(join(src, "bundles", "bad.yaml"), "description: B\nbundles: [bad]\n");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { bundles: ["good@mine", "bad@mine"] } });
+    const out = await runHook("session-start", { source: "startup" }, e.ctx);
+    assert.match(out.systemMessage ?? "", /1 item\(s\) updated, 1 warning/);
+    assert.match(out.hookSpecificOutput?.additionalContext ?? "", /bundle:bad@mine: bundle cycle bad → bad/);
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo/SKILL.md")), true);
+  } finally {
+    e.cleanup();
+  }
+});

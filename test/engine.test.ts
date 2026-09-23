@@ -619,3 +619,249 @@ test("a project dir equal to home has no project scope (sync, check, status)", a
     e.cleanup();
   }
 });
+
+// ---- patterns and bundles (k48, spec §3, §15) ---------------------------------
+
+test("a pattern wildcard installs only matching items; a pattern matching nothing warns", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "pat");
+    putItem(src, "rule", "perl-style");
+    putItem(src, "rule", "perl-moo");
+    putItem(src, "rule", "go-style");
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { rules: ["perl-*@shared", "zz-*@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key).sort(), ["rules/perl-moo", "rules/perl-style"]);
+    assert.equal(r.scopes[0]!.warnings.length, 1);
+    assert.match(r.scopes[0]!.warnings[0]!, /zz-\*@shared matches nothing/);
+    const s = status(e.ctx, { scope: "user" }).scopes[0]!;
+    assert.deepEqual(s.declared.map((d) => [d.key, d.via]).sort(), [["rules/perl-moo", "perl-*@shared"], ["rules/perl-style", "perl-*@shared"]]);
+    assert.deepEqual(s.wildcards.map((w) => [w.entry, w.installed]), [["perl-*@shared", 2], ["zz-*@shared", 0]]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("two patterns of the same source yielding one name install it once, silently", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "same");
+    putItem(src, "rule", "perl-style");
+    putItem(src, "rule", "perl-moo");
+    putItem(src, "rule", "go-style");
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { rules: ["perl-*@shared", "*-style@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key).sort(), ["rules/go-style", "rules/perl-moo", "rules/perl-style"]);
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+/** A source with rules r1..r3, a template rule `t` printing vars, and bundles. */
+function bundleSource(root: string, name: string, bundles: Record<string, string>, meta?: unknown): string {
+  const src = join(root, name);
+  for (const r of ["r1", "r2", "r3"]) putItem(src, "rule", r);
+  putItem(src, "skill", "s1");
+  putRaw(src, "rules/t.md.njk", "---\ndescription: t\n---\nv={{ vars.v }} w={{ vars.w }}\n");
+  for (const [b, text] of Object.entries(bundles)) putRaw(src, `bundles/${b}.yaml`, text);
+  if (meta) putRaw(src, "skilletor.json", JSON.stringify(meta));
+  return src;
+}
+
+test("a bundle installs its items (names, patterns, nested bundles); dropping it removes them", async () => {
+  const e = env();
+  try {
+    const src = bundleSource(e.tmp.dir, "b1", {
+      perl: "description: P\nrules: [r1, \"r*\"]\nbundles: [base]\n",
+      base: "description: B\nskills: [s1]\n",
+    });
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["perl@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key).sort(), ["rules/r1", "rules/r2", "rules/r3", "skills/s1"]);
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+    const lock = readLock(join(e.home, ".claude/skilletor.lock.json"));
+    assert.deepEqual(lock["rules/r1"]!.via, ["bundle:perl@shared"]);
+
+    const s = status(e.ctx, { scope: "user" }).scopes[0]!;
+    assert.deepEqual(s.declared.map((d) => d.via), Array(4).fill("bundle:perl@shared"));
+    assert.deepEqual(s.bundles, [{ name: "perl", source: "shared", entry: "perl@shared", installed: 4 }]);
+    assert.deepEqual(s.orphans, []);
+
+    e.writeCfg("user", { sources: { shared: { local: src } } });
+    const r2 = await sync(e.ctx, { scope: "user" });
+    assert.equal(r2.scopes[0]!.removed.length, 4);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("bundle vars: source defaults < bundle vars < user vars; the outer bundle wins along a chain", async () => {
+  const e = env();
+  try {
+    const src = bundleSource(e.tmp.dir, "bv", {
+      outer: "description: O\nbundles: [inner]\nvars:\n  v: from-outer\n",
+      inner: "description: I\nrules: [t]\nvars:\n  v: from-inner\n  w: from-inner\n",
+    }, { vars: { v: "default", w: "default" } });
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["outer@shared"] } });
+    await sync(e.ctx, { scope: "user" });
+    assert.match(readFileSync(join(e.home, ".claude/rules/t.md"), "utf8"), /v=from-outer w=from-inner/);
+
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["outer@shared"] }, vars: { w: "user" } });
+    await sync(e.ctx, { scope: "user" });
+    assert.match(readFileSync(join(e.home, ".claude/rules/t.md"), "utf8"), /v=from-outer w=user/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("bundle vars conflict: neither value applies and one warning names both bundles", async () => {
+  const e = env();
+  try {
+    const src = bundleSource(e.tmp.dir, "bc", {
+      a: "description: A\nrules: [t]\nvars:\n  v: from-a\n  w: same\n",
+      b: "description: B\nrules: [t]\nvars:\n  v: from-b\n  w: same\n",
+    }, { vars: { v: "default", w: "default" } });
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["a@shared", "b@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.match(readFileSync(join(e.home, ".claude/rules/t.md"), "utf8"), /v=default w=same/);
+    assert.equal(r.scopes[0]!.warnings.length, 1);
+    assert.match(r.scopes[0]!.warnings[0]!, /"v"/);
+    assert.match(r.scopes[0]!.warnings[0]!, /bundle:a@shared/);
+    assert.match(r.scopes[0]!.warnings[0]!, /bundle:b@shared/);
+    assert.deepEqual(readLock(join(e.home, ".claude/skilletor.lock.json"))["rules/t"]!.via, ["bundle:a@shared", "bundle:b@shared"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("an explicit item gets no bundle vars; same source silent, another source's bundle warns", async () => {
+  const e = env();
+  try {
+    const src = bundleSource(e.tmp.dir, "be", { a: "description: A\nrules: [t, r1]\nvars:\n  v: from-a\n" }, { vars: { v: "default", w: "d" } });
+    const other = bundleSource(e.tmp.dir, "bo", { o: "description: O\nrules: [r1, r2]\n" });
+    e.writeCfg("user", {
+      sources: { shared: { local: src }, other: { local: other } },
+      install: { rules: ["t@shared", "r1@shared"], bundles: ["a@shared", "o@other"] },
+    });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.match(readFileSync(join(e.home, ".claude/rules/t.md"), "utf8"), /v=default/);
+    assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`).sort(), ["rules/r1@shared", "rules/r2@other", "rules/t@shared"]);
+    assert.equal(r.scopes[0]!.warnings.length, 1);
+    assert.match(r.scopes[0]!.warnings[0]!, /r1.*bundle:o@other.*explicitly declared as r1@shared/);
+    // The lock remembers that bundle a also declares the explicit items (for uninstall hints).
+    const lock = readLock(join(e.home, ".claude/skilletor.lock.json"));
+    assert.deepEqual(lock["rules/r1"]!.via, ["bundle:a@shared"]);
+    assert.deepEqual(lock["rules/r2"]!.via, ["bundle:o@other"]);
+    const st = status(e.ctx, { scope: "user" }).scopes[0]!;
+    assert.equal(st.declared.find((d) => d.key === "rules/r1")!.via, undefined); // explicit
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a bundle and a wildcard of different sources yielding one name skip it with a warning", async () => {
+  const e = env();
+  try {
+    const src = bundleSource(e.tmp.dir, "bw", { a: "description: A\nrules: [r1]\n" });
+    const other = join(e.tmp.dir, "bw2");
+    putItem(other, "rule", "r1");
+    e.writeCfg("user", {
+      sources: { shared: { local: src }, other: { local: other } },
+      install: { rules: ["*@other", "r2@shared"], bundles: ["a@shared"] },
+    });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["rules/r2"]);
+    assert.equal(r.scopes[0]!.warnings.length, 1);
+    assert.match(r.scopes[0]!.warnings[0]!, /r1.*offered by .*skipped/);
+    assert.match(r.scopes[0]!.warnings[0]!, /bundle:a@shared/);
+    assert.match(r.scopes[0]!.warnings[0]!, /\*@other/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a bundle and a wildcard of the same source yielding one name install it once, silently", async () => {
+  const e = env();
+  try {
+    const src = bundleSource(e.tmp.dir, "bs", { a: "description: A\nrules: [r1]\n" });
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { rules: ["r*@shared"], bundles: ["a@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key).sort(), ["rules/r1", "rules/r2", "rules/r3"]);
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a bundle error affects only that bundle and keeps what it installed", async () => {
+  const e = env();
+  try {
+    const src = bundleSource(e.tmp.dir, "berr", {
+      a: "description: A\nrules: [r1]\n",
+      b: "description: B\nrules: [r2]\n",
+    });
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["a@shared", "b@shared"] } });
+    await sync(e.ctx, { scope: "user" });
+
+    putRaw(src, "bundles/a.yaml", "description: A\nrules: [r1]\nbundles: [a]\n"); // now a cycle
+    putRaw(src, "bundles/b.yaml", "description: B\nrules: [r2, r3]\n");
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["rules/r3"]);
+    assert.deepEqual(r.scopes[0]!.removed, []);
+    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), true);
+    assert.equal(r.scopes[0]!.warnings.length, 1);
+    assert.match(r.scopes[0]!.warnings[0]!, /bundle:a@shared.*cycle a → a/);
+    // Still kept, with its via, on the next run.
+    await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(readLock(join(e.home, ".claude/skilletor.lock.json"))["rules/r1"]!.via, ["bundle:a@shared"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a missing bundle warns; an unresolvable source keeps what its bundle installed", async () => {
+  const e = env();
+  try {
+    const src = bundleSource(e.tmp.dir, "bgone", { a: "description: A\nrules: [r1]\n" });
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["a@shared", "ghost@shared"] } });
+    const r1 = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r1.scopes[0]!.added.map((i) => i.key), ["rules/r1"]);
+    assert.equal(r1.scopes[0]!.warnings.length, 1);
+    assert.match(r1.scopes[0]!.warnings[0]!, /bundle:ghost@shared.*not found/);
+
+    rmSync(src, { recursive: true, force: true });
+    const r2 = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r2.scopes[0]!.removed, []);
+    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("bundle warnings (missing name, other source not supported yet) reach the report", async () => {
+  const e = env();
+  try {
+    const src = bundleSource(e.tmp.dir, "bwarn", { a: "description: A\nrules: [r1, nope, x@Getty]\n" });
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["a@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["rules/r1"]);
+    assert.equal(r.scopes[0]!.warnings.length, 2);
+    assert.match(r.scopes[0]!.warnings.join("\n"), /nope/);
+    assert.match(r.scopes[0]!.warnings.join("\n"), /x@Getty.*not supported yet/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("check covers sources referenced only by a bundle", async () => {
+  const e = env();
+  try {
+    const src = bundleSource(e.tmp.dir, "bck", { a: "description: A\nrules: [r1]\n" });
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["a@shared"] } });
+    const chk = await check(e.ctx, { scope: "user" });
+    assert.deepEqual(chk.sources.map((s) => s.name), ["shared"]);
+  } finally {
+    e.cleanup();
+  }
+});

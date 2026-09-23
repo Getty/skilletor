@@ -93,6 +93,48 @@ test("install 'rule:*@src' and status text marks wildcard items", () => {
   assert.match(st.stdout, /\* rules\/\* @shared \(1 installed\)/);
 });
 
+// k48: bundles and patterns through the real binary, with HOME in a temp dir.
+test("install bundle:name@src and a pattern; status and available show bundles; uninstall bundle:", () => {
+  const home = join(tmp.dir, "bundle-home");
+  const proj = join(tmp.dir, "bundle-proj");
+  const src = join(tmp.dir, "bundle-src");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(proj, { recursive: true });
+  mkdirSync(join(src, "rules"), { recursive: true });
+  mkdirSync(join(src, "bundles"), { recursive: true });
+  for (const r of ["perl-a", "perl-b", "go-c"]) writeFileSync(join(src, "rules", `${r}.md`), `---\ndescription: ${r}\n---\nX\n`);
+  writeFileSync(join(src, "bundles", "perl.yaml"), "description: Perl things\nrules: [\"perl-*\"]\nvars:\n  v: 1\n");
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { shared: { local: src } } }));
+  const env = claudeOnlyEnv(home);
+  const common = ["--project-dir", proj];
+
+  const ok = runCli(["install", "bundle:perl@shared", "rule:go-*@shared", ...common], env);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /\+ rules\/perl-a/);
+  assert.match(ok.stdout, /\+ rules\/go-c/);
+
+  const st = runCli(["status", "--scope", "user", ...common], env);
+  assert.equal(st.status, 0, st.stderr);
+  assert.match(st.stdout, /rules\/perl-a @shared via bundle:perl@shared/);
+  assert.match(st.stdout, /rules\/go-c @shared via go-\*@shared/);
+  assert.match(st.stdout, /\* rules\/go-\* @shared \(1 installed\)/);
+  assert.match(st.stdout, /\* bundle:perl@shared \(2 installed\)/);
+
+  const av = runCli(["available", "shared", ...common], env);
+  assert.equal(av.status, 0, av.stderr);
+  assert.match(av.stdout, /✓ bundle perl@shared — Perl things\n\s+rule:perl-a, rule:perl-b/);
+  const avJson = JSON.parse(runCli(["available", "shared", "--json", ...common], env).stdout);
+  assert.deepEqual(avJson.find((i: { type: string }) => i.type === "bundle").vars, { v: 1 });
+
+  const only = runCli(["uninstall", "perl-a@shared", ...common], env);
+  assert.equal(only.status, 1);
+  assert.match(only.stderr, /bundle bundle:perl@shared/);
+
+  const un = runCli(["uninstall", "bundle:perl@shared", ...common], env);
+  assert.equal(un.status, 0, un.stderr);
+  assert.match(un.stdout, /- rules\/perl-a/);
+});
+
 // k37: uninstall through the real binary: wildcard-only exits 1 with the hint,
 // explicit-plus-wildcard exits 0 and still warns.
 test("uninstall of a wildcard-covered item: exit 1 alone, exit 0 with a warning when explicit", () => {

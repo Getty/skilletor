@@ -27,6 +27,8 @@ export interface PlanItem {
    *  and reported by hash, never written or deleted here — the caller maintains
    *  the block from the new lock. */
   inBlock?: boolean;
+  /** Recorded in the lock entry as is (the bundles that declared the item). */
+  via?: string[];
 }
 
 export interface ApplyOptions {
@@ -94,7 +96,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
       for (const rel of files) removeFile(safeJoin(root, rel), touched(root));
       if (files.length > 0) res.removed.push(it.key);
       res.skipped.push(it.key);
-      newLock[it.key] = { source: it.source, version: it.version, files: {}, skipped: it.skipped };
+      newLock[it.key] = withVia({ source: it.source, version: it.version, files: {}, skipped: it.skipped }, it);
       continue;
     }
     // A previous skip entry owns nothing: treat the item as not yet installed.
@@ -145,7 +147,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
     }
 
     if (Object.keys(entryFiles).length > 0) {
-      newLock[it.key] = { source: it.source, version: it.version, files: entryFiles };
+      newLock[it.key] = withVia({ source: it.source, version: it.version, files: entryFiles }, it);
     }
 
     if (existing === undefined) {
@@ -191,15 +193,20 @@ function recordBlockItem(it: PlanItem, prev: LockEntry | undefined, newLock: Loc
   if (it.skipped) {
     if (had) res.removed.push(it.key);
     res.skipped.push(it.key);
-    newLock[it.key] = { source: it.source, version: it.version, files: {}, skipped: it.skipped, block: true };
+    newLock[it.key] = withVia({ source: it.source, version: it.version, files: {}, skipped: it.skipped, block: true }, it);
     return;
   }
   const files: Record<string, string> = {};
   for (const [rel, buf] of it.output) files[rel] = hashBuffer(buf);
-  newLock[it.key] = { source: it.source, version: it.version, files, block: true };
+  newLock[it.key] = withVia({ source: it.source, version: it.version, files, block: true }, it);
   if (!had) res.added.push(it.key);
   else if (JSON.stringify(prev!.files) !== JSON.stringify(files)) res.updated.push(it.key);
   else res.unchanged.push(it.key);
+}
+
+function withVia(entry: LockEntry, it: PlanItem): LockEntry {
+  if (it.via?.length) entry.via = [...it.via];
+  return entry;
 }
 
 function safeJoin(root: string, rel: string): string {
