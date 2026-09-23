@@ -1,7 +1,7 @@
 {
   "name": "skilletor",
   "version": "0.1.1",
-  "description": "Remote skills for Codex and Claude Code — declared once in skilletor.json, synced on every session, templated per project. Installs skills into ~/.agents/skills and <repo>/.agents/skills.",
+  "description": "Remote skills, agents and rules for Codex and Claude Code — declared once in skilletor.json, synced on every session, templated per project. For Codex: skills in .agents/skills, agents as agent-role TOML, rules in a managed AGENTS.md block.",
   "author": {
     "name": "Torsten Raudssus",
     "url": "https://github.com/Getty"
@@ -9,7 +9,7 @@
   "homepage": "https://github.com/Getty/skilletor",
   "repository": "https://github.com/Getty/skilletor",
   "license": "MIT",
-  "keywords": ["skills", "sync", "templates", "codex", "claude-code", "plugin", "nunjucks"],
+  "keywords": ["skills", "agents", "rules", "sync", "templates", "codex", "claude-code", "plugin", "nunjucks"],
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json"
 }
