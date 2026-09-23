@@ -46,6 +46,11 @@ export class ApplyError extends Error {
 
 const NAME_RE = /^[A-Za-z0-9._-]+$/;
 
+/** True if `apply` accepts this item name (callers can skip instead of failing the plan). */
+export function isValidItemName(name: string): boolean {
+  return NAME_RE.test(name);
+}
+
 export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
   const targetDir = resolvePath(opts.targetDir);
   const lockPath = join(targetDir, "skilletor.lock.json");

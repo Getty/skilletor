@@ -188,3 +188,126 @@ test("trust confirms a project-only source and shows the URL", async () => {
     e.cleanup();
   }
 });
+
+// ---- wildcards (k34) --------------------------------------------------------
+
+function rule(dir: string, name: string) {
+  mkdirSync(join(dir, "rules"), { recursive: true });
+  writeFileSync(join(dir, "rules", `${name}.md`), `---\ndescription: ${name} rule\n---\nrule\n`);
+}
+
+test("install type:*@source stores a wildcard and installs every item of that type", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "r1");
+      rule(d, "r2");
+      skill(d, "foo");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    const report = await cmdInstall(e.ctx, { items: ["rule:*@mine"] });
+    assert.deepEqual(e.readUserCfg().install, { rules: ["*@mine"] });
+    assert.deepEqual(report.scopes[0]!.added.map((i) => i.key).sort(), ["rules/r1", "rules/r2"]);
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo")), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("install of a wildcard without a type prefix is an error", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => rule(d, "r1"));
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    await assert.rejects(
+      () => cmdInstall(e.ctx, { items: ["*@mine"] }),
+      (err: unknown) => err instanceof CommandError && /type prefix/.test((err as Error).message) && /rule:\*@mine/.test((err as Error).message),
+    );
+    assert.equal(e.readUserCfg().install, undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("install of a wildcard checks the source exists and is trusted", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({});
+    await assert.rejects(() => cmdInstall(e.ctx, { items: ["rule:*@ghost"] }), /unknown source/);
+    writeFileSync(
+      join(e.projectDir, ".claude", "skilletor.json"),
+      JSON.stringify({ sources: { team: { git: "file:///nope.git" } } }),
+    );
+    await assert.rejects(() => cmdInstall(e.ctx, { items: ["rule:*@team"], project: true }), /not trusted/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("install --project writes the wildcard to the project config", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => rule(d, "r1"));
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    await cmdInstall(e.ctx, { items: ["rule:*@mine"], project: true });
+    const proj = JSON.parse(readFileSync(join(e.projectDir, ".claude", "skilletor.json"), "utf8"));
+    assert.deepEqual(proj.install, { rules: ["*@mine"] });
+    assert.equal(existsSync(join(e.projectDir, ".claude/rules/r1.md")), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall type:*@source removes only that type's wildcard and its items", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "r1");
+      skill(d, "foo");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["*@mine"], rules: ["rule:*@mine"] } });
+    await cmdInstall(e.ctx, { items: [] });
+    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), true);
+    await cmdUninstall(e.ctx, { items: ["rule:*@mine"] });
+    assert.deepEqual(e.readUserCfg().install, { skills: ["*@mine"] });
+    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), false);
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo/SKILL.md")), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("uninstall of a wildcard without a type prefix is an error", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({ sources: { mine: { local: e.tmp.dir } }, install: { rules: ["*@mine"] } });
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["*@mine"] }), /type prefix/);
+    assert.deepEqual(e.readUserCfg().install, { rules: ["*@mine"] });
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("source remove refuses while a wildcard uses the source", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => rule(d, "r1"));
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { rules: ["*@mine"] } });
+    await assert.rejects(() => cmdSourceRemove(e.ctx, { name: "mine" }), /still has installed/i);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("available marks items installed through a wildcard", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => rule(d, "r1"));
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { rules: ["*@mine"] } });
+    await cmdInstall(e.ctx, { items: [] });
+    const items = await cmdAvailable(e.ctx);
+    assert.deepEqual(items.map((i) => [i.name, i.installed]), [["r1", true]]);
+  } finally {
+    e.cleanup();
+  }
+});

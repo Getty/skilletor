@@ -26,6 +26,7 @@ types under the same roof.
 |---|---|
 | **Source** | A named source: git repo, HTTPS tarball, or local directory |
 | **Item** | An installable thing from a source, addressed as `name@source` |
+| **Wildcard** | `*@source` in one type's install list: every item of that type in the source |
 | **Type** | `skill`, `agent`, `rule` – a fixed table in code, not config-extensible |
 | **Scope** | `user` (`~/.claude/`) or `project` (`<project>/.claude/`) |
 | **Lock** | Per scope: what skilletor installed, with output hashes |
@@ -52,7 +53,7 @@ The scope follows from which file declares an item.
   "install": {
     "skills": ["perl-moo@shared", "container-kubernetes@shared"],
     "agents": ["karr@shared"],
-    "rules":  ["commit-style@team"]
+    "rules":  ["commit-style@team", "*@shared"]
   },
   "vars": { "kubernetes": true, "k8s_namespace": "prod" },
   "gitignore": true,
@@ -65,7 +66,21 @@ The scope follows from which file declares an item.
 - `checkInterval` (user only, seconds, default 1800 = 30 min): throttle for the
   in-session check. `0` or a negative value disables it (SessionStart still syncs).
 - Duplicate target names within one type and scope (`foo@shared` + `foo@team`) are a
-  config error.
+  config error. So is the same wildcard (`*@shared` under one type) declared twice in
+  one scope.
+- **Wildcards:** `"*@source"` (or `"rule:*@source"`) in `install.skills|agents|rules`
+  declares every item of that type in the source. It is stored as written and expanded
+  at sync time against the resolved source's catalog (see 6.1), so items added upstream
+  are installed on the next sync and items removed upstream are deleted via the lock
+  like any undeclared item. `*` is only valid as the whole name.
+- **Overlap with wildcards** (per type and scope; never a config error, because an
+  upstream addition must not break the whole sync):
+  - an explicit entry and a wildcard yielding the same name from the same source: the
+    explicit entry is used, silently;
+  - an explicit entry and a wildcard yielding the same name from a different source:
+    the explicit entry wins, the report carries a warning;
+  - two wildcards (different sources) yielding the same name: that name is skipped with
+    a warning (an already installed copy stays as it is); all other items proceed.
 
 **Merging sources:** user sources are usable in project configs. Same name: fields from
 the user or local config merge *over* the project definition.
@@ -90,7 +105,8 @@ skilletor.json             # optional: { "description": "…", "vars": { default
 ```
 
 The catalog (`skilletor available`) is built by scanning this layout; name and
-description come from the items' frontmatter.
+description come from the items' frontmatter. The same scan expands a wildcard
+(`*@source`, §3) at sync time: every catalog item of the wildcard's type is declared.
 
 ### 4.2 Shorthand resolution for `skilletor add [name] <spec>`
 
@@ -164,11 +180,17 @@ Deliberately excluded: `env.*` (otherwise secrets end up in files) and the git b
 
 1. Load, merge, validate config.
 2. Resolve sources (in parallel) → local directory + version per source.
-3. **Build each declared item in memory** (render or copy).
+3. Expand wildcards against each resolved source's catalog (overlap rules in §3), then
+   **build each declared item in memory** (render or copy).
 4. Compare output against disk and lock; write only differences (atomically:
    temp file + rename); remove files the item no longer contains.
 5. Delete items no longer declared, per the lock.
 6. Write the lock and (in a project) the gitignore block, emit the report.
+
+**Unresolvable sources keep their items:** when a source cannot be resolved or scanned
+(offline without cache, untrusted, broken layout), every locked item it provided stays
+untouched – for explicit entries and for everything previously installed through a
+wildcard over that source alike. Deletion only follows from a successful resolve.
 
 **Render-and-compare:** there is no invalidation logic. Every run renders everything and
 diffs the output; changed variables, snippets, and local checkout edits take effect
@@ -222,8 +244,9 @@ line. Config error → nothing is touched, clear message.
 skilletor add [name] <spec> [--project]   # add a source (= source add), resolves shorthand
 skilletor source list | remove <name>
 skilletor available [source]              # catalog: type, name, description, installed?
-skilletor install <item>… [--project]     # name@source, or type:name@source when ambiguous
-skilletor uninstall <item>…
+skilletor install <item>… [--project]     # name@source, or type:name@source when ambiguous;
+                                          # type:*@source installs a wildcard (type required)
+skilletor uninstall <item>… [--project]   # type:*@source removes the wildcard entry
 skilletor sync | check | status           # --scope user|project|all, --json, --force
 skilletor trust <source>
 skilletor hook <event>                    # for hooks.json only
@@ -231,6 +254,10 @@ skilletor hook <event>                    # for hooks.json only
 
 `add`/`install`/`uninstall` edit only the config (default: the user config) and then run
 `sync`. The declarative config stays the single source of truth.
+
+`status` marks items that were declared through a wildcard (`via *@shared`, and a `via`
+field in `--json`) and lists each wildcard with the number of items it currently has
+installed.
 
 ## 8. Hooks and messages
 

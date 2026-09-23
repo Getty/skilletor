@@ -282,3 +282,94 @@ test("gitignore false in project config is honored", () => {
     cleanup();
   }
 });
+
+// ---- wildcards (k34) --------------------------------------------------------
+
+test("wildcard entries parse into wildcards, not install; a matching type prefix is allowed", () => {
+  const { home, projectDir, cleanup } = setup({
+    user: {
+      sources: { shared: { git: "https://example.com/s" } },
+      install: { rules: ["*@shared"], skills: ["skill:*@shared", "foo@shared"] },
+    },
+  });
+  try {
+    const cfg = loadConfig({ home, projectDir });
+    assert.deepEqual(cfg.user.install.map((i) => i.target), ["skills/foo"]);
+    assert.deepEqual(
+      cfg.user.wildcards.map((w) => ({ type: w.type, source: w.source, raw: w.raw })).sort((a, b) => a.type.localeCompare(b.type)),
+      [
+        { type: "rule", source: "shared", raw: "*@shared" },
+        { type: "skill", source: "shared", raw: "skill:*@shared" },
+      ],
+    );
+    assert.deepEqual(cfg.project?.wildcards, []);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a wildcard referencing an unknown source is rejected", () => {
+  const { home, projectDir, cleanup } = setup({ user: { install: { rules: ["*@ghost"] } } });
+  try {
+    assert.throws(() => loadConfig({ home, projectDir }), /unknown source.*ghost/i);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a wildcard with a mismatched type prefix is rejected", () => {
+  const { home, projectDir, cleanup } = setup({
+    user: { sources: { s: { git: "https://example.com/s" } }, install: { rules: ["agent:*@s"] } },
+  });
+  try {
+    assert.throws(() => loadConfig({ home, projectDir }), /type/i);
+  } finally {
+    cleanup();
+  }
+});
+
+test("the same wildcard twice in one scope is rejected, also across project and local", () => {
+  const one = setup({
+    user: { sources: { s: { git: "https://example.com/s" } }, install: { rules: ["*@s", "rule:*@s"] } },
+  });
+  try {
+    assert.throws(() => loadConfig({ home: one.home, projectDir: one.projectDir }), /duplicate/i);
+  } finally {
+    one.cleanup();
+  }
+  const two = setup({
+    project: { sources: { s: { git: "https://example.com/s" } }, install: { rules: ["*@s"] } },
+    local: { install: { rules: ["*@s"] } },
+  });
+  try {
+    assert.throws(() => loadConfig({ home: two.home, projectDir: two.projectDir }), /duplicate/i);
+  } finally {
+    two.cleanup();
+  }
+});
+
+test("wildcards from two sources in one type are not a config error", () => {
+  const { home, projectDir, cleanup } = setup({
+    user: {
+      sources: { a: { git: "https://example.com/a" }, b: { git: "https://example.com/b" } },
+      install: { rules: ["*@a", "*@b", "foo@a"] },
+    },
+  });
+  try {
+    const cfg = loadConfig({ home, projectDir });
+    assert.deepEqual(cfg.user.wildcards.map((w) => w.source), ["a", "b"]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a partial wildcard name is rejected", () => {
+  const { home, projectDir, cleanup } = setup({
+    user: { sources: { s: { git: "https://example.com/s" } }, install: { rules: ["foo*@s"] } },
+  });
+  try {
+    assert.throws(() => loadConfig({ home, projectDir }), /\*/);
+  } finally {
+    cleanup();
+  }
+});

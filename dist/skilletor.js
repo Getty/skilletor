@@ -5773,6 +5773,7 @@ function atomicWrite(path, data) {
 
 // src/config.ts
 var INSTALL_KEYS = { skills: "skill", agents: "agent", rules: "rule" };
+var WILDCARD = "*";
 var ConfigError = class extends Error {
   name = "ConfigError";
 };
@@ -5854,6 +5855,7 @@ function parseInstall(obj, path, scope, known) {
     }
   }
   const items = [];
+  const wildcards = [];
   const seen = /* @__PURE__ */ new Map();
   for (const [key, type] of Object.entries(INSTALL_KEYS)) {
     const list = install[key];
@@ -5869,7 +5871,7 @@ function parseInstall(obj, path, scope, known) {
           `${path}: ${scope} install "${entry}" references unknown source "${item.source}"`
         );
       }
-      const targetKey = `${item.type}/${item.name}`;
+      const targetKey = seenKey(item);
       const prev = seen.get(targetKey);
       if (prev !== void 0) {
         throw new ConfigError(
@@ -5877,10 +5879,14 @@ function parseInstall(obj, path, scope, known) {
         );
       }
       seen.set(targetKey, entry);
-      items.push(item);
+      if (item.name === WILDCARD) wildcards.push({ type: item.type, source: item.source, raw: entry });
+      else items.push(item);
     });
   }
-  return items;
+  return { install: items, wildcards };
+}
+function seenKey(item) {
+  return item.name === WILDCARD ? `${item.type}/*@${item.source}` : `${item.type}/${item.name}`;
 }
 function parseEntry(entry, type, path, where) {
   const at = entry.lastIndexOf("@");
@@ -5900,6 +5906,9 @@ function parseEntry(entry, type, path, where) {
     name = name.slice(colon + 1);
   }
   if (name.length === 0) throw new ConfigError(`${path}: ${where} "${entry}" has an empty name`);
+  if (name !== WILDCARD && name.includes(WILDCARD)) {
+    throw new ConfigError(`${path}: ${where} "${entry}": "*" is only valid as the whole name (*@source)`);
+  }
   return { type, name, source, target: `${type}s/${name}`, raw: entry };
 }
 function mergeVars(...objs) {
@@ -5931,9 +5940,11 @@ function loadConfig(opts) {
   for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s, "user"));
   for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s, "user"));
   const checkInterval = numberOr(user.checkInterval, 1800, userPath, "checkInterval");
+  const userInstall = parseInstall(user, userPath, "user", userSources);
   const userScope = {
     scope: "user",
-    install: parseInstall(user, userPath, "user", userSources),
+    install: userInstall.install,
+    wildcards: userInstall.wildcards,
     vars: mergeVars(asObject(user.vars, userPath, "vars"))
   };
   let projectScope;
@@ -5942,7 +5953,8 @@ function loadConfig(opts) {
     const localInstall = parseInstall(local, localPath, "project", sources);
     projectScope = {
       scope: "project",
-      install: dedupeAcross(projectInstall, localInstall, projectPath),
+      install: dedupeAcross(projectInstall.install, localInstall.install, projectPath),
+      wildcards: dedupeWildcards(projectInstall.wildcards, localInstall.wildcards, projectPath),
       vars: mergeVars(
         asObject(user.vars, userPath, "vars"),
         asObject(project.vars, projectPath, "vars"),
@@ -5966,6 +5978,20 @@ function dedupeAcross(a, b, path) {
     }
     seen.set(key, item.raw);
     out.push(item);
+  }
+  return out;
+}
+function dedupeWildcards(a, b, path) {
+  const seen = /* @__PURE__ */ new Map();
+  const out = [];
+  for (const w of [...a, ...b]) {
+    const key = seenKey({ type: w.type, name: WILDCARD, source: w.source });
+    const prev = seen.get(key);
+    if (prev !== void 0) {
+      throw new ConfigError(`${path}: duplicate ${w.type} wildcard for "${w.source}" declared as ${prev} and ${w.raw}`);
+    }
+    seen.set(key, w.raw);
+    out.push(w);
   }
   return out;
 }
@@ -6023,12 +6049,12 @@ function addInstallEntry(path, type, entry) {
   cfg.install = install;
   saveRaw(path, cfg);
 }
-function removeInstallEntries(path, name, source) {
+function removeInstallEntries(path, name, source, type) {
   const cfg = loadRaw(path);
   const install = cfg.install;
   if (!install) return 0;
   let removed = 0;
-  for (const key of Object.values(INSTALL_KEY)) {
+  for (const key of type ? [INSTALL_KEY[type]] : Object.values(INSTALL_KEY)) {
     const list = install[key];
     if (!Array.isArray(list)) continue;
     const kept = list.filter((e) => {
@@ -6539,6 +6565,9 @@ var ApplyError = class extends Error {
   name = "ApplyError";
 };
 var NAME_RE = /^[A-Za-z0-9._-]+$/;
+function isValidItemName(name) {
+  return NAME_RE.test(name);
+}
 function apply(plan, opts) {
   const targetDir = resolvePath3(opts.targetDir);
   const lockPath = join8(targetDir, "skilletor.lock.json");
@@ -6873,6 +6902,10 @@ function makeBackend(src, home, cacheRoot, timeoutMs) {
   if (src.local) return new LocalSource(src.local, home);
   throw new Error(`source ${src.name} has no backend`);
 }
+function scopeSources(scopeCfg) {
+  return [...new Set([...scopeCfg.install, ...scopeCfg.wildcards].map((i) => i.source))];
+}
+var TYPE_DIR = { skill: "skills", agent: "agents", rule: "rules" };
 function sourceVersion(lock, sourceName) {
   for (const entry of Object.values(lock)) if (entry.source === sourceName) return entry.version;
   return void 0;
@@ -6925,7 +6958,7 @@ async function syncScope(ctx, config, scopeCfg, scope, opts, state) {
   const cacheRoot = cacheRootOf(ctx);
   const lockPath = join11(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
-  const needed = [...new Set(scopeCfg.install.map((i) => i.source))];
+  const needed = scopeSources(scopeCfg);
   const resolved = /* @__PURE__ */ new Map();
   await Promise.all(
     needed.map(async (name) => {
@@ -6954,42 +6987,95 @@ async function syncScope(ctx, config, scopeCfg, scope, opts, state) {
   const keep = [];
   const catalogs = /* @__PURE__ */ new Map();
   const keyInfo = /* @__PURE__ */ new Map();
-  for (const item of scopeCfg.install) {
-    keyInfo.set(item.target, { key: item.target, type: item.type, name: item.name, source: item.source });
-    const r = resolved.get(item.source);
-    const keepIfLocked = () => {
-      if (item.target in oldLock) keep.push(item.target);
-    };
-    if (!r) {
-      keepIfLocked();
-      continue;
-    }
-    let cat = catalogs.get(item.source);
-    if (!cat) {
+  const catalogOf = (source) => {
+    if (catalogs.has(source)) return catalogs.get(source);
+    const r = resolved.get(source);
+    let cat = null;
+    if (r) {
       try {
         cat = scan(r.dir);
-        catalogs.set(item.source, cat);
       } catch (err) {
-        rep.warnings.push(`source ${item.source}: ${err.message}`);
-        keepIfLocked();
-        continue;
+        rep.warnings.push(`source ${source}: ${err.message}`);
       }
+    }
+    catalogs.set(source, cat);
+    return cat;
+  };
+  const keepIfLocked = (key) => {
+    if (key in oldLock) keep.push(key);
+  };
+  const buildItem = (item) => {
+    keyInfo.set(item.target, { key: item.target, type: item.type, name: item.name, source: item.source });
+    const r = resolved.get(item.source);
+    const cat = catalogOf(item.source);
+    if (!r || !cat) {
+      keepIfLocked(item.target);
+      return;
     }
     const catItem = cat.items.find((ci) => ci.type === item.type && ci.name === item.name);
     if (!catItem) {
       rep.warnings.push(`item not found in source ${item.source}: ${item.type} ${item.name}`);
-      keepIfLocked();
-      continue;
+      keepIfLocked(item.target);
+      return;
     }
     let output;
     try {
       output = build(catItem, r.dir, makeContext(ctx, scope, targetDir, item, scopeCfg.vars, cat.meta.vars ?? {}));
     } catch (err) {
       rep.warnings.push(`template error in ${item.type} ${item.name}: ${err.message}`);
-      keepIfLocked();
-      continue;
+      keepIfLocked(item.target);
+      return;
     }
     plan.push({ key: item.target, type: item.type, name: item.name, source: item.source, version: r.version, output });
+  };
+  const explicit = /* @__PURE__ */ new Map();
+  for (const item of scopeCfg.install) {
+    explicit.set(item.target, { source: item.source, raw: item.raw });
+    buildItem(item);
+  }
+  const offers = /* @__PURE__ */ new Map();
+  const offer = (w, name, live) => {
+    const target = `${TYPE_DIR[w.type]}/${name}`;
+    const o = offers.get(target) ?? { type: w.type, name, from: [], live };
+    o.from.push(w);
+    offers.set(target, o);
+  };
+  for (const w of scopeCfg.wildcards) {
+    const cat = catalogOf(w.source);
+    if (cat) {
+      for (const ci of cat.items) if (ci.type === w.type) offer(w, ci.name, true);
+    } else {
+      for (const [key, entry] of Object.entries(oldLock)) {
+        const tn = keyToTypeName(key);
+        if (entry.source === w.source && tn.type === w.type) offer(w, tn.name, false);
+      }
+    }
+  }
+  for (const [target, o] of offers) {
+    const claim = explicit.get(target);
+    if (claim) {
+      for (const w2 of o.from) {
+        if (w2.source !== claim.source) {
+          rep.warnings.push(`${o.type} "${o.name}" from ${w2.raw} ignored: explicitly declared as ${claim.raw}`);
+        }
+      }
+      continue;
+    }
+    if (o.from.length > 1) {
+      rep.warnings.push(`${o.type} "${o.name}" offered by ${o.from.map((w2) => w2.raw).join(" and ")}; skipped`);
+      keepIfLocked(target);
+      continue;
+    }
+    const w = o.from[0];
+    if (!o.live) {
+      keepIfLocked(target);
+      continue;
+    }
+    if (!isValidItemName(o.name)) {
+      rep.warnings.push(`${o.type} "${o.name}" from ${w.raw} skipped: invalid item name`);
+      continue;
+    }
+    buildItem({ type: o.type, name: o.name, source: w.source, target });
   }
   const result = apply(plan, { targetDir, force: opts.force, keep });
   if (scope === "project") {
@@ -7022,7 +7108,7 @@ async function check(ctx, opts = {}) {
   if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
   for (const [scope, scopeCfg] of scopes) {
     const oldLock = readLock(join11(targetDirOf(ctx, scope), "skilletor.lock.json"));
-    for (const name of new Set(scopeCfg.install.map((i) => i.source))) {
+    for (const name of scopeSources(scopeCfg)) {
       const src = config.sources.get(name);
       if (!src || !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
       try {
@@ -7055,16 +7141,40 @@ function status(ctx, opts = {}) {
     const sourceVersions = {};
     for (const entry of Object.values(lock)) sourceVersions[entry.source] = entry.version;
     const trustRequests = [];
-    for (const name of new Set(scopeCfg.install.map((i) => i.source))) {
+    for (const name of scopeSources(scopeCfg)) {
       const src = config.sources.get(name);
       if (src && !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) {
         trustRequests.push({ name, url: identityOf(src) });
       }
     }
+    const declared = scopeCfg.install.map((i) => ({
+      key: i.target,
+      source: i.source,
+      installed: i.target in lock
+    }));
+    const viaCount = /* @__PURE__ */ new Map();
+    const orphans = [];
+    for (const [key, entry] of Object.entries(lock)) {
+      if (declaredKeys.has(key)) continue;
+      const type = keyToTypeName(key).type;
+      const w = scopeCfg.wildcards.find((x) => x.source === entry.source && x.type === type);
+      if (!w) {
+        orphans.push(key);
+        continue;
+      }
+      declared.push({ key, source: entry.source, installed: true, via: w.raw });
+      viaCount.set(w, (viaCount.get(w) ?? 0) + 1);
+    }
     out.scopes.push({
       scope,
-      declared: scopeCfg.install.map((i) => ({ key: i.target, source: i.source, installed: i.target in lock })),
-      orphans: Object.keys(lock).filter((k) => !declaredKeys.has(k)),
+      declared,
+      orphans,
+      wildcards: scopeCfg.wildcards.map((w) => ({
+        type: w.type,
+        source: w.source,
+        entry: w.raw,
+        installed: viaCount.get(w) ?? 0
+      })),
       trustRequests,
       sourceVersions
     });
@@ -7218,7 +7328,7 @@ function configPath(ctx, project) {
   const root = project ? ctx.projectDir : ctx.home;
   return join12(root, ".claude", "skilletor.json");
 }
-var TYPE_DIR = { skill: "skills", agent: "agents", rule: "rules" };
+var TYPE_DIR2 = { skill: "skills", agent: "agents", rule: "rules" };
 async function cmdAdd(ctx, args) {
   const resolved = resolveSpec(args.spec, ctx.probe ?? makeProbe());
   const name = args.name ?? resolved.derivedName;
@@ -7246,7 +7356,7 @@ function pickDef(s) {
 }
 async function cmdSourceRemove(ctx, args) {
   const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
-  const inUse = declaredItems(config).some((i) => i.source === args.name);
+  const inUse = usedSources(config).has(args.name);
   if (inUse && !args.force) {
     throw new CommandError(`source "${args.name}" still has installed items; use --force to remove anyway`);
   }
@@ -7270,7 +7380,7 @@ async function cmdAvailable(ctx, args = {}) {
         name: item.name,
         description: item.description,
         source: name,
-        installed: installedKeys.has(`${TYPE_DIR[item.type]}/${item.name}@${name}`)
+        installed: installedKeys.has(`${TYPE_DIR2[item.type]}/${item.name}@${name}`)
       });
     }
   }
@@ -7287,6 +7397,10 @@ async function cmdInstall(ctx, args) {
     if (!src) throw new CommandError(`unknown source: ${source}`);
     if (!state.isTrusted({ name: source, resolved: identityOf(src), origin: src.origin })) {
       throw new CommandError(`source "${source}" is not trusted; run: skilletor trust ${source}`);
+    }
+    if (name === WILDCARD) {
+      addInstallEntry(path, explicitType, `${WILDCARD}@${source}`);
+      continue;
     }
     let cat = catalogs.get(source);
     if (!cat) {
@@ -7309,8 +7423,8 @@ async function cmdInstall(ctx, args) {
 async function cmdUninstall(ctx, args) {
   const path = configPath(ctx, Boolean(args.project));
   for (const spec of args.items) {
-    const { name, source } = parseItemSpec(spec);
-    removeInstallEntries(path, name, source);
+    const { type, name, source } = parseItemSpec(spec);
+    removeInstallEntries(path, name, source, name === WILDCARD ? type : void 0);
   }
   return sync(ctx);
 }
@@ -7339,12 +7453,22 @@ function parseItemSpec(spec) {
     type = prefix;
     name = name.slice(colon + 1);
   }
+  if (name === WILDCARD && !type) {
+    throw new CommandError(
+      `wildcard "${spec}" needs a type prefix: rule:*@${source}, skill:*@${source} or agent:*@${source}`
+    );
+  }
   return { type, name, source };
 }
 function declaredItems(config) {
   const items = [...config.user.install];
   if (config.project) items.push(...config.project.install);
   return items.map((i) => ({ key: i.target, source: i.source }));
+}
+function usedSources(config) {
+  const used = new Set(declaredItems(config).map((i) => i.source));
+  for (const w of [...config.user.wildcards, ...config.project?.wildcards ?? []]) used.add(w.source);
+  return used;
 }
 function installedSet(ctx, config) {
   const set = /* @__PURE__ */ new Set();
@@ -7459,8 +7583,10 @@ Commands:
   source list           List declared sources
   source remove <name>  Remove a source, then sync
   available [source]    List items offered by trusted sources
-  install <item>...     Install items ([type:]name@source), then sync
-  uninstall <item>...   Remove items ([type:]name@source), then sync
+  install <item>...     Install items ([type:]name@source), then sync;
+                        type:*@source installs every item of that type
+  uninstall <item>...   Remove items ([type:]name@source or type:*@source),
+                        then sync
   trust <source>        Trust a project-declared source
 
 Options:
@@ -7503,7 +7629,10 @@ function statusText(report) {
   const lines = [];
   for (const s of report.scopes) {
     lines.push(`${s.scope} scope:`);
-    for (const d of s.declared) lines.push(`  ${d.installed ? "\u2713" : "\xB7"} ${d.key} @${d.source}`);
+    for (const d of s.declared) {
+      lines.push(`  ${d.installed ? "\u2713" : "\xB7"} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}`);
+    }
+    for (const w of s.wildcards) lines.push(`  * ${w.type}s/* @${w.source} (${w.installed} installed)`);
     for (const o of s.orphans) lines.push(`  ? ${o} (in lock, not declared)`);
     for (const t of s.trustRequests) lines.push(`  trust: ${t.name} (${t.url})`);
   }

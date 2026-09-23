@@ -182,3 +182,247 @@ test("an item removed from config is deleted on the next sync", async () => {
     e.cleanup();
   }
 });
+// ---- wildcards (k34) --------------------------------------------------------
+
+/** Write a rule / agent / skill into a source dir (created on demand). */
+function putItem(dir: string, type: "skill" | "agent" | "rule", name: string, body = name.toUpperCase()): void {
+  if (type === "skill") {
+    mkdirSync(join(dir, "skills", name), { recursive: true });
+    writeFileSync(join(dir, "skills", name, "SKILL.md"), `---\ndescription: ${name}\n---\n${body}\n`);
+  } else {
+    mkdirSync(join(dir, `${type}s`), { recursive: true });
+    writeFileSync(join(dir, `${type}s`, `${name}.md`), `---\ndescription: ${name}\n---\n${body}\n`);
+  }
+}
+
+test("wildcard installs every rule of a source, picks up additions and drops removals", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "wsrc");
+    putItem(src, "rule", "alpha");
+    putItem(src, "rule", "beta");
+    putItem(src, "skill", "notarule");
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { rules: ["*@shared"] } });
+
+    const r1 = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r1.scopes[0]!.added.map((i) => i.key).sort(), ["rules/alpha", "rules/beta"]);
+    assert.deepEqual(r1.scopes[0]!.added.map((i) => i.source), ["shared", "shared"]);
+    assert.equal(existsSync(join(e.home, ".claude/skills/notarule")), false); // other types untouched
+
+    putItem(src, "rule", "gamma"); // upstream addition
+    rmSync(join(src, "rules", "alpha.md")); // upstream removal
+    const r2 = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r2.scopes[0]!.added.map((i) => i.key), ["rules/gamma"]);
+    assert.deepEqual(r2.scopes[0]!.removed.map((i) => i.key), ["rules/alpha"]);
+    assert.equal(existsSync(join(e.home, ".claude/rules/alpha.md")), false);
+    assert.equal(existsSync(join(e.home, ".claude/rules/gamma.md")), true);
+    assert.deepEqual(r2.scopes[0]!.warnings, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("wildcards work for skills and agents too", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "wall");
+    putItem(src, "skill", "s1");
+    putItem(src, "skill", "s2");
+    putItem(src, "agent", "a1");
+    e.writeCfg("user", {
+      sources: { shared: { local: src } },
+      install: { skills: ["*@shared"], agents: ["agent:*@shared"] },
+    });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key).sort(), ["agents/a1", "skills/s1", "skills/s2"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("an unresolvable wildcard source keeps everything it installed", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "gone");
+    putItem(src, "rule", "alpha");
+    putItem(src, "rule", "beta");
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { rules: ["*@shared"] } });
+    await sync(e.ctx, { scope: "user" });
+
+    rmSync(src, { recursive: true, force: true }); // source can no longer be resolved
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.removed, []);
+    assert.equal(existsSync(join(e.home, ".claude/rules/alpha.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/rules/beta.md")), true);
+    assert.deepEqual(Object.keys(readLock(join(e.home, ".claude/skilletor.lock.json"))).sort(), ["rules/alpha", "rules/beta"]);
+    assert.equal(r.scopes[0]!.warnings.some((w) => /shared/.test(w)), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("an unresolvable wildcard source only keeps items of the wildcard's type and source", async () => {
+  const e = env();
+  try {
+    const gone = join(e.tmp.dir, "gone2");
+    const other = join(e.tmp.dir, "other2");
+    putItem(gone, "rule", "alpha");
+    putItem(other, "rule", "solo");
+    e.writeCfg("user", {
+      sources: { shared: { local: gone }, other: { local: other } },
+      install: { rules: ["*@shared", "solo@other"] },
+    });
+    await sync(e.ctx, { scope: "user" });
+    rmSync(gone, { recursive: true, force: true });
+    e.writeCfg("user", { sources: { shared: { local: gone }, other: { local: other } }, install: { rules: ["*@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.removed.map((i) => i.key), ["rules/solo"]); // undeclared, other source: removed
+    assert.equal(existsSync(join(e.home, ".claude/rules/alpha.md")), true); // kept
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("explicit entry and wildcard of the same source dedupe silently", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "dd");
+    putItem(src, "rule", "alpha");
+    putItem(src, "rule", "beta");
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { rules: ["alpha@shared", "*@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key).sort(), ["rules/alpha", "rules/beta"]);
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("explicit entry beats a wildcard of another source, with a warning", async () => {
+  const e = env();
+  try {
+    const a = join(e.tmp.dir, "ea");
+    const b = join(e.tmp.dir, "eb");
+    putItem(a, "rule", "alpha", "FROM-A");
+    putItem(b, "rule", "alpha", "FROM-B");
+    putItem(b, "rule", "beta");
+    e.writeCfg("user", { sources: { a: { local: a }, b: { local: b } }, install: { rules: ["alpha@a", "*@b"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`).sort(), ["rules/alpha@a", "rules/beta@b"]);
+    assert.match(readFileSync(join(e.home, ".claude/rules/alpha.md"), "utf8"), /FROM-A/);
+    assert.equal(r.scopes[0]!.warnings.length, 1);
+    assert.match(r.scopes[0]!.warnings[0]!, /alpha/);
+    assert.match(r.scopes[0]!.warnings[0]!, /\*@b/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("two wildcards yielding the same name skip only that name, with a warning", async () => {
+  const e = env();
+  try {
+    const a = join(e.tmp.dir, "wa");
+    const b = join(e.tmp.dir, "wb");
+    putItem(a, "rule", "only-a");
+    putItem(b, "rule", "only-b");
+    e.writeCfg("user", { sources: { a: { local: a }, b: { local: b } }, install: { rules: ["*@a", "*@b"] } });
+    const r1 = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r1.scopes[0]!.warnings, []);
+
+    putItem(a, "rule", "clash", "FROM-A"); // upstream addition in a …
+    putItem(b, "rule", "clash", "FROM-B"); // … and in b
+    putItem(b, "rule", "fresh");
+    const r2 = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r2.scopes[0]!.added.map((i) => i.key), ["rules/fresh"]); // the rest proceeds
+    assert.equal(existsSync(join(e.home, ".claude/rules/clash.md")), false);
+    assert.equal(r2.scopes[0]!.warnings.length, 1);
+    assert.match(r2.scopes[0]!.warnings[0]!, /clash/);
+    assert.match(r2.scopes[0]!.warnings[0]!, /\*@a/);
+    assert.match(r2.scopes[0]!.warnings[0]!, /\*@b/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a wildcard collision keeps an already installed copy", async () => {
+  const e = env();
+  try {
+    const a = join(e.tmp.dir, "ka");
+    const b = join(e.tmp.dir, "kb");
+    putItem(a, "rule", "clash", "FROM-A");
+    mkdirSync(b, { recursive: true });
+    e.writeCfg("user", { sources: { a: { local: a }, b: { local: b } }, install: { rules: ["*@a", "*@b"] } });
+    await sync(e.ctx, { scope: "user" });
+    putItem(b, "rule", "clash", "FROM-B");
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.removed, []);
+    assert.match(readFileSync(join(e.home, ".claude/rules/clash.md"), "utf8"), /FROM-A/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a wildcard skips an upstream item with an invalid name instead of failing the sync", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "bad");
+    putItem(src, "rule", "good");
+    putItem(src, "rule", "bad name");
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { rules: ["*@shared"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["rules/good"]);
+    assert.equal(r.scopes[0]!.warnings.some((w) => /bad name/.test(w)), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a wildcard over an untrusted project-only source reports a trust request", async () => {
+  const e = env();
+  try {
+    e.writeCfg("project", { sources: { team: { git: "file:///whatever.git" } }, install: { rules: ["*@team"] } });
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(r.scopes[0]!.trustRequests.map((t) => t.name), ["team"]);
+    assert.deepEqual(r.scopes[0]!.added, []);
+    const st = status(e.ctx, { scope: "project" });
+    assert.deepEqual(st.scopes[0]!.trustRequests.map((t) => t.name), ["team"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("status marks items that came from a wildcard and lists the wildcard", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "st");
+    putItem(src, "rule", "alpha");
+    putItem(src, "rule", "beta");
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { rules: ["alpha@shared", "*@shared"] } });
+    await sync(e.ctx, { scope: "user" });
+    const s = status(e.ctx, { scope: "user" }).scopes[0]!;
+    assert.deepEqual(
+      s.declared.map((d) => ({ key: d.key, via: d.via, installed: d.installed })),
+      [
+        { key: "rules/alpha", via: undefined, installed: true },
+        { key: "rules/beta", via: "*@shared", installed: true },
+      ],
+    );
+    assert.deepEqual(s.orphans, []);
+    assert.deepEqual(s.wildcards, [{ type: "rule", source: "shared", entry: "*@shared", installed: 1 }]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("check covers sources referenced only by a wildcard", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "ck");
+    putItem(src, "rule", "alpha");
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { rules: ["*@shared"] } });
+    const chk = await check(e.ctx, { scope: "user" });
+    assert.deepEqual(chk.sources.map((s) => s.name), ["shared"]);
+  } finally {
+    e.cleanup();
+  }
+});

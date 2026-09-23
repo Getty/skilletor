@@ -3,7 +3,7 @@
 // config.ts so the declarative config stays the single source of truth.
 import { join } from "node:path";
 import {
-  addInstallEntry, addSource, loadConfig, removeInstallEntries, removeSource,
+  addInstallEntry, addSource, loadConfig, removeInstallEntries, removeSource, WILDCARD,
   type ItemType, type LoadedConfig, type SourceDef,
 } from "./config.ts";
 import { resolveSpec, type Probe } from "./spec.ts";
@@ -73,7 +73,7 @@ export async function cmdSourceRemove(
   args: { name: string; project?: boolean; force?: boolean },
 ): Promise<SyncReport> {
   const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
-  const inUse = declaredItems(config).some((i) => i.source === args.name);
+  const inUse = usedSources(config).has(args.name);
   if (inUse && !args.force) {
     throw new CommandError(`source "${args.name}" still has installed items; use --force to remove anyway`);
   }
@@ -134,6 +134,11 @@ export async function cmdInstall(
     if (!state.isTrusted({ name: source, resolved: identityOf(src), origin: src.origin })) {
       throw new CommandError(`source "${source}" is not trusted; run: skilletor trust ${source}`);
     }
+    if (name === WILDCARD) {
+      // Expanded at sync time; an empty type is fine (items may arrive later).
+      addInstallEntry(path, explicitType!, `${WILDCARD}@${source}`);
+      continue;
+    }
     let cat = catalogs.get(source);
     if (!cat) {
       cat = scan((await makeBackend(src, ctx.home, cacheRootOf(ctx)).resolve()).dir);
@@ -159,8 +164,9 @@ export async function cmdUninstall(
 ): Promise<SyncReport> {
   const path = configPath(ctx, Boolean(args.project));
   for (const spec of args.items) {
-    const { name, source } = parseItemSpec(spec);
-    removeInstallEntries(path, name, source);
+    const { type, name, source } = parseItemSpec(spec);
+    // A wildcard is removed only from its own type's list.
+    removeInstallEntries(path, name, source, name === WILDCARD ? type : undefined);
   }
   return sync(ctx);
 }
@@ -195,6 +201,11 @@ function parseItemSpec(spec: string): { type?: ItemType; name: string; source: s
     type = prefix;
     name = name.slice(colon + 1);
   }
+  if (name === WILDCARD && !type) {
+    throw new CommandError(
+      `wildcard "${spec}" needs a type prefix: rule:*@${source}, skill:*@${source} or agent:*@${source}`,
+    );
+  }
   return { type, name, source };
 }
 
@@ -202,6 +213,13 @@ function declaredItems(config: LoadedConfig): { key: string; source: string }[] 
   const items = [...config.user.install];
   if (config.project) items.push(...config.project.install);
   return items.map((i) => ({ key: i.target, source: i.source }));
+}
+
+/** Sources referenced by an explicit entry or a wildcard, in any scope. */
+function usedSources(config: LoadedConfig): Set<string> {
+  const used = new Set(declaredItems(config).map((i) => i.source));
+  for (const w of [...config.user.wildcards, ...(config.project?.wildcards ?? [])]) used.add(w.source);
+  return used;
 }
 
 /** Set of "<typedir>/<name>@<source>" for every declared or locked item. */

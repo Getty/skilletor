@@ -6,14 +6,16 @@
 import { execFileSync } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
 import { basename, join } from "node:path";
-import { loadConfig, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig } from "./config.ts";
+import {
+  loadConfig, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig, type WildcardItem,
+} from "./config.ts";
 import { LocalSource } from "./sources/local.ts";
 import { GitSource } from "./sources/git.ts";
 import { UrlSource } from "./sources/url.ts";
 import type { Source } from "./sources/types.ts";
 import { scan, type Catalog } from "./catalog.ts";
 import { build, type RenderContext } from "./render.ts";
-import { apply, type PlanItem } from "./apply.ts";
+import { apply, isValidItemName, type PlanItem } from "./apply.ts";
 import { readLock, type Lock } from "./lock.ts";
 import { State } from "./state.ts";
 import { updateGitignore } from "./gitignore.ts";
@@ -61,6 +63,13 @@ export function makeBackend(src: ResolvedSource, home: string, cacheRoot: string
   if (src.local) return new LocalSource(src.local, home); // missing dir -> resolve errors
   throw new Error(`source ${src.name} has no backend`);
 }
+
+/** Every source a scope references, through explicit entries or wildcards. */
+export function scopeSources(scopeCfg: ScopeConfig): string[] {
+  return [...new Set([...scopeCfg.install, ...scopeCfg.wildcards].map((i) => i.source))];
+}
+
+const TYPE_DIR: Record<ItemType, string> = { skill: "skills", agent: "agents", rule: "rules" };
 
 function sourceVersion(lock: Lock, sourceName: string): string | undefined {
   for (const entry of Object.values(lock)) if (entry.source === sourceName) return entry.version;
@@ -140,7 +149,7 @@ async function syncScope(
   const oldLock = readLock(lockPath);
 
   // Resolve every needed source in parallel (skip untrusted, warn on failure).
-  const needed = [...new Set(scopeCfg.install.map((i) => i.source))];
+  const needed = scopeSources(scopeCfg);
   const resolved = new Map<string, { dir: string; version: string } | null>();
   await Promise.all(
     needed.map(async (name) => {
@@ -169,45 +178,104 @@ async function syncScope(
   // Build each declared item; keep (don't delete) items whose source is unavailable.
   const plan: PlanItem[] = [];
   const keep: string[] = [];
-  const catalogs = new Map<string, Catalog>();
+  const catalogs = new Map<string, Catalog | null>();
   const keyInfo = new Map<string, ItemChange>();
 
-  for (const item of scopeCfg.install) {
-    keyInfo.set(item.target, { key: item.target, type: item.type, name: item.name, source: item.source });
-    const r = resolved.get(item.source);
-    const keepIfLocked = () => {
-      if (item.target in oldLock) keep.push(item.target);
-    };
-    if (!r) {
-      keepIfLocked();
-      continue;
-    }
-    let cat = catalogs.get(item.source);
-    if (!cat) {
+  /** The source's catalog, or null (warned once) when it is unresolved or unscannable. */
+  const catalogOf = (source: string): Catalog | null => {
+    if (catalogs.has(source)) return catalogs.get(source)!;
+    const r = resolved.get(source);
+    let cat: Catalog | null = null;
+    if (r) {
       try {
         cat = scan(r.dir);
-        catalogs.set(item.source, cat);
       } catch (err) {
-        rep.warnings.push(`source ${item.source}: ${(err as Error).message}`);
-        keepIfLocked();
-        continue;
+        rep.warnings.push(`source ${source}: ${(err as Error).message}`);
       }
+    }
+    catalogs.set(source, cat);
+    return cat;
+  };
+  const keepIfLocked = (key: string) => {
+    if (key in oldLock) keep.push(key);
+  };
+
+  const buildItem = (item: { type: ItemType; name: string; source: string; target: string }) => {
+    keyInfo.set(item.target, { key: item.target, type: item.type, name: item.name, source: item.source });
+    const r = resolved.get(item.source);
+    const cat = catalogOf(item.source);
+    if (!r || !cat) {
+      keepIfLocked(item.target);
+      return;
     }
     const catItem = cat.items.find((ci) => ci.type === item.type && ci.name === item.name);
     if (!catItem) {
       rep.warnings.push(`item not found in source ${item.source}: ${item.type} ${item.name}`);
-      keepIfLocked();
-      continue;
+      keepIfLocked(item.target);
+      return;
     }
     let output: Map<string, Buffer>;
     try {
       output = build(catItem, r.dir, makeContext(ctx, scope, targetDir, item, scopeCfg.vars, cat.meta.vars ?? {}));
     } catch (err) {
       rep.warnings.push(`template error in ${item.type} ${item.name}: ${(err as Error).message}`);
-      keepIfLocked();
-      continue;
+      keepIfLocked(item.target);
+      return;
     }
     plan.push({ key: item.target, type: item.type, name: item.name, source: item.source, version: r.version, output });
+  };
+
+  const explicit = new Map<string, { source: string; raw: string }>();
+  for (const item of scopeCfg.install) {
+    explicit.set(item.target, { source: item.source, raw: item.raw });
+    buildItem(item);
+  }
+
+  // Expand wildcards (spec §3, §6.1). An unresolvable source offers what it
+  // installed before, so its items are kept and still count for collisions.
+  const offers = new Map<string, { type: ItemType; name: string; from: WildcardItem[]; live: boolean }>();
+  const offer = (w: WildcardItem, name: string, live: boolean) => {
+    const target = `${TYPE_DIR[w.type]}/${name}`;
+    const o = offers.get(target) ?? { type: w.type, name, from: [], live };
+    o.from.push(w);
+    offers.set(target, o);
+  };
+  for (const w of scopeCfg.wildcards) {
+    const cat = catalogOf(w.source);
+    if (cat) {
+      for (const ci of cat.items) if (ci.type === w.type) offer(w, ci.name, true);
+    } else {
+      for (const [key, entry] of Object.entries(oldLock)) {
+        const tn = keyToTypeName(key);
+        if (entry.source === w.source && tn.type === w.type) offer(w, tn.name, false);
+      }
+    }
+  }
+  for (const [target, o] of offers) {
+    const claim = explicit.get(target);
+    if (claim) {
+      for (const w of o.from) {
+        if (w.source !== claim.source) {
+          rep.warnings.push(`${o.type} "${o.name}" from ${w.raw} ignored: explicitly declared as ${claim.raw}`);
+        }
+      }
+      continue;
+    }
+    if (o.from.length > 1) {
+      rep.warnings.push(`${o.type} "${o.name}" offered by ${o.from.map((w) => w.raw).join(" and ")}; skipped`);
+      keepIfLocked(target);
+      continue;
+    }
+    const w = o.from[0]!;
+    if (!o.live) {
+      keepIfLocked(target);
+      continue;
+    }
+    if (!isValidItemName(o.name)) {
+      rep.warnings.push(`${o.type} "${o.name}" from ${w.raw} skipped: invalid item name`);
+      continue;
+    }
+    buildItem({ type: o.type, name: o.name, source: w.source, target });
   }
 
   const result = apply(plan, { targetDir, force: opts.force, keep });
@@ -256,7 +324,7 @@ export async function check(ctx: EngineContext, opts: SyncOptions = {}): Promise
 
   for (const [scope, scopeCfg] of scopes) {
     const oldLock = readLock(join(targetDirOf(ctx, scope), "skilletor.lock.json"));
-    for (const name of new Set(scopeCfg.install.map((i) => i.source))) {
+    for (const name of scopeSources(scopeCfg)) {
       const src = config.sources.get(name);
       if (!src || !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
       try {
@@ -276,8 +344,11 @@ export async function check(ctx: EngineContext, opts: SyncOptions = {}): Promise
 export interface StatusReport {
   scopes: {
     scope: ScopeName;
-    declared: { key: string; source: string; installed: boolean }[];
+    /** `via` names the wildcard entry an item was installed through. */
+    declared: { key: string; source: string; installed: boolean; via?: string }[];
     orphans: string[];
+    /** Each wildcard with the number of items currently installed through it. */
+    wildcards: { type: ItemType; source: string; entry: string; installed: number }[];
     trustRequests: { name: string; url: string }[];
     sourceVersions: Record<string, string>;
   }[];
@@ -304,16 +375,35 @@ export function status(ctx: EngineContext, opts: SyncOptions = {}): StatusReport
     const sourceVersions: Record<string, string> = {};
     for (const entry of Object.values(lock)) sourceVersions[entry.source] = entry.version;
     const trustRequests: { name: string; url: string }[] = [];
-    for (const name of new Set(scopeCfg.install.map((i) => i.source))) {
+    for (const name of scopeSources(scopeCfg)) {
       const src = config.sources.get(name);
       if (src && !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) {
         trustRequests.push({ name, url: identityOf(src) });
       }
     }
+    const declared: StatusReport["scopes"][number]["declared"] = scopeCfg.install.map((i) => ({
+      key: i.target, source: i.source, installed: i.target in lock,
+    }));
+    const viaCount = new Map<WildcardItem, number>();
+    const orphans: string[] = [];
+    for (const [key, entry] of Object.entries(lock)) {
+      if (declaredKeys.has(key)) continue;
+      const type = keyToTypeName(key).type;
+      const w = scopeCfg.wildcards.find((x) => x.source === entry.source && x.type === type);
+      if (!w) {
+        orphans.push(key);
+        continue;
+      }
+      declared.push({ key, source: entry.source, installed: true, via: w.raw });
+      viaCount.set(w, (viaCount.get(w) ?? 0) + 1);
+    }
     out.scopes.push({
       scope,
-      declared: scopeCfg.install.map((i) => ({ key: i.target, source: i.source, installed: i.target in lock })),
-      orphans: Object.keys(lock).filter((k) => !declaredKeys.has(k)),
+      declared,
+      orphans,
+      wildcards: scopeCfg.wildcards.map((w) => ({
+        type: w.type, source: w.source, entry: w.raw, installed: viaCount.get(w) ?? 0,
+      })),
       trustRequests,
       sourceVersions,
     });

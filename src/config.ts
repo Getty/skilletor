@@ -15,6 +15,8 @@ export type ItemType = "skill" | "agent" | "rule";
 export const ITEM_TYPES: readonly ItemType[] = ["skill", "agent", "rule"];
 /** Config install keys (`skills`/`agents`/`rules`) mapped to the item type. */
 const INSTALL_KEYS: Record<string, ItemType> = { skills: "skill", agents: "agent", rules: "rule" };
+/** The item name that declares every item of a type in a source (`*@source`). */
+export const WILDCARD = "*";
 
 export class ConfigError extends Error {
   override name = "ConfigError";
@@ -40,9 +42,18 @@ export interface InstallItem {
   raw: string;
 }
 
+/** `*@source` under one type: every item of that type in the source, expanded at sync time. */
+export interface WildcardItem {
+  type: ItemType;
+  source: string;
+  /** The raw declaration, e.g. `*@shared` or `rule:*@shared`. */
+  raw: string;
+}
+
 export interface ScopeConfig {
   scope: "user" | "project";
   install: InstallItem[];
+  wildcards: WildcardItem[];
   vars: Record<string, unknown>;
   /** Project scope only: maintain the managed gitignore block (default true). */
   gitignore?: boolean;
@@ -147,13 +158,18 @@ function mergeSource(base: ResolvedSource | undefined, incoming: ResolvedSource,
   return merged;
 }
 
-/** Parse one file's `install` into items, given which sources are legal to reference. */
+interface ParsedInstall {
+  install: InstallItem[];
+  wildcards: WildcardItem[];
+}
+
+/** Parse one file's `install` into items and wildcards, given which sources are legal to reference. */
 function parseInstall(
   obj: Json,
   path: string,
   scope: "user" | "project",
   known: Map<string, ResolvedSource>,
-): InstallItem[] {
+): ParsedInstall {
   const install = asObject(obj.install, path, "install");
   for (const key of Object.keys(install)) {
     if (!(key in INSTALL_KEYS)) {
@@ -161,7 +177,8 @@ function parseInstall(
     }
   }
   const items: InstallItem[] = [];
-  const seen = new Map<string, string>(); // "type/name" -> raw declaration
+  const wildcards: WildcardItem[] = [];
+  const seen = new Map<string, string>(); // "type/name" (or "type/*@source") -> raw declaration
   for (const [key, type] of Object.entries(INSTALL_KEYS)) {
     const list = install[key];
     if (list === undefined) continue;
@@ -176,7 +193,7 @@ function parseInstall(
           `${path}: ${scope} install "${entry}" references unknown source "${item.source}"`,
         );
       }
-      const targetKey = `${item.type}/${item.name}`;
+      const targetKey = seenKey(item);
       const prev = seen.get(targetKey);
       if (prev !== undefined) {
         throw new ConfigError(
@@ -184,10 +201,16 @@ function parseInstall(
         );
       }
       seen.set(targetKey, entry);
-      items.push(item);
+      if (item.name === WILDCARD) wildcards.push({ type: item.type, source: item.source, raw: entry });
+      else items.push(item);
     });
   }
-  return items;
+  return { install: items, wildcards };
+}
+
+/** Duplicate key: a name per type, or a wildcard per type and source. */
+function seenKey(item: { type: ItemType; name: string; source: string }): string {
+  return item.name === WILDCARD ? `${item.type}/*@${item.source}` : `${item.type}/${item.name}`;
 }
 
 /** Parse `[type:]name@source`. The array's type wins; an explicit prefix must match it. */
@@ -209,6 +232,9 @@ function parseEntry(entry: string, type: ItemType, path: string, where: string):
     name = name.slice(colon + 1);
   }
   if (name.length === 0) throw new ConfigError(`${path}: ${where} "${entry}" has an empty name`);
+  if (name !== WILDCARD && name.includes(WILDCARD)) {
+    throw new ConfigError(`${path}: ${where} "${entry}": "*" is only valid as the whole name (*@source)`);
+  }
   return { type, name, source, target: `${type}s/${name}`, raw: entry };
 }
 
@@ -249,9 +275,11 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
   // Default 30 min. 0 (or negative) disables the in-session check; SessionStart still syncs.
   const checkInterval = numberOr(user.checkInterval, 1800, userPath, "checkInterval");
 
+  const userInstall = parseInstall(user, userPath, "user", userSources);
   const userScope: ScopeConfig = {
     scope: "user",
-    install: parseInstall(user, userPath, "user", userSources),
+    install: userInstall.install,
+    wildcards: userInstall.wildcards,
     vars: mergeVars(asObject(user.vars, userPath, "vars")),
   };
 
@@ -262,7 +290,8 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
     const localInstall = parseInstall(local, localPath, "project", sources);
     projectScope = {
       scope: "project",
-      install: dedupeAcross(projectInstall, localInstall, projectPath),
+      install: dedupeAcross(projectInstall.install, localInstall.install, projectPath),
+      wildcards: dedupeWildcards(projectInstall.wildcards, localInstall.wildcards, projectPath),
       vars: mergeVars(
         asObject(user.vars, userPath, "vars"),
         asObject(project.vars, projectPath, "vars"),
@@ -289,6 +318,22 @@ function dedupeAcross(a: InstallItem[], b: InstallItem[], path: string): Install
     }
     seen.set(key, item.raw);
     out.push(item);
+  }
+  return out;
+}
+
+/** Concatenate two wildcard lists, rejecting the same type+source twice. */
+function dedupeWildcards(a: WildcardItem[], b: WildcardItem[], path: string): WildcardItem[] {
+  const seen = new Map<string, string>();
+  const out: WildcardItem[] = [];
+  for (const w of [...a, ...b]) {
+    const key = seenKey({ type: w.type, name: WILDCARD, source: w.source });
+    const prev = seen.get(key);
+    if (prev !== undefined) {
+      throw new ConfigError(`${path}: duplicate ${w.type} wildcard for "${w.source}" declared as ${prev} and ${w.raw}`);
+    }
+    seen.set(key, w.raw);
+    out.push(w);
   }
   return out;
 }
@@ -369,13 +414,13 @@ export function addInstallEntry(path: string, type: ItemType, entry: string): vo
   saveRaw(path, cfg);
 }
 
-/** Remove install entries matching a name (optionally scoped to a source). */
-export function removeInstallEntries(path: string, name: string, source?: string): number {
+/** Remove install entries matching a name (optionally scoped to a source and to one type's list). */
+export function removeInstallEntries(path: string, name: string, source?: string, type?: ItemType): number {
   const cfg = loadRaw(path);
   const install = cfg.install as Record<string, unknown> | undefined;
   if (!install) return 0;
   let removed = 0;
-  for (const key of Object.values(INSTALL_KEY)) {
+  for (const key of type ? [INSTALL_KEY[type]] : Object.values(INSTALL_KEY)) {
     const list = install[key];
     if (!Array.isArray(list)) continue;
     const kept = (list as string[]).filter((e) => {

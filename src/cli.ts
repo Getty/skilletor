@@ -28,8 +28,10 @@ Commands:
   source list           List declared sources
   source remove <name>  Remove a source, then sync
   available [source]    List items offered by trusted sources
-  install <item>...     Install items ([type:]name@source), then sync
-  uninstall <item>...   Remove items ([type:]name@source), then sync
+  install <item>...     Install items ([type:]name@source), then sync;
+                        type:*@source installs every item of that type
+  uninstall <item>...   Remove items ([type:]name@source or type:*@source),
+                        then sync
   trust <source>        Trust a project-declared source
 
 Options:
@@ -84,7 +86,10 @@ function statusText(report: ReturnType<typeof status>): string {
   const lines: string[] = [];
   for (const s of report.scopes) {
     lines.push(`${s.scope} scope:`);
-    for (const d of s.declared) lines.push(`  ${d.installed ? "✓" : "·"} ${d.key} @${d.source}`);
+    for (const d of s.declared) {
+      lines.push(`  ${d.installed ? "✓" : "·"} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}`);
+    }
+    for (const w of s.wildcards) lines.push(`  * ${w.type}s/* @${w.source} (${w.installed} installed)`);
     for (const o of s.orphans) lines.push(`  ? ${o} (in lock, not declared)`);
     for (const t of s.trustRequests) lines.push(`  trust: ${t.name} (${t.url})`);
   }
