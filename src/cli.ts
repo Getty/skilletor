@@ -24,15 +24,22 @@ Commands:
   sync                  Reconcile installed items with the config
   check                 Report whether any source has changed (writes nothing)
   status                Show declared vs. installed items
-  add [name] <spec>     Add a source (coming soon)
-  install <item>...     Install items (coming soon)
-  uninstall <item>...   Remove items (coming soon)
-  trust <source>        Trust a project-declared source (coming soon)
+  add [name] <spec>     Add and trust a source, then sync
+  source list           List declared sources
+  source remove <name>  Remove a source, then sync
+  available [source]    List items offered by trusted sources
+  install <item>...     Install items ([type:]name@source), then sync
+  uninstall <item>...   Remove items ([type:]name@source), then sync
+  trust <source>        Trust a project-declared source
 
 Options:
-  --scope <s>           user | project | all (default: all)
+  --scope <s>           user | project | all (default: all; sync, check, status)
+  --project             Edit the project config instead of the user config
+                        (add, install, uninstall, source remove)
   --json                Machine-readable output
-  --force               Adopt foreign files on conflict
+                        (sync, check, status, source list, available)
+  --force               sync: adopt foreign files on conflict;
+                        source remove: remove even if items are installed
   --project-dir <dir>   Project root (default: cwd)
   -h, --help            Show this help
   -v, --version         Show the version
