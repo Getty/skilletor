@@ -6518,6 +6518,14 @@ function build(item, sourceDir, context) {
   }
   return out;
 }
+var FRONTMATTER = /^\s*---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
+function rendersEmpty(item, output) {
+  const main = item.type === "skill" ? `skills/${item.name}/SKILL.md` : `${item.type}s/${item.name}.md`;
+  if (!item.files.includes(`${main}.njk`) || item.files.includes(main)) return false;
+  const text = output.get(main)?.toString("utf8");
+  if (text === void 0) return false;
+  return text.replace(FRONTMATTER, "").trim() === "";
+}
 
 // src/apply.ts
 import { existsSync as existsSync6, readFileSync as readFileSync5, readdirSync as readdirSync2, rmdirSync, rmSync as rmSync3 } from "node:fs";
@@ -6553,6 +6561,7 @@ function serializeLock(lock) {
     const files = {};
     for (const f of Object.keys(entry.files).sort()) files[f] = entry.files[f];
     out[key] = { source: entry.source, version: entry.version, files };
+    if (entry.skipped) out[key].skipped = entry.skipped;
   }
   return JSON.stringify(out, null, 2) + "\n";
 }
@@ -6573,12 +6582,20 @@ function apply(plan, opts) {
   const lockPath = join8(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const newLock = {};
-  const res = { added: [], updated: [], removed: [], unchanged: [], conflicts: [], overwritten: [] };
+  const res = { added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [] };
   const dirsTouched = /* @__PURE__ */ new Set();
   const planned = new Set(plan.map((i) => i.key));
   for (const it of plan) {
     if (!NAME_RE.test(it.name)) throw new ApplyError(`invalid item name: ${it.name}`);
-    const existing = oldLock[it.key];
+    if (it.skipped) {
+      const files = Object.keys(oldLock[it.key]?.files ?? {});
+      for (const rel of files) removeFile(safeJoin(targetDir, rel), dirsTouched);
+      if (files.length > 0) res.removed.push(it.key);
+      res.skipped.push(it.key);
+      newLock[it.key] = { source: it.source, version: it.version, files: {}, skipped: it.skipped };
+      continue;
+    }
+    const existing = oldLock[it.key]?.skipped ? void 0 : oldLock[it.key];
     const entryFiles = {};
     let wrote = false;
     let removedFile = false;
@@ -6639,7 +6656,7 @@ function apply(plan, opts) {
     for (const rel of Object.keys(oldLock[key].files)) {
       removeFile(safeJoin(targetDir, rel), dirsTouched);
     }
-    res.removed.push(key);
+    if (!oldLock[key].skipped) res.removed.push(key);
   }
   pruneEmptyDirs(dirsTouched, targetDir);
   if (serializeLock(newLock) !== serializeLock(oldLock)) {
@@ -6822,7 +6839,18 @@ var ACTIVATION = {
   rule: "active after /reload-plugins or restart"
 };
 function emptyScopeReport(scope) {
-  return { scope, added: [], updated: [], removed: [], unchanged: [], conflicts: [], overwritten: [], warnings: [], trustRequests: [] };
+  return {
+    scope,
+    added: [],
+    updated: [],
+    removed: [],
+    unchanged: [],
+    skipped: [],
+    conflicts: [],
+    overwritten: [],
+    warnings: [],
+    trustRequests: []
+  };
 }
 function keyToTypeName(key) {
   const [dir, ...rest] = key.split("/");
@@ -6844,11 +6872,14 @@ function reportText(r) {
   if (r.error) return `skilletor: config error, nothing changed \u2014 ${r.error}`;
   const lines = [];
   for (const s of r.scopes) {
-    if (!isNotable(s)) continue;
+    if (!isNotable(s) && s.skipped.length === 0) continue;
+    const skipped = new Set(s.skipped.map((it) => it.key));
     lines.push(`skilletor: ${s.scope} scope`);
     for (const it of s.added) lines.push(`  + ${it.key} (${ACTIVATION[it.type]})`);
     for (const it of s.updated) lines.push(`  ~ ${it.key} (${ACTIVATION[it.type]})`);
-    for (const it of s.removed) lines.push(`  - ${it.key} (removed)`);
+    for (const it of s.removed) lines.push(`  - ${it.key} (${skipped.has(it.key) ? "removed: renders empty" : "removed"})`);
+    const removed = new Set(s.removed.map((it) => it.key));
+    for (const it of s.skipped) if (!removed.has(it.key)) lines.push(`  \xB7 ${it.key} skipped (renders empty)`);
     for (const c of s.overwritten) lines.push(`  overwrote local change: ${c.path}`);
     for (const c of s.conflicts) lines.push(`  conflict: ${c.path} already exists (use --force to adopt)`);
     for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${t.url}) \u2014 run: skilletor trust ${t.name}`);
@@ -7026,7 +7057,12 @@ async function syncScope(ctx, config, scopeCfg, scope, opts, state) {
       keepIfLocked(item.target);
       return;
     }
-    plan.push({ key: item.target, type: item.type, name: item.name, source: item.source, version: r.version, output });
+    const planItem = { key: item.target, type: item.type, name: item.name, source: item.source, version: r.version, output };
+    if (rendersEmpty(catItem, output)) {
+      planItem.output = /* @__PURE__ */ new Map();
+      planItem.skipped = "renders-empty";
+    }
+    plan.push(planItem);
   };
   const explicit = /* @__PURE__ */ new Map();
   for (const item of scopeCfg.install) {
@@ -7088,6 +7124,7 @@ async function syncScope(ctx, config, scopeCfg, scope, opts, state) {
   rep.updated = result.updated.map(toChange);
   rep.removed = result.removed.map(toChange);
   rep.unchanged = result.unchanged.map(toChange);
+  rep.skipped = result.skipped.map(toChange);
   rep.conflicts = result.conflicts.map((c) => ({ path: c.path }));
   rep.overwritten = result.overwritten.map((c) => ({ path: c.path }));
   return rep;
@@ -7147,11 +7184,16 @@ function status(ctx, opts = {}) {
         trustRequests.push({ name, url: identityOf(src) });
       }
     }
-    const declared = scopeCfg.install.map((i) => ({
-      key: i.target,
-      source: i.source,
-      installed: i.target in lock
-    }));
+    const declared = scopeCfg.install.map((i) => {
+      const entry = lock[i.target];
+      const d = {
+        key: i.target,
+        source: i.source,
+        installed: entry !== void 0 && !entry.skipped
+      };
+      if (entry?.skipped) d.skipped = entry.skipped;
+      return d;
+    });
     const viaCount = /* @__PURE__ */ new Map();
     const orphans = [];
     for (const [key, entry] of Object.entries(lock)) {
@@ -7160,6 +7202,10 @@ function status(ctx, opts = {}) {
       const w = scopeCfg.wildcards.find((x) => x.source === entry.source && x.type === type);
       if (!w) {
         orphans.push(key);
+        continue;
+      }
+      if (entry.skipped) {
+        declared.push({ key, source: entry.source, installed: false, via: w.raw, skipped: entry.skipped });
         continue;
       }
       declared.push({ key, source: entry.source, installed: true, via: w.raw });
@@ -7477,6 +7523,7 @@ function installedSet(ctx, config) {
     const dir = join12(scope === "user" ? ctx.home : ctx.projectDir ?? "", ".claude");
     if (scope === "project" && !ctx.projectDir) continue;
     for (const [key, entry] of Object.entries(readLock(join12(dir, "skilletor.lock.json")))) {
+      if (entry.skipped) continue;
       set.add(`${key}@${entry.source}`);
     }
   }
@@ -7630,7 +7677,9 @@ function statusText(report) {
   for (const s of report.scopes) {
     lines.push(`${s.scope} scope:`);
     for (const d of s.declared) {
-      lines.push(`  ${d.installed ? "\u2713" : "\xB7"} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}`);
+      const mark = d.installed ? "\u2713" : d.skipped ? "-" : "\xB7";
+      const note = d.skipped ? " (skipped: renders empty)" : "";
+      lines.push(`  ${mark} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}${note}`);
     }
     for (const w of s.wildcards) lines.push(`  * ${w.type}s/* @${w.source} (${w.installed} installed)`);
     for (const o of s.orphans) lines.push(`  ? ${o} (in lock, not declared)`);

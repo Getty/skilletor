@@ -82,3 +82,19 @@ export function build(
 
   return out;
 }
+
+/** A leading YAML frontmatter block (after optional whitespace), closed by `---`. */
+const FRONTMATTER = /^\s*---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
+
+/**
+ * True if the item's main file is a template whose rendered output is
+ * whitespace-only once a leading frontmatter block is removed (spec §5): the
+ * item does not apply in this scope. A non-template main file is never empty.
+ */
+export function rendersEmpty(item: CatalogItem, output: Map<string, Buffer>): boolean {
+  const main = item.type === "skill" ? `skills/${item.name}/SKILL.md` : `${item.type}s/${item.name}.md`;
+  if (!item.files.includes(`${main}.njk`) || item.files.includes(main)) return false;
+  const text = output.get(main)?.toString("utf8");
+  if (text === undefined) return false;
+  return text.replace(FRONTMATTER, "").trim() === "";
+}

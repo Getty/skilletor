@@ -48,3 +48,25 @@ test("hasChanges is true only for add/update/remove", () => {
   assert.equal(hasNotable({ scopes: [onlyWarn] }), true);
   assert.equal(hasChanges(sample()), true);
 });
+
+// ---- skipped items (k35) ----------------------------------------------------
+
+test("skipped items get their own text line and do not make a hook report", () => {
+  const s = emptyScopeReport("project");
+  s.skipped = [{ key: "rules/k8s", type: "rule", name: "k8s", source: "shared" }];
+  const r: SyncReport = { scopes: [s] };
+  assert.match(reportText(r), /rules\/k8s skipped \(renders empty\)/);
+  assert.doesNotMatch(reportText(r), /warning|error/i);
+  assert.equal(hasNotable(r), false);
+  assert.deepEqual(reportHook(r), {});
+});
+
+test("a skipped item that was removed shows as one removal line", () => {
+  const s = emptyScopeReport("user");
+  const it = { key: "rules/k8s", type: "rule" as const, name: "k8s", source: "shared" };
+  s.removed = [it];
+  s.skipped = [it];
+  const text = reportText({ scopes: [s] });
+  assert.match(text, /- rules\/k8s \(removed: renders empty\)/);
+  assert.equal(text.split("\n").filter((l) => l.includes("rules/k8s")).length, 1);
+});

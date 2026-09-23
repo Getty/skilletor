@@ -9,7 +9,7 @@ import { existsSync, readFileSync, readdirSync, rmdirSync, rmSync } from "node:f
 import { dirname, join, resolve as resolvePath, sep } from "node:path";
 import type { ItemType } from "./config.ts";
 import { atomicWrite, hashBuffer } from "./fsutil.ts";
-import { readLock, serializeLock, writeLock, type Lock, type LockEntry } from "./lock.ts";
+import { readLock, serializeLock, writeLock, type Lock, type LockEntry, type SkipReason } from "./lock.ts";
 
 export interface PlanItem {
   /** Lock key: "<typedir>/<name>", e.g. "skills/perl-moo". */
@@ -20,6 +20,9 @@ export interface PlanItem {
   version: string;
   /** Install-relative path -> bytes. */
   output: Map<string, Buffer>;
+  /** Not applicable in this scope: write nothing, remove an installed copy,
+   *  keep a file-less lock entry carrying the reason. `output` is ignored. */
+  skipped?: SkipReason;
 }
 
 export interface ApplyOptions {
@@ -36,6 +39,8 @@ export interface ApplyResult {
   updated: string[];
   removed: string[];
   unchanged: string[];
+  /** Plan items marked skipped (also in `removed` if files were deleted). */
+  skipped: string[];
   conflicts: { key: string; path: string }[];
   overwritten: { key: string; path: string }[];
 }
@@ -56,14 +61,24 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
   const lockPath = join(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const newLock: Lock = {};
-  const res: ApplyResult = { added: [], updated: [], removed: [], unchanged: [], conflicts: [], overwritten: [] };
+  const res: ApplyResult = { added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [] };
   const dirsTouched = new Set<string>();
 
   const planned = new Set(plan.map((i) => i.key));
 
   for (const it of plan) {
     if (!NAME_RE.test(it.name)) throw new ApplyError(`invalid item name: ${it.name}`);
-    const existing = oldLock[it.key];
+    if (it.skipped) {
+      // Owns no paths: delete only what the lock says we installed.
+      const files = Object.keys(oldLock[it.key]?.files ?? {});
+      for (const rel of files) removeFile(safeJoin(targetDir, rel), dirsTouched);
+      if (files.length > 0) res.removed.push(it.key);
+      res.skipped.push(it.key);
+      newLock[it.key] = { source: it.source, version: it.version, files: {}, skipped: it.skipped };
+      continue;
+    }
+    // A previous skip entry owns nothing: treat the item as not yet installed.
+    const existing = oldLock[it.key]?.skipped ? undefined : oldLock[it.key];
     const entryFiles: Record<string, string> = {};
     let wrote = false;
     let removedFile = false;
@@ -134,7 +149,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
     for (const rel of Object.keys(oldLock[key]!.files)) {
       removeFile(safeJoin(targetDir, rel), dirsTouched);
     }
-    res.removed.push(key);
+    if (!oldLock[key]!.skipped) res.removed.push(key); // a skip entry had nothing installed
   }
 
   pruneEmptyDirs(dirsTouched, targetDir);

@@ -2,7 +2,8 @@
 //
 //   { "skills/perl-moo": {
 //       "source": "shared", "version": "git:ab12cd3",
-//       "files": { "skills/perl-moo/SKILL.md": "sha256:…" } } }
+//       "files": { "skills/perl-moo/SKILL.md": "sha256:…" } },
+//     "rules/k8s": { …, "files": {}, "skipped": "renders-empty" } }
 //
 // Serialized deterministically (sorted keys) so a no-op run produces identical
 // bytes and never rewrites the file.
@@ -14,7 +15,11 @@ export interface LockEntry {
   version: string;
   /** Install-relative path -> content hash. */
   files: Record<string, string>;
+  /** Declared but not applicable in this scope: owns no files (spec §5, §6.2). */
+  skipped?: SkipReason;
 }
+
+export type SkipReason = "renders-empty";
 
 export type Lock = Record<string, LockEntry>;
 
@@ -49,6 +54,7 @@ export function serializeLock(lock: Lock): string {
     const files: Record<string, string> = {};
     for (const f of Object.keys(entry.files).sort()) files[f] = entry.files[f]!;
     out[key] = { source: entry.source, version: entry.version, files };
+    if (entry.skipped) out[key].skipped = entry.skipped;
   }
   return JSON.stringify(out, null, 2) + "\n";
 }

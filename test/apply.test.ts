@@ -169,3 +169,77 @@ test("agent and rule items install as single files", () => {
     tmp.cleanup();
   }
 });
+
+// ---- skipped items (k35) ----------------------------------------------------
+
+function skipped(type: ItemType, name: string): PlanItem {
+  return { ...item(type, name, {}), skipped: "renders-empty" };
+}
+
+test("a skipped item writes nothing and records a file-less lock entry", () => {
+  const tmp = makeTmpDir();
+  try {
+    const res = apply([skipped("rule", "r")], { targetDir: tmp.dir });
+    assert.deepEqual(res.skipped, ["rules/r"]);
+    assert.deepEqual([res.added, res.removed, res.unchanged], [[], [], []]);
+    assert.equal(existsSync(join(tmp.dir, "rules")), false);
+    assert.deepEqual(readLock(join(tmp.dir, "skilletor.lock.json"))["rules/r"], {
+      source: "shared", version: "git:aa", files: {}, skipped: "renders-empty",
+    });
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("skipping an installed item removes its files and reports it removed", () => {
+  const tmp = makeTmpDir();
+  try {
+    apply([item("skill", "moo", { "skills/moo/SKILL.md": "S", "skills/moo/ref.md": "R" })], { targetDir: tmp.dir });
+    const res = apply([skipped("skill", "moo")], { targetDir: tmp.dir });
+    assert.deepEqual(res.removed, ["skills/moo"]);
+    assert.deepEqual(res.skipped, ["skills/moo"]);
+    assert.equal(existsSync(join(tmp.dir, "skills/moo")), false);
+    // A second skip is quiet and leaves the lock untouched.
+    const again = apply([skipped("skill", "moo")], { targetDir: tmp.dir });
+    assert.deepEqual([again.removed, again.skipped], [[], ["skills/moo"]]);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("a skipped item leaves a foreign file at its path alone, no conflict", () => {
+  const tmp = makeTmpDir();
+  try {
+    mkdirSync(join(tmp.dir, "rules"), { recursive: true });
+    writeFileSync(join(tmp.dir, "rules/r.md"), "MINE");
+    const res = apply([skipped("rule", "r")], { targetDir: tmp.dir, force: true });
+    assert.deepEqual(res.conflicts, []);
+    assert.equal(read(tmp.dir, "rules/r.md"), "MINE");
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("an item that was skipped and applies again counts as added", () => {
+  const tmp = makeTmpDir();
+  try {
+    apply([skipped("rule", "r")], { targetDir: tmp.dir });
+    const res = apply([item("rule", "r", { "rules/r.md": "R" })], { targetDir: tmp.dir });
+    assert.deepEqual(res.added, ["rules/r"]);
+    assert.equal(readLock(join(tmp.dir, "skilletor.lock.json"))["rules/r"]?.skipped, undefined);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("an undeclared skipped entry is dropped from the lock without a removal", () => {
+  const tmp = makeTmpDir();
+  try {
+    apply([skipped("rule", "r")], { targetDir: tmp.dir });
+    const res = apply([], { targetDir: tmp.dir });
+    assert.deepEqual(res.removed, []);
+    assert.deepEqual(readLock(join(tmp.dir, "skilletor.lock.json")), {});
+  } finally {
+    tmp.cleanup();
+  }
+});

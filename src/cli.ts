@@ -87,7 +87,9 @@ function statusText(report: ReturnType<typeof status>): string {
   for (const s of report.scopes) {
     lines.push(`${s.scope} scope:`);
     for (const d of s.declared) {
-      lines.push(`  ${d.installed ? "✓" : "·"} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}`);
+      const mark = d.installed ? "✓" : d.skipped ? "-" : "·";
+      const note = d.skipped ? " (skipped: renders empty)" : "";
+      lines.push(`  ${mark} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}${note}`);
     }
     for (const w of s.wildcards) lines.push(`  * ${w.type}s/* @${w.source} (${w.installed} installed)`);
     for (const o of s.orphans) lines.push(`  ? ${o} (in lock, not declared)`);

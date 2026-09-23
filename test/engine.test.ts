@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { sync, check, status, type EngineContext } from "../src/engine.ts";
-import { reportText } from "../src/report.ts";
+import { reportHook, reportText } from "../src/report.ts";
 import { readLock } from "../src/lock.ts";
 
 function env() {
@@ -422,6 +422,170 @@ test("check covers sources referenced only by a wildcard", async () => {
     e.writeCfg("user", { sources: { shared: { local: src } }, install: { rules: ["*@shared"] } });
     const chk = await check(e.ctx, { scope: "user" });
     assert.deepEqual(chk.sources.map((s) => s.name), ["shared"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// ---- empty renders (k35) ----------------------------------------------------
+
+/** Write a raw file into a source dir. */
+function putRaw(dir: string, rel: string, content: string): void {
+  mkdirSync(join(dir, rel, ".."), { recursive: true });
+  writeFileSync(join(dir, rel), content);
+}
+
+const GATED = "---\npaths: [\"**/*.yaml\"]\n---\n{% if vars.k8s %}\nUse kubectl.\n{% endif %}\n";
+
+test("a rule gated off by a var is not written and is reported as skipped", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "g1");
+    putRaw(src, "rules/k8s.md.njk", GATED);
+    e.writeCfg("user", { sources: { s: { local: src } }, install: { rules: ["k8s@s"] }, vars: { k8s: false } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.equal(existsSync(join(e.home, ".claude/rules/k8s.md")), false);
+    assert.deepEqual(r.scopes[0]!.skipped.map((i) => i.key), ["rules/k8s"]);
+    assert.deepEqual([r.scopes[0]!.added, r.scopes[0]!.warnings], [[], []]);
+    assert.match(reportText(r), /rules\/k8s skipped \(renders empty\)/);
+    assert.deepEqual(reportHook(r), {}); // nothing changed: the hook stays silent
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("toggling the var off removes the installed rule; toggling it on reinstalls it", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "g2");
+    putRaw(src, "rules/k8s.md.njk", GATED);
+    const cfg = (on: boolean) => ({ sources: { s: { local: src } }, install: { rules: ["k8s@s"] }, vars: { k8s: on } });
+    const target = join(e.home, ".claude/rules/k8s.md");
+
+    e.writeCfg("user", cfg(true));
+    await sync(e.ctx, { scope: "user" });
+    assert.match(readFileSync(target, "utf8"), /kubectl/);
+
+    e.writeCfg("user", cfg(false));
+    const off = await sync(e.ctx, { scope: "user" });
+    assert.equal(existsSync(target), false);
+    assert.deepEqual(off.scopes[0]!.removed.map((i) => i.key), ["rules/k8s"]);
+    assert.deepEqual(off.scopes[0]!.skipped.map((i) => i.key), ["rules/k8s"]);
+
+    e.writeCfg("user", cfg(true));
+    const on = await sync(e.ctx, { scope: "user" });
+    assert.match(readFileSync(target, "utf8"), /kubectl/);
+    assert.deepEqual(on.scopes[0]!.added.map((i) => i.key), ["rules/k8s"]);
+    assert.deepEqual(on.scopes[0]!.skipped, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a project var can switch off a rule the user scope would install", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "g3");
+    putRaw(src, "rules/k8s.md.njk", GATED);
+    e.writeCfg("user", { sources: { s: { local: src } }, vars: { k8s: true } });
+    e.writeCfg("project", { install: { rules: ["k8s@s"] } });
+    e.writeCfg("local", { vars: { k8s: false } });
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.equal(existsSync(join(e.projectDir, ".claude/rules/k8s.md")), false);
+    assert.deepEqual(r.scopes[0]!.skipped.map((i) => i.key), ["rules/k8s"]);
+    assert.doesNotMatch(readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8"), /k8s/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a non-template empty rule is still installed", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "g4");
+    putRaw(src, "rules/blank.md", "");
+    e.writeCfg("user", { sources: { s: { local: src } }, install: { rules: ["blank@s"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.equal(existsSync(join(e.home, ".claude/rules/blank.md")), true);
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["rules/blank"]);
+    assert.deepEqual(r.scopes[0]!.skipped, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a skill whose SKILL.md renders empty skips all its files", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "g5");
+    putRaw(src, "skills/kube/SKILL.md.njk", "{% if vars.k8s %}---\ndescription: k\n---\nK{% endif %}");
+    putRaw(src, "skills/kube/reference.md", "REFERENCE");
+    putRaw(src, "skills/kube/extra.md.njk", "EXTRA");
+    e.writeCfg("user", { sources: { s: { local: src } }, install: { skills: ["kube@s"] }, vars: { k8s: false } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.equal(existsSync(join(e.home, ".claude/skills/kube")), false);
+    assert.deepEqual(r.scopes[0]!.skipped.map((i) => i.key), ["skills/kube"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a wildcard item that renders empty is skipped without affecting its siblings", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "g6");
+    putRaw(src, "rules/k8s.md.njk", GATED);
+    putRaw(src, "rules/plain.md", "PLAIN\n");
+    putRaw(src, "rules/templ.md.njk", "T={{ vars.k8s }}\n");
+    e.writeCfg("user", { sources: { s: { local: src } }, install: { rules: ["*@s"] }, vars: { k8s: false } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key).sort(), ["rules/plain", "rules/templ"]);
+    assert.deepEqual(r.scopes[0]!.skipped.map((i) => i.key), ["rules/k8s"]);
+    assert.equal(existsSync(join(e.home, ".claude/rules/k8s.md")), false);
+    const st = status(e.ctx, { scope: "user" }).scopes[0]!;
+    assert.deepEqual(st.wildcards[0]!.installed, 2);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a render error is still an error: the installed copy stays, with a warning", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "g7");
+    putRaw(src, "rules/k8s.md.njk", GATED);
+    e.writeCfg("user", { sources: { s: { local: src } }, install: { rules: ["k8s@s"] }, vars: { k8s: true } });
+    await sync(e.ctx, { scope: "user" });
+    putRaw(src, "rules/k8s.md.njk", "{{ vars.typo }}");
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.match(readFileSync(join(e.home, ".claude/rules/k8s.md"), "utf8"), /kubectl/);
+    assert.equal(r.scopes[0]!.warnings.some((w) => /template error/.test(w)), true);
+    assert.deepEqual(r.scopes[0]!.skipped, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("status tells a skipped item from one that is not installed, also when offline", async () => {
+  const e = env();
+  try {
+    const src = join(e.tmp.dir, "g8");
+    putRaw(src, "rules/k8s.md.njk", GATED);
+    putRaw(src, "rules/later.md", "L\n");
+    e.writeCfg("user", { sources: { s: { local: src } }, install: { rules: ["k8s@s"] }, vars: { k8s: false } });
+    await sync(e.ctx, { scope: "user" });
+    e.writeCfg("user", { sources: { s: { local: src } }, install: { rules: ["k8s@s", "later@s"] }, vars: { k8s: false } });
+    const pick = () =>
+      status(e.ctx, { scope: "user" }).scopes[0]!.declared.map((d) => ({ key: d.key, installed: d.installed, skipped: d.skipped }));
+    const expected = [
+      { key: "rules/k8s", installed: false, skipped: "renders-empty" },
+      { key: "rules/later", installed: false, skipped: undefined },
+    ];
+    assert.deepEqual(pick(), expected);
+
+    rmSync(src, { recursive: true, force: true }); // unresolvable: the skip marker is kept
+    await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(pick(), expected);
   } finally {
     e.cleanup();
   }

@@ -91,3 +91,26 @@ test("install 'rule:*@src' and status text marks wildcard items", () => {
   assert.match(st.stdout, /rules\/r1 @shared via \*@shared/);
   assert.match(st.stdout, /\* rules\/\* @shared \(1 installed\)/);
 });
+
+// k35: a gated-off rule through the real binary: exit 0, skip line, status marker.
+test("sync reports a rule that renders empty as skipped and exits 0", () => {
+  const home = join(tmp.dir, "empty-home");
+  const proj = join(tmp.dir, "empty-proj");
+  const src = join(tmp.dir, "empty-src");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(proj, { recursive: true });
+  mkdirSync(join(src, "rules"), { recursive: true });
+  writeFileSync(join(src, "rules", "k8s.md.njk"), "{% if vars.k8s %}K{% endif %}\n");
+  writeFileSync(
+    join(home, ".claude", "skilletor.json"),
+    JSON.stringify({ sources: { s: { local: src } }, install: { rules: ["k8s@s"] }, vars: { k8s: false } }),
+  );
+  const env = { ...process.env, HOME: home };
+  const common = ["--scope", "user", "--project-dir", proj];
+
+  const r = runCli(["sync", ...common], env);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /rules\/k8s skipped \(renders empty\)/);
+  const st = runCli(["status", ...common], env);
+  assert.match(st.stdout, /rules\/k8s @s \(skipped: renders empty\)/);
+});

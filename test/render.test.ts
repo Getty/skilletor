@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
-import { build, RenderError, type RenderContext } from "../src/render.ts";
+import { build, rendersEmpty, RenderError, type RenderContext } from "../src/render.ts";
 import type { CatalogItem } from "../src/catalog.ts";
 
 function ctx(vars: Record<string, unknown>): RenderContext {
@@ -125,4 +125,42 @@ test("project.* is available in project scope", () => {
   } finally {
     tmp.cleanup();
   }
+});
+
+// ---- empty renders (k35) ----------------------------------------------------
+
+function out(files: Record<string, string>): Map<string, Buffer> {
+  return new Map(Object.entries(files).map(([k, v]) => [k, Buffer.from(v)]));
+}
+const ruleT: CatalogItem = { type: "rule", name: "r", files: ["rules/r.md.njk"] };
+const ruleP: CatalogItem = { type: "rule", name: "r", files: ["rules/r.md"] };
+const skillT: CatalogItem = { type: "skill", name: "s", files: ["skills/s/SKILL.md.njk", "skills/s/ref.md"] };
+
+test("rendersEmpty: whitespace-only main template is empty", () => {
+  assert.equal(rendersEmpty(ruleT, out({ "rules/r.md": " \n\t\n" })), true);
+  assert.equal(rendersEmpty(ruleT, out({ "rules/r.md": "" })), true);
+});
+
+test("rendersEmpty: frontmatter-only counts as empty, also after leading whitespace", () => {
+  assert.equal(rendersEmpty(ruleT, out({ "rules/r.md": "---\npaths: [\"**/*.pm\"]\n---\n\n  \n" })), true);
+  assert.equal(rendersEmpty(ruleT, out({ "rules/r.md": "\n---\ndescription: x\n---" })), true);
+  assert.equal(rendersEmpty(ruleT, out({ "rules/r.md": "---\n---\n" })), true);
+  assert.equal(rendersEmpty(ruleT, out({ "rules/r.md": "---\r\npaths: x\r\n---\r\n" })), true);
+});
+
+test("rendersEmpty: any body text or an unclosed frontmatter is not empty", () => {
+  assert.equal(rendersEmpty(ruleT, out({ "rules/r.md": "---\npaths: x\n---\nBODY\n" })), false);
+  assert.equal(rendersEmpty(ruleT, out({ "rules/r.md": "---\npaths: x\n" })), false);
+  assert.equal(rendersEmpty(ruleT, out({ "rules/r.md": "just text" })), false);
+});
+
+test("rendersEmpty: a non-template main file is never empty", () => {
+  assert.equal(rendersEmpty(ruleP, out({ "rules/r.md": "" })), false);
+  const skillP: CatalogItem = { type: "skill", name: "s", files: ["skills/s/SKILL.md", "skills/s/x.md.njk"] };
+  assert.equal(rendersEmpty(skillP, out({ "skills/s/SKILL.md": "", "skills/s/x.md": "" })), false);
+});
+
+test("rendersEmpty: a skill is judged by SKILL.md only, not its companions", () => {
+  assert.equal(rendersEmpty(skillT, out({ "skills/s/SKILL.md": "\n", "skills/s/ref.md": "REF" })), true);
+  assert.equal(rendersEmpty(skillT, out({ "skills/s/SKILL.md": "S", "skills/s/ref.md": "" })), false);
 });

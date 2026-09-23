@@ -14,9 +14,9 @@ import { GitSource } from "./sources/git.ts";
 import { UrlSource } from "./sources/url.ts";
 import type { Source } from "./sources/types.ts";
 import { scan, type Catalog } from "./catalog.ts";
-import { build, type RenderContext } from "./render.ts";
+import { build, rendersEmpty, type RenderContext } from "./render.ts";
 import { apply, isValidItemName, type PlanItem } from "./apply.ts";
-import { readLock, type Lock } from "./lock.ts";
+import { readLock, type Lock, type SkipReason } from "./lock.ts";
 import { State } from "./state.ts";
 import { updateGitignore } from "./gitignore.ts";
 import {
@@ -222,7 +222,13 @@ async function syncScope(
       keepIfLocked(item.target);
       return;
     }
-    plan.push({ key: item.target, type: item.type, name: item.name, source: item.source, version: r.version, output });
+    const planItem: PlanItem = { key: item.target, type: item.type, name: item.name, source: item.source, version: r.version, output };
+    // Main template renders empty: not applicable here (spec §5).
+    if (rendersEmpty(catItem, output)) {
+      planItem.output = new Map();
+      planItem.skipped = "renders-empty";
+    }
+    plan.push(planItem);
   };
 
   const explicit = new Map<string, { source: string; raw: string }>();
@@ -292,6 +298,7 @@ async function syncScope(
   rep.updated = result.updated.map(toChange);
   rep.removed = result.removed.map(toChange);
   rep.unchanged = result.unchanged.map(toChange);
+  rep.skipped = result.skipped.map(toChange);
   rep.conflicts = result.conflicts.map((c) => ({ path: c.path }));
   rep.overwritten = result.overwritten.map((c) => ({ path: c.path }));
   return rep;
@@ -345,7 +352,7 @@ export interface StatusReport {
   scopes: {
     scope: ScopeName;
     /** `via` names the wildcard entry an item was installed through. */
-    declared: { key: string; source: string; installed: boolean; via?: string }[];
+    declared: { key: string; source: string; installed: boolean; via?: string; skipped?: SkipReason }[];
     orphans: string[];
     /** Each wildcard with the number of items currently installed through it. */
     wildcards: { type: ItemType; source: string; entry: string; installed: number }[];
@@ -381,9 +388,15 @@ export function status(ctx: EngineContext, opts: SyncOptions = {}): StatusReport
         trustRequests.push({ name, url: identityOf(src) });
       }
     }
-    const declared: StatusReport["scopes"][number]["declared"] = scopeCfg.install.map((i) => ({
-      key: i.target, source: i.source, installed: i.target in lock,
-    }));
+    // A skip entry (spec §6.2) is declared but deliberately not installed.
+    const declared: StatusReport["scopes"][number]["declared"] = scopeCfg.install.map((i) => {
+      const entry = lock[i.target];
+      const d: StatusReport["scopes"][number]["declared"][number] = {
+        key: i.target, source: i.source, installed: entry !== undefined && !entry.skipped,
+      };
+      if (entry?.skipped) d.skipped = entry.skipped;
+      return d;
+    });
     const viaCount = new Map<WildcardItem, number>();
     const orphans: string[] = [];
     for (const [key, entry] of Object.entries(lock)) {
@@ -392,6 +405,10 @@ export function status(ctx: EngineContext, opts: SyncOptions = {}): StatusReport
       const w = scopeCfg.wildcards.find((x) => x.source === entry.source && x.type === type);
       if (!w) {
         orphans.push(key);
+        continue;
+      }
+      if (entry.skipped) {
+        declared.push({ key, source: entry.source, installed: false, via: w.raw, skipped: entry.skipped });
         continue;
       }
       declared.push({ key, source: entry.source, installed: true, via: w.raw });

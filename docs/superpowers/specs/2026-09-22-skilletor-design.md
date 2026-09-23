@@ -174,6 +174,17 @@ name is `skills` everywhere.
 Deliberately excluded: `env.*` (otherwise secrets end up in files) and the git branch
 (would re-render on every switch).
 
+**Empty render = not applicable:** if an item's main file is a template – `SKILL.md.njk`
+for a skill, `<name>.md.njk` for an agent or rule – and its rendered output is
+whitespace-only once a leading YAML frontmatter block (`---` … `---`, optionally after
+leading whitespace) is removed, the item does not apply to this scope. So a rule whose
+`paths:` frontmatter survives but whose body is fully gated by `{% if vars.x %}` counts
+as empty. Such an item is skipped as a whole: nothing is written (for a skill, none of
+its other files either), an installed copy is removed via the lock, and the report lists
+it as skipped – neither an error nor a warning. A main file that is not a template is
+never treated this way, even if it is empty. A render error stays an error (§6.6). Vars
+can therefore switch individual items on and off per user, project or local config.
+
 ## 6. Engine
 
 ### 6.1 `sync` pipeline (per scope, user before project)
@@ -181,7 +192,8 @@ Deliberately excluded: `env.*` (otherwise secrets end up in files) and the git b
 1. Load, merge, validate config.
 2. Resolve sources (in parallel) → local directory + version per source.
 3. Expand wildcards against each resolved source's catalog (overlap rules in §3), then
-   **build each declared item in memory** (render or copy).
+   **build each declared item in memory** (render or copy). An item whose main template
+   renders empty (§5) is marked skipped instead; its installed files are removed in step 4.
 4. Compare output against disk and lock; write only differences (atomically:
    temp file + rename); remove files the item no longer contains.
 5. Delete items no longer declared, per the lock.
@@ -203,8 +215,16 @@ automatically as a result.
 ```json
 { "skills/perl-moo": {
     "source": "shared", "version": "git:ab12cd3",
-    "files": { "SKILL.md": "sha256:…", "reference.md": "sha256:…" } } }
+    "files": { "SKILL.md": "sha256:…", "reference.md": "sha256:…" } },
+  "rules/k8s": {
+    "source": "shared", "version": "git:ab12cd3", "files": {}, "skipped": "renders-empty" } }
 ```
+
+An item that rendered empty (§5) keeps a lock entry with no files and
+`"skipped": "renders-empty"`. It owns no path, so a file someone else put at its target
+is left alone (no conflict, `--force` irrelevant). The entry lets `status` report the
+skip without rendering (status stays offline and read-only), and it is kept like any
+other entry while its source cannot be resolved.
 
 ### 6.3 Ownership and coexistence with your own files
 
@@ -255,7 +275,9 @@ skilletor hook <event>                    # for hooks.json only
 `add`/`install`/`uninstall` edit only the config (default: the user config) and then run
 `sync`. The declarative config stays the single source of truth.
 
-`status` marks items that were declared through a wildcard (`via *@shared`, and a `via`
+`status` shows a declared item that rendered empty at the last sync as skipped
+(`skipped: "renders-empty"` in `--json`, `installed: false`), distinct from an item that
+is not installed yet. It marks items that were declared through a wildcard (`via *@shared`, and a `via`
 field in `--json`) and lists each wildcard with the number of items it currently has
 installed.
 

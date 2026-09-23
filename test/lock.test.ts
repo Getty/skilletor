@@ -52,3 +52,15 @@ test("invalid JSON is rejected", () => {
     tmp.cleanup();
   }
 });
+
+test("a skipped entry round-trips its marker (k35)", () => {
+  const tmp = makeTmpDir();
+  try {
+    const p = join(tmp.dir, "skilletor.lock.json");
+    const lock: Lock = { "rules/r": { source: "s", version: "v", files: {}, skipped: "renders-empty" } };
+    writeLock(p, lock);
+    assert.deepEqual(readLock(p), lock);
+  } finally {
+    tmp.cleanup();
+  }
+});

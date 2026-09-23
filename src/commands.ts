@@ -230,6 +230,7 @@ function installedSet(ctx: CommandContext, config: LoadedConfig): Set<string> {
     const dir = join(scope === "user" ? ctx.home : ctx.projectDir ?? "", ".claude");
     if (scope === "project" && !ctx.projectDir) continue;
     for (const [key, entry] of Object.entries(readLock(join(dir, "skilletor.lock.json")))) {
+      if (entry.skipped) continue; // renders empty here: nothing installed
       set.add(`${key}@${entry.source}`);
     }
   }

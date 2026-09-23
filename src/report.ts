@@ -23,6 +23,9 @@ export interface ScopeReport {
   updated: ItemChange[];
   removed: ItemChange[];
   unchanged: ItemChange[];
+  /** Declared items that render empty (spec §5): not applicable, not an error.
+   *  An item also in `removed` had an installed copy deleted this run. */
+  skipped: ItemChange[];
   conflicts: { path: string }[];
   overwritten: { path: string }[];
   warnings: string[];
@@ -36,7 +39,10 @@ export interface SyncReport {
 }
 
 export function emptyScopeReport(scope: "user" | "project"): ScopeReport {
-  return { scope, added: [], updated: [], removed: [], unchanged: [], conflicts: [], overwritten: [], warnings: [], trustRequests: [] };
+  return {
+    scope, added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [], warnings: [],
+    trustRequests: [],
+  };
 }
 
 /** "skills/perl-moo" -> { type: "skill", name: "perl-moo" }. */
@@ -70,11 +76,15 @@ export function reportText(r: SyncReport): string {
   if (r.error) return `skilletor: config error, nothing changed — ${r.error}`;
   const lines: string[] = [];
   for (const s of r.scopes) {
-    if (!isNotable(s)) continue;
+    // Skips are informational: shown here, but not "notable" (the hook stays quiet).
+    if (!isNotable(s) && s.skipped.length === 0) continue;
+    const skipped = new Set(s.skipped.map((it) => it.key));
     lines.push(`skilletor: ${s.scope} scope`);
     for (const it of s.added) lines.push(`  + ${it.key} (${ACTIVATION[it.type]})`);
     for (const it of s.updated) lines.push(`  ~ ${it.key} (${ACTIVATION[it.type]})`);
-    for (const it of s.removed) lines.push(`  - ${it.key} (removed)`);
+    for (const it of s.removed) lines.push(`  - ${it.key} (${skipped.has(it.key) ? "removed: renders empty" : "removed"})`);
+    const removed = new Set(s.removed.map((it) => it.key));
+    for (const it of s.skipped) if (!removed.has(it.key)) lines.push(`  · ${it.key} skipped (renders empty)`);
     for (const c of s.overwritten) lines.push(`  overwrote local change: ${c.path}`);
     for (const c of s.conflicts) lines.push(`  conflict: ${c.path} already exists (use --force to adopt)`);
     for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${t.url}) — run: skilletor trust ${t.name}`);
