@@ -431,7 +431,8 @@ manage-skills configuration. (The Codex target moved into scope: §14.)
 skilletor installs for one or both of two **harnesses**: Claude Code (`claude`) and the
 OpenAI Codex CLI (`codex`). Phase 1 covers detection, the per-target layout, skills for
 Codex, and the Codex plugin wiring; phase 2 converts agents to Codex agent-role TOML
-(§14.7); phase 3 writes rules into a managed block in `AGENTS.md` (§14.8).
+(§14.7); phase 3 delivers rules through skilletor's `SessionStart` hook, with a rules file
+and a pointer in `AGENTS.md` (§14.8).
 
 ### 14.1 Which harnesses: detection and `targets`
 
@@ -470,7 +471,7 @@ one:
 |---|---|---|
 | skill | `<base>/.claude/skills/<name>/` | `<base>/.agents/skills/<name>/` |
 | agent | `<base>/.claude/agents/<name>.md` | user: `$CODEX_HOME/agents/<name>.toml` (default `~/.codex`); project: `<repo>/.codex/agents/<name>.toml` (§14.7) |
-| rule | `<base>/.claude/rules/<name>.md` | a section of the managed block in `$CODEX_HOME/AGENTS.md` (user) or `<repo>/AGENTS.md` (project) (§14.8) |
+| rule | `<base>/.claude/rules/<name>.md` | a section of `$CODEX_HOME/skilletor-rules.md` (user) or `<repo>/.codex/skilletor-rules.md` (project), injected by the hook, pointed to from `AGENTS.md` (§14.8) |
 
 `<base>` is `~` (user scope) or the project root (project scope). The user-scope Codex agent
 root is the one root that need not lie under `<base>`: it follows `$CODEX_HOME`
@@ -520,10 +521,11 @@ once per target and names the targets in the scope header when they are not just
 ### 14.5 Plugin wiring for Codex
 
 - `.codex-plugin/plugin.json` (name `skilletor`, same version as `package.json` and
-  `.claude-plugin/plugin.json`, enforced by a test) points at `./skills/` and the shared
-  `./hooks/hooks.json`. Codex has the same `SessionStart`/`UserPromptSubmit` events and
-  hook JSON shape, and sets `CLAUDE_PLUGIN_ROOT` for plugin hook commands, so one hooks
-  file serves both.
+  `.claude-plugin/plugin.json`, enforced by a test) points at `./skills/` and
+  `./hooks/codex-hooks.json`. Codex has the same `SessionStart`/`UserPromptSubmit` events and
+  hook JSON shape and sets `CLAUDE_PLUGIN_ROOT` for plugin hook commands; the Codex file
+  differs from `./hooks/hooks.json` only by `--harness codex` on each command and
+  `"additionalContextLimit": 0` on `SessionStart` (§14.8), a Codex-only key.
 - Codex does not set `CLAUDE_PROJECT_DIR`. The hook then takes the git top level of the
   hook input's `cwd` (else `cwd` itself) as the project root, so a session started in a
   subdirectory still finds `<repo>/.claude/skilletor.json`.
@@ -589,22 +591,26 @@ content can close the string early. Round-trip tests parse the output with `smol
 (devDependency only); Codex's own loader accepts the files (manual check via the app-server's
 `configWarning`s, which name every malformed role file).
 
-### 14.8 Codex rules (phase 3)
+### 14.8 Codex rules (phase 3, reworked by #50)
 
-Codex has no rules directory; it reads `AGENTS.md`. skilletor keeps all of a scope's Codex
-rules in **one managed block** of that scope's file – `$CODEX_HOME/AGENTS.md` (user, default
-`~/.codex`) or `<repo>/AGENTS.md` (project):
+Codex has no rules directory. Its only always-loaded instruction file is `AGENTS.md`, which
+is usually committed, cannot be partly ignored and is cut at `project_doc_max_bytes`. So
+skilletor does not put rule text there. Rules reach Codex through **skilletor's own
+`SessionStart` hook**; a gitignored **rules file** per scope holds the same text for the
+case where the hook's message is gone (compaction); `AGENTS.md` carries only a short
+**pointer** to that file.
+
+**Rules file** – one per scope, wholly owned by skilletor: `$CODEX_HOME/skilletor-rules.md`
+(user, default `~/.codex`) and `<repo>/.codex/skilletor-rules.md` (project):
 
 ```
-<!-- skilletor:begin -->
-<!-- managed by skilletor — edits inside are overwritten -->
+<!-- skilletor:rules scope=project -->
+<!-- managed by skilletor — edits are overwritten; change the rule in its source -->
 
 <!-- skilletor:rule k8s source=shared -->
 Applies when working with files matching: `k8s/**`, `*.yaml`.
 
 …rule body…
-
-<!-- skilletor:end -->
 ```
 
 - **Sections:** one per rule, sorted by rule name, each opened by its marker comment
@@ -613,42 +619,104 @@ Applies when working with files matching: `k8s/**`, `*.yaml`.
   working with files matching: …" line; other frontmatter keys are dropped. A rule whose
   body is blank for Codex (empty render, or an empty file) is skipped for Codex. A rule
   whose body contains a skilletor marker line is not written (warning) – it would corrupt
-  the block.
+  the file.
+- The file exists exactly when the scope has at least one Codex rule; it is deleted when
+  the last one goes or Codex is switched off (§14.1). The project file is listed in the
+  managed block of `<repo>/.codex/.gitignore` (§14.3).
+- **Lock and ownership:** each rule keeps an entry `codex:rules/<name>` with
+  `"block": true` and `files: { "skilletor-rules.md": <hash of its section> }`. `apply`
+  records such entries (added / updated / unchanged / removed by hash) but never touches
+  disk for them; the engine then rebuilds the file from the new lock. A rule kept because
+  its source is unreachable keeps its section text from the file. A section edited or
+  deleted by hand is restored and reported as an overwritten local change
+  (`<file>#rules/<name>`, e.g. `.codex/skilletor-rules.md#rules/k8s`). `status` and
+  `check` treat these entries like any other.
+- **Migration:** a lock entry written by the old design (`files: { "AGENTS.md": … }`)
+  counts as changed and is rewritten under the new file name on the next sync; the old
+  rule sections leave `AGENTS.md` because the managed block there is rebuilt as the pointer
+  below. Nothing is reported as a local change for that move.
+
+**Hook injection.** The Codex plugin gets its own hooks file, `hooks/codex-hooks.json`
+(`.codex-plugin/plugin.json` points at it; Claude Code keeps `hooks/hooks.json` unchanged).
+Its commands pass `--harness codex`; the `SessionStart` handler uses the matcher
+`startup|resume|clear` and sets `"additionalContextLimit": 0`.
+
+- `skilletor hook session-start --harness codex` syncs as before, then – when the input's
+  `source` is `startup` or `clear`, or missing – appends to `additionalContext` the rules
+  file of the user scope, then the one of the project scope (each only when present and
+  Codex is a target of that scope), read from disk, so a failed or timed-out sync still
+  delivers the last good rules. On `resume` no rules are appended: the first copy is still
+  in the resumed history and a second one would duplicate it.
+- `user-prompt-submit` never appends rules.
+- Without `--harness` (Claude Code) nothing changes.
+
+**Pointer in `AGENTS.md`.** Each scope whose rules file exists keeps one managed block in
+its `AGENTS.md` – `$CODEX_HOME/AGENTS.md` (user) or `<repo>/AGENTS.md` (project):
+
+```
+<!-- skilletor:begin -->
+<!-- managed by skilletor — edits inside are overwritten -->
+Additional rules for this project are managed by skilletor. They are normally provided at
+session start as a developer message beginning with `<!-- skilletor:rules`. If that message
+is not in your context (for example after context compaction), read
+`.codex/skilletor-rules.md` before you start a task, and follow it.
+<!-- skilletor:end -->
+```
+
+The user-scope text says "for all projects" and names the absolute path of the user rules
+file. The block's text is fixed, so it changes in a project's diff only when Codex rules
+appear or disappear there.
+
 - **Placement:** content outside the markers is never modified. A missing file is created
   with just the block; a file without a block gets it appended after a blank line. When
-  the block ends up empty it is removed, and if nothing but whitespace is left the file is
-  deleted (a file skilletor created is thus removed again). Switching Codex off (§14.1)
-  removes the block the same way.
-- **Refusals** – warning, nothing written for Codex rules in that scope, existing lock
-  entries kept, `--force` does not override:
+  the rules file goes, the block is removed, and if nothing but whitespace is left the file
+  is deleted (a file skilletor created is thus removed again).
+- **Refusals** – warning, the pointer block is not written or changed in that scope,
+  `--force` does not override. The rules file and the hook injection are unaffected.
   - malformed markers: `begin` without `end`, `end` before `begin`, either one twice;
   - `AGENTS.md` is a symlink (commonly `CLAUDE.md` ↔ `AGENTS.md`: writing through it would
-    show Claude the rules twice), a directory, or unreadable;
+    send Claude to the Codex rules), a directory, or unreadable;
   - `claude` is also a target of the scope and a Claude memory file is the same file as the
     `AGENTS.md` (the other direction: `CLAUDE.md` → `AGENTS.md`, or a hard link). Checked:
     `<repo>/CLAUDE.md` and `<repo>/.claude/CLAUDE.md` (project), `~/.claude/CLAUDE.md` against
     `$CODEX_HOME/AGENTS.md` (user); compared by real path (a dangling link counts by its
     target) or device + inode. With Claude not a target, the block is written.
-- **Lock and ownership:** each rule keeps an entry `codex:rules/<name>` with
-  `"block": true` and `files: { "AGENTS.md": <hash of its section> }`. `apply` records such
-  entries (added / updated / unchanged / removed by hash) but never touches disk for them;
-  the engine then rebuilds the block from the new lock. A rule kept because its source is
-  unreachable keeps its section text from the file. A section edited or deleted by hand is
-  restored and reported as an overwritten local change (`<file>#rules/<name>`, e.g.
-  `.codex/AGENTS.md#rules/k8s`).
-  `status` and `check` treat these entries like any other.
-- **No gitignore:** `AGENTS.md` is typically committed and cannot be partly ignored, so the
-  block is not covered by any managed `.gitignore` – a project's rules for Codex show up in
-  its diff (known wart; use user-scope rules for machine-specific content).
-- **Codex's reading rules (measured on 0.153.4 with `codex debug prompt-input`):** the
-  global file comes first, then `--- project-doc ---`, then project files from the repo
-  root down to the cwd, all inside one `# AGENTS.md instructions for <cwd>` message. An
-  `AGENTS.override.md` next to an `AGENTS.md` replaces it (global and per directory) –
-  skilletor still writes the block but warns that Codex will not see it. Project docs
-  together are cut at `project_doc_max_bytes` (default 32768; read from the top level of
-  `$CODEX_HOME/config.toml` when set there), truncating from the end – where a new block
-  sits – so skilletor warns when the project `AGENTS.md` exceeds it. The global file was not
-  truncated at 40 000 bytes, so the user scope has no size warning.
+- **Warnings** for the pointer: an `AGENTS.override.md` next to the `AGENTS.md` (Codex
+  reads the override instead); a project `AGENTS.md` larger than `project_doc_max_bytes`
+  (default 32768; read from the top level of `$CODEX_HOME/config.toml` when set there) –
+  Codex cuts project docs from the end, where the pointer sits.
+
+**Hook trust.** Codex skips plugin hooks until the user trusts them (`/hooks`), without any
+message – then Codex gets neither syncs nor rules. When Codex is a machine target, `status`
+and the report warn once if `$CODEX_HOME/config.toml` has no `[hooks.state."<key>"]` entry
+with a `trusted_hash` for skilletor's `SessionStart` handler (key
+`skilletor@<marketplace>:hooks/codex-hooks.json:session_start:0:0`, matched on the
+`skilletor@` prefix and the `:session_start:` part). A stale hash (hook changed by an update,
+Codex shows it as "modified") is not detected. Every change to `hooks/codex-hooks.json`
+makes users trust the hook again – note it in the release notes.
+
+**Measured on Codex 0.153.4** (isolated `CODEX_HOME`, test plugin, rollouts inspected,
+model asked; 2026-09-23, ticket #50):
+
+- `additionalContext` becomes its own developer message after the `AGENTS.md` message and
+  before the first prompt. Default limit ≈ 2 500 tokens, cut from the middle with the full
+  output spilled to a temp file; `additionalContextLimit: 0` passes it whole, also from a
+  plugin's hooks file.
+- `SessionStart` runs in `codex exec` too. On `resume` it runs again (`source: resume`) and
+  its output is appended a second time.
+- Compaction drops the hook message (it is not in the replacement history); the model then
+  knows the rules only from the summary. `AGENTS.md` is injected again after compaction.
+  `SessionStart` with matcher `compact` did not fire on a manual compaction; `PostCompact`
+  fires but its `additionalContext` is not injected. Automatic mid-turn compaction was not
+  reproduced.
+- Pointer after compaction: 5/5 runs followed the test rule, 4/5 read the rules file
+  first; without the pointer 4/5 followed from the summary alone (one salient rule – a weak
+  discriminator; many detailed rules were not measured).
+- Codex's `AGENTS.md` reading (measured with `codex debug prompt-input`): the global file
+  first, then `--- project-doc ---`, then project files from the repo root down to the cwd,
+  in one `# AGENTS.md instructions for <cwd>` message; `AGENTS.override.md` replaces
+  `AGENTS.md`; project docs are cut at `project_doc_max_bytes` from the end; the global file
+  was not truncated at 40 000 bytes.
 
 ## 15. Bundles
 
