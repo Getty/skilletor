@@ -26,7 +26,8 @@ types under the same roof.
 |---|---|
 | **Source** | A named source: git repo, HTTPS tarball, or local directory |
 | **Item** | An installable thing from a source, addressed as `name@source` |
-| **Wildcard** | `*@source` in one type's install list: every item of that type in the source |
+| **Wildcard** | `*@source` or a pattern such as `perl-*@source` in one type's install list: every item of that type in the source whose name matches (§3) |
+| **Bundle** | `bundles/<name>.yaml` in a source: a named set of that source's items plus var defaults, declared as `name@source` under `install.bundles` (§15) |
 | **Type** | `skill`, `agent`, `rule` – a fixed table in code, not config-extensible |
 | **Scope** | `user` (`~/.claude/`) or `project` (`<project>/.claude/`) |
 | **Lock** | Per scope: what skilletor installed, with output hashes |
@@ -82,13 +83,21 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
   declares every item of that type in the source. It is stored as written and expanded
   at sync time against the resolved source's catalog (see 6.1), so items added upstream
   are installed on the next sync and items removed upstream are deleted via the lock
-  like any undeclared item. `*` is only valid as the whole name.
+  like any undeclared item. `*` matches any run of characters (including none) anywhere
+  in the name: `*@shared`, `perl-*@shared`, `*-style@shared`. A name without `*` is an
+  explicit entry. A pattern that matches nothing yields a warning, not an error.
+- **Bundles:** `install.bundles` lists `name@source` entries naming a bundle in that
+  source (§15). A bundle is expanded at sync time like a wildcard; the items it yields
+  follow the overlap rules below exactly as wildcard-yielded items do. Patterns over
+  bundle names are not supported.
 - **Overlap with wildcards** (per type and scope; never a config error, because an
   upstream addition must not break the whole sync):
   - an explicit entry and a wildcard yielding the same name from the same source: the
     explicit entry is used, silently;
   - an explicit entry and a wildcard yielding the same name from a different source:
     the explicit entry wins, the report carries a warning;
+  - two wildcards or bundles of the same source yielding the same name (`perl-*` and
+    `*-style` both matching `perl-style`): installed once, silently;
   - two wildcards (different sources) yielding the same name: that name is skipped with
     a warning (an already installed copy stays as it is); all other items proceed.
 
@@ -111,6 +120,7 @@ skills/<name>/SKILL.md[.njk] + any accompanying files
 agents/<name>.md[.njk]
 rules/<name>.md[.njk]
 snippets/…                 # for includes only, not installable
+bundles/<name>.yaml|.yml   # optional: named item sets with var defaults (§15)
 skilletor.json             # optional: { "description": "…", "vars": { defaults } }
 ```
 
@@ -175,7 +185,7 @@ name is `skills` everywhere.
 
 | Variable | Contents |
 |---|---|
-| `vars.*` | merged: source defaults < user < project < local |
+| `vars.*` | merged: source defaults < bundle vars (§15, bundle items only) < user < project < local |
 | `project.dir`, `project.name`, `project.git_remote` | project scope only |
 | `scope`, `target.dir` | `user`/`project`, target root |
 | `host.name`, `host.os`, `user.name`, `user.home` | instance |
@@ -276,8 +286,9 @@ skilletor add [name] <spec> [--project]   # add a source (= source add), resolve
 skilletor source list | remove <name>
 skilletor available [source]              # catalog: type, name, description, installed?
 skilletor install <item>… [--project]     # name@source, or type:name@source when ambiguous;
-                                          # type:*@source installs a wildcard (type required)
-skilletor uninstall <item>… [--project]   # type:*@source removes the wildcard entry
+                                          # type:*@source or type:perl-*@source installs a
+                                          # wildcard (type required); bundle:name@source a bundle
+skilletor uninstall <item>… [--project]   # a wildcard or bundle entry is removed as written
 skilletor sync | check | status           # --scope user|project|all, --json, --force
 skilletor trust <source>
 skilletor hook <event>                    # for hooks.json only
@@ -299,7 +310,9 @@ and the ways out: uninstall `type:*@source`, or gate the item through `vars` whe
 template can render empty (§5 skip). Otherwise the error says where else it is declared
 (another type's list, or the other scope's config → `--project`). An item that is
 removed but still covered by a wildcard in the same config is removed (exit 0) with a
-warning that the wildcard brings it back on the next sync.
+warning that the wildcard brings it back on the next sync. Bundles behave the same way:
+an item that only a bundle declares cannot be uninstalled by name; the error names the
+bundle (§15).
 
 `status` shows a declared item that rendered empty at the last sync as skipped
 (`skipped: "renders-empty"` in `--json`, `installed: false`), distinct from an item that
@@ -635,3 +648,94 @@ Applies when working with files matching: `k8s/**`, `*.yaml`.
   `$CODEX_HOME/config.toml` when set there), truncating from the end – where a new block
   sits – so skilletor warns when the project `AGENTS.md` exceeds it. The global file was not
   truncated at 40 000 bytes, so the user scope has no size warning.
+
+## 15. Bundles
+
+A source can name a set of its own items so that a project declares one entry instead of
+repeating the same list everywhere.
+
+### 15.1 Format
+
+One file per bundle, `bundles/<name>.yaml` (or `.yml`; both for the same name is an error
+for that bundle). Parsed with skilletor's YAML-subset reader (`src/frontmatter.ts`:
+mappings, block and flow sequences, plain and quoted scalars; no anchors or aliases).
+
+```yaml
+description: Everything for Perl projects
+skills: [perl-*, testing]
+agents: [perl-reviewer]
+rules: [something, perl-*]
+bundles: [base]
+vars:
+  perl_version: "5.40"
+  kubernetes: false
+```
+
+| Key | Meaning |
+|---|---|
+| `description` | Shown by `skilletor available` (required) |
+| `skills`, `agents`, `rules` | Item names or patterns (`*` as in §3) of that type, **from this source only** |
+| `bundles` | Other bundles of this source, included recursively |
+| `vars` | Var defaults for the items this bundle yields |
+
+Every key but `description` is optional. An entry containing `@` is an error: bundles
+never reach into another source, so they add no trust question.
+
+### 15.2 Expansion
+
+At sync time, per scope and after the source resolves (§6.1 step 3), each declared bundle
+is expanded against the source's catalog: explicit names and patterns per type, then the
+included bundles, depth first. The result is a set of `(type, name)` items, each carrying
+the bundle chain it came through. Expansion runs on every sync, so a bundle edited
+upstream takes effect on the next sync like any wildcard.
+
+- An item reached through several bundles of the same source is installed once.
+- The items a bundle yields join the overlap rules of §3 exactly like wildcard-yielded
+  items: an explicit entry wins (silently for the same source, with a warning for a
+  different one); the same name from two different sources is skipped with a warning and
+  an installed copy stays.
+- A pattern that matches nothing and a name that the catalog lacks each give one warning.
+- Empty-render skip (§5), targets and per-harness output (§14) apply unchanged.
+
+### 15.3 Vars
+
+Merge order for an item a bundle yields:
+
+`source defaults < bundle vars < user < project < local`
+
+- Bundle vars apply only to the items that bundle yields; they never change another item.
+- Nested bundles: along one chain the outer bundle wins over the included one (`perl`
+  including `base` → `perl`'s value).
+- Conflict: if one item is reached through two chains whose bundle vars set the same key to
+  different values, neither applies for that key – the item gets the next level down
+  (source default, if any) – and the report warns once, naming both bundles.
+- Explicitly declared items do not receive bundle vars, even when a bundle also yields them.
+
+### 15.4 Errors
+
+These affect only the bundle concerned; other entries sync normally, and items the bundle
+installed before stay installed (kept like an unresolvable source's items, §6.1):
+
+- the bundle does not exist in the source's catalog;
+- the file does not parse, carries an unknown key, lacks `description`, or has both
+  `.yaml` and `.yml`;
+- an entry contains `@`;
+- a cycle in `bundles` (`a` → `b` → `a`); the warning names the cycle.
+
+An unresolvable or untrusted source keeps what its bundles installed, as for wildcards.
+
+### 15.5 CLI and status
+
+- `skilletor install bundle:perl@shared [--project]` adds `perl@shared` to
+  `install.bundles`. Without a prefix, `perl@shared` resolves to the bundle when no item
+  of another type has that name; otherwise it is ambiguous and the error suggests
+  `bundle:`. `uninstall bundle:perl@shared` removes the entry.
+- `uninstall` of an item that only a bundle declares fails like the wildcard case (§7),
+  naming the bundle and the ways out (uninstall the bundle, or gate the item through
+  `vars`).
+- `available` lists bundles (type `bundle`) with description and their expanded members;
+  `--json` includes the members and the bundle's vars.
+- `status` marks items `via bundle:perl@shared` (`via` in `--json`) and prints one line per
+  bundle with the number of items it currently has installed, like wildcards.
+- The lock records items only; a bundle itself has no lock entry. `check` treats a changed
+  source as today, so an edited bundle file triggers a sync like any other upstream change.
