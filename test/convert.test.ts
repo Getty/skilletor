@@ -123,7 +123,7 @@ test("a codex: table cannot collide with a derived key (no duplicate TOML keys)"
   assert.match(r.warnings[0] ?? "", /^codex\.description: a table cannot replace/);
 });
 
-// ---- rules -> a section of the AGENTS.md block (spec §14.8) ----------------------
+// ---- rules -> a section of the Codex rules file (spec §14.8) ----------------------
 
 test("a rule becomes its body, frontmatter removed; paths become a leading line", () => {
   assert.equal(codexRuleSection("---\ndescription: x\n---\n\nUse tabs.\n\n", "r"), "Use tabs.\n");
@@ -141,14 +141,16 @@ test("a blank rule body is not applicable for Codex", () => {
 });
 
 test("a rule body containing a skilletor marker line is refused", () => {
-  assert.throws(() => codexRuleSection("text\n<!-- skilletor:end -->\n", "r"), (err: Error) => err instanceof ConvertError && /marker/.test(err.message));
+  for (const line of ["<!-- skilletor:end -->", "<!-- skilletor:rule x source=y -->", "<!-- skilletor:rules scope=user -->"]) {
+    assert.throws(() => codexRuleSection(`text\n${line}\n`, "r"), (err: Error) => err instanceof ConvertError && /marker/.test(err.message), line);
+  }
 });
 
-test("convertForTarget: a Codex rule maps to one AGENTS.md section; Claude rules pass through", () => {
+test("convertForTarget: a Codex rule maps to one section of the rules file; Claude rules pass through", () => {
   const out = new Map([["rules/r.md", Buffer.from("---\npaths: [a]\n---\nR\n")]]);
   const codex = convertForTarget("codex", "rule", "r", out);
-  assert.deepEqual([...codex.output.keys()], ["AGENTS.md"]);
-  assert.equal(codex.output.get("AGENTS.md")!.toString(), "Applies when working with files matching: `a`.\n\nR\n");
+  assert.deepEqual([...codex.output.keys()], ["skilletor-rules.md"]);
+  assert.equal(codex.output.get("skilletor-rules.md")!.toString(), "Applies when working with files matching: `a`.\n\nR\n");
   assert.equal(convertForTarget("claude", "rule", "r", out).output, out);
   assert.equal(convertForTarget("codex", "rule", "r", new Map([["rules/r.md", Buffer.from("\n")]])).skipped, true);
 });

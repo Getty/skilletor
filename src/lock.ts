@@ -17,8 +17,9 @@ export interface LockEntry {
   files: Record<string, string>;
   /** Declared but not applicable in this scope: owns no files (spec §5, §6.2). */
   skipped?: SkipReason;
-  /** A section of a shared file's managed block (Codex rules in AGENTS.md, spec §14.8):
-   *  `files` maps that file to the section's hash; the engine, not apply, writes it. */
+  /** A section of a file assembled from several items (Codex rules in skilletor-rules.md,
+   *  spec §14.8): `files` maps that file to the section's hash; the engine, not apply,
+   *  writes it. */
   block?: boolean;
   /** The bundle entries (`bundle:perl@shared`) that declared the item, when bundles did
    *  (spec §15.5): lets `status` name them offline, and keeps the item while a bundle

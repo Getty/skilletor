@@ -3,7 +3,7 @@
 //
 // Detection looks only at markers the harness itself creates (never at
 // `~/.claude/` alone: skilletor's own config lives there). The layout table is
-// the seam later phases extend (Codex agents as TOML, rules in AGENTS.md).
+// the seam later phases extend (Codex agents as TOML, rules in a rules file).
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { HARNESSES, type Harness, type ItemType } from "./config.ts";
@@ -29,8 +29,8 @@ export interface TargetLayout {
   /** Per supported item type: the root directory for a scope. Lock file paths are
    *  relative to it. A type missing here is not written for this harness. */
   roots: Partial<Record<ItemType, (r: RootContext) => string>>;
-  /** Types whose items are sections of one managed block in `<root>/AGENTS.md`
-   *  rather than files of their own (spec §14.8). */
+  /** Types whose items are sections of one skilletor-owned file,
+   *  `<root>/skilletor-rules.md`, rather than files of their own (spec §14.8). */
   blockTypes?: readonly ItemType[];
 }
 
@@ -40,14 +40,14 @@ const codexHomeDir = (r: RootContext) => r.codexHome || join(r.base, ".codex");
 export const LAYOUTS: Record<Harness, TargetLayout> = {
   claude: { harness: "claude", keyPrefix: "", roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") } },
   // Skills (phase 1), agents as TOML (phase 2, convert.ts), rules as sections of
-  // the managed AGENTS.md block (phase 3, agentsmd.ts).
+  // the rules file next to the agents (phase 3, agentsmd.ts).
   codex: {
     harness: "codex",
     keyPrefix: "codex:",
     roots: {
       skill: under(".agents"),
       agent: (r) => (r.scope === "user" ? codexHomeDir(r) : join(r.base, ".codex")),
-      rule: (r) => (r.scope === "user" ? codexHomeDir(r) : r.base),
+      rule: (r) => (r.scope === "user" ? codexHomeDir(r) : join(r.base, ".codex")),
     },
     blockTypes: ["rule"],
   },
@@ -152,14 +152,12 @@ export function isBlockType(harness: Harness, type: ItemType): boolean {
   return LAYOUTS[harness].blockTypes?.includes(type) ?? false;
 }
 
-/** Every distinct root of per-file items in a scope (for per-root gitignore blocks);
- *  block roots (a shared AGENTS.md) are not gitignored. */
+/** Every distinct root of a scope (for per-root gitignore blocks), the root of
+ *  the Codex rules file included. */
 export function allRoots(r: RootContext): string[] {
   const roots = new Set<string>();
   for (const h of HARNESSES) {
-    for (const [type, f] of Object.entries(LAYOUTS[h].roots)) {
-      if (f && !isBlockType(h, type as ItemType)) roots.add(f(r));
-    }
+    for (const f of Object.values(LAYOUTS[h].roots)) if (f) roots.add(f(r));
   }
   return [...roots];
 }

@@ -8,10 +8,13 @@
 //
 // The same hooks serve Codex (spec §14.5). Codex sets no CLAUDE_PROJECT_DIR, so
 // without a project dir the git top level of the input's cwd (else cwd) is used.
+// With `--harness codex` (the Codex plugin's hooks file) SessionStart also injects
+// the Codex rules files after its report (spec §14.8).
 import { execFileSync, spawn } from "node:child_process";
-import { loadConfig } from "./config.ts";
+import { readFileSync } from "node:fs";
+import { loadConfig, type Harness } from "./config.ts";
 import { State } from "./state.ts";
-import { check, projectDirOf, sync, type EngineContext } from "./engine.ts";
+import { check, codexRulesFiles, projectDirOf, sync, type EngineContext } from "./engine.ts";
 import { reportHook, type SyncReport } from "./report.ts";
 
 export interface HookInput {
@@ -31,6 +34,8 @@ export interface HookContext extends EngineContext {
   background?: (ctx: HookContext) => void;
   /** Absolute path to the bundled CLI, for the default background spawn. */
   binPath?: string;
+  /** The harness whose hooks file ran the hook (`--harness`); unset = Claude Code. */
+  harness?: Harness;
 }
 
 const SESSION_START_TIMEOUT_MS = 5_000;
@@ -90,6 +95,42 @@ export async function runHook(event: string, input: HookInput, hookCtx: HookCont
 }
 
 async function sessionStart(input: HookInput, ctx: HookContext): Promise<HookOutput> {
+  let out: HookOutput;
+  try {
+    out = await checkAndSync(input, ctx);
+  } catch (err) {
+    out = warn((err as Error).message);
+  }
+  // A resumed session still has the first copy in its history (spec §14.8).
+  const source = input.source;
+  if (ctx.harness === "codex" && (source === undefined || source === null || source === "startup" || source === "clear")) {
+    out = withCodexRules(out, ctx);
+  }
+  return out;
+}
+
+/** Append the Codex rules files, read from disk, to the output's additionalContext. */
+function withCodexRules(out: HookOutput, ctx: HookContext): HookOutput {
+  const texts: string[] = [];
+  const problems: string[] = [];
+  for (const file of codexRulesFiles(ctx)) {
+    try {
+      texts.push(readFileSync(file, "utf8"));
+    } catch (err) {
+      problems.push(`cannot read ${file} (${(err as Error).message})`);
+    }
+  }
+  const result: HookOutput = { ...out };
+  if (problems.length) result.systemMessage = [out.systemMessage, `skilletor: ${problems.join("; ")}`].filter(Boolean).join("; ");
+  if (texts.length) {
+    const rules = texts.join("\n");
+    const before = out.hookSpecificOutput?.additionalContext;
+    result.hookSpecificOutput = { hookEventName: "SessionStart", additionalContext: before ? `${before}\n\n${rules}` : rules };
+  }
+  return result;
+}
+
+async function checkAndSync(input: HookInput, ctx: HookContext): Promise<HookOutput> {
   const engineCtx: HookContext = { ...ctx, timeoutMs: ctx.timeoutMs ?? SESSION_START_TIMEOUT_MS };
   const state = new State(ctx.stateRoot);
   const key = projectKeyOf(ctx, input);

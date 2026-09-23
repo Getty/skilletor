@@ -5746,7 +5746,7 @@ import { join as join15 } from "node:path";
 // src/engine.ts
 import { execFileSync } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
-import { existsSync as existsSync10, rmSync as rmSync6 } from "node:fs";
+import { existsSync as existsSync10, readFileSync as readFileSync9, rmSync as rmSync6 } from "node:fs";
 import { basename as basename3, dirname as dirname4, isAbsolute, join as join13, relative as relative2 } from "node:path";
 
 // src/config.ts
@@ -6868,14 +6868,14 @@ var codexHomeDir = (r) => r.codexHome || join3(r.base, ".codex");
 var LAYOUTS = {
   claude: { harness: "claude", keyPrefix: "", roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") } },
   // Skills (phase 1), agents as TOML (phase 2, convert.ts), rules as sections of
-  // the managed AGENTS.md block (phase 3, agentsmd.ts).
+  // the rules file next to the agents (phase 3, agentsmd.ts).
   codex: {
     harness: "codex",
     keyPrefix: "codex:",
     roots: {
       skill: under(".agents"),
       agent: (r) => r.scope === "user" ? codexHomeDir(r) : join3(r.base, ".codex"),
-      rule: (r) => r.scope === "user" ? codexHomeDir(r) : r.base
+      rule: (r) => r.scope === "user" ? codexHomeDir(r) : join3(r.base, ".codex")
     },
     blockTypes: ["rule"]
   }
@@ -6943,9 +6943,7 @@ function isBlockType(harness, type) {
 function allRoots(r) {
   const roots = /* @__PURE__ */ new Set();
   for (const h of HARNESSES) {
-    for (const [type, f] of Object.entries(LAYOUTS[h].roots)) {
-      if (f && !isBlockType(h, type)) roots.add(f(r));
-    }
+    for (const f of Object.values(LAYOUTS[h].roots)) if (f) roots.add(f(r));
   }
   return [...roots];
 }
@@ -6966,13 +6964,54 @@ import { join as join4 } from "node:path";
 var BEGIN = "<!-- skilletor:begin -->";
 var END = "<!-- skilletor:end -->";
 var NOTE = "<!-- managed by skilletor \u2014 edits inside are overwritten -->";
+var RULES_FILE = "skilletor-rules.md";
+var RULES_MARKER = "<!-- skilletor:rules";
+var RULES_NOTE = "<!-- managed by skilletor \u2014 edits are overwritten; change the rule in its source -->";
 var RULE_RE = /^<!-- skilletor:rule (\S+) source=(.*) -->$/;
-var MARKER_LINE = /^<!-- skilletor:(begin|end|rule)\b/;
+var MARKER_LINE = /^<!-- skilletor:(begin|end|rules?)\b/;
 var BlockError = class extends Error {
   name = "BlockError";
 };
 function normalizeSection(text) {
   return text.replace(/^(?:[ \t]*\r?\n)+/, "").replace(/\s+$/, "") + "\n";
+}
+function parseSections(lines) {
+  const sections = /* @__PURE__ */ new Map();
+  let current;
+  const flush = () => {
+    if (current) sections.set(current.name, { source: current.source, text: normalizeSection(current.lines.join("\n")) });
+  };
+  for (const line of lines) {
+    const m = RULE_RE.exec(line.trim());
+    if (m) {
+      flush();
+      current = { name: m[1], source: m[2], lines: [] };
+    } else if (current) {
+      current.lines.push(line);
+    }
+  }
+  flush();
+  return sections;
+}
+function rulesFileText(scope, sections) {
+  if (sections.length === 0) return null;
+  const out = [`${RULES_MARKER} scope=${scope} -->`, RULES_NOTE, ""];
+  for (const s of sections) {
+    out.push(`<!-- skilletor:rule ${s.name} source=${s.source} -->`, ...s.text.replace(/\n$/, "").split("\n"), "");
+  }
+  return out.join("\n").replace(/\n+$/, "") + "\n";
+}
+function parseRulesFile(text) {
+  return parseSections(text.split("\n"));
+}
+function pointerLines(scope, file) {
+  return [
+    NOTE,
+    `Additional rules for ${scope === "user" ? "all projects" : "this project"} are managed by skilletor. They are normally provided at`,
+    `session start as a developer message beginning with \`${RULES_MARKER}\`. If that message`,
+    "is not in your context (for example after context compaction), read",
+    `\`${file}\` before you start a task, and follow it.`
+  ];
 }
 function parseBlock(text) {
   const lines = text.split("\n");
@@ -6991,33 +7030,10 @@ function parseBlock(text) {
   const begin = begins[0];
   const end = ends[0];
   if (end < begin) throw new BlockError(`"${END}" before "${BEGIN}"`);
-  const sections = /* @__PURE__ */ new Map();
-  let current;
-  const flush = () => {
-    if (current) sections.set(current.name, { source: current.source, text: normalizeSection(current.lines.join("\n")) });
-  };
-  for (const line of lines.slice(begin + 1, end)) {
-    const m = RULE_RE.exec(line.trim());
-    if (m) {
-      flush();
-      current = { name: m[1], source: m[2], lines: [] };
-    } else if (current) {
-      current.lines.push(line);
-    }
-  }
-  flush();
-  return { begin, end, sections };
+  return { begin, end, sections: parseSections(lines.slice(begin + 1, end)) };
 }
-function blockLines(sections) {
-  const out = [BEGIN, NOTE, ""];
-  for (const s of sections) {
-    out.push(`<!-- skilletor:rule ${s.name} source=${s.source} -->`, ...s.text.replace(/\n$/, "").split("\n"), "");
-  }
-  out.push(END);
-  return out;
-}
-function withBlock(text, sections) {
-  const block = sections.length ? blockLines(sections) : null;
+function withBlock(text, body) {
+  const block = body ? [BEGIN, ...body, END] : null;
   if (text === null) return block ? block.join("\n") + "\n" : null;
   const parsed = parseBlock(text);
   const lines = text.split("\n");
@@ -7057,19 +7073,46 @@ function inspectAgentsMd(path) {
     return { ok: false, reason: `malformed skilletor markers: ${err.message}` };
   }
 }
-function projectDocLimit(codexHome) {
-  let text;
+function readConfigToml(codexHome) {
   try {
-    text = readFileSync2(join4(codexHome, "config.toml"), "utf8");
+    return readFileSync2(join4(codexHome, "config.toml"), "utf8");
   } catch {
-    return 32768;
+    return void 0;
   }
+}
+function projectDocLimit(codexHome) {
+  const text = readConfigToml(codexHome);
+  if (text === void 0) return 32768;
   for (const line of text.split("\n")) {
     if (/^\s*\[/.test(line)) break;
     const m = /^\s*project_doc_max_bytes\s*=\s*(\d+)\s*(?:#.*)?$/.exec(line);
     if (m) return Number(m[1]);
   }
   return 32768;
+}
+var isSessionStartKey = (key) => key.startsWith("skilletor@") && key.includes(":session_start:");
+var QUOTED_KEY = /^\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')/;
+var TRUSTED_HASH = /^\s*trusted_hash\s*=\s*["']/;
+function codexHookTrusted(codexHome) {
+  const text = readConfigToml(codexHome);
+  if (text === void 0) return false;
+  let table = "other";
+  for (const line of text.split("\n")) {
+    const header = /^\s*\[\s*([^\[\]]*?)\s*\]\s*(?:#.*)?$/.exec(line);
+    if (header) {
+      const name = header[1];
+      const m = /^hooks\s*\.\s*state\s*\.\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')$/.exec(name);
+      if (m) table = isSessionStartKey(m[1] ?? m[2]) ? "hook" : "other";
+      else table = /^hooks\s*\.\s*state$/.test(name) ? "state" : "other";
+      continue;
+    }
+    if (table === "hook" && TRUSTED_HASH.test(line)) return true;
+    if (table === "state") {
+      const k = QUOTED_KEY.exec(line);
+      if (k && isSessionStartKey(k[1] ?? k[2]) && /\btrusted_hash\s*=\s*["']/.test(line.slice(k[0].length))) return true;
+    }
+  }
+  return false;
 }
 
 // src/toml.ts
@@ -7257,7 +7300,7 @@ function codexRuleSection(markdown, itemName2) {
   }
   if (fm.body.trim() === "") return void 0;
   if (fm.body.split("\n").some((l) => MARKER_LINE.test(l.trim()))) {
-    throw new ConvertError(`rule ${itemName2} contains a skilletor marker line; it would break the AGENTS.md block`);
+    throw new ConvertError(`rule ${itemName2} contains a skilletor marker line; it would break the rules file`);
   }
   const raw = fm.data.paths;
   const paths = (Array.isArray(raw) ? raw : raw === void 0 || raw === null ? [] : [raw]).map((p) => String(p));
@@ -7272,7 +7315,7 @@ function convertForTarget(harness, type, name, output, opts = {}) {
     if (md2 === void 0) throw new ConvertError(`rules/${name}.md missing from the build`);
     const section = codexRuleSection(md2.toString("utf8"), name);
     const out2 = /* @__PURE__ */ new Map();
-    if (section !== void 0) out2.set("AGENTS.md", Buffer.from(section, "utf8"));
+    if (section !== void 0) out2.set(RULES_FILE, Buffer.from(section, "utf8"));
     return { output: out2, skipped: section === void 0, warnings: [], briefingDropped: false };
   }
   if (harness !== "codex" || type !== "agent") return { output, skipped: false, warnings: [], briefingDropped: false };
@@ -8162,6 +8205,7 @@ function reportText(r) {
     for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${t.url}) \u2014 run: skilletor trust ${t.name}`);
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
+  for (const w of r.warnings ?? []) lines.push(`skilletor: warning: ${w}`);
   for (const n of r.notes ?? []) lines.push(`skilletor: note: ${n}`);
   return lines.join("\n");
 }
@@ -8327,7 +8371,15 @@ async function syncInner(ctx, opts, state) {
   }
   const notes = runNotes(noteCounts);
   if (notes.length) report.notes = notes;
+  const trust = hookTrustWarning(ctx, targets);
+  if (trust) report.warnings = [trust];
   return report;
+}
+function hookTrustWarning(ctx, targets) {
+  if (!targets.user.includes("codex")) return void 0;
+  const codexHome = codexHomeOf(ctx) || join13(ctx.home, ".codex");
+  if (codexHookTrusted(codexHome)) return void 0;
+  return `Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${join13(codexHome, "config.toml")}); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules`;
 }
 function bump(counts, kind) {
   counts.set(kind, (counts.get(kind) ?? 0) + 1);
@@ -8579,79 +8631,19 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
     const rel = relative2(base, abs);
     return rel.startsWith("..") || isAbsolute(rel) ? abs : rel;
   };
-  const blockFile = join13(rootOf(rc, "codex", "rule"), "AGENTS.md");
-  const blockLabel = labelOf(blockFile);
-  const oldBlockKeys = Object.keys(oldLock).filter((k) => oldLock[k].block);
-  let blockState;
-  if (oldBlockKeys.length > 0 || plan.some((p) => p.inBlock)) {
-    blockState = inspectAgentsMd(blockFile);
-    const memory = harnesses.includes("claude") ? claudeMemoryFiles(ctx, scope).find((f) => sameFile(f, blockFile)) : void 0;
-    if (blockState.ok && memory) {
-      blockState = {
-        ok: false,
-        reason: `is the same file as ${labelOf(memory)} (Claude Code would read the rules twice)`
-      };
-    }
-    if (!blockState.ok) {
-      const why = blockState.reason;
-      rep.warnings.push(`${blockLabel}${why.startsWith("is ") ? " " : ": "}${why}; rules for Codex not written`);
-      for (let i = plan.length - 1; i >= 0; i--) if (plan[i].inBlock) plan.splice(i, 1);
-      keep.push(...oldBlockKeys);
-    }
-  }
   const result = apply(plan, {
     targetDir,
     force: opts.force,
     keep,
     rootOf: (key) => rootOfKey(rc, key) ?? targetDir
   });
-  const blockOverwritten = [];
-  if (blockState?.ok) {
-    const newLock = readLock(lockPath);
-    const existing = blockState.parsed?.sections ?? /* @__PURE__ */ new Map();
-    const planned = new Map(
-      plan.filter((p) => p.inBlock && !p.skipped).map((p) => [p.key, p.output.get("AGENTS.md").toString("utf8")])
-    );
-    const sections = [];
-    for (const [key, entry] of Object.entries(newLock)) {
-      if (!entry.block || entry.skipped) continue;
-      const name = parseLockKey(key).name;
-      const current = existing.get(name);
-      const text = planned.get(key) ?? current?.text;
-      if (text === void 0) continue;
-      const prev = oldLock[key];
-      if (prev?.block && !prev.skipped && (!current || hashBuffer(Buffer.from(current.text, "utf8")) !== prev.files["AGENTS.md"])) {
-        blockOverwritten.push(`${blockLabel}#rules/${name}`);
-      }
-      sections.push({ name, source: entry.source, text });
-    }
-    sections.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-    const next = withBlock(blockState.text, sections);
-    if (next !== blockState.text) {
-      if (next === null) rmSync6(blockFile, { force: true });
-      else atomicWrite(blockFile, next);
-    }
-    if (sections.length > 0) {
-      if (existsSync10(join13(dirname4(blockFile), "AGENTS.override.md"))) {
-        rep.warnings.push(
-          `${labelOf(join13(dirname4(blockFile), "AGENTS.override.md"))} exists; Codex reads it instead of AGENTS.md, so the skilletor rules there are not seen`
-        );
-      }
-      if (scope === "project" && next !== null) {
-        const limit = projectDocLimit(codexHomeOf(ctx) || join13(ctx.home, ".codex"));
-        const bytes = Buffer.byteLength(next, "utf8");
-        if (bytes > limit) {
-          rep.warnings.push(
-            `${blockLabel} is ${bytes} bytes; Codex reads at most ${limit} bytes of project instructions (project_doc_max_bytes), so the end of the skilletor block may be cut off`
-          );
-        }
-      }
-    }
-  }
+  const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) || existsSync10(join13(rootOf(rc, "codex", "rule"), RULES_FILE)) ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings }) : { overwritten: [], exists: false };
   if (scope === "project") {
     const newLock = readLock(lockPath);
+    const rulesRoot = rootOf(rc, "codex", "rule");
     for (const rootDir of allRoots(rc)) {
       const managed = Object.entries(newLock).filter(([key, e]) => !e.block && rootOfKey(rc, key) === rootDir).flatMap(([, e]) => Object.keys(e.files));
+      if (rules.exists && rootDir === rulesRoot) managed.push(RULES_FILE);
       const isClaude = rootDir === targetDir;
       updateGitignore({
         dir: rootDir,
@@ -8672,8 +8664,105 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
     return { path: root === targetDir ? c.path : labelOf(join13(root, c.path)) };
   };
   rep.conflicts = result.conflicts.map(shown);
-  rep.overwritten = [...result.overwritten.map(shown), ...blockOverwritten.map((path) => ({ path }))];
+  rep.overwritten = [...result.overwritten.map(shown), ...rules.overwritten.map((path) => ({ path }))];
   return rep;
+}
+function syncCodexRules(a) {
+  const { ctx, scope, rc, oldLock, labelOf, warnings } = a;
+  const rulesFile = join13(rootOf(rc, "codex", "rule"), RULES_FILE);
+  const rulesLabel = labelOf(rulesFile);
+  const agentsFile = join13(scope === "user" ? rootOf(rc, "codex", "rule") : rc.base, "AGENTS.md");
+  const agentsLabel = labelOf(agentsFile);
+  const LEGACY = "AGENTS.md";
+  let fileText = null;
+  try {
+    fileText = readFileSync9(rulesFile, "utf8");
+  } catch {
+  }
+  const current = fileText === null ? /* @__PURE__ */ new Map() : parseRulesFile(fileText);
+  const agents = inspectAgentsMd(agentsFile);
+  const legacy = agents.ok ? agents.parsed?.sections : void 0;
+  const planned = new Map(
+    a.plan.filter((p) => p.inBlock && !p.skipped).map((p) => [p.key, p.output.get(RULES_FILE).toString("utf8")])
+  );
+  const newLock = readLock(a.lockPath);
+  let lockMigrated = false;
+  const sections = [];
+  const overwritten = [];
+  for (const [key, entry] of Object.entries(newLock)) {
+    if (!entry.block || entry.skipped) continue;
+    const name = parseLockKey(key).name;
+    const prevHash = oldLock[key]?.skipped ? void 0 : oldLock[key]?.files[RULES_FILE];
+    const onDisk = current.get(name) ?? (oldLock[key]?.files[LEGACY] !== void 0 ? legacy?.get(name) : void 0);
+    if (entry.files[LEGACY] !== void 0 && entry.files[RULES_FILE] === void 0) {
+      entry.files = { [RULES_FILE]: entry.files[LEGACY] };
+      lockMigrated = true;
+    }
+    const text = planned.get(key) ?? onDisk?.text;
+    if (text === void 0) continue;
+    if (prevHash !== void 0 && (!onDisk || hashBuffer(Buffer.from(onDisk.text, "utf8")) !== prevHash)) {
+      overwritten.push(`${rulesLabel}#rules/${name}`);
+    }
+    sections.push({ name, source: entry.source, text });
+  }
+  if (lockMigrated) writeLock(a.lockPath, newLock);
+  sections.sort((x, y) => x.name < y.name ? -1 : x.name > y.name ? 1 : 0);
+  const next = rulesFileText(scope, sections);
+  let exists = fileText !== null;
+  try {
+    if (next !== fileText) {
+      if (next === null) rmSync6(rulesFile, { force: true });
+      else atomicWrite(rulesFile, next);
+    }
+    exists = next !== null;
+  } catch (err) {
+    warnings.push(`${rulesLabel}: cannot write the Codex rules file (${err.message})`);
+  }
+  const want = exists;
+  let state = agents;
+  const memory = want && a.harnesses.includes("claude") ? claudeMemoryFiles(ctx, scope).find((f) => sameFile(f, agentsFile)) : void 0;
+  if (state.ok && memory) state = { ok: false, reason: `is the same file as ${labelOf(memory)} (Claude Code would read it)` };
+  if (!state.ok) {
+    const why = state.reason;
+    if (want || state.reason.startsWith("malformed")) {
+      warnings.push(`${agentsLabel}${why.startsWith("is ") ? " " : ": "}${why}; pointer to the Codex rules not written`);
+    }
+    return { overwritten, exists };
+  }
+  const shownRules = scope === "user" ? rulesFile : `.codex/${RULES_FILE}`;
+  const agentsNext = withBlock(state.text, want ? pointerLines(scope, shownRules) : null);
+  if (agentsNext !== state.text) {
+    if (agentsNext === null) rmSync6(agentsFile, { force: true });
+    else atomicWrite(agentsFile, agentsNext);
+  }
+  if (want) {
+    const override = join13(dirname4(agentsFile), "AGENTS.override.md");
+    if (existsSync10(override)) {
+      warnings.push(`${labelOf(override)} exists; Codex reads it instead of AGENTS.md, so the pointer to the skilletor rules is not seen`);
+    }
+    if (scope === "project" && agentsNext !== null) {
+      const limit = projectDocLimit(codexHomeOf(ctx) || join13(ctx.home, ".codex"));
+      const bytes = Buffer.byteLength(agentsNext, "utf8");
+      if (bytes > limit) {
+        warnings.push(
+          `${agentsLabel} is ${bytes} bytes; Codex reads at most ${limit} bytes of project instructions (project_doc_max_bytes), so the pointer to the rules at its end may be cut off`
+        );
+      }
+    }
+  }
+  return { overwritten, exists };
+}
+function codexRulesFiles(given) {
+  const ctx = scoped(given);
+  const loaded = loadWithTargets(ctx);
+  const out = [];
+  const scopes = ctx.projectDir ? ["user", "project"] : ["user"];
+  for (const scope of scopes) {
+    if (!("error" in loaded) && !loaded.targets[scope].includes("codex")) continue;
+    const file = join13(rootOf({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }, "codex", "rule"), RULES_FILE);
+    if (existsSync10(file)) out.push(file);
+  }
+  return out;
 }
 async function check(given, opts = {}) {
   const ctx = scoped(given);
@@ -8788,6 +8877,8 @@ function status(given, opts = {}) {
       sourceVersions
     });
   }
+  const trust = hookTrustWarning(ctx, targets);
+  if (trust) out.warnings = [trust];
   return out;
 }
 
@@ -9207,6 +9298,7 @@ function installedSet(ctx, config) {
 
 // src/hooks.ts
 import { execFileSync as execFileSync3, spawn } from "node:child_process";
+import { readFileSync as readFileSync10 } from "node:fs";
 var SESSION_START_TIMEOUT_MS = 5e3;
 var DEFAULT_INTERVAL = 600;
 function projectKeyOf(ctx, input) {
@@ -9254,6 +9346,40 @@ async function runHook(event, input, hookCtx) {
   }
 }
 async function sessionStart(input, ctx) {
+  let out;
+  try {
+    out = await checkAndSync(input, ctx);
+  } catch (err) {
+    out = warn(err.message);
+  }
+  const source = input.source;
+  if (ctx.harness === "codex" && (source === void 0 || source === null || source === "startup" || source === "clear")) {
+    out = withCodexRules(out, ctx);
+  }
+  return out;
+}
+function withCodexRules(out, ctx) {
+  const texts = [];
+  const problems = [];
+  for (const file of codexRulesFiles(ctx)) {
+    try {
+      texts.push(readFileSync10(file, "utf8"));
+    } catch (err) {
+      problems.push(`cannot read ${file} (${err.message})`);
+    }
+  }
+  const result = { ...out };
+  if (problems.length) result.systemMessage = [out.systemMessage, `skilletor: ${problems.join("; ")}`].filter(Boolean).join("; ");
+  if (texts.length) {
+    const rules = texts.join("\n");
+    const before = out.hookSpecificOutput?.additionalContext;
+    result.hookSpecificOutput = { hookEventName: "SessionStart", additionalContext: before ? `${before}
+
+${rules}` : rules };
+  }
+  return result;
+}
+async function checkAndSync(input, ctx) {
   const engineCtx = { ...ctx, timeoutMs: ctx.timeoutMs ?? SESSION_START_TIMEOUT_MS };
   const state = new State(ctx.stateRoot);
   const key = projectKeyOf(ctx, input);
@@ -9398,6 +9524,7 @@ function statusText(report) {
     for (const t of s.trustRequests) lines.push(`  trust: ${t.name} (${t.url})`);
   }
   if (report.projectIsHome) lines.push("project scope: none (the project directory is the home directory)");
+  for (const w of report.warnings ?? []) lines.push(`warning: ${w}`);
   return lines.join("\n");
 }
 async function run(argv) {
@@ -9528,7 +9655,7 @@ async function run(argv) {
         return 0;
       }
       case "hook":
-        return runHookCommand(flags.rest[0]);
+        return runHookCommand(flags.rest);
       default:
         process.stderr.write(`skilletor: unknown command: ${cmd}
 `);
@@ -9553,7 +9680,10 @@ function readStdin() {
     process.stdin.on("error", () => resolve2(data));
   });
 }
-async function runHookCommand(event) {
+async function runHookCommand(args) {
+  const event = args[0];
+  const at = args.indexOf("--harness");
+  const harness = at === -1 ? args.find((x) => x.startsWith("--harness="))?.slice(10) : args[at + 1];
   if (!event) return 0;
   let input = {};
   try {
@@ -9569,6 +9699,7 @@ async function runHookCommand(event) {
     stateRoot: join15(home, ".claude", "skilletor"),
     binPath: fileURLToPath(import.meta.url)
   };
+  if (harness === "codex") ctx.harness = "codex";
   try {
     const out = await runHook(event, input, ctx);
     if (out.systemMessage || out.hookSpecificOutput) {

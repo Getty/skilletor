@@ -37,3 +37,23 @@ test("hook commands go through the plugin root the harness sets (Codex sets CLAU
     for (const g of groups) for (const h of g.hooks) assert.match(h.command, /^\$\{CLAUDE_PLUGIN_ROOT\}\/bin\/skilletor hook /);
   }
 });
+
+// k50 (spec §14.5, §14.8): the Codex plugin has its own hooks file, the Claude one is untouched.
+test("codex-hooks.json = hooks.json with --harness codex, matcher startup|resume|clear, no context limit", () => {
+  assert.equal(codex.hooks, "./hooks/codex-hooks.json");
+  assert.equal(claude.hooks ?? "./hooks/hooks.json", "./hooks/hooks.json");
+  type Groups = Record<string, { matcher?: string; hooks: Record<string, unknown>[] }[]>;
+  const forClaude = json("hooks/hooks.json").hooks as Groups;
+  const forCodex = json("hooks/codex-hooks.json").hooks as Groups;
+  assert.equal(forClaude.SessionStart![0]!.matcher, "startup|resume");
+  assert.equal(JSON.stringify(forClaude).includes("additionalContextLimit"), false);
+  assert.equal(JSON.stringify(forClaude).includes("--harness"), false);
+  // Derive the expected Codex file from the Claude one.
+  const expected = JSON.parse(JSON.stringify(forClaude)) as Groups;
+  for (const groups of Object.values(expected)) {
+    for (const g of groups) for (const h of g.hooks) h.command = `${h.command as string} --harness codex`;
+  }
+  expected.SessionStart![0]!.matcher = "startup|resume|clear";
+  expected.SessionStart![0]!.hooks[0]!.additionalContextLimit = 0;
+  assert.deepEqual(forCodex, expected);
+});

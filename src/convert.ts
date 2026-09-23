@@ -4,7 +4,7 @@
 import type { Harness, ItemType } from "./config.ts";
 import { FrontmatterError, splitFrontmatter, YamlFloat, type YamlValue } from "./frontmatter.ts";
 import { stringifyToml, TomlFloat, type TomlTable, type TomlValue } from "./toml.ts";
-import { MARKER_LINE, normalizeSection } from "./agentsmd.ts";
+import { MARKER_LINE, normalizeSection, RULES_FILE } from "./agentsmd.ts";
 
 export class ConvertError extends Error {
   override name = "ConvertError";
@@ -132,10 +132,10 @@ export function codexAgentToml(markdown: string, itemName: string, opts: Convert
   return { toml: stringifyToml(table, { multiline: ["developer_instructions"] }), warnings, briefingDropped };
 }
 
-// ---- rules -> AGENTS.md sections (spec §14.8) ------------------------------------
+// ---- rules -> sections of the Codex rules file (spec §14.8) ----------------------
 
 /**
- * A rule's section in the managed AGENTS.md block: the body without frontmatter,
+ * A rule's section in the Codex rules file: the body without frontmatter,
  * led by an "Applies when …" line for a `paths:` frontmatter (Codex cannot load
  * conditionally). Undefined when the body is blank. Throws a ConvertError for
  * unreadable frontmatter or a body that contains a skilletor marker line.
@@ -150,7 +150,7 @@ export function codexRuleSection(markdown: string, itemName: string): string | u
   }
   if (fm.body.trim() === "") return undefined;
   if (fm.body.split("\n").some((l) => MARKER_LINE.test(l.trim()))) {
-    throw new ConvertError(`rule ${itemName} contains a skilletor marker line; it would break the AGENTS.md block`);
+    throw new ConvertError(`rule ${itemName} contains a skilletor marker line; it would break the rules file`);
   }
   const raw = fm.data.paths;
   const paths = (Array.isArray(raw) ? raw : raw === undefined || raw === null ? [] : [raw]).map((p) => String(p));
@@ -172,8 +172,8 @@ export interface TargetConversion {
 /**
  * Map an item's rendered output to what a harness installs. Claude, and Codex
  * skills, take it as it is; a Codex agent becomes `agents/<name>.toml`; a Codex
- * rule becomes its section text under the key `AGENTS.md` (the engine assembles
- * the block). Throws a ConvertError when the item cannot be converted.
+ * rule becomes its section text under the key `skilletor-rules.md` (the engine
+ * assembles the file). Throws a ConvertError when the item cannot be converted.
  */
 export function convertForTarget(
   harness: Harness, type: ItemType, name: string, output: Map<string, Buffer>, opts: ConvertOptions = {},
@@ -183,7 +183,7 @@ export function convertForTarget(
     if (md === undefined) throw new ConvertError(`rules/${name}.md missing from the build`);
     const section = codexRuleSection(md.toString("utf8"), name);
     const out = new Map<string, Buffer>();
-    if (section !== undefined) out.set("AGENTS.md", Buffer.from(section, "utf8"));
+    if (section !== undefined) out.set(RULES_FILE, Buffer.from(section, "utf8"));
     return { output: out, skipped: section === undefined, warnings: [], briefingDropped: false };
   }
   if (harness !== "codex" || type !== "agent") return { output, skipped: false, warnings: [], briefingDropped: false };

@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
@@ -253,6 +253,97 @@ test("session-start with a broken bundle and a good one: installs the good one, 
     assert.match(out.systemMessage ?? "", /1 item\(s\) updated, 1 warning/);
     assert.match(out.hookSpecificOutput?.additionalContext ?? "", /bundle:bad@mine: bundle cycle bad → bad/);
     assert.equal(existsSync(join(e.home, ".claude/skills/foo/SKILL.md")), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// ---- k50: Codex rules through SessionStart (spec §14.8) ------------------------------
+
+/** A Codex-only hook env with one user rule and one project rule synced once. */
+async function codexRules(e: ReturnType<typeof env>) {
+  const src = join(e.tmp.dir, "rsrc");
+  mkdirSync(join(src, "rules"), { recursive: true });
+  writeFileSync(join(src, "rules", "urule.md"), "User rule.\n");
+  writeFileSync(join(src, "rules", "prule.md"), "Project rule.\n");
+  e.writeUserCfg({ sources: { mine: { local: resolvePath(src) } }, install: { rules: ["urule@mine"] } });
+  writeFileSync(join(e.projectDir, ".claude", "skilletor.json"), JSON.stringify({ install: { rules: ["prule@mine"] } }));
+  const codexHome = join(e.home, ".codex");
+  const ctx: HookContext = { ...e.ctx, markers: { claude: [], codex: [e.home] }, codexHome, harness: "codex" };
+  const first = await runHook("session-start", { source: "startup" }, ctx);
+  const userFile = readFileSync(join(codexHome, "skilletor-rules.md"), "utf8");
+  const projectFile = readFileSync(join(e.projectDir, ".codex", "skilletor-rules.md"), "utf8");
+  return { ctx, first, userFile, projectFile, src };
+}
+
+test("k50: codex session-start appends the user, then the project rules file after the sync report", async () => {
+  const e = env();
+  try {
+    const { first, userFile, projectFile } = await codexRules(e);
+    assert.match(userFile, /^<!-- skilletor:rules scope=user -->\n[\s\S]*User rule\.\n$/);
+    assert.match(projectFile, /^<!-- skilletor:rules scope=project -->\n[\s\S]*Project rule\.\n$/);
+    const ctxText = first.hookSpecificOutput?.additionalContext ?? "";
+    assert.match(ctxText, /^skilletor synced items:/); // the sync report stays first
+    assert.ok(ctxText.endsWith(userFile + "\n" + projectFile), ctxText);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k50: nothing changed: startup, clear and a missing source get exactly the rules; resume gets none", async () => {
+  const e = env();
+  try {
+    const { ctx, userFile, projectFile } = await codexRules(e);
+    for (const source of ["startup", "clear", undefined]) {
+      const out = await runHook("session-start", source ? { source } : {}, ctx);
+      assert.deepEqual(out, {
+        hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: userFile + "\n" + projectFile },
+      }, String(source));
+    }
+    assert.deepEqual(await runHook("session-start", { source: "resume" }, ctx), {});
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k50: user-prompt-submit never appends rules; without --harness codex session-start does not either", async () => {
+  const e = env();
+  try {
+    const { ctx } = await codexRules(e);
+    assert.deepEqual(await runHook("user-prompt-submit", {}, ctx), {});
+    assert.deepEqual(await runHook("session-start", { source: "startup" }, { ...ctx, harness: undefined }), {});
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k50: a failed sync still delivers the last good rules, after the warning", async () => {
+  const e = env();
+  try {
+    const { ctx, userFile, projectFile } = await codexRules(e);
+    writeFileSync(join(e.home, ".claude", "skilletor.json"), "{ broken");
+    const out = await runHook("session-start", { source: "startup" }, ctx);
+    assert.match(out.systemMessage ?? "", /^skilletor: /);
+    assert.equal(out.hookSpecificOutput?.additionalContext, userFile + "\n" + projectFile);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k50: a scope Codex is not a target of contributes no rules, even with a stale file", async () => {
+  const e = env();
+  try {
+    const { ctx, userFile } = await codexRules(e);
+    writeFileSync(join(e.home, "marker-claude"), "");
+    const both: HookContext = { ...ctx, markers: { claude: [join(e.home, "marker-claude")], codex: [e.home] } };
+    writeFileSync(join(e.projectDir, ".claude", "skilletor.json"), JSON.stringify({ targets: ["claude"] }));
+    // Sync removes the project file; a stale copy written back afterwards is still ignored.
+    await runHook("session-start", { source: "startup" }, both);
+    assert.equal(existsSync(join(e.projectDir, ".codex", "skilletor-rules.md")), false);
+    mkdirSync(join(e.projectDir, ".codex"), { recursive: true });
+    writeFileSync(join(e.projectDir, ".codex", "skilletor-rules.md"), "stale\n");
+    const out = await runHook("session-start", { source: "startup" }, both);
+    assert.equal(out.hookSpecificOutput?.additionalContext, userFile);
   } finally {
     e.cleanup();
   }

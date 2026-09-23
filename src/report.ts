@@ -46,6 +46,9 @@ export interface SyncReport {
   /** Informational, once per run (e.g. items a target does not receive yet).
    *  Shown by `reportText`, never by the hooks. Absent when empty. */
   notes?: string[];
+  /** Once per run, not per scope (the untrusted Codex hook, spec §14.8). Shown by
+   *  `reportText`, never by the hooks (a hook that runs is trusted). Absent when empty. */
+  warnings?: string[];
   /** Config error: nothing was touched. */
   error?: string;
 }
@@ -101,6 +104,7 @@ export function reportText(r: SyncReport): string {
     for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${t.url}) — run: skilletor trust ${t.name}`);
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
+  for (const w of r.warnings ?? []) lines.push(`skilletor: warning: ${w}`);
   for (const n of r.notes ?? []) lines.push(`skilletor: note: ${n}`);
   return lines.join("\n");
 }

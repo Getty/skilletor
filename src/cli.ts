@@ -124,6 +124,7 @@ function statusText(report: ReturnType<typeof status>): string {
     for (const t of s.trustRequests) lines.push(`  trust: ${t.name} (${t.url})`);
   }
   if (report.projectIsHome) lines.push("project scope: none (the project directory is the home directory)");
+  for (const w of report.warnings ?? []) lines.push(`warning: ${w}`);
   return lines.join("\n");
 }
 
@@ -252,7 +253,7 @@ export async function run(argv: string[]): Promise<number> {
         return 0;
       }
       case "hook":
-        return runHookCommand(flags.rest[0]);
+        return runHookCommand(flags.rest);
       default:
         process.stderr.write(`skilletor: unknown command: ${cmd}\n`);
         return 2;
@@ -277,8 +278,13 @@ function readStdin(): Promise<string> {
   });
 }
 
-/** `skilletor hook <event>`: read stdin JSON, run the hook, print JSON, always exit 0. */
-async function runHookCommand(event: string | undefined): Promise<number> {
+/** `skilletor hook <event> [--harness codex]`: read stdin JSON, run the hook, print JSON,
+ *  always exit 0. `--harness` is internal (the Codex plugin's hooks file, spec §14.8);
+ *  any other value is Claude Code's behavior. */
+async function runHookCommand(args: string[]): Promise<number> {
+  const event = args[0];
+  const at = args.indexOf("--harness");
+  const harness = at === -1 ? args.find((x) => x.startsWith("--harness="))?.slice(10) : args[at + 1];
   if (!event) return 0; // nothing to do, never disturb the session
   let input: HookInput = {};
   try {
@@ -296,6 +302,7 @@ async function runHookCommand(event: string | undefined): Promise<number> {
     stateRoot: join(home, ".claude", "skilletor"),
     binPath: fileURLToPath(import.meta.url),
   };
+  if (harness === "codex") ctx.harness = "codex";
   try {
     const out = await runHook(event, input, ctx);
     if (out.systemMessage || out.hookSpecificOutput) {

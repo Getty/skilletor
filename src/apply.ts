@@ -23,9 +23,9 @@ export interface PlanItem {
   /** Not applicable in this scope: write nothing, remove an installed copy,
    *  keep a file-less lock entry carrying the reason. `output` is ignored. */
   skipped?: SkipReason;
-  /** A section of a shared file's managed block (spec §14.8): recorded in the lock
-   *  and reported by hash, never written or deleted here — the caller maintains
-   *  the block from the new lock. */
+  /** A section of a file assembled from several items (the Codex rules file, spec
+   *  §14.8): recorded in the lock and reported by hash, never written or deleted
+   *  here — the caller rebuilds the file from the new lock. */
   inBlock?: boolean;
   /** Recorded in the lock entry as is (the bundles that declared the item). */
   via?: string[];

@@ -240,11 +240,15 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
   delete env.SKILLETOR_PROJECT_DIR;
 
   const input = JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: join(repo, "sub"), session_id: "s1" });
-  const r = runCli(["hook", "session-start"], env, input);
+  const r = runCli(["hook", "session-start", "--harness", "codex"], env, input);
   assert.equal(r.status, 0, r.stderr);
   const out = JSON.parse(r.stdout);
   assert.equal(out.hookSpecificOutput.hookEventName, "SessionStart");
   assert.match(out.hookSpecificOutput.additionalContext, /skill bar@s \(codex\): active from the next Codex session/);
+  // --harness codex: the user rules file follows the report in the same context (spec §14.8).
+  const rules = readFileSync(join(codexHome, "skilletor-rules.md"), "utf8");
+  assert.match(rules, /^<!-- skilletor:rules scope=user -->\n[\s\S]*<!-- skilletor:rule style source=s -->\nUse tabs\.\n$/);
+  assert.ok(out.hookSpecificOutput.additionalContext.endsWith("\n" + rules));
   assert.equal(existsSync(join(realpathSync(repo), ".agents/skills/bar/SKILL.md")), true);
   assert.equal(existsSync(join(repo, ".claude/skills")), false); // Claude not in use here
   // The user agent became a Codex agent role under CODEX_HOME.
@@ -253,12 +257,20 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
     "name = \"helper\"\ndescription = \"helps\"\ndeveloper_instructions = '''\nYou help.\n'''\n",
   );
 
-  // The user rule became a section of the managed block in $CODEX_HOME/AGENTS.md.
-  assert.match(readFileSync(join(codexHome, "AGENTS.md"), "utf8"), /<!-- skilletor:rule style source=s -->\nUse tabs\.\n/);
+  // $CODEX_HOME/AGENTS.md only points to the rules file.
+  const agents = readFileSync(join(codexHome, "AGENTS.md"), "utf8");
+  assert.ok(agents.includes("`" + join(codexHome, "skilletor-rules.md") + "` before you start a task"), agents);
+  assert.doesNotMatch(agents, /Use tabs/);
+  // resume: synced, but no second copy of the rules.
+  const resume = runCli(["hook", "session-start", "--harness", "codex"], env, input.replace("startup", "resume"));
+  assert.equal(resume.status, 0, resume.stderr);
+  assert.equal(resume.stdout, "");
 
   const st = runCli(["status", "--project-dir", repo], env);
   assert.match(st.stdout, /^project scope \(codex\):$/m);
   assert.match(st.stdout, /✓ codex:skills\/bar @s/);
+  // The hook was never trusted in this CODEX_HOME: status says so once (spec §14.8).
+  assert.equal(st.stdout.match(/^warning: Codex has not trusted skilletor's SessionStart hook/gm)?.length, 1);
 });
 
 test("no harness on the machine: sync fails with the fix named, exit 2", () => {

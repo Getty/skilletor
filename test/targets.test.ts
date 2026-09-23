@@ -81,8 +81,8 @@ test("lock keys: claude unprefixed, codex prefixed; roots per harness and type",
   assert.equal(rootOfKey(u("/b"), "codex:agents/foo"), join("/b", ".codex")); // user: default Codex home
   assert.equal(rootOfKey({ ...u("/b"), codexHome: "/cx" }, "codex:agents/foo"), "/cx");
   assert.equal(rootOfKey({ base: "/p", scope: "project", codexHome: "/cx" }, "codex:agents/foo"), join("/p", ".codex"));
-  assert.equal(rootOfKey(u("/b"), "codex:rules/foo"), join("/b", ".codex")); // AGENTS.md block (phase 3)
-  assert.equal(rootOfKey({ base: "/p", scope: "project" }, "codex:rules/foo"), "/p"); // <repo>/AGENTS.md
+  assert.equal(rootOfKey(u("/b"), "codex:rules/foo"), join("/b", ".codex")); // $CODEX_HOME/skilletor-rules.md
+  assert.equal(rootOfKey({ base: "/p", scope: "project" }, "codex:rules/foo"), join("/p", ".codex")); // <repo>/.codex/skilletor-rules.md
   assert.equal(rootOfKey(u("/b"), "future:skills/foo"), undefined);
 });
 

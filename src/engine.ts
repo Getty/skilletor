@@ -5,7 +5,7 @@
 // as it was.
 import { execFileSync } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import {
   loadConfig, WILDCARD, type BundleItem, type Harness, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig,
@@ -18,7 +18,10 @@ import {
   defaultMarkers, detectHarnesses, lockKey, parseLockKey, rootOf, rootOfKey, selectTargets, supports, targetDrift,
   allRoots, isBlockType, type HarnessMarkers, type RootContext, type TargetSelection,
 } from "./targets.ts";
-import { inspectAgentsMd, projectDocLimit, withBlock, type Inspection, type Section } from "./agentsmd.ts";
+import {
+  codexHookTrusted, inspectAgentsMd, parseRulesFile, pointerLines, projectDocLimit, rulesFileText, RULES_FILE, withBlock,
+  type Inspection, type Section,
+} from "./agentsmd.ts";
 import { atomicWrite, hashBuffer, sameFile, samePath } from "./fsutil.ts";
 import { convertForTarget } from "./convert.ts";
 import { LocalSource } from "./sources/local.ts";
@@ -28,7 +31,7 @@ import type { Source } from "./sources/types.ts";
 import { scan, type Catalog } from "./catalog.ts";
 import { build, rendersEmpty, type RenderContext } from "./render.ts";
 import { apply, isValidItemName, type PlanItem } from "./apply.ts";
-import { readLock, type Lock, type SkipReason } from "./lock.ts";
+import { readLock, writeLock, type Lock, type SkipReason } from "./lock.ts";
 import { State } from "./state.ts";
 import { updateGitignore } from "./gitignore.ts";
 import {
@@ -252,7 +255,22 @@ async function syncInner(ctx: EngineContext, opts: SyncOptions, state: State): P
   }
   const notes = runNotes(noteCounts);
   if (notes.length) report.notes = notes;
+  const trust = hookTrustWarning(ctx, targets);
+  if (trust) report.warnings = [trust];
   return report;
+}
+
+/**
+ * Codex skips plugin hooks the user has not trusted, silently (spec §14.8): when Codex
+ * is a machine target and its config.toml has no trusted SessionStart hook for
+ * skilletor, one warning for the run.
+ */
+function hookTrustWarning(ctx: EngineContext, targets: TargetSelection): string | undefined {
+  if (!targets.user.includes("codex")) return undefined;
+  const codexHome = codexHomeOf(ctx) || join(ctx.home, ".codex");
+  if (codexHookTrusted(codexHome)) return undefined;
+  return `Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${join(codexHome, "config.toml")}); ` +
+    "until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules";
 }
 
 /** Count one occurrence of a note kind ("briefing <harness>"). */
@@ -564,93 +582,27 @@ async function syncScope(
     return rel.startsWith("..") || isAbsolute(rel) ? abs : rel;
   };
 
-  // Codex rules are sections of one managed block in a shared AGENTS.md (spec
-  // §14.8). Check the file first: a refusal writes nothing for them and keeps
-  // every block entry as it is (--force does not override this).
-  const blockFile = join(rootOf(rc, "codex", "rule")!, "AGENTS.md");
-  const blockLabel = labelOf(blockFile);
-  const oldBlockKeys = Object.keys(oldLock).filter((k) => oldLock[k]!.block);
-  let blockState: Inspection | undefined;
-  if (oldBlockKeys.length > 0 || plan.some((p) => p.inBlock)) {
-    blockState = inspectAgentsMd(blockFile);
-    // Claude Code reads CLAUDE.md: when that is this AGENTS.md, it would see every
-    // rule twice (block + its own rules dir), so the block is refused like a symlink.
-    const memory = harnesses.includes("claude") ? claudeMemoryFiles(ctx, scope).find((f) => sameFile(f, blockFile)) : undefined;
-    if (blockState.ok && memory) {
-      blockState = {
-        ok: false,
-        reason: `is the same file as ${labelOf(memory)} (Claude Code would read the rules twice)`,
-      };
-    }
-    if (!blockState.ok) {
-      const why = blockState.reason;
-      rep.warnings.push(`${blockLabel}${why.startsWith("is ") ? " " : ": "}${why}; rules for Codex not written`);
-      for (let i = plan.length - 1; i >= 0; i--) if (plan[i]!.inBlock) plan.splice(i, 1);
-      keep.push(...oldBlockKeys);
-    }
-  }
-
   const result = apply(plan, {
     targetDir, force: opts.force, keep, rootOf: (key) => rootOfKey(rc, key) ?? targetDir,
   });
 
-  const blockOverwritten: string[] = [];
-  if (blockState?.ok) {
-    // Rebuild the block from the new lock: rendered text for planned rules, the
-    // file's current section for kept ones (source unreachable).
-    const newLock = readLock(lockPath);
-    const existing = blockState.parsed?.sections ?? new Map<string, { source: string; text: string }>();
-    const planned = new Map(
-      plan.filter((p) => p.inBlock && !p.skipped).map((p) => [p.key, p.output.get("AGENTS.md")!.toString("utf8")]),
-    );
-    const sections: Section[] = [];
-    for (const [key, entry] of Object.entries(newLock)) {
-      if (!entry.block || entry.skipped) continue;
-      const name = parseLockKey(key).name;
-      const current = existing.get(name);
-      const text = planned.get(key) ?? current?.text;
-      if (text === undefined) continue;
-      const prev = oldLock[key];
-      if (prev?.block && !prev.skipped && (!current || hashBuffer(Buffer.from(current.text, "utf8")) !== prev.files["AGENTS.md"])) {
-        blockOverwritten.push(`${blockLabel}#rules/${name}`); // edited or deleted by hand
-      }
-      sections.push({ name, source: entry.source, text });
-    }
-    sections.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    const next = withBlock(blockState.text, sections);
-    if (next !== blockState.text) {
-      if (next === null) rmSync(blockFile, { force: true });
-      else atomicWrite(blockFile, next);
-    }
-    if (sections.length > 0) {
-      if (existsSync(join(dirname(blockFile), "AGENTS.override.md"))) {
-        rep.warnings.push(
-          `${labelOf(join(dirname(blockFile), "AGENTS.override.md"))} exists; Codex reads it instead of AGENTS.md, ` +
-            "so the skilletor rules there are not seen",
-        );
-      }
-      if (scope === "project" && next !== null) {
-        const limit = projectDocLimit(codexHomeOf(ctx) || join(ctx.home, ".codex"));
-        const bytes = Buffer.byteLength(next, "utf8");
-        if (bytes > limit) {
-          rep.warnings.push(
-            `${blockLabel} is ${bytes} bytes; Codex reads at most ${limit} bytes of project instructions ` +
-              "(project_doc_max_bytes), so the end of the skilletor block may be cut off",
-          );
-        }
-      }
-    }
-  }
+  // Codex rules (spec §14.8): the rules file and the AGENTS.md pointer, from the new lock.
+  const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) ||
+      existsSync(join(rootOf(rc, "codex", "rule")!, RULES_FILE))
+    ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings })
+    : { overwritten: [], exists: false };
 
   if (scope === "project") {
     // One managed block per target root: `.claude/.gitignore` (with the lock and
-    // local config), `.agents/.gitignore` and `.codex/.gitignore` for Codex paths
-    // (spec §6.4, §14.3).
+    // local config), `.agents/.gitignore` and `.codex/.gitignore` for Codex paths,
+    // the rules file included (spec §6.4, §14.3, §14.8).
     const newLock = readLock(lockPath);
+    const rulesRoot = rootOf(rc, "codex", "rule")!;
     for (const rootDir of allRoots(rc)) {
       const managed = Object.entries(newLock)
         .filter(([key, e]) => !e.block && rootOfKey(rc, key) === rootDir)
         .flatMap(([, e]) => Object.keys(e.files));
+      if (rules.exists && rootDir === rulesRoot) managed.push(RULES_FILE);
       const isClaude = rootDir === targetDir;
       updateGitignore({
         dir: rootDir,
@@ -675,8 +627,143 @@ async function syncScope(
     return { path: root === targetDir ? c.path : labelOf(join(root, c.path)) };
   };
   rep.conflicts = result.conflicts.map(shown);
-  rep.overwritten = [...result.overwritten.map(shown), ...blockOverwritten.map((path) => ({ path }))];
+  rep.overwritten = [...result.overwritten.map(shown), ...rules.overwritten.map((path) => ({ path }))];
   return rep;
+}
+
+/**
+ * Rebuild a scope's Codex rules file from the new lock, then its AGENTS.md pointer
+ * (spec §14.8). Planned rules take their rendered section; kept ones (source
+ * unreachable) their text from the file – or, for an entry of the first design
+ * (#41, keyed `AGENTS.md`), from the old rules block in AGENTS.md, and the entry is
+ * rewritten under the new file name. A pointer refusal is a warning and touches
+ * neither the rules file nor the lock. Returns the overwritten local changes
+ * (`<file>#rules/<name>`) and whether the rules file exists now.
+ */
+function syncCodexRules(a: {
+  ctx: EngineContext;
+  scope: ScopeName;
+  harnesses: Harness[];
+  rc: RootContext;
+  oldLock: Lock;
+  plan: PlanItem[];
+  lockPath: string;
+  labelOf: (abs: string) => string;
+  warnings: string[];
+}): { overwritten: string[]; exists: boolean } {
+  const { ctx, scope, rc, oldLock, labelOf, warnings } = a;
+  const rulesFile = join(rootOf(rc, "codex", "rule")!, RULES_FILE);
+  const rulesLabel = labelOf(rulesFile);
+  const agentsFile = join(scope === "user" ? rootOf(rc, "codex", "rule")! : rc.base, "AGENTS.md");
+  const agentsLabel = labelOf(agentsFile);
+  const LEGACY = "AGENTS.md"; // the files key of a first-design entry
+
+  let fileText: string | null = null;
+  try {
+    fileText = readFileSync(rulesFile, "utf8");
+  } catch {
+    // missing (or unreadable: rewritten below)
+  }
+  const current = fileText === null ? new Map<string, { source: string; text: string }>() : parseRulesFile(fileText);
+  const agents = inspectAgentsMd(agentsFile);
+  const legacy = agents.ok ? agents.parsed?.sections : undefined;
+  const planned = new Map(
+    a.plan.filter((p) => p.inBlock && !p.skipped).map((p) => [p.key, p.output.get(RULES_FILE)!.toString("utf8")]),
+  );
+
+  const newLock = readLock(a.lockPath);
+  let lockMigrated = false;
+  const sections: Section[] = [];
+  const overwritten: string[] = [];
+  for (const [key, entry] of Object.entries(newLock)) {
+    if (!entry.block || entry.skipped) continue;
+    const name = parseLockKey(key).name;
+    const prevHash = oldLock[key]?.skipped ? undefined : oldLock[key]?.files[RULES_FILE];
+    const onDisk = current.get(name) ?? (oldLock[key]?.files[LEGACY] !== undefined ? legacy?.get(name) : undefined);
+    if (entry.files[LEGACY] !== undefined && entry.files[RULES_FILE] === undefined) {
+      entry.files = { [RULES_FILE]: entry.files[LEGACY]! }; // kept first-design entry: same section, new file
+      lockMigrated = true;
+    }
+    const text = planned.get(key) ?? onDisk?.text;
+    if (text === undefined) continue;
+    // Edited or deleted by hand; a first-design entry (no hash for this file) moves silently.
+    if (prevHash !== undefined && (!onDisk || hashBuffer(Buffer.from(onDisk.text, "utf8")) !== prevHash)) {
+      overwritten.push(`${rulesLabel}#rules/${name}`);
+    }
+    sections.push({ name, source: entry.source, text });
+  }
+  if (lockMigrated) writeLock(a.lockPath, newLock);
+  sections.sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
+
+  const next = rulesFileText(scope, sections);
+  let exists = fileText !== null;
+  try {
+    if (next !== fileText) {
+      if (next === null) rmSync(rulesFile, { force: true });
+      else atomicWrite(rulesFile, next);
+    }
+    exists = next !== null;
+  } catch (err) {
+    warnings.push(`${rulesLabel}: cannot write the Codex rules file (${(err as Error).message})`);
+  }
+
+  // The pointer: present exactly when the rules file is.
+  const want = exists;
+  let state: Inspection = agents;
+  // Claude Code reads CLAUDE.md: when that is this AGENTS.md, Claude would be sent to the Codex rules.
+  const memory = want && a.harnesses.includes("claude")
+    ? claudeMemoryFiles(ctx, scope).find((f) => sameFile(f, agentsFile))
+    : undefined;
+  if (state.ok && memory) state = { ok: false, reason: `is the same file as ${labelOf(memory)} (Claude Code would read it)` };
+  if (!state.ok) {
+    const why = state.reason;
+    if (want || state.reason.startsWith("malformed")) {
+      warnings.push(`${agentsLabel}${why.startsWith("is ") ? " " : ": "}${why}; pointer to the Codex rules not written`);
+    }
+    return { overwritten, exists };
+  }
+  const shownRules = scope === "user" ? rulesFile : `.codex/${RULES_FILE}`;
+  const agentsNext = withBlock(state.text, want ? pointerLines(scope, shownRules) : null);
+  if (agentsNext !== state.text) {
+    if (agentsNext === null) rmSync(agentsFile, { force: true });
+    else atomicWrite(agentsFile, agentsNext);
+  }
+  if (want) {
+    const override = join(dirname(agentsFile), "AGENTS.override.md");
+    if (existsSync(override)) {
+      warnings.push(`${labelOf(override)} exists; Codex reads it instead of AGENTS.md, so the pointer to the skilletor rules is not seen`);
+    }
+    if (scope === "project" && agentsNext !== null) {
+      const limit = projectDocLimit(codexHomeOf(ctx) || join(ctx.home, ".codex"));
+      const bytes = Buffer.byteLength(agentsNext, "utf8");
+      if (bytes > limit) {
+        warnings.push(
+          `${agentsLabel} is ${bytes} bytes; Codex reads at most ${limit} bytes of project instructions ` +
+            "(project_doc_max_bytes), so the pointer to the rules at its end may be cut off",
+        );
+      }
+    }
+  }
+  return { overwritten, exists };
+}
+
+/**
+ * The Codex rules files the SessionStart hook injects (spec §14.8): the user scope's,
+ * then the project's, each when it exists and Codex is a target of that scope. When
+ * the config or the targets cannot be loaded, every existing file (the last good
+ * state). Reads no source and never throws.
+ */
+export function codexRulesFiles(given: EngineContext): string[] {
+  const ctx = scoped(given);
+  const loaded = loadWithTargets(ctx);
+  const out: string[] = [];
+  const scopes: ScopeName[] = ctx.projectDir ? ["user", "project"] : ["user"];
+  for (const scope of scopes) {
+    if (!("error" in loaded) && !loaded.targets[scope].includes("codex")) continue;
+    const file = join(rootOf({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }, "codex", "rule")!, RULES_FILE);
+    if (existsSync(file)) out.push(file);
+  }
+  return out;
 }
 
 // ---- check ------------------------------------------------------------------
@@ -746,6 +833,8 @@ export interface StatusReport {
   }[];
   /** The project dir is the home dir, so there is no project scope. Absent otherwise. */
   projectIsHome?: true;
+  /** Once per run, not per scope (the untrusted Codex hook, spec §14.8). Absent when empty. */
+  warnings?: string[];
   error?: string;
 }
 
@@ -826,5 +915,7 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
       sourceVersions,
     });
   }
+  const trust = hookTrustWarning(ctx, targets);
+  if (trust) out.warnings = [trust];
   return out;
 }
