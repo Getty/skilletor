@@ -14,20 +14,36 @@ export class TargetError extends Error {
   override name = "TargetError";
 }
 
+/** Where a scope's roots live: its base (`~` or the project root), and the Codex home. */
+export interface RootContext {
+  base: string;
+  scope: "user" | "project";
+  /** `$CODEX_HOME`; unset or empty means `<home>/.codex` (only the user scope uses it). */
+  codexHome?: string;
+}
+
 export interface TargetLayout {
   harness: Harness;
   /** Lock-key prefix; "" keeps claude keys exactly as they were before targets. */
   keyPrefix: string;
-  /** Per supported item type: the root directory under the scope base (`~` or
-   *  the project root). Lock file paths are relative to it. A type missing here
-   *  is not written for this harness. */
-  roots: Partial<Record<ItemType, string>>;
+  /** Per supported item type: the root directory for a scope. Lock file paths are
+   *  relative to it. A type missing here is not written for this harness. */
+  roots: Partial<Record<ItemType, (r: RootContext) => string>>;
 }
 
+const under = (dir: string) => (r: RootContext) => join(r.base, dir);
+
 export const LAYOUTS: Record<Harness, TargetLayout> = {
-  claude: { harness: "claude", keyPrefix: "", roots: { skill: ".claude", agent: ".claude", rule: ".claude" } },
-  // Phase 1: skills only. Agents (phase 2) and rules (phase 3) are not written.
-  codex: { harness: "codex", keyPrefix: "codex:", roots: { skill: ".agents" } },
+  claude: { harness: "claude", keyPrefix: "", roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") } },
+  // Skills (phase 1) and agents as TOML (phase 2, convert.ts); rules come in phase 3.
+  codex: {
+    harness: "codex",
+    keyPrefix: "codex:",
+    roots: {
+      skill: under(".agents"),
+      agent: (r) => (r.scope === "user" ? r.codexHome || join(r.base, ".codex") : join(r.base, ".codex")),
+    },
+  },
 };
 
 /** Per harness: absolute paths whose existence means the harness is in use. */
@@ -113,23 +129,22 @@ export function supports(harness: Harness, type: ItemType): boolean {
   return LAYOUTS[harness].roots[type] !== undefined;
 }
 
-/** Absolute root for an item of `type` under `base` for a harness (undefined if not written). */
-export function rootOf(base: string, harness: Harness, type: ItemType): string | undefined {
-  const dir = LAYOUTS[harness].roots[type];
-  return dir === undefined ? undefined : join(base, dir);
+/** Absolute root for an item of `type` in a scope for a harness (undefined if not written). */
+export function rootOf(r: RootContext, harness: Harness, type: ItemType): string | undefined {
+  return LAYOUTS[harness].roots[type]?.(r);
 }
 
 /** Absolute root a lock key's files live under; undefined for unknown or unsupported keys. */
-export function rootOfKey(base: string, key: string): string | undefined {
+export function rootOfKey(r: RootContext, key: string): string | undefined {
   const k = parseLockKey(key);
-  return k.harness ? rootOf(base, k.harness, k.type) : undefined;
+  return k.harness ? rootOf(r, k.harness, k.type) : undefined;
 }
 
-/** Every distinct root directory name any layout uses (for per-root gitignore blocks). */
-export function allRootNames(): string[] {
-  const names = new Set<string>();
-  for (const h of HARNESSES) for (const d of Object.values(LAYOUTS[h].roots)) if (d) names.add(d);
-  return [...names];
+/** Every distinct root any layout uses in a scope (for per-root gitignore blocks). */
+export function allRoots(r: RootContext): string[] {
+  const roots = new Set<string>();
+  for (const h of HARNESSES) for (const f of Object.values(LAYOUTS[h].roots)) if (f) roots.add(f(r));
+  return [...roots];
 }
 
 /**

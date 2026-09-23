@@ -203,12 +203,12 @@ var require_lib = __commonJS({
       var result = {};
       var iterator = isFunction(val) ? val : getAttrGetter(val);
       for (var i = 0; i < obj.length; i++) {
-        var value = obj[i];
-        var key = iterator(value, i);
+        var value2 = obj[i];
+        var key = iterator(value2, i);
         if (key === void 0 && throwOnUndefined === true) {
           throw new TypeError('groupby: attribute "' + val + '" resolved to undefined');
         }
-        (result[key] || (result[key] = [])).push(value);
+        (result[key] || (result[key] = [])).push(value2);
       }
       return result;
     }
@@ -571,10 +571,10 @@ var require_lexer = __commonJS({
     var TOKEN_SYMBOL = "symbol";
     var TOKEN_SPECIAL = "special";
     var TOKEN_REGEX = "regex";
-    function token(type, value, lineno, colno) {
+    function token(type, value2, lineno, colno) {
       return {
         type,
-        value,
+        value: value2,
         lineno,
         colno
       };
@@ -1345,10 +1345,10 @@ var require_nodes = __commonJS({
       fields: ["extName", "prop", "args", "contentArgs"]
     });
     var CallExtensionAsync = CallExtension.extend("CallExtensionAsync");
-    function print(str, indent, inline) {
+    function print(str, indent, inline2) {
       var lines = str.split("\n");
       lines.forEach(function(line, i) {
-        if (line && (inline && i > 0 || !inline)) {
+        if (line && (inline2 && i > 0 || !inline2)) {
           process.stdout.write(" ".repeat(indent));
         }
         var nl = i === lines.length - 1 ? "" : "\n";
@@ -1477,12 +1477,12 @@ var require_parser = __commonJS({
     var nodes = require_nodes();
     var Obj = require_object().Obj;
     var lib = require_lib();
-    var Parser = /* @__PURE__ */ (function(_Obj) {
-      _inheritsLoose(Parser2, _Obj);
-      function Parser2() {
+    var Parser2 = /* @__PURE__ */ (function(_Obj) {
+      _inheritsLoose(Parser3, _Obj);
+      function Parser3() {
         return _Obj.apply(this, arguments) || this;
       }
-      var _proto = Parser2.prototype;
+      var _proto = Parser3.prototype;
       _proto.init = function init(tokens) {
         this.tokens = tokens;
         this.peeked = null;
@@ -1533,7 +1533,7 @@ var require_parser = __commonJS({
         }
         return new lib.TemplateError(msg, lineno, colno);
       };
-      _proto.fail = function fail(msg, lineno, colno) {
+      _proto.fail = function fail2(msg, lineno, colno) {
         throw this.error(msg, lineno, colno);
       };
       _proto.skip = function skip(type) {
@@ -2279,8 +2279,8 @@ var require_parser = __commonJS({
             if (!this.skip(lexer.TOKEN_COLON)) {
               this.fail("parseAggregate: expected colon after dict key", tok.lineno, tok.colno);
             }
-            var value = this.parseExpression();
-            node.addChild(new nodes.Pair(key.lineno, key.colno, key, value));
+            var value2 = this.parseExpression();
+            node.addChild(new nodes.Pair(key.lineno, key.colno, key, value2));
           } else {
             var expr = this.parseExpression();
             node.addChild(expr);
@@ -2380,17 +2380,17 @@ var require_parser = __commonJS({
       _proto.parseAsRoot = function parseAsRoot() {
         return new nodes.Root(0, 0, this.parseNodes());
       };
-      return Parser2;
+      return Parser3;
     })(Obj);
     module.exports = {
       parse: function parse(src, extensions, opts) {
-        var p = new Parser(lexer.lex(src, opts));
+        var p = new Parser2(lexer.lex(src, opts));
         if (extensions !== void 0) {
           p.extensions = extensions;
         }
         return p.parseAsRoot();
       },
-      Parser
+      Parser: Parser2
     };
   }
 });
@@ -2926,7 +2926,7 @@ var require_compiler = __commonJS({
         this.inBlock = false;
         this.throwOnUndefined = throwOnUndefined;
       };
-      _proto.fail = function fail(msg, lineno, colno) {
+      _proto.fail = function fail2(msg, lineno, colno) {
         if (lineno !== void 0) {
           lineno += 1;
         }
@@ -3828,11 +3828,11 @@ var require_filters = __commonJS({
     var lib = require_lib();
     var r = require_runtime();
     var _exports = module.exports = {};
-    function normalize(value, defaultValue) {
-      if (value === null || value === void 0 || value === false) {
+    function normalize(value2, defaultValue) {
+      if (value2 === null || value2 === void 0 || value2 === false) {
         return defaultValue;
       }
-      return value;
+      return value2;
     }
     _exports.abs = Math.abs;
     function isNaN(num) {
@@ -3980,15 +3980,15 @@ var require_filters = __commonJS({
     }
     _exports.last = last;
     function lengthFilter(val) {
-      var value = normalize(val, "");
-      if (value !== void 0) {
-        if (typeof Map === "function" && value instanceof Map || typeof Set === "function" && value instanceof Set) {
-          return value.size;
+      var value2 = normalize(val, "");
+      if (value2 !== void 0) {
+        if (typeof Map === "function" && value2 instanceof Map || typeof Set === "function" && value2 instanceof Set) {
+          return value2.size;
         }
-        if (lib.isObject(value) && !(value instanceof r.SafeString)) {
-          return lib.keys(value).length;
+        if (lib.isObject(value2) && !(value2 instanceof r.SafeString)) {
+          return lib.keys(value2).length;
         }
-        return value.length;
+        return value2.length;
       }
       return 0;
     }
@@ -3998,10 +3998,10 @@ var require_filters = __commonJS({
         return val.split("");
       } else if (lib.isObject(val)) {
         return lib._entries(val || {}).map(function(_ref) {
-          var key = _ref[0], value = _ref[1];
+          var key = _ref[0], value2 = _ref[1];
           return {
             key,
-            value
+            value: value2
           };
         });
       } else if (lib.isArray(val)) {
@@ -4297,11 +4297,11 @@ var require_filters = __commonJS({
       return isNaN(res) ? def : res;
     }
     _exports.float = float;
-    var intFilter = r.makeMacro(["value", "default", "base"], [], function doInt(value, defaultValue, base) {
+    var intFilter = r.makeMacro(["value", "default", "base"], [], function doInt(value2, defaultValue, base) {
       if (base === void 0) {
         base = 10;
       }
-      var res = parseInt(value, base);
+      var res = parseInt(value2, base);
       return isNaN(res) ? defaultValue : res;
     });
     _exports.int = intFilter;
@@ -4550,20 +4550,20 @@ var require_tests = __commonJS({
   "node_modules/nunjucks/src/tests.js"(exports) {
     "use strict";
     var SafeString = require_runtime().SafeString;
-    function callable(value) {
-      return typeof value === "function";
+    function callable(value2) {
+      return typeof value2 === "function";
     }
     exports.callable = callable;
-    function defined(value) {
-      return value !== void 0;
+    function defined(value2) {
+      return value2 !== void 0;
     }
     exports.defined = defined;
     function divisibleby(one, two) {
       return one % two === 0;
     }
     exports.divisibleby = divisibleby;
-    function escaped(value) {
-      return value instanceof SafeString;
+    function escaped(value2) {
+      return value2 instanceof SafeString;
     }
     exports.escaped = escaped;
     function equalto(one, two) {
@@ -4572,12 +4572,12 @@ var require_tests = __commonJS({
     exports.equalto = equalto;
     exports.eq = exports.equalto;
     exports.sameas = exports.equalto;
-    function even(value) {
-      return value % 2 === 0;
+    function even(value2) {
+      return value2 % 2 === 0;
     }
     exports.even = even;
-    function falsy(value) {
-      return !value;
+    function falsy(value2) {
+      return !value2;
     }
     exports.falsy = falsy;
     function ge(one, two) {
@@ -4598,54 +4598,54 @@ var require_tests = __commonJS({
     }
     exports.lessthan = lessthan;
     exports.lt = exports.lessthan;
-    function lower(value) {
-      return value.toLowerCase() === value;
+    function lower(value2) {
+      return value2.toLowerCase() === value2;
     }
     exports.lower = lower;
     function ne(one, two) {
       return one !== two;
     }
     exports.ne = ne;
-    function nullTest(value) {
-      return value === null;
+    function nullTest(value2) {
+      return value2 === null;
     }
     exports.null = nullTest;
-    function number(value) {
-      return typeof value === "number";
+    function number(value2) {
+      return typeof value2 === "number";
     }
     exports.number = number;
-    function odd(value) {
-      return value % 2 === 1;
+    function odd(value2) {
+      return value2 % 2 === 1;
     }
     exports.odd = odd;
-    function string(value) {
-      return typeof value === "string";
+    function string(value2) {
+      return typeof value2 === "string";
     }
     exports.string = string;
-    function truthy(value) {
-      return !!value;
+    function truthy(value2) {
+      return !!value2;
     }
     exports.truthy = truthy;
-    function undefinedTest(value) {
-      return value === void 0;
+    function undefinedTest(value2) {
+      return value2 === void 0;
     }
     exports.undefined = undefinedTest;
-    function upper(value) {
-      return value.toUpperCase() === value;
+    function upper(value2) {
+      return value2.toUpperCase() === value2;
     }
     exports.upper = upper;
-    function iterable(value) {
+    function iterable(value2) {
       if (typeof Symbol !== "undefined") {
-        return !!value[Symbol.iterator];
+        return !!value2[Symbol.iterator];
       } else {
-        return Array.isArray(value) || typeof value === "string";
+        return Array.isArray(value2) || typeof value2 === "string";
       }
     }
     exports.iterable = iterable;
-    function mapping(value) {
-      var bool = value !== null && value !== void 0 && typeof value === "object" && !Array.isArray(value);
+    function mapping(value2) {
+      var bool = value2 !== null && value2 !== void 0 && typeof value2 === "object" && !Array.isArray(value2);
       if (Set) {
-        return bool && !(value instanceof Set);
+        return bool && !(value2 instanceof Set);
       } else {
         return bool;
       }
@@ -4881,8 +4881,8 @@ var require_environment = __commonJS({
       _proto.hasExtension = function hasExtension(name) {
         return !!this.extensions[name];
       };
-      _proto.addGlobal = function addGlobal(name, value) {
-        this.globals[name] = value;
+      _proto.addGlobal = function addGlobal(name, value2) {
+        this.globals[name] = value2;
         return this;
       };
       _proto.getGlobal = function getGlobal(name) {
@@ -5379,7 +5379,7 @@ var require_jinja_compat = __commonJS({
       var runtime = this.runtime;
       var lib = this.lib;
       var Compiler = this.compiler.Compiler;
-      var Parser = this.parser.Parser;
+      var Parser2 = this.parser.Parser;
       var nodes = this.nodes;
       var lexer = this.lexer;
       var orig_contextOrFrameLookup = runtime.contextOrFrameLookup;
@@ -5389,8 +5389,8 @@ var require_jinja_compat = __commonJS({
       if (Compiler) {
         orig_Compiler_assertType = Compiler.prototype.assertType;
       }
-      if (Parser) {
-        orig_Parser_parseAggregate = Parser.prototype.parseAggregate;
+      if (Parser2) {
+        orig_Parser_parseAggregate = Parser2.prototype.parseAggregate;
       }
       function uninstall() {
         runtime.contextOrFrameLookup = orig_contextOrFrameLookup;
@@ -5398,8 +5398,8 @@ var require_jinja_compat = __commonJS({
         if (Compiler) {
           Compiler.prototype.assertType = orig_Compiler_assertType;
         }
-        if (Parser) {
-          Parser.prototype.parseAggregate = orig_Parser_parseAggregate;
+        if (Parser2) {
+          Parser2.prototype.parseAggregate = orig_Parser_parseAggregate;
         }
       }
       runtime.contextOrFrameLookup = function contextOrFrameLookup(context, frame, key) {
@@ -5425,7 +5425,7 @@ var require_jinja_compat = __commonJS({
           colno: tokens.colno
         };
       }
-      if (process.env.BUILD_TYPE !== "SLIM" && nodes && Compiler && Parser) {
+      if (process.env.BUILD_TYPE !== "SLIM" && nodes && Compiler && Parser2) {
         var Slice = nodes.Node.extend("Slice", {
           fields: ["start", "stop", "step"],
           init: function init(lineno, colno, start, stop, step) {
@@ -5450,7 +5450,7 @@ var require_jinja_compat = __commonJS({
           this._compileExpression(node.step, frame);
           this._emit(")");
         };
-        Parser.prototype.parseAggregate = function parseAggregate() {
+        Parser2.prototype.parseAggregate = function parseAggregate() {
           var _this = this;
           var origState = getTokensState(this.tokens);
           origState.colno--;
@@ -5745,7 +5745,7 @@ import { join as join14 } from "node:path";
 // src/engine.ts
 import { execFileSync } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
-import { basename, join as join12, relative as relative2 } from "node:path";
+import { basename, isAbsolute, join as join12, relative as relative2 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -5789,17 +5789,17 @@ function readConfigFile(path) {
     if (err.code === "ENOENT") return {};
     throw new ConfigError(`${path}: cannot read config (${err.message})`);
   }
-  let value;
+  let value2;
   try {
-    value = JSON.parse(text);
+    value2 = JSON.parse(text);
   } catch (err) {
     throw new ConfigError(`${path}: invalid JSON (${err.message})`);
   }
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+  if (value2 === null || typeof value2 !== "object" || Array.isArray(value2)) {
     throw new ConfigError(`${path}: top level must be a JSON object`);
   }
-  validateKeys(value, path);
-  return value;
+  validateKeys(value2, path);
+  return value2;
 }
 function validateKeys(obj, path) {
   for (const key of Object.keys(obj)) {
@@ -5810,12 +5810,12 @@ function validateKeys(obj, path) {
     }
   }
 }
-function asObject(value, path, where) {
-  if (value === void 0) return {};
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+function asObject(value2, path, where) {
+  if (value2 === void 0) return {};
+  if (value2 === null || typeof value2 !== "object" || Array.isArray(value2)) {
     throw new ConfigError(`${path}: ${where} must be an object`);
   }
-  return value;
+  return value2;
 }
 function parseSources(obj, path) {
   const sources = /* @__PURE__ */ new Map();
@@ -6002,14 +6002,14 @@ function dedupeWildcards(a, b, path) {
   }
   return out;
 }
-function targetsOf(value, path) {
-  if (value === void 0) return void 0;
+function targetsOf(value2, path) {
+  if (value2 === void 0) return void 0;
   const allowed = HARNESSES.join(", ");
-  if (!Array.isArray(value) || value.length === 0) {
+  if (!Array.isArray(value2) || value2.length === 0) {
     throw new ConfigError(`${path}: "targets" must be a non-empty array (of ${allowed})`);
   }
   const out = [];
-  for (const v of value) {
+  for (const v of value2) {
     if (typeof v !== "string" || !HARNESSES.includes(v)) {
       throw new ConfigError(`${path}: "targets" has unknown harness ${JSON.stringify(v)} (allowed: ${allowed})`);
     }
@@ -6018,26 +6018,26 @@ function targetsOf(value, path) {
   }
   return out;
 }
-function numberOr(value, fallback, path, key) {
-  if (value === void 0) return fallback;
-  if (typeof value !== "number" || !Number.isFinite(value)) {
+function numberOr(value2, fallback, path, key) {
+  if (value2 === void 0) return fallback;
+  if (typeof value2 !== "number" || !Number.isFinite(value2)) {
     throw new ConfigError(`${path}: "${key}" must be a number`);
   }
-  return value;
+  return value2;
 }
-function boolOr(value, fallback, path, key) {
-  if (value === void 0) return fallback;
-  if (typeof value !== "boolean") throw new ConfigError(`${path}: "${key}" must be a boolean`);
-  return value;
+function boolOr(value2, fallback, path, key) {
+  if (value2 === void 0) return fallback;
+  if (typeof value2 !== "boolean") throw new ConfigError(`${path}: "${key}" must be a boolean`);
+  return value2;
 }
 function loadRaw(path) {
   if (!existsSync(path)) return {};
   try {
-    const value = JSON.parse(readFileSync(path, "utf8"));
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    const value2 = JSON.parse(readFileSync(path, "utf8"));
+    if (value2 === null || typeof value2 !== "object" || Array.isArray(value2)) {
       throw new Error("top level must be an object");
     }
-    return value;
+    return value2;
   } catch (err) {
     throw new ConfigError(`${path}: invalid JSON (${err.message})`);
   }
@@ -6116,10 +6116,18 @@ import { join as join3 } from "node:path";
 var TargetError = class extends Error {
   name = "TargetError";
 };
+var under = (dir) => (r) => join3(r.base, dir);
 var LAYOUTS = {
-  claude: { harness: "claude", keyPrefix: "", roots: { skill: ".claude", agent: ".claude", rule: ".claude" } },
-  // Phase 1: skills only. Agents (phase 2) and rules (phase 3) are not written.
-  codex: { harness: "codex", keyPrefix: "codex:", roots: { skill: ".agents" } }
+  claude: { harness: "claude", keyPrefix: "", roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") } },
+  // Skills (phase 1) and agents as TOML (phase 2, convert.ts); rules come in phase 3.
+  codex: {
+    harness: "codex",
+    keyPrefix: "codex:",
+    roots: {
+      skill: under(".agents"),
+      agent: (r) => r.scope === "user" ? r.codexHome || join3(r.base, ".codex") : join3(r.base, ".codex")
+    }
+  }
 };
 function defaultMarkers(home, codexHome) {
   const cx = codexHome || join3(home, ".codex");
@@ -6171,18 +6179,17 @@ function parseLockKey(key) {
 function supports(harness, type) {
   return LAYOUTS[harness].roots[type] !== void 0;
 }
-function rootOf(base, harness, type) {
-  const dir = LAYOUTS[harness].roots[type];
-  return dir === void 0 ? void 0 : join3(base, dir);
+function rootOf(r, harness, type) {
+  return LAYOUTS[harness].roots[type]?.(r);
 }
-function rootOfKey(base, key) {
+function rootOfKey(r, key) {
   const k = parseLockKey(key);
-  return k.harness ? rootOf(base, k.harness, k.type) : void 0;
+  return k.harness ? rootOf(r, k.harness, k.type) : void 0;
 }
-function allRootNames() {
-  const names = /* @__PURE__ */ new Set();
-  for (const h of HARNESSES) for (const d of Object.values(LAYOUTS[h].roots)) if (d) names.add(d);
-  return [...names];
+function allRoots(r) {
+  const roots = /* @__PURE__ */ new Set();
+  for (const h of HARNESSES) for (const f of Object.values(LAYOUTS[h].roots)) if (f) roots.add(f(r));
+  return [...roots];
 }
 function targetDrift(keys, active) {
   const set = new Set(keys);
@@ -6193,6 +6200,529 @@ function targetDrift(keys, active) {
     for (const h of active) if (supports(h, k.type) && !set.has(lockKey(h, k.target))) return true;
   }
   return false;
+}
+
+// src/frontmatter.ts
+var FrontmatterError = class extends Error {
+  name = "FrontmatterError";
+};
+var YamlFloat = class {
+  value;
+  constructor(value2) {
+    this.value = value2;
+  }
+};
+var OPEN = /^---[ \t]*\r?\n/;
+var CLOSE = /^---[ \t]*(?:\r?\n|$)/gm;
+function splitFrontmatter(text) {
+  const open = OPEN.exec(text);
+  if (!open) return { data: {}, body: text };
+  CLOSE.lastIndex = open[0].length;
+  const close = CLOSE.exec(text);
+  if (!close) throw new FrontmatterError("frontmatter: no closing --- line");
+  const yaml = text.slice(open[0].length, close.index);
+  const body = text.slice(close.index + close[0].length).replace(/^(?:[ \t]*\r?\n)+/, "");
+  return { data: parseYaml(yaml), body };
+}
+function fail(line, message) {
+  throw new FrontmatterError(`frontmatter line ${line?.no ?? "?"}: ${message}`);
+}
+function indentOf(line) {
+  const m = /^[ \t]*/.exec(line.raw)[0];
+  if (m.includes("	")) fail(line, "tabs are not allowed in indentation");
+  return m.length;
+}
+function skippable(line) {
+  const t = line.raw.trim();
+  return t === "" || t.startsWith("#");
+}
+function isSeqItem(text) {
+  return text === "-" || text.startsWith("- ");
+}
+var KEY_RE = /^(?:"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'|([^\s"'#&*!|>[\]{},?:-][^:#]*?))[ \t]*:(?:[ \t]+(.*))?$/;
+function parseYaml(yaml) {
+  const lines = yaml.split(/\r?\n/).map((raw, i) => ({ no: i + 2, raw }));
+  const p = new Parser(lines);
+  const [value2, pos] = p.mapping(0, 0);
+  if (pos < lines.length) fail(lines[pos], "unexpected content");
+  return value2;
+}
+var Parser = class {
+  lines;
+  constructor(lines) {
+    this.lines = lines;
+  }
+  nextContent(pos) {
+    while (pos < this.lines.length && skippable(this.lines[pos])) pos++;
+    return pos;
+  }
+  mapping(start, indent) {
+    const obj = {};
+    let pos = start;
+    for (; ; ) {
+      pos = this.nextContent(pos);
+      if (pos >= this.lines.length) break;
+      const line = this.lines[pos];
+      const ind = indentOf(line);
+      if (ind < indent) break;
+      if (ind > indent) fail(line, "unexpected indentation");
+      const text = line.raw.slice(ind);
+      if (isSeqItem(text)) fail(line, "unexpected sequence item");
+      const m = KEY_RE.exec(text);
+      if (!m) fail(line, "expected `key: value`");
+      const key = m[1] !== void 0 ? unescapeDouble(m[1], line) : m[2] !== void 0 ? m[2].replace(/''/g, "'") : m[3].trim();
+      if (Object.prototype.hasOwnProperty.call(obj, key)) fail(line, `duplicate key "${key}"`);
+      const [value2, next] = this.value(m[4] ?? "", pos + 1, indent, line);
+      obj[key] = value2;
+      pos = next;
+    }
+    return [obj, pos];
+  }
+  /** The value after `key:` on `line`; `pos` is the line after it. */
+  value(rest, pos, indent, line) {
+    const r = rest.trim();
+    if (r.startsWith("|") || r.startsWith(">")) return this.blockScalar(r, pos, indent, line);
+    if (r === "" || r.startsWith("#")) {
+      const q = this.nextContent(pos);
+      if (q >= this.lines.length) return [null, q];
+      const next = this.lines[q];
+      const ind = indentOf(next);
+      const text = next.raw.slice(ind);
+      if (ind > indent) return isSeqItem(text) ? this.sequence(q, ind) : this.mapping(q, ind);
+      if (ind === indent && isSeqItem(text)) return this.sequence(q, ind);
+      return [null, q];
+    }
+    const parts = [r];
+    let p = pos;
+    for (; ; ) {
+      const q = this.nextContent(p);
+      if (q >= this.lines.length || indentOf(this.lines[q]) <= indent) break;
+      parts.push(this.lines[q].raw.trim());
+      p = q + 1;
+    }
+    if (parts.length === 1) return [inline(r, line), pos];
+    if (/^["'[{]/.test(r)) return [inline(parts.join(" "), line), p];
+    if (/^[&*!]/.test(r)) fail(line, "anchors, aliases and tags are not supported");
+    return [parts.map((s) => stripComment(s)).join(" "), p];
+  }
+  sequence(start, indent) {
+    const arr = [];
+    let pos = start;
+    for (; ; ) {
+      pos = this.nextContent(pos);
+      if (pos >= this.lines.length) break;
+      const line = this.lines[pos];
+      const ind = indentOf(line);
+      if (ind < indent) break;
+      if (ind > indent) fail(line, "unexpected indentation in a sequence");
+      const text = line.raw.slice(ind);
+      if (!isSeqItem(text)) break;
+      const item = text.slice(1).trim();
+      if (item === "" || item.startsWith("#")) fail(line, "nested blocks inside sequences are not supported");
+      if (KEY_RE.test(item)) fail(line, "mappings inside sequences are not supported");
+      if (/^[[{]/.test(item)) fail(line, "nested collections are not supported");
+      arr.push(inline(item, line));
+      pos++;
+    }
+    return [arr, pos];
+  }
+  blockScalar(header, pos, indent, line) {
+    const h = /^([|>])([+-]?)([1-9]?)[ \t]*(?:#.*)?$/.exec(header);
+    if (!h) fail(line, `unsupported block scalar header "${header}"`);
+    const folded = h[1] === ">";
+    const chomp = h[2];
+    let contentIndent = h[3] ? indent + Number(h[3]) : -1;
+    const collected = [];
+    let p = pos;
+    while (p < this.lines.length) {
+      const l = this.lines[p];
+      if (l.raw.trim() === "") {
+        collected.push(l);
+        p++;
+        continue;
+      }
+      const ind = indentOf(l);
+      if (ind <= indent) break;
+      if (contentIndent === -1) contentIndent = ind;
+      if (ind < contentIndent) fail(l, "block scalar line is less indented than its first line");
+      collected.push(l);
+      p++;
+    }
+    const texts = collected.map((l) => l.raw.trim() === "" ? "" : l.raw.slice(contentIndent));
+    let trailing = 0;
+    while (texts.length && texts[texts.length - 1] === "") {
+      texts.pop();
+      trailing++;
+    }
+    let body;
+    if (!folded) {
+      body = texts.join("\n");
+    } else {
+      body = "";
+      let pending = 0;
+      let first = true;
+      let prevMore = false;
+      for (const t of texts) {
+        if (t === "") {
+          pending++;
+          continue;
+        }
+        const more = t.startsWith(" ") || t.startsWith("	");
+        if (first) body = t;
+        else if (pending > 0) body += "\n".repeat(pending) + t;
+        else if (more || prevMore) body += "\n" + t;
+        else body += " " + t;
+        first = false;
+        pending = 0;
+        prevMore = more;
+      }
+    }
+    if (chomp === "-") return [body, p];
+    if (body === "" && chomp !== "+") return ["", p];
+    return [body + "\n" + (chomp === "+" ? "\n".repeat(trailing) : ""), p];
+  }
+};
+function stripComment(s) {
+  const i = s.search(/(^|[ \t])#/);
+  return (i === -1 ? s : s.slice(0, i)).trim();
+}
+function typedPlain(s) {
+  if (s === "" || s === "~" || /^(null|Null|NULL)$/.test(s)) return null;
+  if (/^(true|True|TRUE)$/.test(s)) return true;
+  if (/^(false|False|FALSE)$/.test(s)) return false;
+  if (/^[-+]?[0-9]+$/.test(s)) {
+    const n = Number(s);
+    return Number.isSafeInteger(n) ? n : s;
+  }
+  if (/^[-+]?(\.[0-9]+|[0-9]+\.[0-9]*|[0-9]+(?=[eE]))([eE][-+]?[0-9]+)?$/.test(s)) return new YamlFloat(Number(s));
+  return s;
+}
+var ESCAPES = {
+  "0": "\0",
+  a: "\x07",
+  b: "\b",
+  t: "	",
+  "	": "	",
+  n: "\n",
+  v: "\v",
+  f: "\f",
+  r: "\r",
+  e: "\x1B",
+  " ": " ",
+  '"': '"',
+  "/": "/",
+  "\\": "\\",
+  N: "\x85",
+  _: "\xA0",
+  L: "\u2028",
+  P: "\u2029"
+};
+function unescapeDouble(s, line) {
+  let out = "";
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch !== "\\") {
+      out += ch;
+      continue;
+    }
+    const e = s[++i];
+    if (e === void 0) fail(line, "dangling backslash in a double-quoted string");
+    const hexLen = e === "x" ? 2 : e === "u" ? 4 : e === "U" ? 8 : 0;
+    if (hexLen) {
+      const hex = s.slice(i + 1, i + 1 + hexLen);
+      if (!new RegExp(`^[0-9a-fA-F]{${hexLen}}$`).test(hex)) fail(line, `bad \\${e} escape`);
+      out += String.fromCodePoint(parseInt(hex, 16));
+      i += hexLen;
+    } else if (e in ESCAPES) {
+      out += ESCAPES[e];
+    } else {
+      fail(line, `unknown escape \\${e}`);
+    }
+  }
+  return out;
+}
+function quoted(s, i, line) {
+  const q = s[i];
+  let j = i + 1;
+  if (q === "'") {
+    let out = "";
+    for (; ; ) {
+      if (j >= s.length) fail(line, "unterminated single-quoted string");
+      if (s[j] === "'") {
+        if (s[j + 1] === "'") {
+          out += "'";
+          j += 2;
+          continue;
+        }
+        return [out, j + 1];
+      }
+      out += s[j++];
+    }
+  }
+  for (; ; ) {
+    if (j >= s.length) fail(line, "unterminated double-quoted string");
+    if (s[j] === "\\") {
+      j += 2;
+      continue;
+    }
+    if (s[j] === '"') return [unescapeDouble(s.slice(i + 1, j), line), j + 1];
+    j++;
+  }
+}
+function assertEnd(s, i, line) {
+  const rest = s.slice(i).trim();
+  if (rest !== "" && !rest.startsWith("#")) fail(line, `unexpected text after a value: "${rest}"`);
+}
+function flowScalar(s, i, closer, line) {
+  while (s[i] === " " || s[i] === "	") i++;
+  if (s[i] === '"' || s[i] === "'") {
+    const [v, j2] = quoted(s, i, line);
+    return [v, j2];
+  }
+  if (s[i] === "[" || s[i] === "{") fail(line, "nested collections are not supported");
+  let j = i;
+  while (j < s.length && s[j] !== "," && s[j] !== closer) j++;
+  return [typedPlain(s.slice(i, j).trim()), j];
+}
+function flowSeparator(s, j, closer, line) {
+  while (s[j] === " " || s[j] === "	") j++;
+  if (s[j] === ",") return [false, j + 1];
+  if (s[j] === closer) return [true, j + 1];
+  return fail(line, `expected "," or "${closer}"`);
+}
+function inline(value2, line) {
+  const s = value2.trim();
+  if (/^[&*!]/.test(s)) fail(line, "anchors, aliases and tags are not supported");
+  if (s.startsWith('"') || s.startsWith("'")) {
+    const [v, j] = quoted(s, 0, line);
+    assertEnd(s, j, line);
+    return v;
+  }
+  if (s.startsWith("[")) {
+    const arr = [];
+    let j = 1;
+    if (/^\[\s*\]/.test(s)) {
+      assertEnd(s, s.indexOf("]") + 1, line);
+      return arr;
+    }
+    for (; ; ) {
+      const [v, k] = flowScalar(s, j, "]", line);
+      arr.push(v);
+      const [done, n] = flowSeparator(s, k, "]", line);
+      j = n;
+      if (done) break;
+    }
+    assertEnd(s, j, line);
+    return arr;
+  }
+  if (s.startsWith("{")) {
+    const obj = {};
+    let j = 1;
+    if (/^\{\s*\}/.test(s)) {
+      assertEnd(s, s.indexOf("}") + 1, line);
+      return obj;
+    }
+    for (; ; ) {
+      while (s[j] === " ") j++;
+      const colon = s.indexOf(":", j);
+      if (colon === -1) fail(line, "expected `key: value` in a flow mapping");
+      const key = s.slice(j, colon).trim().replace(/^(["'])(.*)\1$/, "$2");
+      if (key === "" || /[,{}[\]]/.test(key)) fail(line, "bad key in a flow mapping");
+      const [v, k] = flowScalar(s, colon + 1, "}", line);
+      obj[key] = v;
+      const [done, n] = flowSeparator(s, k, "}", line);
+      j = n;
+      if (done) break;
+    }
+    assertEnd(s, j, line);
+    return obj;
+  }
+  return typedPlain(stripComment(s));
+}
+
+// src/toml.ts
+var TomlWriteError = class extends Error {
+  name = "TomlWriteError";
+};
+var TomlFloat = class {
+  value;
+  constructor(value2) {
+    this.value = value2;
+  }
+};
+var BARE_KEY = /^[A-Za-z0-9_-]+$/;
+function tomlKey(key) {
+  return BARE_KEY.test(key) ? key : basicString(key);
+}
+function escapeBasic(s, keepNewlines) {
+  let out = "";
+  for (const ch of s) {
+    const code = ch.codePointAt(0);
+    if (ch === "\\") out += "\\\\";
+    else if (ch === '"') out += '\\"';
+    else if (ch === "\n") out += keepNewlines ? "\n" : "\\n";
+    else if (ch === "	") out += keepNewlines ? "	" : "\\t";
+    else if (ch === "\r") out += "\\r";
+    else if (code < 32 || code === 127) out += "\\u" + code.toString(16).padStart(4, "0").toUpperCase();
+    else out += ch;
+  }
+  return out;
+}
+function basicString(s) {
+  return `"${escapeBasic(s, false)}"`;
+}
+var LITERAL_UNSAFE = /[\u0000-\u0008\u000a-\u001f\u007f]/;
+function multilineString(s) {
+  const literalOk = !s.includes("'''") && !s.endsWith("'") && !LITERAL_UNSAFE.test(s.replace(/\n/g, ""));
+  if (literalOk) return `'''
+${s}'''`;
+  return `"""
+${escapeBasic(s, true)}"""`;
+}
+function scalar(v, where, multiline) {
+  if (typeof v === "string") return multiline ? multilineString(v) : basicString(v);
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "number") {
+    if (!Number.isSafeInteger(v)) throw new TomlWriteError(`${where}: ${v} is not an integer (use TomlFloat)`);
+    return String(v);
+  }
+  if (v instanceof TomlFloat) {
+    if (!Number.isFinite(v.value)) throw new TomlWriteError(`${where}: ${v.value} is not a finite float`);
+    const text = String(v.value);
+    return /[.eE]/.test(text) ? text : `${text}.0`;
+  }
+  throw new TomlWriteError(`${where}: unsupported value ${JSON.stringify(v)}`);
+}
+function value(v, where, multiline) {
+  if (Array.isArray(v)) {
+    for (const item of v) if (typeof item !== "string") throw new TomlWriteError(`${where}: only string arrays are supported`);
+    return `[${v.map(basicString).join(", ")}]`;
+  }
+  return scalar(v, where, multiline);
+}
+function isTable(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof TomlFloat);
+}
+function stringifyToml(table, opts = {}) {
+  const ml = new Set(opts.multiline ?? []);
+  const lines = [];
+  const tables = [];
+  for (const [k, v] of Object.entries(table)) {
+    if (isTable(v)) tables.push([k, v]);
+    else lines.push(`${tomlKey(k)} = ${value(v, k, ml.has(k))}`);
+  }
+  for (const [k, t] of tables) {
+    lines.push("", `[${tomlKey(k)}]`);
+    for (const [sk, sv] of Object.entries(t)) {
+      if (isTable(sv)) throw new TomlWriteError(`${k}.${sk}: nested tables are not supported`);
+      lines.push(`${tomlKey(sk)} = ${value(sv, `${k}.${sk}`, false)}`);
+    }
+  }
+  return lines.join("\n") + "\n";
+}
+
+// src/convert.ts
+var ConvertError = class extends Error {
+  name = "ConvertError";
+};
+var CODEX_BRIEFING_TABLE = false;
+function tomlLeaf(v) {
+  if (typeof v === "string" || typeof v === "boolean") return v;
+  if (typeof v === "number") return v;
+  if (v instanceof YamlFloat) return new TomlFloat(v.value);
+  if (v === null) return { reason: "null has no TOML form" };
+  if (Array.isArray(v)) {
+    return v.every((x) => typeof x === "string") ? v : { reason: "only arrays of strings are supported" };
+  }
+  return { reason: "nested tables are not supported" };
+}
+function isReason(leaf) {
+  return typeof leaf === "object" && !Array.isArray(leaf) && !(leaf instanceof TomlFloat);
+}
+function isMapping(v) {
+  return v !== null && v !== void 0 && typeof v === "object" && !Array.isArray(v) && !(v instanceof YamlFloat);
+}
+function asText(v) {
+  if (v === void 0 || v === null || typeof v === "object") return void 0;
+  return String(v);
+}
+function codexAgentToml(markdown, itemName2, opts = {}) {
+  let fm;
+  try {
+    fm = splitFrontmatter(markdown);
+  } catch (err) {
+    if (err instanceof FrontmatterError) throw new ConvertError(err.message);
+    throw err;
+  }
+  const { data, body } = fm;
+  const warnings = [];
+  const top = {
+    name: asText(data.name) || itemName2,
+    description: asText(data.description) ?? ""
+  };
+  const tables = {};
+  const briefing = data.briefing;
+  const skills = isMapping(briefing) ? briefing.skills : void 0;
+  let briefingDropped = false;
+  if (Array.isArray(skills)) {
+    if (opts.briefingTable ?? CODEX_BRIEFING_TABLE) {
+      const leaf = tomlLeaf(skills);
+      if (isReason(leaf)) warnings.push(`briefing.skills: ${leaf.reason}; dropped`);
+      else tables.briefing = { skills: leaf };
+    } else {
+      briefingDropped = true;
+    }
+  }
+  let instructions = body;
+  const codex = data.codex;
+  if (codex !== void 0 && !isMapping(codex)) {
+    warnings.push("codex: must be a mapping; ignored");
+  } else if (codex) {
+    for (const [key, v] of Object.entries(codex)) {
+      if (isMapping(v) && (key in top || key === "developer_instructions" || key in tables)) {
+        warnings.push(`codex.${key}: a table cannot replace the ${key} key; dropped`);
+        continue;
+      }
+      if (isMapping(v)) {
+        const t = {};
+        for (const [sk, sv] of Object.entries(v)) {
+          const leaf2 = tomlLeaf(sv);
+          if (isReason(leaf2)) {
+            warnings.push(`codex.${key}.${sk}: ${leaf2.reason}; dropped`);
+          } else {
+            t[sk] = leaf2;
+          }
+        }
+        tables[key] = t;
+        continue;
+      }
+      const leaf = tomlLeaf(v);
+      if (isReason(leaf)) {
+        warnings.push(`codex.${key}: ${leaf.reason}; dropped`);
+      } else if (key === "developer_instructions") {
+        instructions = leaf;
+      } else {
+        top[key] = leaf;
+      }
+    }
+  }
+  if (typeof top.name !== "string" || top.name.trim() === "") throw new ConvertError("name must be a non-empty string");
+  if (typeof top.description !== "string" || top.description.trim() === "") {
+    throw new ConvertError("has no description (Codex rejects an agent role without one)");
+  }
+  if (typeof instructions !== "string") throw new ConvertError("developer_instructions must be a string");
+  if (instructions.trim() === "") return { warnings, briefingDropped };
+  const table = { ...top, developer_instructions: instructions, ...tables };
+  return { toml: stringifyToml(table, { multiline: ["developer_instructions"] }), warnings, briefingDropped };
+}
+function convertForTarget(harness, type, name, output, opts = {}) {
+  if (harness !== "codex" || type !== "agent") return { output, skipped: false, warnings: [], briefingDropped: false };
+  const md = output.get(`agents/${name}.md`);
+  if (md === void 0) throw new ConvertError(`agents/${name}.md missing from the build`);
+  const conv = codexAgentToml(md.toString("utf8"), name, opts);
+  const out = /* @__PURE__ */ new Map();
+  if (conv.toml !== void 0) out.set(`agents/${name}.toml`, Buffer.from(conv.toml, "utf8"));
+  return { output: out, skipped: conv.toml === void 0, warnings: conv.warnings, briefingDropped: conv.briefingDropped };
 }
 
 // src/sources/local.ts
@@ -6667,11 +7197,11 @@ function readLock(path) {
     throw new LockError(`${path}: cannot read lock (${err.message})`);
   }
   try {
-    const value = JSON.parse(text);
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    const value2 = JSON.parse(text);
+    if (value2 === null || typeof value2 !== "object" || Array.isArray(value2)) {
       throw new Error("expected an object");
     }
-    return value;
+    return value2;
   } catch (err) {
     throw new LockError(`${path}: invalid lock JSON (${err.message})`);
   }
@@ -6833,14 +7363,14 @@ var State = class {
   }
   readJson(name) {
     try {
-      const value = JSON.parse(readFileSync6(this.path(name), "utf8"));
-      return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+      const value2 = JSON.parse(readFileSync6(this.path(name), "utf8"));
+      return value2 && typeof value2 === "object" && !Array.isArray(value2) ? value2 : {};
     } catch {
       return {};
     }
   }
-  writeJson(name, value) {
-    atomicWrite(this.path(name), JSON.stringify(value, null, 2) + "\n");
+  writeJson(name, value2) {
+    atomicWrite(this.path(name), JSON.stringify(value2, null, 2) + "\n");
   }
   // ---- trust ----------------------------------------------------------------
   trust(name, resolved) {
@@ -7061,8 +7591,11 @@ function targetDirOf(ctx, scope) {
 function baseOf(ctx, scope) {
   return scope === "user" ? ctx.home : ctx.projectDir;
 }
+function codexHomeOf(ctx) {
+  return (ctx.codexHome ?? process.env.CODEX_HOME) || void 0;
+}
 function targetsOf2(ctx, config) {
-  const markers = ctx.markers ?? defaultMarkers(ctx.home, process.env.CODEX_HOME);
+  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx));
   return selectTargets({ user: config.user.targets, project: config.project?.targets }, detectHarnesses(markers), markers);
 }
 function loadWithTargets(ctx) {
@@ -7126,36 +7659,47 @@ async function syncInner(ctx, opts, state) {
   const { config, targets } = loaded;
   const sel = opts.scope ?? "all";
   const report = { scopes: [] };
-  const unsupported = /* @__PURE__ */ new Map();
+  const noteCounts = /* @__PURE__ */ new Map();
   if (sel === "user" || sel === "all") {
-    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, unsupported));
+    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, noteCounts));
   }
   if ((sel === "project" || sel === "all") && config.project) {
-    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, unsupported);
+    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, noteCounts);
     rep.warnings.unshift(...targets.warnings);
     report.scopes.push(rep);
   }
-  const notes = unsupportedNotes(unsupported);
+  const notes = runNotes(noteCounts);
   if (notes.length) report.notes = notes;
   return report;
 }
-function unsupportedNotes(counts) {
-  const byHarness = /* @__PURE__ */ new Map();
-  for (const [k, n] of counts) {
-    const [harness, type] = k.split(" ");
-    const parts = byHarness.get(harness) ?? [];
-    parts.push(`${n} ${type}(s)`);
-    byHarness.set(harness, parts);
-  }
-  return [...byHarness].map(([h, parts]) => {
-    const label = h === "codex" ? "Codex" : h;
-    return `${parts.join(" and ")} not installed for ${label} (not supported for ${label} yet)`;
-  });
+function bump(counts, kind) {
+  counts.set(kind, (counts.get(kind) ?? 0) + 1);
 }
-async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, unsupported) {
+var HARNESS_LABEL = { claude: "Claude Code", codex: "Codex" };
+function runNotes(counts) {
+  const unsupported = /* @__PURE__ */ new Map();
+  const notes = [];
+  for (const [kind, n] of counts) {
+    const [what, harness, type] = kind.split(" ");
+    if (what === "unsupported") unsupported.set(harness, [...unsupported.get(harness) ?? [], `${n} ${type}(s)`]);
+  }
+  for (const [h, parts] of unsupported) {
+    const label = HARNESS_LABEL[h];
+    notes.push(`${parts.join(" and ")} not installed for ${label} (not supported for ${label} yet)`);
+  }
+  for (const [kind, n] of counts) {
+    const [what, harness] = kind.split(" ");
+    if (what === "briefing") {
+      notes.push(`briefing.skills of ${n} agent(s) not written for ${HARNESS_LABEL[harness]} (Codex ignores an agent file with unknown keys)`);
+    }
+  }
+  return notes;
+}
+async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, noteCounts) {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
   const base = baseOf(ctx, scope);
+  const rc = { base, scope, codexHome: codexHomeOf(ctx) };
   const cacheRoot = cacheRootOf(ctx);
   const lockPath = join12(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
@@ -7185,7 +7729,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, u
     })
   );
   const plan = [];
-  const keep = Object.keys(oldLock).filter((key) => rootOfKey(base, key) === void 0);
+  const keep = Object.keys(oldLock).filter((key) => rootOfKey(rc, key) === void 0);
   const catalogs = /* @__PURE__ */ new Map();
   const keyInfo = /* @__PURE__ */ new Map();
   const catalogOf = (source) => {
@@ -7212,7 +7756,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, u
   const buildItem = (item) => {
     const targets = harnessesFor(item.type);
     for (const h of harnesses) {
-      if (!targets.includes(h)) unsupported.set(`${h} ${item.type}`, (unsupported.get(`${h} ${item.type}`) ?? 0) + 1);
+      if (!targets.includes(h)) bump(noteCounts, `unsupported ${h} ${item.type}`);
     }
     if (targets.length === 0) return;
     for (const h of targets) {
@@ -7233,7 +7777,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, u
     }
     for (const h of targets) {
       const key = lockKey(h, item.target);
-      const root = rootOf(base, h, item.type);
+      const root = rootOf(rc, h, item.type);
       let output;
       try {
         output = build(catItem, r.dir, makeContext(ctx, scope, h, root, item, scopeCfg.vars, cat.meta.vars ?? {}));
@@ -7247,6 +7791,18 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, u
       if (rendersEmpty(catItem, output)) {
         planItem.output = /* @__PURE__ */ new Map();
         planItem.skipped = "renders-empty";
+      } else {
+        try {
+          const conv = convertForTarget(h, item.type, item.name, output);
+          for (const w of conv.warnings) rep.warnings.push(`${item.type} ${item.name} (${h}): ${w}`);
+          if (conv.briefingDropped) bump(noteCounts, `briefing ${h}`);
+          planItem.output = conv.output;
+          if (conv.skipped) planItem.skipped = "renders-empty";
+        } catch (err) {
+          rep.warnings.push(`${item.type} ${item.name} (${h}): ${err.message}`);
+          if (key in oldLock) keep.push(key);
+          continue;
+        }
       }
       plan.push(planItem);
     }
@@ -7304,13 +7860,12 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, u
     targetDir,
     force: opts.force,
     keep,
-    rootOf: (key) => rootOfKey(base, key) ?? targetDir
+    rootOf: (key) => rootOfKey(rc, key) ?? targetDir
   });
   if (scope === "project") {
     const newLock = readLock(lockPath);
-    for (const rootName of allRootNames()) {
-      const rootDir = join12(base, rootName);
-      const managed = Object.entries(newLock).filter(([key]) => rootOfKey(base, key) === rootDir).flatMap(([, e]) => Object.keys(e.files));
+    for (const rootDir of allRoots(rc)) {
+      const managed = Object.entries(newLock).filter(([key]) => rootOfKey(rc, key) === rootDir).flatMap(([, e]) => Object.keys(e.files));
       const isClaude = rootDir === targetDir;
       updateGitignore({
         dir: rootDir,
@@ -7327,8 +7882,10 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, u
   rep.unchanged = result.unchanged.map(toChange);
   rep.skipped = result.skipped.map(toChange);
   const shown = (c) => {
-    const root = rootOfKey(base, c.key) ?? targetDir;
-    return { path: root === targetDir ? c.path : join12(relative2(base, root), c.path) };
+    const root = rootOfKey(rc, c.key) ?? targetDir;
+    if (root === targetDir) return { path: c.path };
+    const rel = relative2(base, root);
+    return { path: rel.startsWith("..") || isAbsolute(rel) ? join12(root, c.path) : join12(rel, c.path) };
   };
   rep.conflicts = result.conflicts.map(shown);
   rep.overwritten = result.overwritten.map(shown);

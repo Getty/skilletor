@@ -28,6 +28,7 @@ function env(harnesses: Harness[]) {
     host: { name: "box", os: "linux" },
     user: { name: "getty", home },
     markers: { claude: [markerOf("claude")], codex: [markerOf("codex")] },
+    codexHome: join(home, ".codex"), // never the real $CODEX_HOME
   };
   const writeCfg = (which: "user" | "project" | "local", obj: unknown) => {
     const file = which === "user"
@@ -103,22 +104,17 @@ test("empty-render skip applies per target", async () => {
   }
 });
 
-test("codex: agents and rules are not written; the report notes it once, the hook stays quiet", async () => {
+test("codex: rules are not written; the report notes it once, the hook stays quiet", async () => {
   const e = env(["codex"]);
   try {
-    const src = source(e.tmp.dir, "s", {
-      "agents/a1.md": "---\ndescription: a\n---\nA\n",
-      "agents/a2.md": "---\ndescription: a\n---\nA\n",
-      "rules/r1.md": "R\n",
-    });
-    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["a1@mine", "a2@mine"], rules: ["r1@mine"] } });
+    const src = source(e.tmp.dir, "s", { "rules/r1.md": "R\n", "rules/r2.md": "R\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { rules: ["r1@mine", "r2@mine"] } });
     const r = await sync(e.ctx, { scope: "user" });
-    assert.equal(existsSync(join(e.home, ".agents/agents")), false);
-    assert.equal(existsSync(join(e.home, ".claude/agents")), false);
+    assert.equal(existsSync(join(e.home, ".claude/rules")), false);
     assert.deepEqual(readLock(join(e.home, ".claude/skilletor.lock.json")), {});
     const text = reportText(r);
     assert.equal(text.match(/not installed for Codex/g)?.length, 1, text);
-    assert.match(text, /2 agent\(s\) and 1 rule\(s\)/);
+    assert.match(text, /2 rule\(s\) not installed/);
     assert.deepEqual(reportHook(r), {});
   } finally {
     e.cleanup();
@@ -320,6 +316,185 @@ test("commands see codex lock keys: available marks the item installed, wildcard
     const items = await cmdAvailable(ctx);
     assert.deepEqual(items.map((i) => [i.name, i.installed]), [["foo", true]]);
     await assert.rejects(cmdUninstall(ctx, { items: ["foo@mine"] }), /installed by the wildcard skill:\*@mine/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// ---- phase 2: agents as Codex agent-role TOML (spec §14.7) -------------------------
+
+const AGENT = (desc: string, body: string, extra = "") => `---\nname: helper\ndescription: ${desc}\nmodel: sonnet\n${extra}---\n${body}`;
+
+test("codex only: an agent becomes $CODEX_HOME/agents/<name>.toml, nothing in .claude/agents", async () => {
+  const e = env(["codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "agents/helper.md": AGENT("Helps", "You are helper.\n") });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["helper@mine"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+    assert.equal(
+      readFileSync(join(e.home, ".codex/agents/helper.toml"), "utf8"),
+      "name = \"helper\"\ndescription = \"Helps\"\ndeveloper_instructions = '''\nYou are helper.\n'''\n",
+    );
+    assert.equal(existsSync(join(e.home, ".claude/agents")), false);
+    const lock = readLock(join(e.home, ".claude/skilletor.lock.json"));
+    assert.deepEqual(Object.keys(lock), ["codex:agents/helper"]);
+    assert.deepEqual(Object.keys(lock["codex:agents/helper"]!.files), ["agents/helper.toml"]);
+    assert.match(reportText(r), /\+ codex:agents\/helper \(active from the next Codex session\)/);
+    assert.equal(r.notes, undefined); // agents no longer "not installed for Codex"
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("both harnesses: the agent is rendered per harness, Markdown for Claude, TOML for Codex", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", {
+      "agents/helper.md.njk": AGENT("Helps", "{% if harness == \"codex\" %}CODEX-BODY{% else %}CLAUDE-BODY{% endif %}\n"),
+    });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["helper@mine"] } });
+    await sync(e.ctx, { scope: "user" });
+    assert.match(readFileSync(join(e.home, ".claude/agents/helper.md"), "utf8"), /CLAUDE-BODY/);
+    const toml = readFileSync(join(e.home, ".codex/agents/helper.toml"), "utf8");
+    assert.match(toml, /CODEX-BODY/);
+    assert.doesNotMatch(toml, /model|sonnet/); // Claude-only keys are not carried over
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("user agents follow CODEX_HOME, even outside the home directory", async () => {
+  const e = env(["codex"]);
+  try {
+    const codexHome = join(e.tmp.dir, "elsewhere", "codex");
+    const ctx = { ...e.ctx, codexHome };
+    const src = source(e.tmp.dir, "s", { "agents/helper.md": AGENT("Helps", "B\n") });
+    mkdirSync(join(codexHome, "agents"), { recursive: true });
+    writeFileSync(join(codexHome, "agents/helper.toml"), "MINE\n");
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["helper@mine"] } });
+    const r = await sync(ctx, { scope: "user" });
+    // A conflict outside the home is shown with its absolute path.
+    assert.deepEqual(r.scopes[0]!.conflicts, [{ path: join(codexHome, "agents/helper.toml") }]);
+    await sync(ctx, { scope: "user", force: true });
+    assert.match(readFileSync(join(codexHome, "agents/helper.toml"), "utf8"), /developer_instructions/);
+    assert.equal(existsSync(join(e.home, ".codex/agents")), false);
+    // Removing the agent deletes the file under CODEX_HOME.
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    await sync(ctx, { scope: "user" });
+    assert.equal(existsSync(join(codexHome, "agents/helper.toml")), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("project agents go to <repo>/.codex/agents with a gitignore block there", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "agents/helper.md": AGENT("Helps", "B\n") });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { agents: ["helper@mine"] } });
+    await sync(e.ctx, { scope: "project" });
+    assert.equal(existsSync(join(e.projectDir, ".codex/agents/helper.toml")), true);
+    assert.equal(existsSync(join(e.home, ".codex/agents")), false);
+    assert.equal(readFileSync(join(e.projectDir, ".codex/.gitignore"), "utf8"), "# >>> skilletor >>>\nagents/helper.toml\n# <<< skilletor <<<\n");
+    assert.equal(existsSync(join(e.projectDir, ".agents")), false); // no skills, no .agents
+    e.writeCfg("project", { targets: ["claude"], install: { agents: ["helper@mine"] } });
+    await sync(e.ctx, { scope: "project" });
+    assert.equal(existsSync(join(e.projectDir, ".codex/agents")), false);
+    assert.equal(existsSync(join(e.projectDir, ".codex/.gitignore")), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("an agent without a description is not written for Codex (one warning); Claude still gets it", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "agents/nodesc.md": "---\nname: nodesc\n---\nB\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["nodesc@mine"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.equal(existsSync(join(e.home, ".claude/agents/nodesc.md")), true);
+    assert.equal(existsSync(join(e.home, ".codex/agents")), false);
+    assert.equal(r.scopes[0]!.warnings.length, 1);
+    assert.match(r.scopes[0]!.warnings[0]!, /agent nodesc \(codex\).*description/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a conversion error keeps an installed Codex copy, like a template error", async () => {
+  const e = env(["codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "agents/helper.md": AGENT("Helps", "B\n") });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["helper@mine"] } });
+    await sync(e.ctx, { scope: "user" });
+    writeFileSync(join(src, "agents/helper.md"), "---\ndescription: &anchor x\n---\nB\n");
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.match(r.scopes[0]!.warnings.join("\n"), /agent helper \(codex\).*line 2/);
+    assert.deepEqual(r.scopes[0]!.removed, []);
+    assert.match(readFileSync(join(e.home, ".codex/agents/helper.toml"), "utf8"), /Helps/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("an agent with a blank body is skipped for Codex only (Codex rejects blank instructions)", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "agents/empty.md": "---\ndescription: d\n---\n\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["empty@mine"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.equal(existsSync(join(e.home, ".claude/agents/empty.md")), true); // not a template: Claude unchanged
+    assert.equal(existsSync(join(e.home, ".codex/agents")), false);
+    assert.deepEqual(r.scopes[0]!.skipped.map((i) => i.key), ["codex:agents/empty"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("briefing.skills is not written for Codex; one note per run counts the agents", async () => {
+  const e = env(["codex"]);
+  try {
+    const briefed = (n: string) => `---\nname: ${n}\ndescription: d\nbriefing:\n  skills:\n    - a\n---\nB\n`;
+    const src = source(e.tmp.dir, "s", { "agents/b1.md": briefed("b1"), "agents/b2.md": briefed("b2") });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["b1@mine", "b2@mine"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.doesNotMatch(readFileSync(join(e.home, ".codex/agents/b1.toml"), "utf8"), /briefing/);
+    assert.equal(r.notes?.length, 1);
+    assert.match(r.notes![0]!, /briefing\.skills of 2 agent\(s\) not written for Codex/);
+    assert.equal(reportHook(r).additionalContext?.includes("briefing"), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a dropped codex: key is a warning naming the item; the rest is written", async () => {
+  const e = env(["codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", {
+      "agents/helper.md": AGENT("Helps", "B\n", "codex:\n  model_reasoning_effort: high\n  bad: ~\n"),
+    });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["helper@mine"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.warnings, ["agent helper (codex): codex.bad: null has no TOML form; dropped"]);
+    assert.match(readFileSync(join(e.home, ".codex/agents/helper.toml"), "utf8"), /^model_reasoning_effort = "high"$/m);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("status and drift cover codex agents", async () => {
+  const e = env(["claude"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "agents/helper.md": AGENT("Helps", "B\n") });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["helper@mine"] } });
+    await sync(e.ctx, { scope: "user" });
+    e.writeCfg("user", { targets: ["claude", "codex"], sources: { mine: { local: src } }, install: { agents: ["helper@mine"] } });
+    assert.deepEqual((await check(e.ctx, { scope: "user" })).targetsChanged, ["user"]);
+    await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(status(e.ctx, { scope: "user" }).scopes[0]!.declared.map((d) => [d.key, d.installed]),
+      [["agents/helper", true], ["codex:agents/helper", true]]);
   } finally {
     e.cleanup();
   }

@@ -403,9 +403,9 @@ manage-skills configuration. (The Codex target moved into scope: §14.)
 ## 14. Harness targets / Codex
 
 skilletor installs for one or both of two **harnesses**: Claude Code (`claude`) and the
-OpenAI Codex CLI (`codex`). Phase 1 (this section) covers detection, the per-target
-layout, skills for Codex, and the Codex plugin wiring. Codex agents (phase 2, converted to
-TOML) and rules (phase 3, a managed block in `AGENTS.md`) come later.
+OpenAI Codex CLI (`codex`). Phase 1 covers detection, the per-target layout, skills for
+Codex, and the Codex plugin wiring; phase 2 converts agents to Codex agent-role TOML
+(§14.7). Rules (phase 3, a managed block in `AGENTS.md`) come later.
 
 ### 14.1 Which harnesses: detection and `targets`
 
@@ -443,18 +443,21 @@ one:
 | Type | `claude` | `codex` |
 |---|---|---|
 | skill | `<base>/.claude/skills/<name>/` | `<base>/.agents/skills/<name>/` |
-| agent | `<base>/.claude/agents/<name>.md` | not written (phase 2) |
+| agent | `<base>/.claude/agents/<name>.md` | user: `$CODEX_HOME/agents/<name>.toml` (default `~/.codex`); project: `<repo>/.codex/agents/<name>.toml` (§14.7) |
 | rule | `<base>/.claude/rules/<name>.md` | not written (phase 3) |
 
-`<base>` is `~` (user scope) or the project root (project scope). Codex reads user skills
+`<base>` is `~` (user scope) or the project root (project scope). The user-scope Codex agent
+root is the one root that need not lie under `<base>`: it follows `$CODEX_HOME`
+(`EngineContext.codexHome`, injectable for tests). Codex reads user skills
 from `~/.agents/skills` and project skills from `<repo>/.agents/skills`; SKILL.md files are
 compatible as they are (Claude-only frontmatter keys are accepted). In code the table is
-`LAYOUTS` in `targets.ts`: per harness a lock-key prefix and a root directory per supported
-type. `apply` receives a key → root function and knows nothing else about harnesses;
-phase 2 adds a per-type output mapping (agent Markdown → TOML) at the same seam.
+`LAYOUTS` in `targets.ts`: per harness a lock-key prefix and, per supported type, a function
+from the scope (base, scope, Codex home) to the root directory. `apply` receives a key →
+root function and knows nothing else about harnesses. The per-type output mapping (agent
+Markdown → TOML, `convert.ts`) runs in the engine between render and apply.
 
-A declared agent or rule while `codex` is a target is simply not written for Codex; the
-report says so in one line per run (a note, not a warning, so the hooks stay quiet).
+A declared rule while `codex` is a target is simply not written for Codex; the report says
+so in one line per run (a note, not a warning, so the hooks stay quiet).
 
 ### 14.3 Rendering, lock, ownership
 
@@ -464,7 +467,8 @@ report says so in one line per run (a note, not a warning, so the hooks stay qui
   Codex.
 - **One lock per scope**, still at `<base>/.claude/skilletor.lock.json`. Claude entries keep
   their key (`skills/foo`) so existing locks stay valid; Codex entries are keyed
-  `codex:skills/foo`, with file paths relative to the Codex root (`.agents`). Ownership,
+  `codex:skills/foo` / `codex:agents/foo`, with file paths relative to that Codex root
+  (`.agents` for skills, the Codex home or `<repo>/.codex` for agents). Ownership,
   conflicts, `--force` and drift rules (§6.3) apply per path, unchanged.
 - A target that is no longer active (switched off in `targets`, or no longer detected) has
   its entries deleted like undeclared items on the next sync. Entries with a harness prefix
@@ -474,8 +478,9 @@ report says so in one line per run (a note, not a warning, so the hooks stay qui
   entry for an inactive target), so SessionStart syncs a newly enabled harness without
   waiting for a source change.
 - **Git hygiene:** besides the block in `<project>/.claude/.gitignore`, skilletor maintains
-  the same kind of block in `<project>/.agents/.gitignore` listing the managed Codex paths.
-  It is created only when there are such paths and removed when they are gone.
+  the same kind of block in `<project>/.agents/.gitignore` and `<project>/.codex/.gitignore`
+  listing the managed Codex paths under each. Such a block is created only when there are
+  such paths and removed when they are gone.
 
 ### 14.4 Report and status
 
@@ -506,3 +511,54 @@ once per target and names the targets in the scope header when they are not just
 - `CLAUDE_CONFIG_DIR` is not honoured, neither for markers nor for the target directory.
 - Detection is re-evaluated on every run: a harness that disappears (e.g. `~/.codex`
   deleted) has its installed items removed on the next sync. Pin `targets` to avoid that.
+- The user-scope Codex agent root follows `$CODEX_HOME` at sync time. Changing
+  `$CODEX_HOME` between syncs strands the files under the old root (the lock stores paths
+  relative to the root, not the root itself).
+
+### 14.7 Codex agents (phase 2)
+
+A Codex agent role is a TOML file; Codex 0.153 reads `$CODEX_HOME/agents/*.toml` and, in a
+**trusted** project only, `<repo>/.codex/agents/*.toml` (an untrusted project's `.codex/` is
+ignored with a warning – document, don't work around). skilletor renders the Claude agent
+Markdown (`agents/<name>.md[.njk]`) **for the `codex` harness** – so a template can branch on
+`harness` – and converts the result:
+
+| TOML key | From |
+|---|---|
+| `name` | frontmatter `name`, else the item name |
+| `description` | frontmatter `description`; missing or empty → not written for Codex, one warning (Codex rejects a role without one) |
+| `developer_instructions` | the body after the frontmatter, verbatim |
+| any key | the optional frontmatter object `codex:`, passed through as top-level TOML keys; it overrides the keys above |
+
+- `codex:` values may be strings, numbers, booleans, string arrays, or one level of tables
+  whose values are of those kinds. Anything else (null, nested tables, mixed arrays) is
+  dropped with one warning naming the key; the rest of the item is written. Values are
+  not validated against Codex's schema: Codex does that at load time and ignores the whole
+  role on a bad value (measured: a `nickname_candidates` entry with quotes → "may only
+  contain ASCII letters, digits, spaces, hyphens, and underscores").
+- Claude-only keys (`model`, `tools`, `allowed-tools`, `color`, …) are **not** carried over
+  and nothing is reported for them: there is no faithful mapping, and a silent guess
+  (`model: sonnet` → some Codex model) would be worse than none. Put Codex values under
+  `codex:` instead, e.g. `codex: { model_reasoning_effort: high, sandbox_mode: read-only }`.
+- **`briefing.skills` is not carried over either** (deviation from the phase-2 ticket, which
+  asked for a `[briefing]` table). Measured on Codex 0.153.4: agent-role files are
+  deserialized strictly, and any unknown key – `[briefing]` included – makes Codex ignore the
+  whole role ("unknown field `briefing`"), in user and trusted-project roots alike. The
+  report carries one note per run counting the Codex agents whose `briefing.skills` was
+  dropped. Writing it is a one-line switch in `convert.ts` should Codex start tolerating it.
+- **Empty body = skipped for Codex** (§5 per target): Codex rejects a blank
+  `developer_instructions`, so an agent whose body is whitespace-only after the frontmatter
+  is skipped for Codex – template or not – and a copy installed earlier is removed.
+- A frontmatter that cannot be read (YAML outside the supported subset: block/flow
+  sequences of scalars, nested mappings, plain/quoted/block scalars) is treated like a
+  template error: warning, the Codex copy stays at its old state.
+- Conversion errors never affect the Claude copy of the same item.
+
+**TOML writing** is skilletor's own ~100-line serializer (`toml.ts`), not a dependency: the
+only runtime dependency stays Nunjucks (§10), and only strings, numbers, booleans, string
+arrays and one level of tables are needed. `developer_instructions` is written as a
+multi-line literal string (`'''`) when it can be (no `'''`, no control characters, no CR,
+no trailing `'`), else as a multi-line basic string with every `\` and `"` escaped, so no
+content can close the string early. Round-trip tests parse the output with `smol-toml`
+(devDependency only); Codex's own loader accepts the files (manual check via the app-server's
+`configWarning`s, which name every malformed role file).

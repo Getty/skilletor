@@ -163,7 +163,9 @@ test("codex session-start without a project dir: the git top level of cwd is the
   const e = env();
   try {
     const { repo, sub } = repoWithProjectSkill(e);
-    const ctx: HookContext = { ...e.ctx, projectDir: undefined, markers: { claude: [], codex: [e.home] } };
+    const ctx: HookContext = {
+      ...e.ctx, projectDir: undefined, markers: { claude: [], codex: [e.home] }, codexHome: join(e.home, ".codex"),
+    };
     const input = { hook_event_name: "SessionStart", source: "startup", cwd: sub, session_id: "x", model: "gpt" };
     const out = await runHook("session-start", input, ctx);
     assert.equal(out.hookSpecificOutput?.hookEventName, "SessionStart");

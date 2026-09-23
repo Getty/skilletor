@@ -5,14 +5,15 @@
 // as it was.
 import { execFileSync } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
-import { basename, join, relative } from "node:path";
+import { basename, isAbsolute, join, relative } from "node:path";
 import {
   loadConfig, type Harness, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig, type WildcardItem,
 } from "./config.ts";
 import {
   defaultMarkers, detectHarnesses, lockKey, parseLockKey, rootOf, rootOfKey, selectTargets, supports, targetDrift,
-  allRootNames, type HarnessMarkers, type TargetSelection,
+  allRoots, type HarnessMarkers, type RootContext, type TargetSelection,
 } from "./targets.ts";
+import { convertForTarget } from "./convert.ts";
 import { LocalSource } from "./sources/local.ts";
 import { GitSource } from "./sources/git.ts";
 import { UrlSource } from "./sources/url.ts";
@@ -38,6 +39,8 @@ export interface EngineContext {
   timeoutMs?: number;
   /** Harness detection markers (spec §14.1); default from `home` and `$CODEX_HOME`. */
   markers?: HarnessMarkers;
+  /** `$CODEX_HOME` (spec §14.2): root of user-scope Codex agents and markers; default from the env. */
+  codexHome?: string;
 }
 
 export interface SyncOptions {
@@ -61,9 +64,14 @@ function baseOf(ctx: EngineContext, scope: ScopeName): string {
   return scope === "user" ? ctx.home : ctx.projectDir!;
 }
 
+/** `$CODEX_HOME`, injected or from the environment; empty means unset. */
+function codexHomeOf(ctx: EngineContext): string | undefined {
+  return (ctx.codexHome ?? process.env.CODEX_HOME) || undefined;
+}
+
 /** Active targets per scope (spec §14.1); throws a TargetError when none apply. */
 export function targetsOf(ctx: EngineContext, config: LoadedConfig): TargetSelection {
-  const markers = ctx.markers ?? defaultMarkers(ctx.home, process.env.CODEX_HOME);
+  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx));
   return selectTargets({ user: config.user.targets, project: config.project?.targets }, detectHarnesses(markers), markers);
 }
 
@@ -152,33 +160,47 @@ async function syncInner(ctx: EngineContext, opts: SyncOptions, state: State): P
   const { config, targets } = loaded;
   const sel = opts.scope ?? "all";
   const report: SyncReport = { scopes: [] };
-  const unsupported = new Map<string, number>(); // "harness type" -> declared items not written
+  const noteCounts = new Map<string, number>(); // note kind -> count, reported once per run
   if (sel === "user" || sel === "all") {
-    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, unsupported));
+    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, noteCounts));
   }
   if ((sel === "project" || sel === "all") && config.project) {
-    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, unsupported);
+    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, noteCounts);
     rep.warnings.unshift(...targets.warnings);
     report.scopes.push(rep);
   }
-  const notes = unsupportedNotes(unsupported);
+  const notes = runNotes(noteCounts);
   if (notes.length) report.notes = notes;
   return report;
 }
 
-/** One line per harness naming the declared items it does not receive yet (spec §14.2). */
-function unsupportedNotes(counts: Map<string, number>): string[] {
-  const byHarness = new Map<string, string[]>();
-  for (const [k, n] of counts) {
-    const [harness, type] = k.split(" ");
-    const parts = byHarness.get(harness!) ?? [];
-    parts.push(`${n} ${type}(s)`);
-    byHarness.set(harness!, parts);
+/** Count one occurrence of a note kind ("unsupported <harness> <type>", "briefing <harness>"). */
+function bump(counts: Map<string, number>, kind: string): void {
+  counts.set(kind, (counts.get(kind) ?? 0) + 1);
+}
+
+const HARNESS_LABEL: Record<Harness, string> = { claude: "Claude Code", codex: "Codex" };
+
+/** The run's notes (spec §14.2, §14.7): one line per harness and kind. */
+function runNotes(counts: Map<string, number>): string[] {
+  const unsupported = new Map<Harness, string[]>();
+  const notes: string[] = [];
+  for (const [kind, n] of counts) {
+    const [what, harness, type] = kind.split(" ") as [string, Harness, string?];
+    if (what === "unsupported") unsupported.set(harness, [...(unsupported.get(harness) ?? []), `${n} ${type}(s)`]);
   }
-  return [...byHarness].map(([h, parts]) => {
-    const label = h === "codex" ? "Codex" : h;
-    return `${parts.join(" and ")} not installed for ${label} (not supported for ${label} yet)`;
-  });
+  for (const [h, parts] of unsupported) {
+    const label = HARNESS_LABEL[h];
+    notes.push(`${parts.join(" and ")} not installed for ${label} (not supported for ${label} yet)`);
+  }
+  for (const [kind, n] of counts) {
+    const [what, harness] = kind.split(" ") as [string, Harness];
+    if (what === "briefing") {
+      notes.push(`briefing.skills of ${n} agent(s) not written for ${HARNESS_LABEL[harness]} ` +
+        "(Codex ignores an agent file with unknown keys)");
+    }
+  }
+  return notes;
 }
 
 async function syncScope(
@@ -189,11 +211,12 @@ async function syncScope(
   harnesses: Harness[],
   opts: SyncOptions,
   state: State,
-  unsupported: Map<string, number>,
+  noteCounts: Map<string, number>,
 ): Promise<ScopeReport> {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
   const base = baseOf(ctx, scope);
+  const rc: RootContext = { base, scope, codexHome: codexHomeOf(ctx) };
   const cacheRoot = cacheRootOf(ctx);
   const lockPath = join(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
@@ -228,7 +251,7 @@ async function syncScope(
   // Build each declared item; keep (don't delete) items whose source is unavailable.
   const plan: PlanItem[] = [];
   // Entries this version cannot place (unknown harness prefix) are never touched.
-  const keep: string[] = Object.keys(oldLock).filter((key) => rootOfKey(base, key) === undefined);
+  const keep: string[] = Object.keys(oldLock).filter((key) => rootOfKey(rc, key) === undefined);
   const catalogs = new Map<string, Catalog | null>();
   const keyInfo = new Map<string, ItemChange>();
 
@@ -260,7 +283,7 @@ async function syncScope(
   const buildItem = (item: { type: ItemType; name: string; source: string; target: string }) => {
     const targets = harnessesFor(item.type);
     for (const h of harnesses) {
-      if (!targets.includes(h)) unsupported.set(`${h} ${item.type}`, (unsupported.get(`${h} ${item.type}`) ?? 0) + 1);
+      if (!targets.includes(h)) bump(noteCounts, `unsupported ${h} ${item.type}`);
     }
     if (targets.length === 0) return;
     for (const h of targets) {
@@ -282,7 +305,7 @@ async function syncScope(
     // Rendered once per target, with that target's harness and root (spec §14.3).
     for (const h of targets) {
       const key = lockKey(h, item.target);
-      const root = rootOf(base, h, item.type)!;
+      const root = rootOf(rc, h, item.type)!;
       let output: Map<string, Buffer>;
       try {
         output = build(catItem, r.dir, makeContext(ctx, scope, h, root, item, scopeCfg.vars, cat.meta.vars ?? {}));
@@ -297,6 +320,20 @@ async function syncScope(
       if (rendersEmpty(catItem, output)) {
         planItem.output = new Map();
         planItem.skipped = "renders-empty";
+      } else {
+        // Per-target output mapping (spec §14.7): a Codex agent becomes TOML. A
+        // conversion error leaves the target's copy as it was, like a template error.
+        try {
+          const conv = convertForTarget(h, item.type, item.name, output);
+          for (const w of conv.warnings) rep.warnings.push(`${item.type} ${item.name} (${h}): ${w}`);
+          if (conv.briefingDropped) bump(noteCounts, `briefing ${h}`);
+          planItem.output = conv.output;
+          if (conv.skipped) planItem.skipped = "renders-empty";
+        } catch (err) {
+          rep.warnings.push(`${item.type} ${item.name} (${h}): ${(err as Error).message}`);
+          if (key in oldLock) keep.push(key);
+          continue;
+        }
       }
       plan.push(planItem);
     }
@@ -357,17 +394,17 @@ async function syncScope(
   }
 
   const result = apply(plan, {
-    targetDir, force: opts.force, keep, rootOf: (key) => rootOfKey(base, key) ?? targetDir,
+    targetDir, force: opts.force, keep, rootOf: (key) => rootOfKey(rc, key) ?? targetDir,
   });
 
   if (scope === "project") {
     // One managed block per target root: `.claude/.gitignore` (with the lock and
-    // local config) and `.agents/.gitignore` for Codex paths (spec §6.4, §14.3).
+    // local config), `.agents/.gitignore` and `.codex/.gitignore` for Codex paths
+    // (spec §6.4, §14.3).
     const newLock = readLock(lockPath);
-    for (const rootName of allRootNames()) {
-      const rootDir = join(base, rootName);
+    for (const rootDir of allRoots(rc)) {
       const managed = Object.entries(newLock)
-        .filter(([key]) => rootOfKey(base, key) === rootDir)
+        .filter(([key]) => rootOfKey(rc, key) === rootDir)
         .flatMap(([, e]) => Object.keys(e.files));
       const isClaude = rootDir === targetDir;
       updateGitignore({
@@ -387,9 +424,12 @@ async function syncScope(
   rep.unchanged = result.unchanged.map(toChange);
   rep.skipped = result.skipped.map(toChange);
   // Claude paths stay relative to `.claude` as before; other roots are named (`.agents/…`).
+  // A root outside the base (a CODEX_HOME elsewhere) is shown absolute.
   const shown = (c: { key: string; path: string }) => {
-    const root = rootOfKey(base, c.key) ?? targetDir;
-    return { path: root === targetDir ? c.path : join(relative(base, root), c.path) };
+    const root = rootOfKey(rc, c.key) ?? targetDir;
+    if (root === targetDir) return { path: c.path };
+    const rel = relative(base, root);
+    return { path: rel.startsWith("..") || isAbsolute(rel) ? join(root, c.path) : join(rel, c.path) };
   };
   rep.conflicts = result.conflicts.map(shown);
   rep.overwritten = result.overwritten.map(shown);

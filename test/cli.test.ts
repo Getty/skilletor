@@ -159,10 +159,13 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
   mkdirSync(join(home, ".claude"), { recursive: true });
   mkdirSync(join(src, "skills", "bar"), { recursive: true });
   writeFileSync(join(src, "skills", "bar", "SKILL.md"), "---\nname: bar\ndescription: bar\n---\nBAR\n");
+  mkdirSync(join(src, "agents"), { recursive: true });
+  writeFileSync(join(src, "agents", "helper.md"), "---\nname: helper\ndescription: helps\nmodel: opus\n---\nYou help.\n");
   writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } } }));
   mkdirSync(join(repo, ".claude"), { recursive: true });
   mkdirSync(join(repo, "sub"), { recursive: true });
   writeFileSync(join(repo, ".claude", "skilletor.json"), JSON.stringify({ install: { skills: ["bar@s"] } }));
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } }, install: { agents: ["helper@s"] } }));
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, CODEX_HOME: codexHome };
   delete env.CLAUDE_PROJECT_DIR;
@@ -176,6 +179,11 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
   assert.match(out.hookSpecificOutput.additionalContext, /skill bar@s \(codex\): active from the next Codex session/);
   assert.equal(existsSync(join(realpathSync(repo), ".agents/skills/bar/SKILL.md")), true);
   assert.equal(existsSync(join(repo, ".claude/skills")), false); // Claude not in use here
+  // The user agent became a Codex agent role under CODEX_HOME.
+  assert.equal(
+    readFileSync(join(codexHome, "agents", "helper.toml"), "utf8"),
+    "name = \"helper\"\ndescription = \"helps\"\ndeveloper_instructions = '''\nYou help.\n'''\n",
+  );
 
   const st = runCli(["status", "--project-dir", repo], env);
   assert.match(st.stdout, /^project scope \(codex\):$/m);
