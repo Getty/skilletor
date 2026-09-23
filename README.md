@@ -98,6 +98,13 @@ skilletor.json             # optional: { "description": "…", "vars": { default
 Only `skill`, `agent` and `rule` are installable — skilletor never syncs hooks,
 `settings.json` or MCP configs.
 
+`skilletor uninstall` removes explicit entries from one config — the user config, or the
+project config with `--project`. `rule:k8s@shared` removes only from `rules`;
+`k8s@shared` removes from every list. Every item is checked before anything is edited:
+an item with no explicit entry in that config fails the command (exit 1, config
+untouched), and the error names where it comes from instead — a wildcard, another
+type's list, or the other scope's config.
+
 ### Wildcards: everything of one type from a source
 
 `"*@source"` in an install list declares every item of that type the source offers:
@@ -125,6 +132,12 @@ scope) nothing fails:
   report warns;
 - two wildcards offer the same name → that one name is skipped with a warning (an
   installed copy stays as it is); every other item proceeds.
+
+An item installed through a wildcard cannot be uninstalled by name — the wildcard would
+bring it back. Uninstall the wildcard (`skilletor uninstall 'rule:*@shared'`), or keep it
+and switch the item off via vars ([empty render = skipped](#switching-items-on-and-off-with-vars)).
+Uninstalling an explicit entry that a wildcard also covers works, with a warning that the
+item returns on the next sync.
 
 Declaring the same wildcard twice in one scope is a config error. If a source cannot be
 resolved (offline without cache, untrusted, broken layout), everything it installed —
@@ -246,7 +259,7 @@ skilletor source list [--json] | source remove <name> [--project] [--force]   # 
 skilletor available [source] [--json]     # catalog of trusted sources
 skilletor install <item>... [--project]   # name@source (type:name@source if ambiguous), then sync
 skilletor install 'rule:*@shared' [--project]   # wildcard: every rule of the source (type prefix required)
-skilletor uninstall <item>... [--project] # 'rule:*@shared' removes the wildcard entry
+skilletor uninstall <item>... [--project] # [type:]name@source (no type: every list); 'rule:*@shared' the wildcard
 skilletor sync | check | status           # --scope user|project|all, --json, --project-dir <dir>
 skilletor sync --force                    # overwrite and adopt unmanaged files reported as conflicts
 skilletor trust <source>

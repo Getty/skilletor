@@ -35,7 +35,7 @@ skilletor source list [--json] | source remove <name> [--project] [--force]   # 
 skilletor available [source] [--json]     # catalog of trusted sources: type, name, description, installed?
 skilletor install <item>... [--project]   # name@source (type:name@source if ambiguous), then sync
 skilletor install 'rule:*@shared' [--project]   # wildcard: type prefix required, quote against shell globbing
-skilletor uninstall <item>... [--project] # 'rule:*@shared' removes the wildcard entry
+skilletor uninstall <item>... [--project] # [type:]name@source (no type: every list); 'rule:*@shared' the wildcard
 skilletor sync | check | status           # --scope user|project|all, --json, --project-dir <dir>
 skilletor sync --force                    # overwrite and adopt unmanaged files reported as conflicts
 skilletor trust <source>                  # confirm a project-declared source (shows the resolved URL)
@@ -44,6 +44,10 @@ skilletor trust <source>                  # confirm a project-declared source (s
 `add`, `install` and `uninstall` only edit the config and then sync — the declarative
 `skilletor.json` is the single source of truth. `check` writes nothing and exits non-zero
 when a source has changed.
+
+`uninstall` edits one config (`--project`: the project's): `type:name@src` removes from that
+list only, `name@src` from all. No explicit entry there → exit 1, config untouched; the
+error names the covering wildcard, other type or other scope.
 
 ## Config
 
@@ -95,6 +99,9 @@ every sync: items added upstream get installed, items removed upstream get delet
   offering one name → that name is skipped with a warning, an installed copy stays.
   The same wildcard twice in one scope is a config error.
 - Source unresolvable (offline, untrusted, broken) → everything it installed stays.
+- A wildcard-installed item can't be uninstalled by name: uninstall `type:*@source`, or
+  gate the item via vars (empty render → skipped). Uninstalling an explicit entry a
+  wildcard also covers warns that it returns on the next sync.
 - `status`: `✓ rules/k8s @shared via *@shared` per item, `* rules/* @shared (3 installed)` per wildcard.
 
 ## Author mode (local override)
