@@ -22,7 +22,7 @@ render.ts     build one item in memory (Nunjucks)     apply.ts     diff → atom
 lock.ts       lock read/write                         state.ts     trust, last-check, pending-report, mutex
 engine.ts     sync / check / status pipeline          hooks.ts     SessionStart + UserPromptSubmit, black box
 report.ts     text / json / hook output               targets.ts   harness detection, LAYOUTS, lock keys
-convert.ts    agent Markdown → Codex TOML             agentsmd.ts  the managed AGENTS.md block
+convert.ts    agent Markdown → Codex TOML             agentsmd.ts  Codex rules file, AGENTS.md pointer, hook trust
 frontmatter.ts  YAML subset reader                    toml.ts      TOML writer (no dependency)
 ```
 
@@ -47,10 +47,13 @@ frontmatter.ts  YAML subset reader                    toml.ts      TOML writer (
   with an unknown prefix are kept untouched. A path on disk that is not in the lock
   is a conflict (reported, untouched; `--force` adopts it). A managed file that
   diverged from its lock hash is overwritten and named in the report.
-- **`AGENTS.md` is shared, not owned.** Codex rules are `block: true` lock entries
-  whose sections live between `<!-- skilletor:begin -->`/`end` markers; text outside
-  the markers is never modified. Malformed markers or a symlinked/unreadable
-  `AGENTS.md` refuse the whole block for that scope, even with `--force`.
+- **Codex rules: the rules file is owned, `AGENTS.md` is shared.** Rules are
+  `block: true` lock entries keyed on `skilletor-rules.md`; `apply` never touches disk
+  for them — the engine rebuilds the whole rules file from the new lock. The Codex
+  `SessionStart` hook (`--harness codex`) injects it on startup/clear, never on resume.
+  `AGENTS.md` gets only a fixed pointer between `<!-- skilletor:begin -->`/`end`; text
+  outside the markers is never modified, and a refusal (malformed markers, symlink,
+  `CLAUDE.md` identity) skips only the pointer, even with `--force`.
 - **Installable types are exactly** `skill`, `agent`, `rule` (`ITEM_TYPES` in
   `config.ts`); where each lands is `LAYOUTS[harness].roots[type]` per scope.
   Hooks, `settings.json` and MCP configs are never synced.

@@ -1,4 +1,4 @@
-# skilletor for Codex — targets, agents, AGENTS.md
+# skilletor for Codex — targets, agents, rules, hook trust
 
 ## Which harnesses (`targets`)
 
@@ -46,20 +46,40 @@ codex:
 - No `description` → not written for Codex, warning. Blank body → skipped for Codex.
 - Project agents in `<repo>/.codex/agents/` load only in a project Codex trusts.
 
-## Rules → the `AGENTS.md` block
+## Rules → rules file, hook, `AGENTS.md` pointer
 
-All Codex rules of a scope go into one block in `$CODEX_HOME/AGENTS.md` (user) or
-`<repo>/AGENTS.md` (project), one section per rule, sorted by name. A `paths:` frontmatter
-becomes a leading "Applies when working with files matching: …" line.
+All Codex rules of a scope go into one rules file, wholly skilletor's:
+`$CODEX_HOME/skilletor-rules.md` (user) or `<repo>/.codex/skilletor-rules.md` (project),
+one section per rule, sorted by name. A `paths:` frontmatter becomes a leading "Applies when
+working with files matching: …" line. The file exists exactly while the scope has a Codex
+rule; a section edited or deleted by hand is restored and reported as overwritten
+(`.codex/skilletor-rules.md#rules/<name>`).
 
-- Text outside `<!-- skilletor:begin -->` … `<!-- skilletor:end -->` is never modified.
-  A section edited or deleted by hand is restored and reported as overwritten.
-- Refused (warning, nothing written for Codex rules in that scope, `--force` does not help):
-  malformed markers (`begin` without `end`, `end` first, either twice), or `AGENTS.md` is a
-  symlink (e.g. to `CLAUDE.md`), a directory or unreadable, or — with Claude also a target —
-  a `CLAUDE.md` Claude reads is that same file (`CLAUDE.md`/`.claude/CLAUDE.md` in the
-  project, `~/.claude/CLAUDE.md` for the user file), since Claude would see each rule twice.
-- Warnings: an `AGENTS.override.md` beside it (Codex reads that instead); a project
-  `AGENTS.md` over Codex's `project_doc_max_bytes` (default 32768 — the block is cut).
-- `AGENTS.md` is not gitignored: a project's Codex rules show in its diff. Opt a project
-  out with `"targets": ["claude"]`, or use user-scope rules for machine-specific text.
+- **Delivery:** the Codex `SessionStart` hook puts the user, then the project rules file at
+  the start of the context on `startup` and `clear` — from disk, so also after a failed
+  sync. Not on `resume` (the first copy is still in the history). Rules missing from your
+  context → read the rules file named in `AGENTS.md`.
+- **Pointer:** `$CODEX_HOME/AGENTS.md` / `<repo>/AGENTS.md` hold only a fixed block
+  between `<!-- skilletor:begin -->` and `<!-- skilletor:end -->` pointing at the rules
+  file; text outside it is never modified. It changes only when the scope's first Codex
+  rule appears or its last goes.
+- Pointer refused (warning, `AGENTS.md` untouched, `--force` does not help; the rules file
+  and hook delivery still work): malformed markers (`begin` without `end`, `end` first,
+  either twice), or `AGENTS.md` is a symlink (e.g. to `CLAUDE.md`), a directory or
+  unreadable, or — with Claude also a target — a `CLAUDE.md` Claude reads is that same file
+  (`CLAUDE.md`/`.claude/CLAUDE.md` in the project, `~/.claude/CLAUDE.md` for the user file).
+- Pointer warnings: an `AGENTS.override.md` beside it (Codex reads that instead); a project
+  `AGENTS.md` over Codex's `project_doc_max_bytes` (default 32768 — the pointer is cut).
+- Git: the project rules file is in the managed `.codex/.gitignore` block (unless
+  `"gitignore": false`); only the pointer shows in the diff. An older skilletor's rule
+  sections in `AGENTS.md` are replaced by the pointer on the next sync (rules reported as
+  updated, not overwritten).
+
+## Hook trust
+
+Codex runs plugin hooks only after the user trusts them in `/hooks`, and skips them
+silently until then — no syncs, no rules. While Codex is a machine target and
+`$CODEX_HOME/config.toml` has no trust entry for skilletor's `SessionStart` hook, `sync`
+and `status` warn once per run; with `--json` that is the top-level `warnings` array
+(absent when empty). A plugin update that changes the hook needs trusting again in
+`/hooks` — skilletor cannot see that case.

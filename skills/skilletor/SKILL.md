@@ -1,6 +1,6 @@
 ---
 name: skilletor
-description: "skilletor CLI — installs and updates skills, agents and rules from remote sources for Claude Code and Codex. Use when adding a source, installing/uninstalling a skill/agent/rule, all of a type or a name pattern (`*@source`, `perl-*@source`) from a source, writing or installing a bundle (`bundles/<name>.yaml`, `bundle:name@source`, `install.bundles`), switching an item on/off per project via vars, editing a skilletor.json or its `targets`, running sync/check/status, asking 'where does this skill come from' or 'why did this file change', or before editing a file skilletor manages (including the skilletor block in AGENTS.md)."
+description: "skilletor CLI — installs and updates skills, agents and rules from remote sources for Claude Code and Codex. Use when adding a source, installing/uninstalling a skill/agent/rule, all of a type or a name pattern (`*@source`, `perl-*@source`) from a source, writing or installing a bundle (`bundles/<name>.yaml`, `bundle:name@source`, `install.bundles`), switching an item on/off per project via vars, editing a skilletor.json or its `targets`, running sync/check/status, asking 'where does this skill come from' or 'why did this file change', or before editing a file skilletor manages (including skilletor-rules.md and the skilletor pointer block in AGENTS.md)."
 ---
 
 # skilletor — remote skills, agents and rules for Claude Code and Codex
@@ -12,8 +12,8 @@ description: "skilletor CLI — installs and updates skills, agents and rules fr
   `<plugin root>/bin/skilletor`; the plugin root is two directories above this SKILL.md,
   whose path Codex listed with the skill (`…/skilletor/<version>/skills/skilletor/SKILL.md`
   → `…/skilletor/<version>/bin/skilletor`). Take `<version>` from that listed path, never
-  from memory — it changes on every plugin update. Codex runs skilletor's session hooks
-  only after the user trusts them in `/hooks`; until then run `sync` by hand.
+  from memory — it changes on every plugin update. Codex runs skilletor's hooks only once
+  trusted in `/hooks` (again after an update changes them); until then `sync` by hand.
 
 ## Do not hand-edit a managed file — change it in the source
 
@@ -29,12 +29,12 @@ Where items land, under `~` (user scope) or the project root (project scope):
 |---|---|---|
 | skill | `.claude/skills/<name>/` | `.agents/skills/<name>/` |
 | agent | `.claude/agents/<name>.md` | `.codex/agents/<name>.toml` (user: `$CODEX_HOME/agents/`) |
-| rule | `.claude/rules/<name>.md` | a section of the skilletor block in `AGENTS.md` (user: `$CODEX_HOME/AGENTS.md`) |
+| rule | `.claude/rules/<name>.md` | a section of `.codex/skilletor-rules.md` (user: `$CODEX_HOME/skilletor-rules.md`) |
 
 `$CODEX_HOME` defaults to `~/.codex`. A file is managed when its path is in
 `<scope>/.claude/skilletor.lock.json` (Codex keys `codex:skills/<name>` etc.) — check the
-lock before editing; files not in it are yours. In `AGENTS.md` only the text between
-`<!-- skilletor:begin -->` and `<!-- skilletor:end -->` is managed.
+lock before editing; files not in it are yours. In `AGENTS.md` only the pointer block
+between `<!-- skilletor:begin -->` and `<!-- skilletor:end -->` is managed.
 
 ## Commands
 
@@ -83,7 +83,7 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
   wrong file is a config error: the config fails to load, nothing syncs.
 - `targets` (`["claude"]`, `["codex"]` or both), unset = auto-detected. The user file sets
   the machine's set; a project or local file can only narrow it (`["claude"]` keeps a
-  project's `AGENTS.md` untouched). Details: [references/codex.md](references/codex.md).
+  project's `AGENTS.md` and `.codex/` untouched). Details: [references/codex.md](references/codex.md).
 
 ### Wildcards and name patterns — `*@source`, `perl-*@source`
 
