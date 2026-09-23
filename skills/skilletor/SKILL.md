@@ -31,10 +31,10 @@ under skills/agents/rules.
 
 ```bash
 skilletor add [name] <spec> [--project]   # add a source (resolves shorthand, trusts it), then sync
-skilletor source list | source remove <name> [--force]
+skilletor source list | source remove <name> [--project] [--force]
 skilletor available [source]              # catalog of trusted sources: type, name, description, installed?
 skilletor install <item>... [--project]   # name@source (type:name@source if ambiguous), then sync
-skilletor uninstall <item>...
+skilletor uninstall <item>... [--project]
 skilletor sync | check | status           # --scope user|project|all, --json, --force, --project-dir <dir>
 skilletor trust <source>                  # confirm a project-declared source (shows the resolved URL)
 ```

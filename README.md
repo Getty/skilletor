@@ -177,10 +177,10 @@ shared remote; manage-skills remains for hardlinked local sharing.
 
 ```
 skilletor add [name] <spec> [--project]   # add a source (resolves shorthand, trusts it), then sync
-skilletor source list | source remove <name> [--force]
+skilletor source list | source remove <name> [--project] [--force]
 skilletor available [source]              # catalog of trusted sources; --json
 skilletor install <item>... [--project]   # name@source (type:name@source if ambiguous), then sync
-skilletor uninstall <item>...
+skilletor uninstall <item>... [--project]
 skilletor sync | check | status           # --scope user|project|all, --json, --force, --project-dir <dir>
 skilletor trust <source>
 ```
