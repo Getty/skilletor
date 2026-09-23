@@ -65,6 +65,7 @@ A source's layout (convention, no manifest):
 skills/<name>/SKILL.md[.njk] + companion files
 agents/<name>.md[.njk]
 rules/<name>.md[.njk]
+bundles/<name>.yaml        # optional: named sets of items (see Bundles)
 snippets/…                 # includes only, not installable
 skilletor.json             # optional: { "description": "…", "vars": { defaults } }
 ```
@@ -89,7 +90,8 @@ skilletor.json             # optional: { "description": "…", "vars": { default
   "install": {
     "skills": ["perl-moo@shared"],
     "agents": ["karr@shared"],
-    "rules":  ["commit-style@team"]
+    "rules":  ["commit-style@team"],
+    "bundles": ["perl@shared"]
   },
   "vars": { "kubernetes": true },
   "gitignore": true,
@@ -105,36 +107,41 @@ for (`claude`, `codex`) — see [Codex](#codex).
 project config with `--project`. `rule:k8s@shared` removes only from `rules`;
 `k8s@shared` removes from every list. Every item is checked before anything is edited:
 an item with no explicit entry in that config fails the command (exit 1, config
-untouched), and the error names where it comes from instead — a wildcard, another
-type's list, or the other scope's config.
+untouched), and the error names where it comes from instead — a wildcard, a bundle,
+another type's list, or the other scope's config.
 
-### Wildcards: everything of one type from a source
+### Wildcards and name patterns
 
-`"*@source"` in an install list declares every item of that type the source offers:
+`"*@source"` in an install list declares every item of that type the source offers; `*`
+may stand anywhere in the name, so a pattern picks the matching ones:
 
 ```json
-{ "install": { "rules": ["*@shared"] } }
+{ "install": { "rules": ["*@shared"], "skills": ["perl-*@shared"] } }
 ```
 
-`"rule:*@shared"` is the same with an explicit type; `*` is only valid as the whole name.
-On the command line the type prefix is required, and the argument must be quoted so the
-shell does not glob it:
+`"rule:*@shared"` is the same with an explicit type (`"rule:*-style@shared"` for a
+pattern). On the command line the type prefix is required, and the argument must be
+quoted so the shell does not glob it:
 
 ```bash
-skilletor install 'rule:*@shared' [--project]
+skilletor install 'rule:*@shared' 'skill:perl-*@shared' [--project]
 skilletor uninstall 'rule:*@shared' [--project]
 ```
 
 A wildcard is expanded against the source on every sync, so items added upstream arrive
-on the next sync and items removed upstream are deleted. When names overlap (per type and
-scope) nothing fails:
+on the next sync and items removed upstream are deleted. A pattern that matches nothing
+warns (`skill wildcard zzz-*@shared matches nothing in source shared`); a bare `*` stays
+silent, since a source without rules is normal. When names overlap (per type and scope)
+nothing fails:
 
 - an explicit entry and a wildcard over the **same** source name the same item → the
   explicit entry is used, silently;
 - an explicit entry and **another** source's wildcard → the explicit entry wins, the
   report warns;
-- two wildcards offer the same name → that one name is skipped with a warning (an
-  installed copy stays as it is); every other item proceeds.
+- two wildcards or bundles of the **same** source yield the same name (`perl-*` and
+  `*-style` both match `perl-style`) → installed once, silently;
+- wildcards or bundles of **different** sources offer the same name → that one name is
+  skipped with a warning (an installed copy stays as it is); every other item proceeds.
 
 An item installed through a wildcard cannot be uninstalled by name — the wildcard would
 bring it back. Uninstall the wildcard (`skilletor uninstall 'rule:*@shared'`), or keep it
@@ -145,8 +152,79 @@ item returns on the next sync.
 Declaring the same wildcard twice in one scope is a config error. If a source cannot be
 resolved (offline without cache, untrusted, broken layout), everything it installed —
 explicitly or through a wildcard — stays in place; deletion only follows a successful
-resolve. `skilletor status` marks such items `via *@shared` and adds one line per
-wildcard, e.g. `* rules/* @shared (3 installed)`.
+resolve. `skilletor status` marks such items `via *@shared` (or `via perl-*@shared`) and
+adds one line per wildcard, e.g. `* rules/* @shared (3 installed)`.
+
+### Bundles: a named set from a source
+
+A source can name a set of items in `bundles/<name>.yaml` (or `.yml` — not both), so a
+project declares one entry instead of repeating a list:
+
+```yaml
+# bundles/perl.yaml in github.com/Getty/skills
+description: Everything for Perl projects
+skills:
+  - "perl-*"                   # quote a leading * in a block list
+  - testing
+  - karr@gitlab.com/peter      # an item of another source, by address
+agents: [perl-reviewer]
+rules: ["*-style"]
+bundles: [base]                # another bundle of this source, included
+vars:
+  perl_version: "5.40"
+```
+
+`description` is required; `skills`, `agents`, `rules` take names and patterns (bare =
+this source); `bundles` takes bare names of this source's bundles, nested recursively
+(a cycle is an error); `vars` sets defaults for the items this bundle yields. Any other
+key is an error. The YAML is skilletor's own subset: no anchors, aliases or tags — which
+is why an unquoted `- *-style` fails to parse and must be written `- "*-style"`.
+
+```bash
+skilletor install bundle:perl@shared [--project]     # adds "perl@shared" to install.bundles
+skilletor uninstall bundle:perl@shared [--project]
+```
+
+`perl@shared` without the prefix works too when no skill, agent or rule of `shared` is
+called `perl`; otherwise the command fails as ambiguous and names both forms
+(`skill:perl@shared, bundle:perl@shared`). Bundles are expanded on every sync, like
+wildcards, and their items follow the same overlap rules. A name the source lacks or a
+pattern that matches nothing warns; a broken bundle (missing, unparseable, cycle, bad
+address) affects only itself, and what it installed before stays.
+
+**Vars.** For an item a bundle yields: `source defaults < bundle vars < user < project <
+local`. Bundle vars reach only that bundle's items. Along a chain the outer bundle wins
+(`perl` over the `base` it includes). If one item is reached through two chains that set
+a key differently, neither value applies — the item falls back to the source default and
+the report warns, naming both bundles. An item you declare explicitly gets no bundle vars,
+even when a bundle yields it too.
+
+**Items of other sources.** `name@<spec>` (patterns too: `perl-*@gitlab.com/peter`) names
+an item of another source by its address, so a bundle means the same on every machine.
+`<spec>` is the `skilletor add` shorthand, limited to forms that need no network probe:
+`Getty`, `Getty/repo`, `gitlab.com/peter`, `hf.co/user`, full `https://…` URLs. A generic
+host must be written as a full `https://` URL, and local paths are not allowed. The entry
+is served by whichever configured source has the same resolved `git`/`url` — its config
+name does not matter, and a `local` override of it (authoring mode) still applies.
+
+If that source is missing:
+
+- `skilletor install bundle:perl@shared` on a terminal asks per missing source —
+  `bundle perl needs a source you don't have yet: gitlab.com/peter →
+  https://gitlab.com/peter/skills — add it as [peter]? (name, or n to skip)` — and adds it
+  like `skilletor add` (which trusts it) to the config the bundle goes into.
+- Without a terminal the command changes nothing, exits 1 and prints the commands to run:
+  `skilletor add peter gitlab.com/peter --project`.
+- `sync` and the hooks **never** add a source — a trusted source must not pull in an
+  untrusted one, since rendering runs code. They warn once per missing source and bundle
+  (`bundle perl@shared needs gitlab.com/peter (https://gitlab.com/peter/skills): run
+  skilletor install bundle:perl@shared`), skip those items and keep installed copies.
+
+**Seeing and removing.** `skilletor available` lists each bundle (type `bundle`) with its
+description and expanded members; `--json` adds `members` and `vars`. `skilletor status`
+marks items `via bundle:perl@shared` and adds `* bundle:perl@shared (7 installed)`. An item
+only a bundle declares cannot be uninstalled by name: the error names the bundle — uninstall
+the bundle, or switch the item off via vars.
 
 ### The in-session check (and how to quiet it)
 
@@ -175,7 +253,7 @@ Use the {{ project.name }} cluster in namespace {{ vars.k8s_namespace }}.
 {% endif %}
 ```
 
-Context: `vars.*` (source defaults < user < project < local), `project.*` (project
+Context: `vars.*` (source defaults < [bundle vars](#bundles-a-named-set-from-a-source) < user < project < local), `project.*` (project
 scope), `scope`, `harness` (`claude` or `codex`), `target.dir`, `host.*`, `user.*`,
 `item.*`. There is deliberately no `env.*`, and printing an undefined variable (`{{ vars.x }}`) is an error (so a typo can't
 ship an empty skill). Testing one (`{% if vars.x %}`) is not: it is simply false.
@@ -424,7 +502,9 @@ skilletor source list [--json] | source remove <name> [--project] [--force]   # 
 skilletor available [source] [--json]     # catalog of trusted sources
 skilletor install <item>... [--project]   # name@source (type:name@source if ambiguous), then sync
 skilletor install 'rule:*@shared' [--project]   # wildcard: every rule of the source (type prefix required)
-skilletor uninstall <item>... [--project] # [type:]name@source (no type: every list); 'rule:*@shared' the wildcard
+skilletor install 'skill:perl-*@shared'   # name pattern: every skill whose name matches
+skilletor install bundle:perl@shared      # a bundle; offers to add sources it needs (terminal only)
+skilletor uninstall <item>... [--project] # [type:]name@source (no type: every list); wildcards, bundle: as written
 skilletor sync | check | status           # --scope user|project|all, --json, --project-dir <dir>
 skilletor sync --force                    # overwrite and adopt unmanaged files reported as conflicts
 skilletor trust <source>
