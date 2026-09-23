@@ -9372,10 +9372,9 @@ function withCodexRules(out, ctx) {
   if (problems.length) result.systemMessage = [out.systemMessage, `skilletor: ${problems.join("; ")}`].filter(Boolean).join("; ");
   if (texts.length) {
     const rules = texts.join("\n");
-    const before = out.hookSpecificOutput?.additionalContext;
-    result.hookSpecificOutput = { hookEventName: "SessionStart", additionalContext: before ? `${before}
-
-${rules}` : rules };
+    const report = out.hookSpecificOutput?.additionalContext;
+    result.hookSpecificOutput = { hookEventName: "SessionStart", additionalContext: report ? `${rules}
+${report}` : rules };
   }
   return result;
 }
@@ -9527,6 +9526,12 @@ function statusText(report) {
   for (const w of report.warnings ?? []) lines.push(`warning: ${w}`);
   return lines.join("\n");
 }
+function syncText(r) {
+  const text = reportText(r);
+  if (r.warnings?.length && !reportText({ ...r, warnings: void 0 })) return `skilletor: up to date
+${text}`;
+  return text || "skilletor: up to date";
+}
 async function run(argv) {
   if (argv.includes("--version") || argv.includes("-v")) {
     process.stdout.write(VERSION + "\n");
@@ -9552,8 +9557,7 @@ async function run(argv) {
           process.stderr.write((flags.json ? reportJson(r) : reportText(r)) + "\n");
           return 2;
         }
-        const text = flags.json ? reportJson(r) : reportText(r);
-        process.stdout.write((text || "skilletor: up to date") + "\n");
+        process.stdout.write((flags.json ? reportJson(r) : syncText(r)) + "\n");
         return 0;
       }
       case "check": {
@@ -9583,7 +9587,7 @@ async function run(argv) {
         const r = await cmdAdd(ctx, { name, spec, project: flags.project });
         process.stdout.write(`added source ${r.name} (${JSON.stringify(r.def)})
 `);
-        process.stdout.write((reportText(r.report) || "skilletor: up to date") + "\n");
+        process.stdout.write(syncText(r.report) + "\n");
         return 0;
       }
       case "source": {
@@ -9629,7 +9633,7 @@ async function run(argv) {
           return 2;
         }
         const r = await cmdInstall({ ...ctx, prompt: ttyPrompter() }, { items: flags.rest, project: flags.project });
-        process.stdout.write((reportText(r) || "skilletor: up to date") + "\n");
+        process.stdout.write(syncText(r) + "\n");
         return 0;
       }
       case "uninstall": {
@@ -9640,7 +9644,7 @@ async function run(argv) {
         const r = await cmdUninstall(ctx, { items: flags.rest, project: flags.project });
         for (const h of r.hints) process.stderr.write(`skilletor: warning: ${h}
 `);
-        process.stdout.write((reportText(r.report) || "skilletor: up to date") + "\n");
+        process.stdout.write(syncText(r.report) + "\n");
         return 0;
       }
       case "trust": {

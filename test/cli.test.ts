@@ -245,10 +245,10 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
   const out = JSON.parse(r.stdout);
   assert.equal(out.hookSpecificOutput.hookEventName, "SessionStart");
   assert.match(out.hookSpecificOutput.additionalContext, /skill bar@s \(codex\): active from the next Codex session/);
-  // --harness codex: the user rules file follows the report in the same context (spec §14.8).
+  // --harness codex: the user rules file leads the context, the report follows (spec §14.8).
   const rules = readFileSync(join(codexHome, "skilletor-rules.md"), "utf8");
   assert.match(rules, /^<!-- skilletor:rules scope=user -->\n[\s\S]*<!-- skilletor:rule style source=s -->\nUse tabs\.\n$/);
-  assert.ok(out.hookSpecificOutput.additionalContext.endsWith("\n" + rules));
+  assert.ok(out.hookSpecificOutput.additionalContext.startsWith(rules + "\nskilletor synced items:\n"));
   assert.equal(existsSync(join(realpathSync(repo), ".agents/skills/bar/SKILL.md")), true);
   assert.equal(existsSync(join(repo, ".claude/skills")), false); // Claude not in use here
   // The user agent became a Codex agent role under CODEX_HOME.
@@ -271,6 +271,11 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
   assert.match(st.stdout, /✓ codex:skills\/bar @s/);
   // The hook was never trusted in this CODEX_HOME: status says so once (spec §14.8).
   assert.equal(st.stdout.match(/^warning: Codex has not trusted skilletor's SessionStart hook/gm)?.length, 1);
+  // A no-change sync still says it is up to date; the trust warning comes in addition.
+  const again = runCli(["sync", "--project-dir", repo], env);
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /^skilletor: up to date$/m);
+  assert.equal(again.stdout.match(/^skilletor: warning: Codex has not trusted skilletor's SessionStart hook/gm)?.length, 1);
 });
 
 test("no harness on the machine: sync fails with the fix named, exit 2", () => {

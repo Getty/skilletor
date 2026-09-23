@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { sync, check, status, type EngineContext } from "./engine.ts";
-import { reportJson, reportText } from "./report.ts";
+import { reportJson, reportText, type SyncReport } from "./report.ts";
 import {
   cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall, type Prompter,
 } from "./commands.ts";
@@ -128,6 +128,14 @@ function statusText(report: ReturnType<typeof status>): string {
   return lines.join("\n");
 }
 
+/** The sync report, or "up to date" when no scope has anything to say; run-level
+ *  warnings (the untrusted Codex hook) come in addition, never instead. */
+function syncText(r: SyncReport): string {
+  const text = reportText(r);
+  if (r.warnings?.length && !reportText({ ...r, warnings: undefined })) return `skilletor: up to date\n${text}`;
+  return text || "skilletor: up to date";
+}
+
 export async function run(argv: string[]): Promise<number> {
   if (argv.includes("--version") || argv.includes("-v")) {
     process.stdout.write(VERSION + "\n");
@@ -154,8 +162,7 @@ export async function run(argv: string[]): Promise<number> {
           process.stderr.write((flags.json ? reportJson(r) : reportText(r)) + "\n");
           return 2;
         }
-        const text = flags.json ? reportJson(r) : reportText(r);
-        process.stdout.write((text || "skilletor: up to date") + "\n");
+        process.stdout.write((flags.json ? reportJson(r) : syncText(r)) + "\n");
         return 0;
       }
       case "check": {
@@ -183,7 +190,7 @@ export async function run(argv: string[]): Promise<number> {
         const spec = flags.rest.length >= 2 ? flags.rest[1]! : flags.rest[0]!;
         const r = await cmdAdd(ctx, { name, spec, project: flags.project });
         process.stdout.write(`added source ${r.name} (${JSON.stringify(r.def)})\n`);
-        process.stdout.write((reportText(r.report) || "skilletor: up to date") + "\n");
+        process.stdout.write(syncText(r.report) + "\n");
         return 0;
       }
       case "source": {
@@ -229,7 +236,7 @@ export async function run(argv: string[]): Promise<number> {
           return 2;
         }
         const r = await cmdInstall({ ...ctx, prompt: ttyPrompter() }, { items: flags.rest, project: flags.project });
-        process.stdout.write((reportText(r) || "skilletor: up to date") + "\n");
+        process.stdout.write(syncText(r) + "\n");
         return 0;
       }
       case "uninstall": {
@@ -239,7 +246,7 @@ export async function run(argv: string[]): Promise<number> {
         }
         const r = await cmdUninstall(ctx, { items: flags.rest, project: flags.project });
         for (const h of r.hints) process.stderr.write(`skilletor: warning: ${h}\n`);
-        process.stdout.write((reportText(r.report) || "skilletor: up to date") + "\n");
+        process.stdout.write(syncText(r.report) + "\n");
         return 0;
       }
       case "trust": {

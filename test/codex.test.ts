@@ -694,6 +694,25 @@ test("a hand edit in the rules file is overwritten and reported; an update rewri
   }
 });
 
+test("a rules file skilletor did not write is overwritten without a conflict (wholly owned)", async () => {
+  const e = env(["codex"]);
+  try {
+    mkdirSync(join(e.projectDir, ".codex"), { recursive: true });
+    writeFileSync(join(e.projectDir, ".codex/skilletor-rules.md"), "someone else's text\n");
+    const src = source(e.tmp.dir, "s", { "rules/r.md": "R.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { rules: ["r@mine"] } });
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(r.scopes[0]!.conflicts, []);
+    assert.deepEqual(r.scopes[0]!.overwritten, []);
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["codex:rules/r"]);
+    assert.equal(readFileSync(join(e.projectDir, ".codex/skilletor-rules.md"), "utf8"), RULES("project", ["r", "mine", "R.\n"]));
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("an unreachable source keeps its rule sections in the rules file", async () => {
   const e = env(["codex"]);
   try {

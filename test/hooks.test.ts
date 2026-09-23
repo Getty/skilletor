@@ -276,15 +276,30 @@ async function codexRules(e: ReturnType<typeof env>) {
   return { ctx, first, userFile, projectFile, src };
 }
 
-test("k50: codex session-start appends the user, then the project rules file after the sync report", async () => {
+test("k50: codex session-start puts the user, then the project rules file first, the sync report after", async () => {
   const e = env();
   try {
     const { first, userFile, projectFile } = await codexRules(e);
     assert.match(userFile, /^<!-- skilletor:rules scope=user -->\n[\s\S]*User rule\.\n$/);
     assert.match(projectFile, /^<!-- skilletor:rules scope=project -->\n[\s\S]*Project rule\.\n$/);
     const ctxText = first.hookSpecificOutput?.additionalContext ?? "";
-    assert.match(ctxText, /^skilletor synced items:/); // the sync report stays first
-    assert.ok(ctxText.endsWith(userFile + "\n" + projectFile), ctxText);
+    // The message begins with the marker, as the AGENTS.md pointer says (spec §14.8).
+    assert.ok(ctxText.startsWith(userFile + "\n" + projectFile + "\nskilletor synced items:\n"), ctxText);
+    assert.match(first.systemMessage ?? "", /^skilletor: 2 item\(s\) updated/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k50: a sync with warnings: rules first, the report's warnings after them", async () => {
+  const e = env();
+  try {
+    const { ctx, userFile, projectFile, src } = await codexRules(e);
+    e.writeUserCfg({ sources: { mine: { local: resolvePath(src) } }, install: { rules: ["urule@mine", "nope@mine"] } });
+    const out = await runHook("session-start", { source: "startup" }, ctx);
+    const ctxText = out.hookSpecificOutput?.additionalContext ?? "";
+    assert.ok(ctxText.startsWith(userFile + "\n" + projectFile + "\n"), ctxText);
+    assert.match(ctxText.slice((userFile + projectFile).length), /- warning: item not found in source mine: rule nope/);
   } finally {
     e.cleanup();
   }
@@ -317,7 +332,7 @@ test("k50: user-prompt-submit never appends rules; without --harness codex sessi
   }
 });
 
-test("k50: a failed sync still delivers the last good rules, after the warning", async () => {
+test("k50: a failed sync still delivers the last good rules as the whole context; the warning is the systemMessage", async () => {
   const e = env();
   try {
     const { ctx, userFile, projectFile } = await codexRules(e);

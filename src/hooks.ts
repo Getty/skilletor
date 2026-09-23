@@ -9,7 +9,7 @@
 // The same hooks serve Codex (spec §14.5). Codex sets no CLAUDE_PROJECT_DIR, so
 // without a project dir the git top level of the input's cwd (else cwd) is used.
 // With `--harness codex` (the Codex plugin's hooks file) SessionStart also injects
-// the Codex rules files after its report (spec §14.8).
+// the Codex rules files, ahead of its report (spec §14.8).
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { loadConfig, type Harness } from "./config.ts";
@@ -109,7 +109,8 @@ async function sessionStart(input: HookInput, ctx: HookContext): Promise<HookOut
   return out;
 }
 
-/** Append the Codex rules files, read from disk, to the output's additionalContext. */
+/** Put the Codex rules files, read from disk, at the start of the output's
+ *  additionalContext, so the message begins with the rules marker the pointer names. */
 function withCodexRules(out: HookOutput, ctx: HookContext): HookOutput {
   const texts: string[] = [];
   const problems: string[] = [];
@@ -124,8 +125,8 @@ function withCodexRules(out: HookOutput, ctx: HookContext): HookOutput {
   if (problems.length) result.systemMessage = [out.systemMessage, `skilletor: ${problems.join("; ")}`].filter(Boolean).join("; ");
   if (texts.length) {
     const rules = texts.join("\n");
-    const before = out.hookSpecificOutput?.additionalContext;
-    result.hookSpecificOutput = { hookEventName: "SessionStart", additionalContext: before ? `${before}\n\n${rules}` : rules };
+    const report = out.hookSpecificOutput?.additionalContext;
+    result.hookSpecificOutput = { hookEventName: "SessionStart", additionalContext: report ? `${rules}\n${report}` : rules };
   }
   return result;
 }
