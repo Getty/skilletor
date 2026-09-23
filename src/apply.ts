@@ -23,6 +23,10 @@ export interface PlanItem {
   /** Not applicable in this scope: write nothing, remove an installed copy,
    *  keep a file-less lock entry carrying the reason. `output` is ignored. */
   skipped?: SkipReason;
+  /** A section of a shared file's managed block (spec §14.8): recorded in the lock
+   *  and reported by hash, never written or deleted here — the caller maintains
+   *  the block from the new lock. */
+  inBlock?: boolean;
 }
 
 export interface ApplyOptions {
@@ -79,6 +83,10 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
 
   for (const it of plan) {
     if (!NAME_RE.test(it.name)) throw new ApplyError(`invalid item name: ${it.name}`);
+    if (it.inBlock) {
+      recordBlockItem(it, oldLock[it.key], newLock, res);
+      continue;
+    }
     const root = rootFor(it.key);
     if (it.skipped) {
       // Owns no paths: delete only what the lock says we installed.
@@ -158,9 +166,11 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
       newLock[key] = oldLock[key]!; // preserve untouched
       continue;
     }
-    const root = rootFor(key);
-    for (const rel of Object.keys(oldLock[key]!.files)) {
-      removeFile(safeJoin(root, rel), touched(root));
+    if (!oldLock[key]!.block) {
+      const root = rootFor(key);
+      for (const rel of Object.keys(oldLock[key]!.files)) {
+        removeFile(safeJoin(root, rel), touched(root));
+      }
     }
     if (!oldLock[key]!.skipped) res.removed.push(key); // a skip entry had nothing installed
   }
@@ -173,6 +183,23 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
   }
 
   return res;
+}
+
+/** Lock and report a block section by its hash; no disk access. */
+function recordBlockItem(it: PlanItem, prev: LockEntry | undefined, newLock: Lock, res: ApplyResult): void {
+  const had = prev !== undefined && !prev.skipped;
+  if (it.skipped) {
+    if (had) res.removed.push(it.key);
+    res.skipped.push(it.key);
+    newLock[it.key] = { source: it.source, version: it.version, files: {}, skipped: it.skipped, block: true };
+    return;
+  }
+  const files: Record<string, string> = {};
+  for (const [rel, buf] of it.output) files[rel] = hashBuffer(buf);
+  newLock[it.key] = { source: it.source, version: it.version, files, block: true };
+  if (!had) res.added.push(it.key);
+  else if (JSON.stringify(prev!.files) !== JSON.stringify(files)) res.updated.push(it.key);
+  else res.unchanged.push(it.key);
 }
 
 function safeJoin(root: string, rel: string): string {

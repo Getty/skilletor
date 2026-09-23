@@ -2,7 +2,7 @@
 // one lock per scope with codex:-prefixed keys, per-target render and removal.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { check, status, sync, type EngineContext } from "../src/engine.ts";
@@ -99,23 +99,6 @@ test("empty-render skip applies per target", async () => {
     assert.equal(existsSync(join(e.home, ".agents/skills/only-claude")), false);
     assert.deepEqual(r.scopes[0]!.skipped.map((i) => i.key), ["codex:skills/only-claude"]);
     assert.equal(readLock(join(e.home, ".claude/skilletor.lock.json"))["codex:skills/only-claude"]?.skipped, "renders-empty");
-  } finally {
-    e.cleanup();
-  }
-});
-
-test("codex: rules are not written; the report notes it once, the hook stays quiet", async () => {
-  const e = env(["codex"]);
-  try {
-    const src = source(e.tmp.dir, "s", { "rules/r1.md": "R\n", "rules/r2.md": "R\n" });
-    e.writeCfg("user", { sources: { mine: { local: src } }, install: { rules: ["r1@mine", "r2@mine"] } });
-    const r = await sync(e.ctx, { scope: "user" });
-    assert.equal(existsSync(join(e.home, ".claude/rules")), false);
-    assert.deepEqual(readLock(join(e.home, ".claude/skilletor.lock.json")), {});
-    const text = reportText(r);
-    assert.equal(text.match(/not installed for Codex/g)?.length, 1, text);
-    assert.match(text, /2 rule\(s\) not installed/);
-    assert.deepEqual(reportHook(r), {});
   } finally {
     e.cleanup();
   }
@@ -266,7 +249,7 @@ test("status lists each declared item per target and names the targets", async (
     assert.deepEqual(s.targets, ["claude", "codex"]);
     assert.deepEqual(
       s.declared.map((d) => [d.key, d.installed]),
-      [["skills/foo", true], ["codex:skills/foo", true], ["rules/r", true]],
+      [["skills/foo", true], ["codex:skills/foo", true], ["rules/r", true], ["codex:rules/r", true]],
     );
     assert.deepEqual(s.orphans, []);
   } finally {
@@ -495,6 +478,227 @@ test("status and drift cover codex agents", async () => {
     await sync(e.ctx, { scope: "user" });
     assert.deepEqual(status(e.ctx, { scope: "user" }).scopes[0]!.declared.map((d) => [d.key, d.installed]),
       [["agents/helper", true], ["codex:agents/helper", true]]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// ---- phase 3: rules as a managed block in AGENTS.md (spec §14.8) -------------------
+
+const BLOCK = (...sections: [string, string, string][]) => [
+  "<!-- skilletor:begin -->",
+  "<!-- managed by skilletor — edits inside are overwritten -->",
+  "",
+  ...sections.flatMap(([name, source, text]) => [`<!-- skilletor:rule ${name} source=${source} -->`, ...text.replace(/\n$/, "").split("\n"), ""]),
+  "<!-- skilletor:end -->",
+].join("\n") + "\n";
+
+test("codex only: rules become one sorted block in $CODEX_HOME/AGENTS.md, paths as a leading line", async () => {
+  const e = env(["codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", {
+      "rules/zeta.md": "Zeta rule.\n",
+      "rules/alpha.md": "---\npaths:\n  - \"k8s/**\"\n---\nAlpha rule.\n",
+    });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { rules: ["zeta@mine", "alpha@mine"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+    assert.equal(r.notes, undefined); // rules are no longer "not installed for Codex"
+    assert.equal(readFileSync(join(e.home, ".codex/AGENTS.md"), "utf8"), BLOCK(
+      ["alpha", "mine", "Applies when working with files matching: `k8s/**`.\n\nAlpha rule.\n"],
+      ["zeta", "mine", "Zeta rule.\n"],
+    ));
+    const lock = readLock(join(e.home, ".claude/skilletor.lock.json"));
+    assert.deepEqual(Object.keys(lock).sort(), ["codex:rules/alpha", "codex:rules/zeta"]);
+    assert.equal(lock["codex:rules/zeta"]!.block, true);
+    assert.deepEqual(Object.keys(lock["codex:rules/zeta"]!.files), ["AGENTS.md"]);
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key).sort(), ["codex:rules/alpha", "codex:rules/zeta"]);
+    assert.equal(existsSync(join(e.home, ".claude/rules")), false);
+    // A second run changes nothing.
+    const again = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(again.scopes[0]!.unchanged.map((i) => i.key).sort(), ["codex:rules/alpha", "codex:rules/zeta"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("an existing AGENTS.md keeps everything outside the block; removing the rules restores it", async () => {
+  const e = env(["codex"]);
+  try {
+    const own = "# My global instructions\n\nBe terse.\n";
+    mkdirSync(join(e.home, ".codex"), { recursive: true });
+    writeFileSync(join(e.home, ".codex/AGENTS.md"), own);
+    const src = source(e.tmp.dir, "s", { "rules/r.md": "R.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { rules: ["r@mine"] } });
+    await sync(e.ctx, { scope: "user" });
+    assert.equal(readFileSync(join(e.home, ".codex/AGENTS.md"), "utf8"), own + "\n" + BLOCK(["r", "mine", "R.\n"]));
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.removed.map((i) => i.key), ["codex:rules/r"]);
+    assert.equal(readFileSync(join(e.home, ".codex/AGENTS.md"), "utf8"), own);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a file skilletor created is deleted when its block empties; switching Codex off removes the block", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "rules/r.md": "R.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { rules: ["r@mine"] } });
+    await sync(e.ctx, { scope: "user" });
+    assert.equal(existsSync(join(e.home, ".codex/AGENTS.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/rules/r.md")), true);
+    e.writeCfg("user", { targets: ["claude"], sources: { mine: { local: src } }, install: { rules: ["r@mine"] } });
+    assert.deepEqual((await check(e.ctx, { scope: "user" })).targetsChanged, ["user"]);
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.removed.map((i) => i.key), ["codex:rules/r"]);
+    assert.equal(existsSync(join(e.home, ".codex/AGENTS.md")), false);
+    assert.equal(existsSync(join(e.home, ".claude/rules/r.md")), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("project rules go to <repo>/AGENTS.md and into no .gitignore", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "rules/r.md": "R.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { rules: ["r@mine"] } });
+    await sync(e.ctx, { scope: "project" });
+    assert.equal(readFileSync(join(e.projectDir, "AGENTS.md"), "utf8"), BLOCK(["r", "mine", "R.\n"]));
+    assert.equal(existsSync(join(e.projectDir, ".gitignore")), false);
+    assert.doesNotMatch(readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8"), /AGENTS/);
+    assert.equal(existsSync(join(e.home, ".codex/AGENTS.md")), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a symlinked AGENTS.md is never written through: one warning, Claude unaffected", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    writeFileSync(join(e.projectDir, "CLAUDE.md"), "shared\n");
+    symlinkSync("CLAUDE.md", join(e.projectDir, "AGENTS.md"));
+    const src = source(e.tmp.dir, "s", { "rules/r1.md": "R1.\n", "rules/r2.md": "R2.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { rules: ["r1@mine", "r2@mine"] } });
+    const r = await sync(e.ctx, { scope: "project", force: true });
+    assert.equal(readFileSync(join(e.projectDir, "CLAUDE.md"), "utf8"), "shared\n");
+    assert.equal(r.scopes[0]!.warnings.length, 1);
+    assert.match(r.scopes[0]!.warnings[0]!, /AGENTS\.md is a symlink.*rules for Codex not written/);
+    assert.equal(existsSync(join(e.projectDir, ".claude/rules/r1.md")), true);
+    assert.deepEqual(Object.keys(readLock(join(e.projectDir, ".claude/skilletor.lock.json"))).sort(), ["rules/r1", "rules/r2"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("malformed markers: nothing written, entries kept, --force does not override", async () => {
+  const e = env(["codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "rules/r.md": "R.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { rules: ["r@mine"] } });
+    await sync(e.ctx, { scope: "user" });
+    const broken = "<!-- skilletor:begin -->\nhalf a block\n";
+    writeFileSync(join(e.home, ".codex/AGENTS.md"), broken);
+    writeFileSync(join(src, "rules/r.md"), "R changed.\n");
+    const r = await sync(e.ctx, { scope: "user", force: true });
+    assert.match(r.scopes[0]!.warnings.join("\n"), /AGENTS\.md: malformed skilletor markers.*rules for Codex not written/);
+    assert.equal(readFileSync(join(e.home, ".codex/AGENTS.md"), "utf8"), broken);
+    assert.deepEqual(r.scopes[0]!.removed, []);
+    assert.deepEqual(Object.keys(readLock(join(e.home, ".claude/skilletor.lock.json"))), ["codex:rules/r"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("empty render for Codex omits the rule from the block (per target)", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", {
+      "rules/only-claude.md.njk": "{% if harness == \"claude\" %}Claude only.{% endif %}\n",
+      "rules/both.md": "Both.\n",
+    });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { rules: ["only-claude@mine", "both@mine"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.equal(readFileSync(join(e.home, ".codex/AGENTS.md"), "utf8"), BLOCK(["both", "mine", "Both.\n"]));
+    assert.equal(existsSync(join(e.home, ".claude/rules/only-claude.md")), true);
+    assert.deepEqual(r.scopes[0]!.skipped.map((i) => i.key), ["codex:rules/only-claude"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a hand edit inside the block is overwritten and reported; an update rewrites the section", async () => {
+  const e = env(["codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "rules/r.md": "R.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { rules: ["r@mine"] } });
+    await sync(e.ctx, { scope: "user" });
+    const f = join(e.home, ".codex/AGENTS.md");
+    writeFileSync(f, readFileSync(f, "utf8").replace("R.", "R. (edited by hand)"));
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.overwritten, [{ path: ".codex/AGENTS.md#rules/r" }]);
+    assert.equal(readFileSync(f, "utf8"), BLOCK(["r", "mine", "R.\n"]));
+    writeFileSync(join(src, "rules/r.md"), "R2.\n");
+    const u = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(u.scopes[0]!.updated.map((i) => i.key), ["codex:rules/r"]);
+    assert.deepEqual(u.scopes[0]!.overwritten, []);
+    assert.equal(readFileSync(f, "utf8"), BLOCK(["r", "mine", "R2.\n"]));
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("an unreachable source keeps its rule sections in the block", async () => {
+  const e = env(["codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "rules/r.md": "R.\n" });
+    const other = source(e.tmp.dir, "o", { "rules/q.md": "Q.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } , oth: { local: other } }, install: { rules: ["*@mine", "q@oth"] } });
+    await sync(e.ctx, { scope: "user" });
+    e.writeCfg("user", { sources: { mine: { local: join(e.tmp.dir, "gone") }, oth: { local: other } }, install: { rules: ["*@mine", "q@oth"] } });
+    writeFileSync(join(other, "rules/q.md"), "Q2.\n");
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.removed, []);
+    assert.equal(readFileSync(join(e.home, ".codex/AGENTS.md"), "utf8"), BLOCK(["q", "oth", "Q2.\n"], ["r", "mine", "R.\n"]));
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a project AGENTS.md over project_doc_max_bytes warns; AGENTS.override.md warns", async () => {
+  const e = env(["codex"]);
+  try {
+    mkdirSync(join(e.home, ".codex"), { recursive: true });
+    writeFileSync(join(e.home, ".codex/config.toml"), "project_doc_max_bytes = 200\n");
+    const src = source(e.tmp.dir, "s", { "rules/big.md": "x".repeat(300) + "\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { rules: ["big@mine"] } });
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.match(r.scopes[0]!.warnings.join("\n"), /AGENTS\.md is \d+ bytes; Codex reads at most 200 bytes of project instructions/);
+    writeFileSync(join(e.projectDir, "AGENTS.override.md"), "override\n");
+    const o = await sync(e.ctx, { scope: "project" });
+    assert.match(o.scopes[0]!.warnings.join("\n"), /AGENTS\.override\.md.*Codex reads it instead/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("status lists codex rules; drift notices a newly enabled Codex", async () => {
+  const e = env(["claude"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "rules/r.md": "R.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { rules: ["r@mine"] } });
+    await sync(e.ctx, { scope: "user" });
+    e.writeCfg("user", { targets: ["claude", "codex"], sources: { mine: { local: src } }, install: { rules: ["r@mine"] } });
+    assert.deepEqual((await check(e.ctx, { scope: "user" })).targetsChanged, ["user"]);
+    await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(status(e.ctx, { scope: "user" }).scopes[0]!.declared.map((d) => [d.key, d.installed]),
+      [["rules/r", true], ["codex:rules/r", true]]);
+    assert.equal((await check(e.ctx, { scope: "user" })).targetsChanged, undefined);
   } finally {
     e.cleanup();
   }

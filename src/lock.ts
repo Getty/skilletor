@@ -17,6 +17,9 @@ export interface LockEntry {
   files: Record<string, string>;
   /** Declared but not applicable in this scope: owns no files (spec §5, §6.2). */
   skipped?: SkipReason;
+  /** A section of a shared file's managed block (Codex rules in AGENTS.md, spec §14.8):
+   *  `files` maps that file to the section's hash; the engine, not apply, writes it. */
+  block?: boolean;
 }
 
 export type SkipReason = "renders-empty";
@@ -55,6 +58,7 @@ export function serializeLock(lock: Lock): string {
     for (const f of Object.keys(entry.files).sort()) files[f] = entry.files[f]!;
     out[key] = { source: entry.source, version: entry.version, files };
     if (entry.skipped) out[key].skipped = entry.skipped;
+    if (entry.block) out[key].block = true;
   }
   return JSON.stringify(out, null, 2) + "\n";
 }

@@ -161,11 +161,13 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
   writeFileSync(join(src, "skills", "bar", "SKILL.md"), "---\nname: bar\ndescription: bar\n---\nBAR\n");
   mkdirSync(join(src, "agents"), { recursive: true });
   writeFileSync(join(src, "agents", "helper.md"), "---\nname: helper\ndescription: helps\nmodel: opus\n---\nYou help.\n");
+  mkdirSync(join(src, "rules"), { recursive: true });
+  writeFileSync(join(src, "rules", "style.md"), "Use tabs.\n");
   writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } } }));
   mkdirSync(join(repo, ".claude"), { recursive: true });
   mkdirSync(join(repo, "sub"), { recursive: true });
   writeFileSync(join(repo, ".claude", "skilletor.json"), JSON.stringify({ install: { skills: ["bar@s"] } }));
-  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } }, install: { agents: ["helper@s"] } }));
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } }, install: { agents: ["helper@s"], rules: ["style@s"] } }));
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, CODEX_HOME: codexHome };
   delete env.CLAUDE_PROJECT_DIR;
@@ -184,6 +186,9 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
     readFileSync(join(codexHome, "agents", "helper.toml"), "utf8"),
     "name = \"helper\"\ndescription = \"helps\"\ndeveloper_instructions = '''\nYou help.\n'''\n",
   );
+
+  // The user rule became a section of the managed block in $CODEX_HOME/AGENTS.md.
+  assert.match(readFileSync(join(codexHome, "AGENTS.md"), "utf8"), /<!-- skilletor:rule style source=s -->\nUse tabs\.\n/);
 
   const st = runCli(["status", "--project-dir", repo], env);
   assert.match(st.stdout, /^project scope \(codex\):$/m);

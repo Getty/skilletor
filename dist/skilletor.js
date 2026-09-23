@@ -1739,7 +1739,7 @@ var require_parser = __commonJS({
         }
         return new nodes.FromImport(fromTok.lineno, fromTok.colno, template, names, withContext);
       };
-      _proto.parseBlock = function parseBlock() {
+      _proto.parseBlock = function parseBlock2() {
         var tag = this.peekToken();
         if (!this.skipSymbol("block")) {
           this.fail("parseBlock: expected block", tag.lineno, tag.colno);
@@ -3965,7 +3965,7 @@ var require_filters = __commonJS({
       return r.copySafeness(str, res);
     }
     _exports.indent = indent;
-    function join15(arr, del, attr) {
+    function join16(arr, del, attr) {
       del = del || "";
       if (attr) {
         arr = lib.map(arr, function(v) {
@@ -3974,7 +3974,7 @@ var require_filters = __commonJS({
       }
       return arr.join(del);
     }
-    _exports.join = join15;
+    _exports.join = join16;
     function last(arr) {
       return arr[arr.length - 1];
     }
@@ -5740,12 +5740,13 @@ var require_nunjucks = __commonJS({
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { join as join14 } from "node:path";
+import { join as join15 } from "node:path";
 
 // src/engine.ts
 import { execFileSync } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
-import { basename, isAbsolute, join as join12, relative as relative2 } from "node:path";
+import { existsSync as existsSync10, rmSync as rmSync6 } from "node:fs";
+import { basename, dirname as dirname4, isAbsolute, join as join13, relative as relative2 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -6117,16 +6118,20 @@ var TargetError = class extends Error {
   name = "TargetError";
 };
 var under = (dir) => (r) => join3(r.base, dir);
+var codexHomeDir = (r) => r.codexHome || join3(r.base, ".codex");
 var LAYOUTS = {
   claude: { harness: "claude", keyPrefix: "", roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") } },
-  // Skills (phase 1) and agents as TOML (phase 2, convert.ts); rules come in phase 3.
+  // Skills (phase 1), agents as TOML (phase 2, convert.ts), rules as sections of
+  // the managed AGENTS.md block (phase 3, agentsmd.ts).
   codex: {
     harness: "codex",
     keyPrefix: "codex:",
     roots: {
       skill: under(".agents"),
-      agent: (r) => r.scope === "user" ? r.codexHome || join3(r.base, ".codex") : join3(r.base, ".codex")
-    }
+      agent: (r) => r.scope === "user" ? codexHomeDir(r) : join3(r.base, ".codex"),
+      rule: (r) => r.scope === "user" ? codexHomeDir(r) : r.base
+    },
+    blockTypes: ["rule"]
   }
 };
 function defaultMarkers(home, codexHome) {
@@ -6186,9 +6191,16 @@ function rootOfKey(r, key) {
   const k = parseLockKey(key);
   return k.harness ? rootOf(r, k.harness, k.type) : void 0;
 }
+function isBlockType(harness, type) {
+  return LAYOUTS[harness].blockTypes?.includes(type) ?? false;
+}
 function allRoots(r) {
   const roots = /* @__PURE__ */ new Set();
-  for (const h of HARNESSES) for (const f of Object.values(LAYOUTS[h].roots)) if (f) roots.add(f(r));
+  for (const h of HARNESSES) {
+    for (const [type, f] of Object.entries(LAYOUTS[h].roots)) {
+      if (f && !isBlockType(h, type)) roots.add(f(r));
+    }
+  }
   return [...roots];
 }
 function targetDrift(keys, active) {
@@ -6200,6 +6212,118 @@ function targetDrift(keys, active) {
     for (const h of active) if (supports(h, k.type) && !set.has(lockKey(h, k.target))) return true;
   }
   return false;
+}
+
+// src/agentsmd.ts
+import { lstatSync, readFileSync as readFileSync2 } from "node:fs";
+import { join as join4 } from "node:path";
+var BEGIN = "<!-- skilletor:begin -->";
+var END = "<!-- skilletor:end -->";
+var NOTE = "<!-- managed by skilletor \u2014 edits inside are overwritten -->";
+var RULE_RE = /^<!-- skilletor:rule (\S+) source=(.*) -->$/;
+var MARKER_LINE = /^<!-- skilletor:(begin|end|rule)\b/;
+var BlockError = class extends Error {
+  name = "BlockError";
+};
+function normalizeSection(text) {
+  return text.replace(/^(?:[ \t]*\r?\n)+/, "").replace(/\s+$/, "") + "\n";
+}
+function parseBlock(text) {
+  const lines = text.split("\n");
+  const begins = [];
+  const ends = [];
+  lines.forEach((l, i) => {
+    const t = l.trim();
+    if (t === BEGIN) begins.push(i);
+    else if (t === END) ends.push(i);
+  });
+  if (begins.length === 0 && ends.length === 0) return null;
+  if (begins.length > 1) throw new BlockError(`"${BEGIN}" appears ${begins.length} times`);
+  if (ends.length > 1) throw new BlockError(`"${END}" appears ${ends.length} times`);
+  if (begins.length === 0) throw new BlockError(`"${END}" without "${BEGIN}"`);
+  if (ends.length === 0) throw new BlockError(`"${BEGIN}" without "${END}"`);
+  const begin = begins[0];
+  const end = ends[0];
+  if (end < begin) throw new BlockError(`"${END}" before "${BEGIN}"`);
+  const sections = /* @__PURE__ */ new Map();
+  let current;
+  const flush = () => {
+    if (current) sections.set(current.name, { source: current.source, text: normalizeSection(current.lines.join("\n")) });
+  };
+  for (const line of lines.slice(begin + 1, end)) {
+    const m = RULE_RE.exec(line.trim());
+    if (m) {
+      flush();
+      current = { name: m[1], source: m[2], lines: [] };
+    } else if (current) {
+      current.lines.push(line);
+    }
+  }
+  flush();
+  return { begin, end, sections };
+}
+function blockLines(sections) {
+  const out = [BEGIN, NOTE, ""];
+  for (const s of sections) {
+    out.push(`<!-- skilletor:rule ${s.name} source=${s.source} -->`, ...s.text.replace(/\n$/, "").split("\n"), "");
+  }
+  out.push(END);
+  return out;
+}
+function withBlock(text, sections) {
+  const block = sections.length ? blockLines(sections) : null;
+  if (text === null) return block ? block.join("\n") + "\n" : null;
+  const parsed = parseBlock(text);
+  const lines = text.split("\n");
+  let out;
+  if (parsed) {
+    const before = lines.slice(0, parsed.begin);
+    const after = lines.slice(parsed.end + 1);
+    out = [...before, ...block ?? [], ...after].join("\n");
+    if (!block && after.every((l) => l.trim() === "")) out = out.replace(/\s*$/, "\n");
+  } else {
+    if (!block) return text;
+    const base = text.replace(/\s*$/, "");
+    out = (base.length ? base + "\n\n" : "") + block.join("\n") + "\n";
+  }
+  return out.trim() === "" ? null : out;
+}
+function inspectAgentsMd(path) {
+  let st;
+  try {
+    st = lstatSync(path);
+  } catch (err) {
+    if (err.code === "ENOENT") return { ok: true, text: null, parsed: null };
+    return { ok: false, reason: `unreadable (${err.message})` };
+  }
+  if (st.isSymbolicLink()) return { ok: false, reason: "is a symlink (skilletor does not write through it)" };
+  if (st.isDirectory()) return { ok: false, reason: "is a directory" };
+  if (!st.isFile()) return { ok: false, reason: "is not a regular file" };
+  let text;
+  try {
+    text = readFileSync2(path, "utf8");
+  } catch (err) {
+    return { ok: false, reason: `unreadable (${err.message})` };
+  }
+  try {
+    return { ok: true, text, parsed: parseBlock(text) };
+  } catch (err) {
+    return { ok: false, reason: `malformed skilletor markers: ${err.message}` };
+  }
+}
+function projectDocLimit(codexHome) {
+  let text;
+  try {
+    text = readFileSync2(join4(codexHome, "config.toml"), "utf8");
+  } catch {
+    return 32768;
+  }
+  for (const line of text.split("\n")) {
+    if (/^\s*\[/.test(line)) break;
+    const m = /^\s*project_doc_max_bytes\s*=\s*(\d+)\s*(?:#.*)?$/.exec(line);
+    if (m) return Number(m[1]);
+  }
+  return 32768;
 }
 
 // src/frontmatter.ts
@@ -6715,7 +6839,34 @@ function codexAgentToml(markdown, itemName2, opts = {}) {
   const table = { ...top, developer_instructions: instructions, ...tables };
   return { toml: stringifyToml(table, { multiline: ["developer_instructions"] }), warnings, briefingDropped };
 }
+function codexRuleSection(markdown, itemName2) {
+  let fm;
+  try {
+    fm = splitFrontmatter(markdown);
+  } catch (err) {
+    if (err instanceof FrontmatterError) throw new ConvertError(err.message);
+    throw err;
+  }
+  if (fm.body.trim() === "") return void 0;
+  if (fm.body.split("\n").some((l) => MARKER_LINE.test(l.trim()))) {
+    throw new ConvertError(`rule ${itemName2} contains a skilletor marker line; it would break the AGENTS.md block`);
+  }
+  const raw = fm.data.paths;
+  const paths = (Array.isArray(raw) ? raw : raw === void 0 || raw === null ? [] : [raw]).map((p) => String(p));
+  const lead = paths.length ? `Applies when working with files matching: ${paths.map((p) => `\`${p}\``).join(", ")}.
+
+` : "";
+  return normalizeSection(lead + fm.body);
+}
 function convertForTarget(harness, type, name, output, opts = {}) {
+  if (harness === "codex" && type === "rule") {
+    const md2 = output.get(`rules/${name}.md`);
+    if (md2 === void 0) throw new ConvertError(`rules/${name}.md missing from the build`);
+    const section = codexRuleSection(md2.toString("utf8"), name);
+    const out2 = /* @__PURE__ */ new Map();
+    if (section !== void 0) out2.set("AGENTS.md", Buffer.from(section, "utf8"));
+    return { output: out2, skipped: section === void 0, warnings: [], briefingDropped: false };
+  }
   if (harness !== "codex" || type !== "agent") return { output, skipped: false, warnings: [], briefingDropped: false };
   const md = output.get(`agents/${name}.md`);
   if (md === void 0) throw new ConvertError(`agents/${name}.md missing from the build`);
@@ -6727,10 +6878,10 @@ function convertForTarget(harness, type, name, output, opts = {}) {
 
 // src/sources/local.ts
 import { existsSync as existsSync3, statSync } from "node:fs";
-import { join as join4 } from "node:path";
+import { join as join5 } from "node:path";
 function expandHome(path, home) {
   if (path === "~") return home;
-  if (path.startsWith("~/")) return join4(home, path.slice(2));
+  if (path.startsWith("~/")) return join5(home, path.slice(2));
   return path;
 }
 var LocalSource = class {
@@ -6760,7 +6911,7 @@ var LocalSource = class {
 import { execFile } from "node:child_process";
 import { createHash as createHash2 } from "node:crypto";
 import { existsSync as existsSync4, mkdirSync as mkdirSync2 } from "node:fs";
-import { join as join5 } from "node:path";
+import { join as join6 } from "node:path";
 var DEFAULT_TIMEOUT_MS = 6e4;
 var GitSource = class {
   opts;
@@ -6769,7 +6920,7 @@ var GitSource = class {
   }
   cacheDir() {
     const hash = createHash2("sha256").update(this.opts.url).digest("hex").slice(0, 16);
-    return join5(this.opts.cacheRoot, hash);
+    return join6(this.opts.cacheRoot, hash);
   }
   run(cwd, args, timeoutMs) {
     return new Promise((resolvePromise, reject) => {
@@ -6790,7 +6941,7 @@ var GitSource = class {
     });
   }
   isRepo(dir) {
-    return existsSync4(join5(dir, ".git"));
+    return existsSync4(join6(dir, ".git"));
   }
   async resolve(_cachedVersion) {
     const dir = this.cacheDir();
@@ -6852,7 +7003,7 @@ function isCommitish(ref) {
 // src/sources/url.ts
 import { createHash as createHash3 } from "node:crypto";
 import { existsSync as existsSync5, mkdirSync as mkdirSync3, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
-import { dirname as dirname2, join as join6, resolve as resolvePath, sep } from "node:path";
+import { dirname as dirname2, join as join7, resolve as resolvePath, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 var TarError = class extends Error {
   name = "TarError";
@@ -6865,7 +7016,7 @@ var UrlSource = class {
   }
   cacheDir() {
     const hash = createHash3("sha256").update(this.opts.url).digest("hex").slice(0, 16);
-    return join6(this.opts.cacheRoot, hash);
+    return join7(this.opts.cacheRoot, hash);
   }
   assertScheme() {
     const u = new URL(this.opts.url);
@@ -6999,7 +7150,7 @@ function writeEntries(dir, entries) {
   mkdirSync3(dir, { recursive: true });
   const root = resolvePath(dir);
   for (const e of entries) {
-    const dest = resolvePath(join6(dir, e.name));
+    const dest = resolvePath(join7(dir, e.name));
     if (dest !== root && !dest.startsWith(root + sep)) {
       throw new TarError(`unsafe tar entry (escapes target): ${e.name}`);
     }
@@ -7013,8 +7164,8 @@ function writeEntries(dir, entries) {
 }
 
 // src/catalog.ts
-import { existsSync as existsSync6, lstatSync, readFileSync as readFileSync2, readdirSync } from "node:fs";
-import { join as join7, relative } from "node:path";
+import { existsSync as existsSync6, lstatSync as lstatSync2, readFileSync as readFileSync3, readdirSync } from "node:fs";
+import { join as join8, relative } from "node:path";
 var CatalogError = class extends Error {
   name = "CatalogError";
 };
@@ -7024,7 +7175,7 @@ var TYPE_DIRS = [
   { dir: "rules", type: "rule" }
 ];
 function noSymlink(path) {
-  const st = lstatSync(path);
+  const st = lstatSync2(path);
   if (st.isSymbolicLink()) {
     throw new CatalogError(`symlink not allowed in source: ${path}`);
   }
@@ -7033,7 +7184,7 @@ function noSymlink(path) {
 function walkFiles(dir, sourceDir) {
   const out = [];
   for (const entry of readdirSync(dir)) {
-    const p = join7(dir, entry);
+    const p = join8(dir, entry);
     const st = noSymlink(p);
     if (st.isDirectory()) out.push(...walkFiles(p, sourceDir));
     else if (st.isFile()) out.push(relative(sourceDir, p));
@@ -7061,11 +7212,11 @@ function unquote(v) {
   return v;
 }
 function descriptionOf(filePath) {
-  return frontmatter(readFileSync2(filePath, "utf8")).description;
+  return frontmatter(readFileSync3(filePath, "utf8")).description;
 }
 function skillFile(dir) {
   for (const candidate of ["SKILL.md", "SKILL.md.njk"]) {
-    const p = join7(dir, candidate);
+    const p = join8(dir, candidate);
     if (existsSync6(p)) {
       noSymlink(p);
       return p;
@@ -7080,11 +7231,11 @@ function itemName(fileName) {
 function scan(dir) {
   const items = [];
   for (const { dir: sub, type } of TYPE_DIRS) {
-    const typeDir = join7(dir, sub);
+    const typeDir = join8(dir, sub);
     if (!existsSync6(typeDir)) continue;
     noSymlink(typeDir);
     for (const entry of readdirSync(typeDir)) {
-      const p = join7(typeDir, entry);
+      const p = join8(typeDir, entry);
       const st = noSymlink(p);
       if (type === "skill") {
         if (!st.isDirectory()) continue;
@@ -7102,12 +7253,12 @@ function scan(dir) {
   return { items, meta: readSourceMeta(dir) };
 }
 function readSourceMeta(dir) {
-  const p = join7(dir, "skilletor.json");
+  const p = join8(dir, "skilletor.json");
   if (!existsSync6(p)) return {};
   noSymlink(p);
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync2(p, "utf8"));
+    parsed = JSON.parse(readFileSync3(p, "utf8"));
   } catch (err) {
     throw new CatalogError(`${p}: invalid JSON (${err.message})`);
   }
@@ -7121,8 +7272,8 @@ function readSourceMeta(dir) {
 
 // src/render.ts
 var import_nunjucks = __toESM(require_nunjucks(), 1);
-import { readFileSync as readFileSync3 } from "node:fs";
-import { join as join8, resolve as resolvePath2, sep as sep2 } from "node:path";
+import { readFileSync as readFileSync4 } from "node:fs";
+import { join as join9, resolve as resolvePath2, sep as sep2 } from "node:path";
 var RenderError = class extends Error {
   name = "RenderError";
 };
@@ -7137,7 +7288,7 @@ function makeLoader(root) {
       }
       let src;
       try {
-        src = readFileSync3(path, "utf8");
+        src = readFileSync4(path, "utf8");
       } catch {
         return null;
       }
@@ -7165,7 +7316,7 @@ function build(item, sourceDir, context) {
       }
       out.set(file.slice(0, -".njk".length), Buffer.from(rendered, "utf8"));
     } else {
-      out.set(file, readFileSync3(join8(sourceDir, file)));
+      out.set(file, readFileSync4(join9(sourceDir, file)));
     }
   }
   return out;
@@ -7180,18 +7331,18 @@ function rendersEmpty(item, output) {
 }
 
 // src/apply.ts
-import { existsSync as existsSync7, readFileSync as readFileSync5, readdirSync as readdirSync2, rmdirSync, rmSync as rmSync3 } from "node:fs";
-import { dirname as dirname3, join as join9, resolve as resolvePath3, sep as sep3 } from "node:path";
+import { existsSync as existsSync7, readFileSync as readFileSync6, readdirSync as readdirSync2, rmdirSync, rmSync as rmSync3 } from "node:fs";
+import { dirname as dirname3, join as join10, resolve as resolvePath3, sep as sep3 } from "node:path";
 
 // src/lock.ts
-import { readFileSync as readFileSync4 } from "node:fs";
+import { readFileSync as readFileSync5 } from "node:fs";
 var LockError = class extends Error {
   name = "LockError";
 };
 function readLock(path) {
   let text;
   try {
-    text = readFileSync4(path, "utf8");
+    text = readFileSync5(path, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") return {};
     throw new LockError(`${path}: cannot read lock (${err.message})`);
@@ -7214,6 +7365,7 @@ function serializeLock(lock) {
     for (const f of Object.keys(entry.files).sort()) files[f] = entry.files[f];
     out[key] = { source: entry.source, version: entry.version, files };
     if (entry.skipped) out[key].skipped = entry.skipped;
+    if (entry.block) out[key].block = true;
   }
   return JSON.stringify(out, null, 2) + "\n";
 }
@@ -7231,7 +7383,7 @@ function isValidItemName(name) {
 }
 function apply(plan, opts) {
   const targetDir = resolvePath3(opts.targetDir);
-  const lockPath = join9(targetDir, "skilletor.lock.json");
+  const lockPath = join10(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const newLock = {};
   const res = { added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [] };
@@ -7245,6 +7397,10 @@ function apply(plan, opts) {
   const planned = new Set(plan.map((i) => i.key));
   for (const it of plan) {
     if (!NAME_RE.test(it.name)) throw new ApplyError(`invalid item name: ${it.name}`);
+    if (it.inBlock) {
+      recordBlockItem(it, oldLock[it.key], newLock, res);
+      continue;
+    }
     const root = rootFor(it.key);
     if (it.skipped) {
       const files = Object.keys(oldLock[it.key]?.files ?? {});
@@ -7264,7 +7420,7 @@ function apply(plan, opts) {
       const locked = existing?.files[rel];
       const onDisk = existsSync7(abs);
       if (onDisk) {
-        const diskHash = hashBuffer(readFileSync5(abs));
+        const diskHash = hashBuffer(readFileSync6(abs));
         if (locked === void 0 && !opts.force) {
           res.conflicts.push({ key: it.key, path: rel });
           continue;
@@ -7312,9 +7468,11 @@ function apply(plan, opts) {
       newLock[key] = oldLock[key];
       continue;
     }
-    const root = rootFor(key);
-    for (const rel of Object.keys(oldLock[key].files)) {
-      removeFile(safeJoin(root, rel), touched(root));
+    if (!oldLock[key].block) {
+      const root = rootFor(key);
+      for (const rel of Object.keys(oldLock[key].files)) {
+        removeFile(safeJoin(root, rel), touched(root));
+      }
     }
     if (!oldLock[key].skipped) res.removed.push(key);
   }
@@ -7324,8 +7482,23 @@ function apply(plan, opts) {
   }
   return res;
 }
+function recordBlockItem(it, prev, newLock, res) {
+  const had = prev !== void 0 && !prev.skipped;
+  if (it.skipped) {
+    if (had) res.removed.push(it.key);
+    res.skipped.push(it.key);
+    newLock[it.key] = { source: it.source, version: it.version, files: {}, skipped: it.skipped, block: true };
+    return;
+  }
+  const files = {};
+  for (const [rel, buf] of it.output) files[rel] = hashBuffer(buf);
+  newLock[it.key] = { source: it.source, version: it.version, files, block: true };
+  if (!had) res.added.push(it.key);
+  else if (JSON.stringify(prev.files) !== JSON.stringify(files)) res.updated.push(it.key);
+  else res.unchanged.push(it.key);
+}
 function safeJoin(root, rel) {
-  const abs = resolvePath3(join9(root, rel));
+  const abs = resolvePath3(join10(root, rel));
   if (abs !== root && !abs.startsWith(root + sep3)) {
     throw new ApplyError(`path escapes target: ${rel}`);
   }
@@ -7349,8 +7522,8 @@ function pruneEmptyDirs(dirs, root) {
 }
 
 // src/state.ts
-import { existsSync as existsSync8, mkdirSync as mkdirSync4, readFileSync as readFileSync6, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
-import { join as join10 } from "node:path";
+import { existsSync as existsSync8, mkdirSync as mkdirSync4, readFileSync as readFileSync7, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import { join as join11 } from "node:path";
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
 var State = class {
   root;
@@ -7359,11 +7532,11 @@ var State = class {
     mkdirSync4(root, { recursive: true });
   }
   path(name) {
-    return join10(this.root, name);
+    return join11(this.root, name);
   }
   readJson(name) {
     try {
-      const value2 = JSON.parse(readFileSync6(this.path(name), "utf8"));
+      const value2 = JSON.parse(readFileSync7(this.path(name), "utf8"));
       return value2 && typeof value2 === "object" && !Array.isArray(value2) ? value2 : {};
     } catch {
       return {};
@@ -7413,7 +7586,7 @@ var State = class {
     const staleMs = opts.staleMs ?? 3e5;
     const pollMs = opts.pollMs ?? 25;
     const lockDir = this.path("sync.lock");
-    const ownerFile = join10(lockDir, "owner.json");
+    const ownerFile = join11(lockDir, "owner.json");
     const deadline = Date.now() + timeoutMs;
     for (; ; ) {
       try {
@@ -7440,7 +7613,7 @@ var State = class {
   }
   isStale(ownerFile, staleMs) {
     try {
-      const owner = JSON.parse(readFileSync6(ownerFile, "utf8"));
+      const owner = JSON.parse(readFileSync7(ownerFile, "utf8"));
       if (typeof owner.at !== "number") return true;
       return Date.now() - owner.at > staleMs;
     } catch {
@@ -7450,23 +7623,23 @@ var State = class {
 };
 
 // src/gitignore.ts
-import { existsSync as existsSync9, readFileSync as readFileSync7, rmSync as rmSync5 } from "node:fs";
-import { join as join11 } from "node:path";
-var BEGIN = "# >>> skilletor >>>";
-var END = "# <<< skilletor <<<";
+import { existsSync as existsSync9, readFileSync as readFileSync8, rmSync as rmSync5 } from "node:fs";
+import { join as join12 } from "node:path";
+var BEGIN2 = "# >>> skilletor >>>";
+var END2 = "# <<< skilletor <<<";
 function updateGitignore(opts) {
-  const path = join11(opts.dir, ".gitignore");
+  const path = join12(opts.dir, ".gitignore");
   const existed = existsSync9(path);
-  const existing = existed ? readFileSync7(path, "utf8") : "";
+  const existing = existed ? readFileSync8(path, "utf8") : "";
   const lines = existing.length ? existing.split("\n") : [];
-  const begin = lines.indexOf(BEGIN);
-  const end = lines.indexOf(END);
+  const begin = lines.indexOf(BEGIN2);
+  const end = lines.indexOf(END2);
   const hasBlock = begin !== -1 && end !== -1 && end > begin;
   const outside = hasBlock ? [...lines.slice(0, begin), ...lines.slice(end + 1)] : lines;
   const entries = blockEntries(opts.managedPaths, opts.fixed ?? ["skilletor.lock.json", "skilletor.local.json"]);
   let out;
   if (opts.enabled && entries.length > 0) {
-    const block = [BEGIN, ...entries, END];
+    const block = [BEGIN2, ...entries, END2];
     if (hasBlock) {
       out = [...lines.slice(0, begin), ...block, ...lines.slice(end + 1)];
     } else {
@@ -7583,10 +7756,10 @@ function reportHook(r) {
 
 // src/engine.ts
 function cacheRootOf(ctx) {
-  return ctx.cacheRoot ?? join12(ctx.stateRoot, "cache");
+  return ctx.cacheRoot ?? join13(ctx.stateRoot, "cache");
 }
 function targetDirOf(ctx, scope) {
-  return join12(baseOf(ctx, scope), ".claude");
+  return join13(baseOf(ctx, scope), ".claude");
 }
 function baseOf(ctx, scope) {
   return scope === "user" ? ctx.home : ctx.projectDir;
@@ -7677,16 +7850,7 @@ function bump(counts, kind) {
 }
 var HARNESS_LABEL = { claude: "Claude Code", codex: "Codex" };
 function runNotes(counts) {
-  const unsupported = /* @__PURE__ */ new Map();
   const notes = [];
-  for (const [kind, n] of counts) {
-    const [what, harness, type] = kind.split(" ");
-    if (what === "unsupported") unsupported.set(harness, [...unsupported.get(harness) ?? [], `${n} ${type}(s)`]);
-  }
-  for (const [h, parts] of unsupported) {
-    const label = HARNESS_LABEL[h];
-    notes.push(`${parts.join(" and ")} not installed for ${label} (not supported for ${label} yet)`);
-  }
   for (const [kind, n] of counts) {
     const [what, harness] = kind.split(" ");
     if (what === "briefing") {
@@ -7701,7 +7865,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
   const base = baseOf(ctx, scope);
   const rc = { base, scope, codexHome: codexHomeOf(ctx) };
   const cacheRoot = cacheRootOf(ctx);
-  const lockPath = join12(targetDir, "skilletor.lock.json");
+  const lockPath = join13(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const needed = scopeSources(scopeCfg);
   const resolved = /* @__PURE__ */ new Map();
@@ -7755,9 +7919,6 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
   };
   const buildItem = (item) => {
     const targets = harnessesFor(item.type);
-    for (const h of harnesses) {
-      if (!targets.includes(h)) bump(noteCounts, `unsupported ${h} ${item.type}`);
-    }
     if (targets.length === 0) return;
     for (const h of targets) {
       const key = lockKey(h, item.target);
@@ -7788,6 +7949,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
         continue;
       }
       const planItem = { key, type: item.type, name: item.name, source: item.source, version: r.version, output };
+      if (isBlockType(h, item.type)) planItem.inBlock = true;
       if (rendersEmpty(catItem, output)) {
         planItem.output = /* @__PURE__ */ new Map();
         planItem.skipped = "renders-empty";
@@ -7856,16 +8018,76 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
     }
     buildItem({ type: o.type, name: o.name, source: w.source, target });
   }
+  const labelOf = (abs) => {
+    const rel = relative2(base, abs);
+    return rel.startsWith("..") || isAbsolute(rel) ? abs : rel;
+  };
+  const blockFile = join13(rootOf(rc, "codex", "rule"), "AGENTS.md");
+  const blockLabel = labelOf(blockFile);
+  const oldBlockKeys = Object.keys(oldLock).filter((k) => oldLock[k].block);
+  let blockState;
+  if (oldBlockKeys.length > 0 || plan.some((p) => p.inBlock)) {
+    blockState = inspectAgentsMd(blockFile);
+    if (!blockState.ok) {
+      const why = blockState.reason;
+      rep.warnings.push(`${blockLabel}${why.startsWith("is ") ? " " : ": "}${why}; rules for Codex not written`);
+      for (let i = plan.length - 1; i >= 0; i--) if (plan[i].inBlock) plan.splice(i, 1);
+      keep.push(...oldBlockKeys);
+    }
+  }
   const result = apply(plan, {
     targetDir,
     force: opts.force,
     keep,
     rootOf: (key) => rootOfKey(rc, key) ?? targetDir
   });
+  const blockOverwritten = [];
+  if (blockState?.ok) {
+    const newLock = readLock(lockPath);
+    const existing = blockState.parsed?.sections ?? /* @__PURE__ */ new Map();
+    const planned = new Map(
+      plan.filter((p) => p.inBlock && !p.skipped).map((p) => [p.key, p.output.get("AGENTS.md").toString("utf8")])
+    );
+    const sections = [];
+    for (const [key, entry] of Object.entries(newLock)) {
+      if (!entry.block || entry.skipped) continue;
+      const name = parseLockKey(key).name;
+      const current = existing.get(name);
+      const text = planned.get(key) ?? current?.text;
+      if (text === void 0) continue;
+      const prev = oldLock[key];
+      if (prev?.block && !prev.skipped && (!current || hashBuffer(Buffer.from(current.text, "utf8")) !== prev.files["AGENTS.md"])) {
+        blockOverwritten.push(`${blockLabel}#rules/${name}`);
+      }
+      sections.push({ name, source: entry.source, text });
+    }
+    sections.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    const next = withBlock(blockState.text, sections);
+    if (next !== blockState.text) {
+      if (next === null) rmSync6(blockFile, { force: true });
+      else atomicWrite(blockFile, next);
+    }
+    if (sections.length > 0) {
+      if (existsSync10(join13(dirname4(blockFile), "AGENTS.override.md"))) {
+        rep.warnings.push(
+          `${labelOf(join13(dirname4(blockFile), "AGENTS.override.md"))} exists; Codex reads it instead of AGENTS.md, so the skilletor rules there are not seen`
+        );
+      }
+      if (scope === "project" && next !== null) {
+        const limit = projectDocLimit(codexHomeOf(ctx) || join13(ctx.home, ".codex"));
+        const bytes = Buffer.byteLength(next, "utf8");
+        if (bytes > limit) {
+          rep.warnings.push(
+            `${blockLabel} is ${bytes} bytes; Codex reads at most ${limit} bytes of project instructions (project_doc_max_bytes), so the end of the skilletor block may be cut off`
+          );
+        }
+      }
+    }
+  }
   if (scope === "project") {
     const newLock = readLock(lockPath);
     for (const rootDir of allRoots(rc)) {
-      const managed = Object.entries(newLock).filter(([key]) => rootOfKey(rc, key) === rootDir).flatMap(([, e]) => Object.keys(e.files));
+      const managed = Object.entries(newLock).filter(([key, e]) => !e.block && rootOfKey(rc, key) === rootDir).flatMap(([, e]) => Object.keys(e.files));
       const isClaude = rootDir === targetDir;
       updateGitignore({
         dir: rootDir,
@@ -7883,12 +8105,10 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
   rep.skipped = result.skipped.map(toChange);
   const shown = (c) => {
     const root = rootOfKey(rc, c.key) ?? targetDir;
-    if (root === targetDir) return { path: c.path };
-    const rel = relative2(base, root);
-    return { path: rel.startsWith("..") || isAbsolute(rel) ? join12(root, c.path) : join12(rel, c.path) };
+    return { path: root === targetDir ? c.path : labelOf(join13(root, c.path)) };
   };
   rep.conflicts = result.conflicts.map(shown);
-  rep.overwritten = result.overwritten.map(shown);
+  rep.overwritten = [...result.overwritten.map(shown), ...blockOverwritten.map((path) => ({ path }))];
   return rep;
 }
 async function check(ctx, opts = {}) {
@@ -7903,7 +8123,7 @@ async function check(ctx, opts = {}) {
   if (sel === "user" || sel === "all") scopes.push(["user", config.user]);
   if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
   for (const [scope, scopeCfg] of scopes) {
-    const oldLock = readLock(join12(targetDirOf(ctx, scope), "skilletor.lock.json"));
+    const oldLock = readLock(join13(targetDirOf(ctx, scope), "skilletor.lock.json"));
     if (targetDrift(Object.keys(oldLock), targets[scope])) {
       out.changed = true;
       (out.targetsChanged ??= []).push(scope);
@@ -7933,7 +8153,7 @@ function status(ctx, opts = {}) {
   if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
   const out = { scopes: [] };
   for (const [scope, scopeCfg] of scopes) {
-    const lock = readLock(join12(targetDirOf(ctx, scope), "skilletor.lock.json"));
+    const lock = readLock(join13(targetDirOf(ctx, scope), "skilletor.lock.json"));
     const active = targets[scope];
     const rows = scopeCfg.install.flatMap((i) => active.filter((h) => supports(h, i.type)).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
     const declaredKeys = new Set(rows.map((r) => r.key));
@@ -7993,7 +8213,7 @@ function status(ctx, opts = {}) {
 }
 
 // src/commands.ts
-import { join as join13 } from "node:path";
+import { join as join14 } from "node:path";
 
 // src/spec.ts
 var SpecError = class extends Error {
@@ -8136,7 +8356,7 @@ var CommandError = class extends Error {
 };
 function configPath(ctx, project) {
   const root = project ? ctx.projectDir : ctx.home;
-  return join13(root, ".claude", "skilletor.json");
+  return join14(root, ".claude", "skilletor.json");
 }
 var TYPE_DIR2 = { skill: "skills", agent: "agents", rule: "rules" };
 async function cmdAdd(ctx, args) {
@@ -8234,7 +8454,7 @@ async function cmdUninstall(ctx, args) {
   const project = Boolean(args.project);
   const path = configPath(ctx, project);
   const scopeName = project ? "project" : "user";
-  const lock = readLock(join13(project ? ctx.projectDir : ctx.home, ".claude", "skilletor.lock.json"));
+  const lock = readLock(join14(project ? ctx.projectDir : ctx.home, ".claude", "skilletor.lock.json"));
   const parsed = args.items.map((spec) => ({ spec, ...parseItemSpec(spec) }));
   const errors = [];
   const hints = [];
@@ -8343,9 +8563,9 @@ function installedSet(ctx, config) {
   const set = /* @__PURE__ */ new Set();
   for (const i of declaredItems(config)) set.add(`${i.key}@${i.source}`);
   for (const scope of ["user", "project"]) {
-    const dir = join13(scope === "user" ? ctx.home : ctx.projectDir ?? "", ".claude");
+    const dir = join14(scope === "user" ? ctx.home : ctx.projectDir ?? "", ".claude");
     if (scope === "project" && !ctx.projectDir) continue;
-    for (const [key, entry] of Object.entries(readLock(join13(dir, "skilletor.lock.json")))) {
+    for (const [key, entry] of Object.entries(readLock(join14(dir, "skilletor.lock.json")))) {
       if (entry.skipped) continue;
       set.add(`${parseLockKey(key).target}@${entry.source}`);
     }
@@ -8504,7 +8724,7 @@ function makeContext2(flags) {
   return {
     home,
     projectDir: flags.projectDir ?? process.cwd(),
-    stateRoot: join14(home, ".claude", "skilletor")
+    stateRoot: join15(home, ".claude", "skilletor")
   };
 }
 function statusText(report) {
@@ -8686,7 +8906,7 @@ async function runHookCommand(event) {
   const ctx = {
     home,
     projectDir,
-    stateRoot: join14(home, ".claude", "skilletor"),
+    stateRoot: join15(home, ".claude", "skilletor"),
     binPath: fileURLToPath(import.meta.url)
   };
   try {

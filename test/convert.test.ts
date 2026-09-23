@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parse } from "smol-toml";
-import { codexAgentToml, ConvertError } from "../src/convert.ts";
+import { codexAgentToml, codexRuleSection, convertForTarget, ConvertError } from "../src/convert.ts";
 
 const toml = (text: string | undefined) => JSON.parse(JSON.stringify(parse(text!))) as Record<string, unknown>;
 
@@ -121,4 +121,34 @@ test("a codex: table cannot collide with a derived key (no duplicate TOML keys)"
   const r = codexAgentToml("---\ndescription: d\ncodex:\n  description:\n    x: 1\n---\nB\n", "a");
   assert.equal(toml(r.toml).description, "d");
   assert.match(r.warnings[0] ?? "", /^codex\.description: a table cannot replace/);
+});
+
+// ---- rules -> a section of the AGENTS.md block (spec §14.8) ----------------------
+
+test("a rule becomes its body, frontmatter removed; paths become a leading line", () => {
+  assert.equal(codexRuleSection("---\ndescription: x\n---\n\nUse tabs.\n\n", "r"), "Use tabs.\n");
+  assert.equal(
+    codexRuleSection("---\npaths:\n  - \"k8s/**\"\n  - '*.yaml'\n---\nBe careful.\n", "r"),
+    "Applies when working with files matching: `k8s/**`, `*.yaml`.\n\nBe careful.\n",
+  );
+  assert.equal(codexRuleSection("---\npaths: src/**\n---\nB\n", "r"), "Applies when working with files matching: `src/**`.\n\nB\n");
+  assert.equal(codexRuleSection("No frontmatter at all.\n", "r"), "No frontmatter at all.\n");
+});
+
+test("a blank rule body is not applicable for Codex", () => {
+  assert.equal(codexRuleSection("---\npaths: [a]\n---\n  \n", "r"), undefined);
+  assert.equal(codexRuleSection("", "r"), undefined);
+});
+
+test("a rule body containing a skilletor marker line is refused", () => {
+  assert.throws(() => codexRuleSection("text\n<!-- skilletor:end -->\n", "r"), (err: Error) => err instanceof ConvertError && /marker/.test(err.message));
+});
+
+test("convertForTarget: a Codex rule maps to one AGENTS.md section; Claude rules pass through", () => {
+  const out = new Map([["rules/r.md", Buffer.from("---\npaths: [a]\n---\nR\n")]]);
+  const codex = convertForTarget("codex", "rule", "r", out);
+  assert.deepEqual([...codex.output.keys()], ["AGENTS.md"]);
+  assert.equal(codex.output.get("AGENTS.md")!.toString(), "Applies when working with files matching: `a`.\n\nR\n");
+  assert.equal(convertForTarget("claude", "rule", "r", out).output, out);
+  assert.equal(convertForTarget("codex", "rule", "r", new Map([["rules/r.md", Buffer.from("\n")]])).skipped, true);
 });

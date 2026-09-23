@@ -5,14 +5,17 @@
 // as it was.
 import { execFileSync } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
-import { basename, isAbsolute, join, relative } from "node:path";
+import { existsSync, rmSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import {
   loadConfig, type Harness, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig, type WildcardItem,
 } from "./config.ts";
 import {
   defaultMarkers, detectHarnesses, lockKey, parseLockKey, rootOf, rootOfKey, selectTargets, supports, targetDrift,
-  allRoots, type HarnessMarkers, type RootContext, type TargetSelection,
+  allRoots, isBlockType, type HarnessMarkers, type RootContext, type TargetSelection,
 } from "./targets.ts";
+import { inspectAgentsMd, projectDocLimit, withBlock, type Inspection, type Section } from "./agentsmd.ts";
+import { atomicWrite, hashBuffer } from "./fsutil.ts";
 import { convertForTarget } from "./convert.ts";
 import { LocalSource } from "./sources/local.ts";
 import { GitSource } from "./sources/git.ts";
@@ -174,25 +177,16 @@ async function syncInner(ctx: EngineContext, opts: SyncOptions, state: State): P
   return report;
 }
 
-/** Count one occurrence of a note kind ("unsupported <harness> <type>", "briefing <harness>"). */
+/** Count one occurrence of a note kind ("briefing <harness>"). */
 function bump(counts: Map<string, number>, kind: string): void {
   counts.set(kind, (counts.get(kind) ?? 0) + 1);
 }
 
 const HARNESS_LABEL: Record<Harness, string> = { claude: "Claude Code", codex: "Codex" };
 
-/** The run's notes (spec §14.2, §14.7): one line per harness and kind. */
+/** The run's notes (spec §14.7): one line per harness and kind. */
 function runNotes(counts: Map<string, number>): string[] {
-  const unsupported = new Map<Harness, string[]>();
   const notes: string[] = [];
-  for (const [kind, n] of counts) {
-    const [what, harness, type] = kind.split(" ") as [string, Harness, string?];
-    if (what === "unsupported") unsupported.set(harness, [...(unsupported.get(harness) ?? []), `${n} ${type}(s)`]);
-  }
-  for (const [h, parts] of unsupported) {
-    const label = HARNESS_LABEL[h];
-    notes.push(`${parts.join(" and ")} not installed for ${label} (not supported for ${label} yet)`);
-  }
   for (const [kind, n] of counts) {
     const [what, harness] = kind.split(" ") as [string, Harness];
     if (what === "briefing") {
@@ -282,9 +276,6 @@ async function syncScope(
 
   const buildItem = (item: { type: ItemType; name: string; source: string; target: string }) => {
     const targets = harnessesFor(item.type);
-    for (const h of harnesses) {
-      if (!targets.includes(h)) bump(noteCounts, `unsupported ${h} ${item.type}`);
-    }
     if (targets.length === 0) return;
     for (const h of targets) {
       const key = lockKey(h, item.target);
@@ -316,6 +307,7 @@ async function syncScope(
         continue;
       }
       const planItem: PlanItem = { key, type: item.type, name: item.name, source: item.source, version: r.version, output };
+      if (isBlockType(h, item.type)) planItem.inBlock = true;
       // Main template renders empty: not applicable here (spec §5).
       if (rendersEmpty(catItem, output)) {
         planItem.output = new Map();
@@ -393,9 +385,80 @@ async function syncScope(
     buildItem({ type: o.type, name: o.name, source: w.source, target });
   }
 
+  /** A path for the report: relative to the scope base when under it, else absolute. */
+  const labelOf = (abs: string): string => {
+    const rel = relative(base, abs);
+    return rel.startsWith("..") || isAbsolute(rel) ? abs : rel;
+  };
+
+  // Codex rules are sections of one managed block in a shared AGENTS.md (spec
+  // §14.8). Check the file first: a refusal writes nothing for them and keeps
+  // every block entry as it is (--force does not override this).
+  const blockFile = join(rootOf(rc, "codex", "rule")!, "AGENTS.md");
+  const blockLabel = labelOf(blockFile);
+  const oldBlockKeys = Object.keys(oldLock).filter((k) => oldLock[k]!.block);
+  let blockState: Inspection | undefined;
+  if (oldBlockKeys.length > 0 || plan.some((p) => p.inBlock)) {
+    blockState = inspectAgentsMd(blockFile);
+    if (!blockState.ok) {
+      const why = blockState.reason;
+      rep.warnings.push(`${blockLabel}${why.startsWith("is ") ? " " : ": "}${why}; rules for Codex not written`);
+      for (let i = plan.length - 1; i >= 0; i--) if (plan[i]!.inBlock) plan.splice(i, 1);
+      keep.push(...oldBlockKeys);
+    }
+  }
+
   const result = apply(plan, {
     targetDir, force: opts.force, keep, rootOf: (key) => rootOfKey(rc, key) ?? targetDir,
   });
+
+  const blockOverwritten: string[] = [];
+  if (blockState?.ok) {
+    // Rebuild the block from the new lock: rendered text for planned rules, the
+    // file's current section for kept ones (source unreachable).
+    const newLock = readLock(lockPath);
+    const existing = blockState.parsed?.sections ?? new Map<string, { source: string; text: string }>();
+    const planned = new Map(
+      plan.filter((p) => p.inBlock && !p.skipped).map((p) => [p.key, p.output.get("AGENTS.md")!.toString("utf8")]),
+    );
+    const sections: Section[] = [];
+    for (const [key, entry] of Object.entries(newLock)) {
+      if (!entry.block || entry.skipped) continue;
+      const name = parseLockKey(key).name;
+      const current = existing.get(name);
+      const text = planned.get(key) ?? current?.text;
+      if (text === undefined) continue;
+      const prev = oldLock[key];
+      if (prev?.block && !prev.skipped && (!current || hashBuffer(Buffer.from(current.text, "utf8")) !== prev.files["AGENTS.md"])) {
+        blockOverwritten.push(`${blockLabel}#rules/${name}`); // edited or deleted by hand
+      }
+      sections.push({ name, source: entry.source, text });
+    }
+    sections.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    const next = withBlock(blockState.text, sections);
+    if (next !== blockState.text) {
+      if (next === null) rmSync(blockFile, { force: true });
+      else atomicWrite(blockFile, next);
+    }
+    if (sections.length > 0) {
+      if (existsSync(join(dirname(blockFile), "AGENTS.override.md"))) {
+        rep.warnings.push(
+          `${labelOf(join(dirname(blockFile), "AGENTS.override.md"))} exists; Codex reads it instead of AGENTS.md, ` +
+            "so the skilletor rules there are not seen",
+        );
+      }
+      if (scope === "project" && next !== null) {
+        const limit = projectDocLimit(codexHomeOf(ctx) || join(ctx.home, ".codex"));
+        const bytes = Buffer.byteLength(next, "utf8");
+        if (bytes > limit) {
+          rep.warnings.push(
+            `${blockLabel} is ${bytes} bytes; Codex reads at most ${limit} bytes of project instructions ` +
+              "(project_doc_max_bytes), so the end of the skilletor block may be cut off",
+          );
+        }
+      }
+    }
+  }
 
   if (scope === "project") {
     // One managed block per target root: `.claude/.gitignore` (with the lock and
@@ -404,7 +467,7 @@ async function syncScope(
     const newLock = readLock(lockPath);
     for (const rootDir of allRoots(rc)) {
       const managed = Object.entries(newLock)
-        .filter(([key]) => rootOfKey(rc, key) === rootDir)
+        .filter(([key, e]) => !e.block && rootOfKey(rc, key) === rootDir)
         .flatMap(([, e]) => Object.keys(e.files));
       const isClaude = rootDir === targetDir;
       updateGitignore({
@@ -427,12 +490,10 @@ async function syncScope(
   // A root outside the base (a CODEX_HOME elsewhere) is shown absolute.
   const shown = (c: { key: string; path: string }) => {
     const root = rootOfKey(rc, c.key) ?? targetDir;
-    if (root === targetDir) return { path: c.path };
-    const rel = relative(base, root);
-    return { path: rel.startsWith("..") || isAbsolute(rel) ? join(root, c.path) : join(rel, c.path) };
+    return { path: root === targetDir ? c.path : labelOf(join(root, c.path)) };
   };
   rep.conflicts = result.conflicts.map(shown);
-  rep.overwritten = result.overwritten.map(shown);
+  rep.overwritten = [...result.overwritten.map(shown), ...blockOverwritten.map((path) => ({ path }))];
   return rep;
 }
 

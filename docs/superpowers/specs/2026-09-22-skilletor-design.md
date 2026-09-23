@@ -405,7 +405,7 @@ manage-skills configuration. (The Codex target moved into scope: §14.)
 skilletor installs for one or both of two **harnesses**: Claude Code (`claude`) and the
 OpenAI Codex CLI (`codex`). Phase 1 covers detection, the per-target layout, skills for
 Codex, and the Codex plugin wiring; phase 2 converts agents to Codex agent-role TOML
-(§14.7). Rules (phase 3, a managed block in `AGENTS.md`) come later.
+(§14.7); phase 3 writes rules into a managed block in `AGENTS.md` (§14.8).
 
 ### 14.1 Which harnesses: detection and `targets`
 
@@ -444,20 +444,20 @@ one:
 |---|---|---|
 | skill | `<base>/.claude/skills/<name>/` | `<base>/.agents/skills/<name>/` |
 | agent | `<base>/.claude/agents/<name>.md` | user: `$CODEX_HOME/agents/<name>.toml` (default `~/.codex`); project: `<repo>/.codex/agents/<name>.toml` (§14.7) |
-| rule | `<base>/.claude/rules/<name>.md` | not written (phase 3) |
+| rule | `<base>/.claude/rules/<name>.md` | a section of the managed block in `$CODEX_HOME/AGENTS.md` (user) or `<repo>/AGENTS.md` (project) (§14.8) |
 
 `<base>` is `~` (user scope) or the project root (project scope). The user-scope Codex agent
 root is the one root that need not lie under `<base>`: it follows `$CODEX_HOME`
 (`EngineContext.codexHome`, injectable for tests). Codex reads user skills
 from `~/.agents/skills` and project skills from `<repo>/.agents/skills`; SKILL.md files are
 compatible as they are (Claude-only frontmatter keys are accepted). In code the table is
-`LAYOUTS` in `targets.ts`: per harness a lock-key prefix and, per supported type, a function
-from the scope (base, scope, Codex home) to the root directory. `apply` receives a key →
+`LAYOUTS` in `targets.ts`: per harness a lock-key prefix, per supported type a function
+from the scope (base, scope, Codex home) to the root directory, and the types that are
+sections of a managed block rather than files (`blockTypes`, Codex rules). `apply` receives a key →
 root function and knows nothing else about harnesses. The per-type output mapping (agent
 Markdown → TOML, `convert.ts`) runs in the engine between render and apply.
 
-A declared rule while `codex` is a target is simply not written for Codex; the report says
-so in one line per run (a note, not a warning, so the hooks stay quiet).
+Every item type has a Codex form, so there is no "not installed for Codex" note any more.
 
 ### 14.3 Rendering, lock, ownership
 
@@ -562,3 +562,59 @@ no trailing `'`), else as a multi-line basic string with every `\` and `"` escap
 content can close the string early. Round-trip tests parse the output with `smol-toml`
 (devDependency only); Codex's own loader accepts the files (manual check via the app-server's
 `configWarning`s, which name every malformed role file).
+
+### 14.8 Codex rules (phase 3)
+
+Codex has no rules directory; it reads `AGENTS.md`. skilletor keeps all of a scope's Codex
+rules in **one managed block** of that scope's file – `$CODEX_HOME/AGENTS.md` (user, default
+`~/.codex`) or `<repo>/AGENTS.md` (project):
+
+```
+<!-- skilletor:begin -->
+<!-- managed by skilletor — edits inside are overwritten -->
+
+<!-- skilletor:rule k8s source=shared -->
+Applies when working with files matching: `k8s/**`, `*.yaml`.
+
+…rule body…
+
+<!-- skilletor:end -->
+```
+
+- **Sections:** one per rule, sorted by rule name, each opened by its marker comment
+  (name and source). The body is the rule rendered **for `codex`**, frontmatter removed. A
+  `paths:` frontmatter (Codex cannot load conditionally) becomes the leading "Applies when
+  working with files matching: …" line; other frontmatter keys are dropped. A rule whose
+  body is blank for Codex (empty render, or an empty file) is skipped for Codex. A rule
+  whose body contains a skilletor marker line is not written (warning) – it would corrupt
+  the block.
+- **Placement:** content outside the markers is never modified. A missing file is created
+  with just the block; a file without a block gets it appended after a blank line. When
+  the block ends up empty it is removed, and if nothing but whitespace is left the file is
+  deleted (a file skilletor created is thus removed again). Switching Codex off (§14.1)
+  removes the block the same way.
+- **Refusals** – warning, nothing written for Codex rules in that scope, existing lock
+  entries kept, `--force` does not override:
+  - malformed markers: `begin` without `end`, `end` before `begin`, either one twice;
+  - `AGENTS.md` is a symlink (commonly `CLAUDE.md` ↔ `AGENTS.md`: writing through it would
+    show Claude the rules twice), a directory, or unreadable.
+- **Lock and ownership:** each rule keeps an entry `codex:rules/<name>` with
+  `"block": true` and `files: { "AGENTS.md": <hash of its section> }`. `apply` records such
+  entries (added / updated / unchanged / removed by hash) but never touches disk for them;
+  the engine then rebuilds the block from the new lock. A rule kept because its source is
+  unreachable keeps its section text from the file. A section edited or deleted by hand is
+  restored and reported as an overwritten local change (`<file>#rules/<name>`, e.g.
+  `.codex/AGENTS.md#rules/k8s`).
+  `status` and `check` treat these entries like any other.
+- **No gitignore:** `AGENTS.md` is typically committed and cannot be partly ignored, so the
+  block is not covered by any managed `.gitignore` – a project's rules for Codex show up in
+  its diff (known wart; use user-scope rules for machine-specific content).
+- **Codex's reading rules (measured on 0.153.4 with `codex debug prompt-input`):** the
+  global file comes first, then `--- project-doc ---`, then project files from the repo
+  root down to the cwd, all inside one `# AGENTS.md instructions for <cwd>` message. An
+  `AGENTS.override.md` next to an `AGENTS.md` replaces it (global and per directory) –
+  skilletor still writes the block but warns that Codex will not see it. Project docs
+  together are cut at `project_doc_max_bytes` (default 32768; read from the top level of
+  `$CODEX_HOME/config.toml` when set there), truncating from the end – where a new block
+  sits – so skilletor warns when the project `AGENTS.md` exceeds it. The global file was not
+  truncated at 40 000 bytes, so the user scope has no size warning.

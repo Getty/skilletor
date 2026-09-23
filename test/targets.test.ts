@@ -81,7 +81,8 @@ test("lock keys: claude unprefixed, codex prefixed; roots per harness and type",
   assert.equal(rootOfKey(u("/b"), "codex:agents/foo"), join("/b", ".codex")); // user: default Codex home
   assert.equal(rootOfKey({ ...u("/b"), codexHome: "/cx" }, "codex:agents/foo"), "/cx");
   assert.equal(rootOfKey({ base: "/p", scope: "project", codexHome: "/cx" }, "codex:agents/foo"), join("/p", ".codex"));
-  assert.equal(rootOfKey(u("/b"), "codex:rules/foo"), undefined); // not written until phase 3
+  assert.equal(rootOfKey(u("/b"), "codex:rules/foo"), join("/b", ".codex")); // AGENTS.md block (phase 3)
+  assert.equal(rootOfKey({ base: "/p", scope: "project" }, "codex:rules/foo"), "/p"); // <repo>/AGENTS.md
   assert.equal(rootOfKey(u("/b"), "future:skills/foo"), undefined);
 });
 
@@ -91,7 +92,8 @@ test("targetDrift: the lock must cover every active target that takes the type, 
   assert.equal(targetDrift(["skills/a"], ["claude", "codex"]), true); // codex copy missing
   assert.equal(targetDrift(["skills/a", "codex:skills/a"], ["claude", "codex"]), false);
   assert.equal(targetDrift(["skills/a", "codex:skills/a"], ["claude"]), true); // codex switched off
-  assert.equal(targetDrift(["rules/y"], ["claude", "codex"]), false); // codex takes no rules (yet)
+  assert.equal(targetDrift(["rules/y"], ["claude", "codex"]), true); // codex takes rules (phase 3)
+  assert.equal(targetDrift(["rules/y", "codex:rules/y"], ["claude", "codex"]), false);
   assert.equal(targetDrift(["agents/x"], ["claude", "codex"]), true); // codex takes agents (phase 2)
   assert.equal(targetDrift(["future:skills/a"], ["claude"]), false); // unknown prefix: kept, no drift
 });

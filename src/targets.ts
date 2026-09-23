@@ -29,20 +29,27 @@ export interface TargetLayout {
   /** Per supported item type: the root directory for a scope. Lock file paths are
    *  relative to it. A type missing here is not written for this harness. */
   roots: Partial<Record<ItemType, (r: RootContext) => string>>;
+  /** Types whose items are sections of one managed block in `<root>/AGENTS.md`
+   *  rather than files of their own (spec §14.8). */
+  blockTypes?: readonly ItemType[];
 }
 
 const under = (dir: string) => (r: RootContext) => join(r.base, dir);
+const codexHomeDir = (r: RootContext) => r.codexHome || join(r.base, ".codex");
 
 export const LAYOUTS: Record<Harness, TargetLayout> = {
   claude: { harness: "claude", keyPrefix: "", roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") } },
-  // Skills (phase 1) and agents as TOML (phase 2, convert.ts); rules come in phase 3.
+  // Skills (phase 1), agents as TOML (phase 2, convert.ts), rules as sections of
+  // the managed AGENTS.md block (phase 3, agentsmd.ts).
   codex: {
     harness: "codex",
     keyPrefix: "codex:",
     roots: {
       skill: under(".agents"),
-      agent: (r) => (r.scope === "user" ? r.codexHome || join(r.base, ".codex") : join(r.base, ".codex")),
+      agent: (r) => (r.scope === "user" ? codexHomeDir(r) : join(r.base, ".codex")),
+      rule: (r) => (r.scope === "user" ? codexHomeDir(r) : r.base),
     },
+    blockTypes: ["rule"],
   },
 };
 
@@ -140,10 +147,20 @@ export function rootOfKey(r: RootContext, key: string): string | undefined {
   return k.harness ? rootOf(r, k.harness, k.type) : undefined;
 }
 
-/** Every distinct root any layout uses in a scope (for per-root gitignore blocks). */
+/** Is this harness's copy of the type a section of a managed block (spec §14.8)? */
+export function isBlockType(harness: Harness, type: ItemType): boolean {
+  return LAYOUTS[harness].blockTypes?.includes(type) ?? false;
+}
+
+/** Every distinct root of per-file items in a scope (for per-root gitignore blocks);
+ *  block roots (a shared AGENTS.md) are not gitignored. */
 export function allRoots(r: RootContext): string[] {
   const roots = new Set<string>();
-  for (const h of HARNESSES) for (const f of Object.values(LAYOUTS[h].roots)) if (f) roots.add(f(r));
+  for (const h of HARNESSES) {
+    for (const [type, f] of Object.entries(LAYOUTS[h].roots)) {
+      if (f && !isBlockType(h, type as ItemType)) roots.add(f(r));
+    }
+  }
   return [...roots];
 }
 
