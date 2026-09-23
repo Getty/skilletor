@@ -27,7 +27,7 @@ types under the same roof.
 | **Source** | A named source: git repo, HTTPS tarball, or local directory |
 | **Item** | An installable thing from a source, addressed as `name@source` |
 | **Wildcard** | `*@source` or a pattern such as `perl-*@source` in one type's install list: every item of that type in the source whose name matches (§3) |
-| **Bundle** | `bundles/<name>.yaml` in a source: a named set of that source's items plus var defaults, declared as `name@source` under `install.bundles` (§15) |
+| **Bundle** | `bundles/<name>.yaml` in a source: a named set of items (its own, or other sources' by address) plus var defaults, declared as `name@source` under `install.bundles` (§15) |
 | **Type** | `skill`, `agent`, `rule` – a fixed table in code, not config-extensible |
 | **Scope** | `user` (`~/.claude/`) or `project` (`<project>/.claude/`) |
 | **Lock** | Per scope: what skilletor installed, with output hashes |
@@ -674,12 +674,12 @@ vars:
 | Key | Meaning |
 |---|---|
 | `description` | Shown by `skilletor available` (required) |
-| `skills`, `agents`, `rules` | Item names or patterns (`*` as in §3) of that type, **from this source only** |
-| `bundles` | Other bundles of this source, included recursively |
+| `skills`, `agents`, `rules` | Item names or patterns (`*` as in §3) of that type: bare = this source, `name@<spec>` = another source by address (§15.6) |
+| `bundles` | Other bundles of this source (bare names only), included recursively |
 | `vars` | Var defaults for the items this bundle yields |
 
-Every key but `description` is optional. An entry containing `@` is an error: bundles
-never reach into another source, so they add no trust question.
+Every key but `description` is optional. An entry of another source names that source by
+its address, never by a config name, so a bundle means the same on every machine (§15.6).
 
 ### 15.2 Expansion
 
@@ -703,6 +703,9 @@ Merge order for an item a bundle yields:
 
 `source defaults < bundle vars < user < project < local`
 
+"Source defaults" are those of the item's own source – for an item of another source,
+that source's `skilletor.json`.
+
 - Bundle vars apply only to the items that bundle yields; they never change another item.
 - Nested bundles: along one chain the outer bundle wins over the included one (`perl`
   including `base` → `perl`'s value).
@@ -719,7 +722,8 @@ installed before stay installed (kept like an unresolvable source's items, §6.1
 - the bundle does not exist in the source's catalog;
 - the file does not parse, carries an unknown key, lacks `description`, or has both
   `.yaml` and `.yml`;
-- an entry contains `@`;
+- an entry's `@<spec>` is not a probe-free remote spec (bad shorthand, generic host
+  without `https://`, local path);
 - a cycle in `bundles` (`a` → `b` → `a`); the warning names the cycle.
 
 An unresolvable or untrusted source keeps what its bundles installed, as for wildcards.
@@ -739,3 +743,36 @@ An unresolvable or untrusted source keeps what its bundles installed, as for wil
   bundle with the number of items it currently has installed, like wildcards.
 - The lock records items only; a bundle itself has no lock entry. `check` treats a changed
   source as today, so an edited bundle file triggers a sync like any other upstream change.
+
+### 15.6 Items of other sources
+
+A bundle entry `name@<spec>` (patterns allowed: `perl-*@gitlab.com/peter`) names an item of
+another source by address. `<spec>` uses the shorthand of §4.2 (`Getty`, `Getty/repo`,
+`gitlab.com/peter`, `https://…`, `…tar.gz`); the resolved URL is the source's identity.
+Only specs that resolve without a probe are allowed – a generic host (`host.tld/…`) must be
+written as a full `https://…` URL – and local paths are not allowed; both are bundle
+errors (§15.4).
+
+- **Matching:** the entry is served by the configured source (any scope visible to the
+  bundle's scope) whose resolved `git`/`url` identity equals the entry's. The config name
+  does not matter. A `local` override of that source (author mode) still applies.
+- **Missing source during `sync` and the hooks:** never added automatically – a trusted
+  source must not be able to pull in an untrusted one, since rendering runs code. The
+  report warns once per missing source and bundle (`bundle perl@shared needs
+  gitlab.com/peter (https://gitlab.com/peter/skills): run skilletor install
+  bundle:perl@shared`); those items are skipped (installed copies stay), everything else
+  proceeds.
+- **Missing source during `skilletor install bundle:…`:** the CLI expands the bundle first
+  and, per missing source, asks on a TTY:
+  `bundle perl needs a source you don't have yet: gitlab.com/peter →
+  https://gitlab.com/peter/skills — add it as [peter]? (name, or n to skip)`. The default
+  name is derived as in §4.2. Accepting adds the source to the config the bundle goes into
+  (user, or project with `--project`) exactly like `skilletor add` – which is the act of
+  trust (§4.3). Skipping leaves those items to the warning above. Without a TTY the command
+  fails before editing anything (exit 1) and prints the `skilletor add <name> <spec>`
+  commands to run. The probe of §4.2 (generic hosts) happens here, never in a hook.
+- **Name clash:** if the derived name is taken by a source with a different identity, the
+  prompt requires a different name (non-TTY: the printed command uses `<name>-2`).
+- **Project-declared sources:** a source that exists only in the project config and is not
+  trusted yet counts as present but untrusted – the usual trust request applies (§4.3).
+- Nested `bundles` stay bare (this source only).
