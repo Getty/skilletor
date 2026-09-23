@@ -31,11 +31,12 @@ under skills/agents/rules.
 
 ```bash
 skilletor add [name] <spec> [--project]   # add a source (resolves shorthand, trusts it), then sync
-skilletor source list | source remove <name> [--project] [--force]
-skilletor available [source]              # catalog of trusted sources: type, name, description, installed?
+skilletor source list [--json] | source remove <name> [--project] [--force]   # --force: even with installed items
+skilletor available [source] [--json]     # catalog of trusted sources: type, name, description, installed?
 skilletor install <item>... [--project]   # name@source (type:name@source if ambiguous), then sync
 skilletor uninstall <item>... [--project]
-skilletor sync | check | status           # --scope user|project|all, --json, --force, --project-dir <dir>
+skilletor sync | check | status           # --scope user|project|all, --json, --project-dir <dir>
+skilletor sync --force                    # overwrite and adopt unmanaged files reported as conflicts
 skilletor trust <source>                  # confirm a project-declared source (shows the resolved URL)
 ```
 
@@ -76,9 +77,11 @@ when a source has changed.
 - `ref` (git) pins a branch, tag or commit; omit for the remote's HEAD.
 - `gitignore` (project only, default true): keep a managed block listing the installed
   paths, the lock and `skilletor.local.json`, so only `skilletor.json` is committed.
+  In the user file it is a config error — the config fails to load and nothing syncs.
 - `checkInterval` (user only, seconds, default 1800 = 30 min): throttle for the
   in-session background check. `0` (or ≤ 0) turns it off — skilletor then only syncs at
-  session start.
+  session start. In a project or local file it is a config error, not ignored — the
+  config fails to load and nothing syncs.
 
 ## Author mode (local override)
 

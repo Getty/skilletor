@@ -102,7 +102,8 @@ Only `skill`, `agent` and `rule` are installable — skilletor never syncs hooks
 
 skilletor always reconciles at **session start**. During a session it also
 re-checks your sources in the background, throttled by `checkInterval` (user
-config, seconds, **default 1800 = 30 min**). If that's too chatty for you:
+config only — in a project or local file it is a config error that stops skilletor
+loading its config; seconds, **default 1800 = 30 min**). If that's too chatty for you:
 
 ```json
 { "checkInterval": 0 }   // turn the in-session check off entirely
@@ -143,7 +144,8 @@ files are build artifacts; there are no hardlinks.
 
 ## Git & your own skills
 
-With `"gitignore": true` (default) skilletor keeps a marked block in
+With `"gitignore": true` (default; project config only — in the user config it is a
+config error that stops skilletor loading its config) skilletor keeps a marked block in
 `<project>/.claude/.gitignore` listing the exact managed paths, the lock and
 `skilletor.local.json`. Only `skilletor.json` is committed; your own hand-written skills
 beside the managed ones stay version-controlled and are never touched. Set
@@ -177,11 +179,12 @@ shared remote; manage-skills remains for hardlinked local sharing.
 
 ```
 skilletor add [name] <spec> [--project]   # add a source (resolves shorthand, trusts it), then sync
-skilletor source list | source remove <name> [--project] [--force]
-skilletor available [source]              # catalog of trusted sources; --json
+skilletor source list [--json] | source remove <name> [--project] [--force]   # --force: even with installed items
+skilletor available [source] [--json]     # catalog of trusted sources
 skilletor install <item>... [--project]   # name@source (type:name@source if ambiguous), then sync
 skilletor uninstall <item>... [--project]
-skilletor sync | check | status           # --scope user|project|all, --json, --force, --project-dir <dir>
+skilletor sync | check | status           # --scope user|project|all, --json, --project-dir <dir>
+skilletor sync --force                    # overwrite and adopt unmanaged files reported as conflicts
 skilletor trust <source>
 ```
 
