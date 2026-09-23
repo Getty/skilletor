@@ -27,4 +27,4 @@ Anything on the list is real — never fail an answer for using it.
 - Files: `~/.claude/skilletor.json` (user), `.claude/skilletor.json` (project),
   `.claude/skilletor.local.json` (machine-local project), `skilletor.lock.json` per scope.
 - Top-level config keys: `sources` (each with `git`, `ref`, `url` or `local`), `install`
-  (`skills`, `agents`, `rules`), `vars`, `gitignore`, `checkInterval`.
+  (`skills`, `agents`, `rules`), `vars`, `gitignore`, `checkInterval`, `targets`.

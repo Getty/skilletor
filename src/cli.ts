@@ -15,7 +15,7 @@ const VERSION =
   typeof __SKILLETOR_VERSION__ === "string" ? __SKILLETOR_VERSION__ : "0.0.0-dev";
 
 const USAGE = `skilletor ${VERSION}
-Remote skills, agents and rules for Claude Code.
+Remote skills, agents and rules for Claude Code and Codex.
 
 Usage:
   skilletor <command> [options]

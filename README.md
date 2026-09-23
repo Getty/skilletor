@@ -4,11 +4,11 @@
 
 > **MYAAH! Your skills are mine… to sync.**
 
-Remote skills, agents and rules for Claude Code — declared once, synced on every
-session, templated per project.
+Remote skills, agents and rules for Claude Code and Codex — declared once, synced on
+every session, templated per project.
 
-skilletor is a Claude Code plugin plus a standalone CLI. It installs **skills, agents and
-rules** from configured sources and keeps them up to date: it reconciles at session
+skilletor is a Claude Code and Codex plugin plus a standalone CLI. It installs **skills,
+agents and rules** from configured sources and keeps them up to date: it reconciles at session
 start, re-checks (throttled) during the session, pulls anything new, and tells the model
 what changed. It is the preferred successor to
 [manage-skills](https://github.com/Getty/manage-skills) (which stays around).
@@ -22,6 +22,7 @@ skilletor add shared Getty && skilletor install perl-moo@shared
 ```
 
 `add` registers (and trusts) a source; `install` declares an item and syncs it onto disk.
+Using Codex? See [Codex](#codex) — the plugin works there too, with a few differences.
 
 ## How it works
 
@@ -33,6 +34,7 @@ source (git | https tarball | local dir)
         │  diff against disk + lock
         ▼
    ~/.claude/{skills,agents,rules}   ·   <project>/.claude/{skills,agents,rules}
+   ~/.agents/skills, $CODEX_HOME/{agents,AGENTS.md}   ·   <project>/{.agents/skills,.codex/agents,AGENTS.md}
 ```
 
 - **SessionStart** — check every source (5s timeout each); on a change, sync and report.
@@ -71,7 +73,7 @@ skilletor.json             # optional: { "description": "…", "vars": { default
 
 `skilletor.json` at three levels; the scope follows from which file declares an item:
 
-| File | Scope | Installs into |
+| File | Scope | Installs into (Claude Code; Codex: see [Codex](#codex)) |
 |---|---|---|
 | `~/.claude/skilletor.json` | user | `~/.claude/{skills,agents,rules}` |
 | `<project>/.claude/skilletor.json` | project (committed) | `<project>/.claude/{skills,agents,rules}` |
@@ -96,7 +98,8 @@ skilletor.json             # optional: { "description": "…", "vars": { default
 ```
 
 Only `skill`, `agent` and `rule` are installable — skilletor never syncs hooks,
-`settings.json` or MCP configs.
+`settings.json` or MCP configs. An optional `"targets"` key picks the harnesses to install
+for (`claude`, `codex`) — see [Codex](#codex).
 
 `skilletor uninstall` removes explicit entries from one config — the user config, or the
 project config with `--project`. `rule:k8s@shared` removes only from `rules`;
@@ -173,8 +176,8 @@ Use the {{ project.name }} cluster in namespace {{ vars.k8s_namespace }}.
 ```
 
 Context: `vars.*` (source defaults < user < project < local), `project.*` (project
-scope), `scope`, `target.dir`, `host.*`, `user.*`, `item.*`. There is deliberately no
-`env.*`, and printing an undefined variable (`{{ vars.x }}`) is an error (so a typo can't
+scope), `scope`, `harness` (`claude` or `codex`), `target.dir`, `host.*`, `user.*`,
+`item.*`. There is deliberately no `env.*`, and printing an undefined variable (`{{ vars.x }}`) is an error (so a typo can't
 ship an empty skill). Testing one (`{% if vars.x %}`) is not: it is simply false.
 
 ### Switching items on and off with vars
@@ -223,14 +226,176 @@ files are build artifacts; there are no hardlinks.
 With `"gitignore": true` (default; project config only — in the user config it is a
 config error that stops skilletor loading its config) skilletor keeps a marked block in
 `<project>/.claude/.gitignore` listing the exact managed paths, the lock and
-`skilletor.local.json`. Only `skilletor.json` is committed; your own hand-written skills
-beside the managed ones stay version-controlled and are never touched. Set
+`skilletor.local.json` (and the same kind of block in `<project>/.agents/.gitignore` and
+`<project>/.codex/.gitignore` for Codex items). Only `skilletor.json` is committed; your
+own hand-written skills beside the managed ones stay version-controlled and are never touched. Set
 `"gitignore": false` to commit everything instead (useful only for items without
 machine-specific variables).
 
 A file is skilletor-managed exactly when it appears in
 `<scope>/.claude/skilletor.lock.json`. Managed files are overwritten on the next sync —
 change them in the source, not in place.
+
+## Codex
+
+skilletor installs for Claude Code, the OpenAI Codex CLI, or both — from the same sources
+and the same `skilletor.json`. Config, lock and state stay under `.claude/` for both
+harnesses, even on a Codex-only machine.
+
+### Which harnesses: detection and `targets`
+
+Without a `targets` key skilletor installs for every harness it finds, by files the
+harness itself creates (never `~/.claude/` alone — skilletor's own config lives there):
+
+| Harness | In use when any of these exists |
+|---|---|
+| `claude` | `~/.claude.json`, `~/.claude/settings.json`, `~/.claude/projects/` |
+| `codex` | in `$CODEX_HOME` (default `~/.codex`): `config.toml`, `auth.json`, `sessions/`, `installation_id` |
+
+`"targets": ["claude"]`, `["codex"]` or `["claude", "codex"]` overrides detection:
+
+1. **Machine targets** = the user config's `targets` if set, else the detected set. If that
+   is empty, `sync`, `check` and `status` stop with a config error naming the markers,
+   and nothing is touched — set `targets` in `~/.claude/skilletor.json`.
+2. **User scope** installs for the machine targets.
+3. **Project scope** installs for the machine targets, narrowed by the project's `targets`
+   (`skilletor.local.json` if it has one, else `skilletor.json`). A project can only
+   narrow, never add a harness the machine does not use; an empty intersection installs
+   nothing for the project and warns.
+
+Detection runs on every sync, so a harness that disappears (say `~/.codex` is deleted) has
+its items removed on the next sync — pin `targets` if that is not what you want. Items of
+a harness that is switched off are removed the same way.
+
+### Where items go
+
+`<base>` is `~` for user scope and the project root for project scope.
+
+| Type | Claude Code | Codex |
+|---|---|---|
+| skill | `<base>/.claude/skills/<name>/` | `<base>/.agents/skills/<name>/` |
+| agent | `<base>/.claude/agents/<name>.md` | user: `$CODEX_HOME/agents/<name>.toml`; project: `<project>/.codex/agents/<name>.toml` |
+| rule | `<base>/.claude/rules/<name>.md` | a section of the skilletor block in `$CODEX_HOME/AGENTS.md` (user) or `<project>/AGENTS.md` (project) |
+
+Every item is rendered once per target, with `harness` (`claude` or `codex`) in the
+template context, so a source can branch on it. Gating a whole item works like any other
+[empty render](#switching-items-on-and-off-with-vars): a skill whose `SKILL.md.njk` is
+wrapped in `{% if harness == "claude" %}` is installed for Claude Code and skipped for
+Codex. Skills are copied as they are — Codex accepts Claude's SKILL.md format.
+
+The lock stays one file per scope (`<base>/.claude/skilletor.lock.json`); Codex entries
+are keyed `codex:skills/<name>`, `codex:agents/<name>`, `codex:rules/<name>`, and the sync
+report and `status` list them under those keys. Codex items are active from the next Codex
+session.
+
+Codex reads project agents from `<project>/.codex/agents/` only in a project it
+**trusts**; in an untrusted project it ignores `.codex/` with a warning.
+
+### Agents: the `codex:` block
+
+A Codex agent role is a TOML file. skilletor renders the agent's Markdown for `codex` and
+converts it: `name` and `description` come from the frontmatter, the body becomes
+`developer_instructions`. Codex-specific settings go under an optional `codex:` mapping,
+passed through as top-level TOML keys (they override the three above):
+
+```markdown
+---
+name: reviewer
+description: Reviews diffs for correctness and style.
+model: sonnet
+tools: Read, Grep
+codex:
+  model_reasoning_effort: high
+  sandbox_mode: read-only
+---
+You review code. …
+```
+
+becomes
+
+```toml
+name = "reviewer"
+description = "Reviews diffs for correctness and style."
+model_reasoning_effort = "high"
+sandbox_mode = "read-only"
+developer_instructions = '''
+You review code. …
+'''
+```
+
+- **Claude-only keys are not carried over** — `model`, `tools`, `allowed-tools`, `color`
+  and any other key outside `codex:` — and nothing is reported for them. There is no
+  faithful mapping (`model: sonnet` means nothing to Codex); put Codex values under `codex:`.
+- `codex:` values may be strings, numbers, booleans, string arrays, or one level of tables
+  of those. Anything else is dropped with a warning naming the key. skilletor does not
+  check the values against Codex's schema — Codex ignores the whole role on a bad value.
+- **`briefing.skills` is not written for Codex.** Codex reads agent-role files strictly
+  and ignores the whole role over any unknown key, a `[briefing]` table included; the
+  sync report notes how many agents lost their `briefing.skills`.
+- An agent without a `description` is not written for Codex (warning) — Codex rejects
+  such a role. An agent whose body is empty is skipped for Codex.
+
+### Rules: a managed block in `AGENTS.md`
+
+Codex has no rules directory; it reads `AGENTS.md`. skilletor keeps all of a scope's Codex
+rules in one marked block of that scope's file — `$CODEX_HOME/AGENTS.md` for user scope,
+`<project>/AGENTS.md` for project scope:
+
+```markdown
+<!-- skilletor:begin -->
+<!-- managed by skilletor — edits inside are overwritten -->
+
+<!-- skilletor:rule k8s source=shared -->
+Applies when working with files matching: `k8s/**`, `*.yaml`.
+
+Use kubectl carefully.
+
+<!-- skilletor:end -->
+```
+
+- One section per rule, sorted by name. The body is the rule rendered for `codex` without
+  its frontmatter; a `paths:` list (Codex cannot load a rule conditionally) becomes the
+  leading "Applies when working with files matching" line.
+- **Everything outside the markers is yours** and never modified. A missing file is
+  created with just the block; an existing one gets the block appended. When the last rule
+  goes, the block goes; a file left empty is deleted.
+- A section edited or deleted by hand is restored on the next sync and reported as an
+  overwritten local change (`AGENTS.md#rules/k8s`). Change the rule in its source.
+- **Refusals** — skilletor writes nothing for Codex rules in that scope, keeps what it had
+  recorded, and warns; `--force` does not override:
+  - the markers are malformed: `begin` without `end`, `end` before `begin`, either twice;
+  - `AGENTS.md` is a symlink (commonly `AGENTS.md` → `CLAUDE.md`: writing through it would
+    show Claude Code the rules twice), a directory, or unreadable.
+
+  The other direction is not caught: if `CLAUDE.md` is a symlink to a regular `AGENTS.md`,
+  the block is written and Claude Code sees each rule twice (once from `.claude/rules/`).
+  Such a project is better off with `"targets": ["claude"]` or `["codex"]`.
+- **Warnings:** an `AGENTS.override.md` next to the file (Codex reads the override
+  instead, so the block is not seen); a project `AGENTS.md` larger than Codex's
+  `project_doc_max_bytes` (default 32768, read from `$CODEX_HOME/config.toml`) — Codex cuts
+  project instructions from the end, where the block sits.
+- **Git:** `AGENTS.md` is usually committed and cannot be partly ignored, so a project's
+  Codex rules show up in its diff. Keep machine-specific rules in user scope, or opt the
+  project out of Codex with `"targets": ["claude"]` in its `skilletor.json` (or, for your
+  machine only, in `skilletor.local.json`).
+
+### The plugin under Codex
+
+The repository ships a Codex plugin manifest (`.codex-plugin/plugin.json`) next to the
+Claude one; both use the same `hooks/hooks.json` and the bundled skill.
+
+- **Trust the hooks.** Codex runs a plugin's hooks only after you trust them — open
+  `/hooks` in Codex and trust skilletor's `SessionStart` and `UserPromptSubmit` hooks.
+  Until then nothing syncs automatically.
+- **The CLI is not on `PATH`** inside Codex (Codex cannot add a plugin's `bin/` to it). The
+  bundled skill tells the model to run it by absolute path, from the plugin's cache
+  directory: `$CODEX_HOME/plugins/cache/<marketplace>/skilletor/<version>/bin/skilletor`.
+  In your own shell, point an alias at that file or at a clone of this repository
+  (`alias skilletor=~/src/skilletor/bin/skilletor` — `dist/` is committed, no `npm install`
+  needed). Use an alias, not a symlink: the launcher finds `dist/` relative to its own path.
+- Codex sets no `CLAUDE_PROJECT_DIR`; the hook takes the git top level of the session's
+  working directory as the project root, so a session started in a subdirectory still
+  finds `<repo>/.claude/skilletor.json`.
 
 ## Security & trust
 
@@ -241,7 +406,7 @@ rendered. This is the same trust level as installing a plugin.
 - A source that appears **only** in a project config (a cloned repo) is never fetched
   until you run `skilletor trust <name>`; if the project later changes the URL, trust
   lapses.
-- Fixed target directories; item names, tar entries and includes may not escape the
+- Fixed target directories per harness; item names, tar entries and includes may not escape the
   source or target root; symlinks in sources are rejected; `url` is HTTPS-only.
 
 ## Coming from manage-skills
