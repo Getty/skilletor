@@ -11,6 +11,7 @@ function ctx(vars: Record<string, unknown>): RenderContext {
   return {
     vars,
     scope: "project",
+    harness: "claude",
     target: { dir: "/tmp/target" },
     host: { name: "box", os: "linux" },
     user: { name: "getty", home: "/home/getty" },

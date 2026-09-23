@@ -12,7 +12,7 @@ const END = "# <<< skilletor <<<";
 test("creates the block with managed paths plus lock and local", () => {
   const tmp = makeTmpDir();
   try {
-    updateGitignore({ claudeDir: tmp.dir, managedPaths: ["skills/moo/SKILL.md"], enabled: true });
+    updateGitignore({ dir: tmp.dir, managedPaths: ["skills/moo/SKILL.md"], enabled: true });
     const text = readFileSync(join(tmp.dir, ".gitignore"), "utf8");
     assert.match(text, new RegExp(BEGIN));
     assert.match(text, /skills\/moo\/SKILL\.md/);
@@ -27,8 +27,8 @@ test("creates the block with managed paths plus lock and local", () => {
 test("updates an existing block to new paths", () => {
   const tmp = makeTmpDir();
   try {
-    updateGitignore({ claudeDir: tmp.dir, managedPaths: ["skills/old/SKILL.md"], enabled: true });
-    updateGitignore({ claudeDir: tmp.dir, managedPaths: ["skills/new/SKILL.md"], enabled: true });
+    updateGitignore({ dir: tmp.dir, managedPaths: ["skills/old/SKILL.md"], enabled: true });
+    updateGitignore({ dir: tmp.dir, managedPaths: ["skills/new/SKILL.md"], enabled: true });
     const text = readFileSync(join(tmp.dir, ".gitignore"), "utf8");
     assert.equal(text.includes("skills/old/SKILL.md"), false);
     assert.match(text, /skills\/new\/SKILL\.md/);
@@ -40,10 +40,10 @@ test("updates an existing block to new paths", () => {
 test("is idempotent: no write when nothing changed", () => {
   const tmp = makeTmpDir();
   try {
-    updateGitignore({ claudeDir: tmp.dir, managedPaths: ["skills/moo/SKILL.md"], enabled: true });
+    updateGitignore({ dir: tmp.dir, managedPaths: ["skills/moo/SKILL.md"], enabled: true });
     const p = join(tmp.dir, ".gitignore");
     const mtime = statSync(p).mtimeMs;
-    updateGitignore({ claudeDir: tmp.dir, managedPaths: ["skills/moo/SKILL.md"], enabled: true });
+    updateGitignore({ dir: tmp.dir, managedPaths: ["skills/moo/SKILL.md"], enabled: true });
     assert.equal(statSync(p).mtimeMs, mtime);
   } finally {
     tmp.cleanup();
@@ -55,7 +55,7 @@ test("foreign content before and after the block is preserved", () => {
   try {
     const p = join(tmp.dir, ".gitignore");
     writeFileSync(p, `node_modules/\n${BEGIN}\nskills/old/SKILL.md\n${END}\n*.log\n`);
-    updateGitignore({ claudeDir: tmp.dir, managedPaths: ["skills/new/SKILL.md"], enabled: true });
+    updateGitignore({ dir: tmp.dir, managedPaths: ["skills/new/SKILL.md"], enabled: true });
     const text = readFileSync(p, "utf8");
     assert.match(text, /node_modules\//);
     assert.match(text, /\*\.log/);
@@ -71,7 +71,7 @@ test("disabling removes the block but keeps foreign content", () => {
   try {
     const p = join(tmp.dir, ".gitignore");
     writeFileSync(p, `node_modules/\n${BEGIN}\nskills/moo/SKILL.md\n${END}\n`);
-    updateGitignore({ claudeDir: tmp.dir, managedPaths: ["skills/moo/SKILL.md"], enabled: false });
+    updateGitignore({ dir: tmp.dir, managedPaths: ["skills/moo/SKILL.md"], enabled: false });
     const text = readFileSync(p, "utf8");
     assert.match(text, /node_modules\//);
     assert.equal(text.includes(BEGIN), false);
@@ -84,9 +84,23 @@ test("disabling deletes the file when only the block remained", () => {
   const tmp = makeTmpDir();
   try {
     const p = join(tmp.dir, ".gitignore");
-    updateGitignore({ claudeDir: tmp.dir, managedPaths: ["skills/moo/SKILL.md"], enabled: true });
-    updateGitignore({ claudeDir: tmp.dir, managedPaths: ["skills/moo/SKILL.md"], enabled: false });
+    updateGitignore({ dir: tmp.dir, managedPaths: ["skills/moo/SKILL.md"], enabled: true });
+    updateGitignore({ dir: tmp.dir, managedPaths: ["skills/moo/SKILL.md"], enabled: false });
     assert.equal(existsSync(p), false);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("with no fixed entries, an empty block is removed and no file is created (spec §14.3)", () => {
+  const tmp = makeTmpDir();
+  try {
+    updateGitignore({ dir: tmp.dir, managedPaths: [], fixed: [], enabled: true });
+    assert.equal(existsSync(join(tmp.dir, ".gitignore")), false);
+    updateGitignore({ dir: tmp.dir, managedPaths: ["skills/x/SKILL.md"], fixed: [], enabled: true });
+    assert.equal(readFileSync(join(tmp.dir, ".gitignore"), "utf8"), "# >>> skilletor >>>\nskills/x/SKILL.md\n# <<< skilletor <<<\n");
+    updateGitignore({ dir: tmp.dir, managedPaths: [], fixed: [], enabled: true });
+    assert.equal(existsSync(join(tmp.dir, ".gitignore")), false);
   } finally {
     tmp.cleanup();
   }

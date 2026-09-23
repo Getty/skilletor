@@ -26,8 +26,13 @@ export interface PlanItem {
 }
 
 export interface ApplyOptions {
-  /** Scope root (the `.claude` directory). */
+  /** Scope root (the `.claude` directory): holds the lock, and every key's files
+   *  unless `rootOf` says otherwise. */
   targetDir: string;
+  /** Root directory a lock key's files live under (e.g. `.agents` for a Codex
+   *  key); default `targetDir`. Must answer for every key in the plan and every
+   *  old lock key not in `keep`. */
+  rootOf?: (key: string) => string;
   force?: boolean;
   /** Lock keys to preserve untouched even if absent from the plan (e.g. an
    *  offline or untrusted source whose items must not be deleted). */
@@ -62,16 +67,23 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
   const oldLock = readLock(lockPath);
   const newLock: Lock = {};
   const res: ApplyResult = { added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [] };
-  const dirsTouched = new Set<string>();
+  const dirsTouched = new Map<string, Set<string>>(); // root -> dirs deleted from
+  const rootFor = (key: string): string => resolvePath(opts.rootOf ? opts.rootOf(key) : targetDir);
+  const touched = (root: string): Set<string> => {
+    let set = dirsTouched.get(root);
+    if (!set) dirsTouched.set(root, (set = new Set()));
+    return set;
+  };
 
   const planned = new Set(plan.map((i) => i.key));
 
   for (const it of plan) {
     if (!NAME_RE.test(it.name)) throw new ApplyError(`invalid item name: ${it.name}`);
+    const root = rootFor(it.key);
     if (it.skipped) {
       // Owns no paths: delete only what the lock says we installed.
       const files = Object.keys(oldLock[it.key]?.files ?? {});
-      for (const rel of files) removeFile(safeJoin(targetDir, rel), dirsTouched);
+      for (const rel of files) removeFile(safeJoin(root, rel), touched(root));
       if (files.length > 0) res.removed.push(it.key);
       res.skipped.push(it.key);
       newLock[it.key] = { source: it.source, version: it.version, files: {}, skipped: it.skipped };
@@ -84,7 +96,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
     let removedFile = false;
 
     for (const [rel, buf] of it.output) {
-      const abs = safeJoin(targetDir, rel);
+      const abs = safeJoin(root, rel);
       const desired = hashBuffer(buf);
       const locked = existing?.files[rel];
       const onDisk = existsSync(abs);
@@ -118,7 +130,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
     if (existing) {
       for (const rel of Object.keys(existing.files)) {
         if (!it.output.has(rel)) {
-          removeFile(safeJoin(targetDir, rel), dirsTouched);
+          removeFile(safeJoin(root, rel), touched(root));
           removedFile = true;
         }
       }
@@ -146,13 +158,14 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
       newLock[key] = oldLock[key]!; // preserve untouched
       continue;
     }
+    const root = rootFor(key);
     for (const rel of Object.keys(oldLock[key]!.files)) {
-      removeFile(safeJoin(targetDir, rel), dirsTouched);
+      removeFile(safeJoin(root, rel), touched(root));
     }
     if (!oldLock[key]!.skipped) res.removed.push(key); // a skip entry had nothing installed
   }
 
-  pruneEmptyDirs(dirsTouched, targetDir);
+  for (const [root, dirs] of dirsTouched) pruneEmptyDirs(dirs, root);
 
   // Only rewrite the lock when it actually changed (keep no-op runs write-free).
   if (serializeLock(newLock) !== serializeLock(oldLock)) {

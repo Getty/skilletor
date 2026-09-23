@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
+import { claudeOnly } from "./helpers/harness.ts";
 import {
   cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall, CommandError,
   type CommandContext,
@@ -26,6 +27,7 @@ function env() {
     stateRoot: join(tmp.dir, "state"),
     host: { name: "box", os: "linux" },
     user: { name: "getty", home },
+    markers: claudeOnly(home),
     probe: noProbe,
   };
   const userCfgPath = join(home, ".claude", "skilletor.json");

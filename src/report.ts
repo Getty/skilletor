@@ -1,14 +1,23 @@
 // Turn a sync result into text (human), JSON, and hook output (spec §8).
 //
 // Per-item activation hints come from the spike (design §12): skills are active
-// immediately; agents and rules need /reload-plugins or a restart.
+// immediately; agents and rules need /reload-plugins or a restart. Codex items
+// (lock key `codex:…`, spec §14.4) carry their own, unmeasured-so-conservative hint.
 import type { ItemType } from "./config.ts";
+import { parseLockKey } from "./targets.ts";
 
 export const ACTIVATION: Record<ItemType, string> = {
   skill: "active now",
   agent: "active after /reload-plugins or restart",
   rule: "active after /reload-plugins or restart",
 };
+
+/** Codex: only skills are written in phase 1 (spec §14.2). */
+export const CODEX_ACTIVATION = "active from the next Codex session";
+
+function activationOf(it: ItemChange): string {
+  return parseLockKey(it.key).harness === "codex" ? CODEX_ACTIVATION : ACTIVATION[it.type];
+}
 
 export interface ItemChange {
   key: string;
@@ -34,6 +43,9 @@ export interface ScopeReport {
 
 export interface SyncReport {
   scopes: ScopeReport[];
+  /** Informational, once per run (e.g. items a target does not receive yet).
+   *  Shown by `reportText`, never by the hooks. Absent when empty. */
+  notes?: string[];
   /** Config error: nothing was touched. */
   error?: string;
 }
@@ -45,11 +57,10 @@ export function emptyScopeReport(scope: "user" | "project"): ScopeReport {
   };
 }
 
-/** "skills/perl-moo" -> { type: "skill", name: "perl-moo" }. */
+/** "skills/perl-moo" (or "codex:skills/perl-moo") -> { type: "skill", name: "perl-moo" }. */
 export function keyToTypeName(key: string): { type: ItemType; name: string } {
-  const [dir, ...rest] = key.split("/");
-  const type: ItemType = dir === "skills" ? "skill" : dir === "agents" ? "agent" : "rule";
-  return { type, name: rest.join("/") };
+  const { type, name } = parseLockKey(key);
+  return { type, name };
 }
 
 export function hasChanges(r: SyncReport): boolean {
@@ -80,8 +91,8 @@ export function reportText(r: SyncReport): string {
     if (!isNotable(s) && s.skipped.length === 0) continue;
     const skipped = new Set(s.skipped.map((it) => it.key));
     lines.push(`skilletor: ${s.scope} scope`);
-    for (const it of s.added) lines.push(`  + ${it.key} (${ACTIVATION[it.type]})`);
-    for (const it of s.updated) lines.push(`  ~ ${it.key} (${ACTIVATION[it.type]})`);
+    for (const it of s.added) lines.push(`  + ${it.key} (${activationOf(it)})`);
+    for (const it of s.updated) lines.push(`  ~ ${it.key} (${activationOf(it)})`);
     for (const it of s.removed) lines.push(`  - ${it.key} (${skipped.has(it.key) ? "removed: renders empty" : "removed"})`);
     const removed = new Set(s.removed.map((it) => it.key));
     for (const it of s.skipped) if (!removed.has(it.key)) lines.push(`  · ${it.key} skipped (renders empty)`);
@@ -90,6 +101,7 @@ export function reportText(r: SyncReport): string {
     for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${t.url}) — run: skilletor trust ${t.name}`);
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
+  for (const n of r.notes ?? []) lines.push(`skilletor: note: ${n}`);
   return lines.join("\n");
 }
 
@@ -113,7 +125,10 @@ export function reportHook(r: SyncReport): { systemMessage?: string; additionalC
   const ctx: string[] = [];
   if (changed.length) {
     ctx.push("skilletor synced items:");
-    for (const it of changed) ctx.push(`- ${it.type} ${it.name}@${it.source}: ${ACTIVATION[it.type]}`);
+    for (const it of changed) {
+      const codex = parseLockKey(it.key).harness === "codex" ? " (codex)" : "";
+      ctx.push(`- ${it.type} ${it.name}@${it.source}${codex}: ${activationOf(it)}`);
+    }
   }
   for (const s of r.scopes) {
     for (const t of s.trustRequests) ctx.push(`- untrusted source ${t.name} (${t.url}); run: skilletor trust ${t.name}`);

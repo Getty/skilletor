@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
+import { claudeOnly } from "./helpers/harness.ts";
 import { sync, check, status, type EngineContext } from "../src/engine.ts";
 import { reportHook, reportText } from "../src/report.ts";
 import { readLock } from "../src/lock.ts";
@@ -22,6 +23,7 @@ function env() {
     stateRoot,
     host: { name: "box", os: "linux" },
     user: { name: "getty", home },
+    markers: claudeOnly(home),
   };
   const writeCfg = (which: "user" | "project" | "local", obj: unknown) => {
     const file =

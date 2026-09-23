@@ -3965,7 +3965,7 @@ var require_filters = __commonJS({
       return r.copySafeness(str, res);
     }
     _exports.indent = indent;
-    function join14(arr, del, attr) {
+    function join15(arr, del, attr) {
       del = del || "";
       if (attr) {
         arr = lib.map(arr, function(v) {
@@ -3974,7 +3974,7 @@ var require_filters = __commonJS({
       }
       return arr.join(del);
     }
-    _exports.join = join14;
+    _exports.join = join15;
     function last(arr) {
       return arr[arr.length - 1];
     }
@@ -5740,12 +5740,12 @@ var require_nunjucks = __commonJS({
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { join as join13 } from "node:path";
+import { join as join14 } from "node:path";
 
 // src/engine.ts
 import { execFileSync } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
-import { basename, join as join11 } from "node:path";
+import { basename, join as join12, relative as relative2 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -5774,11 +5774,12 @@ function atomicWrite(path, data) {
 // src/config.ts
 var ITEM_TYPES = ["skill", "agent", "rule"];
 var INSTALL_KEYS = { skills: "skill", agents: "agent", rules: "rule" };
+var HARNESSES = ["claude", "codex"];
 var WILDCARD = "*";
 var ConfigError = class extends Error {
   name = "ConfigError";
 };
-var ALLOWED_KEYS = /* @__PURE__ */ new Set(["sources", "install", "vars", "gitignore", "checkInterval"]);
+var ALLOWED_KEYS = /* @__PURE__ */ new Set(["sources", "install", "vars", "gitignore", "checkInterval", "targets"]);
 var SOURCE_KEYS = /* @__PURE__ */ new Set(["git", "ref", "url", "local"]);
 function readConfigFile(path) {
   let text;
@@ -5948,6 +5949,8 @@ function loadConfig(opts) {
     wildcards: userInstall.wildcards,
     vars: mergeVars(asObject(user.vars, userPath, "vars"))
   };
+  const userTargets = targetsOf(user.targets, userPath);
+  if (userTargets) userScope.targets = userTargets;
   let projectScope;
   if (hasProject) {
     const projectInstall = parseInstall(project, projectPath, "project", sources);
@@ -5963,6 +5966,9 @@ function loadConfig(opts) {
       ),
       gitignore: boolOr(local.gitignore ?? project.gitignore, true, projectPath, "gitignore")
     };
+    const projectTargets = targetsOf(project.targets, projectPath);
+    const localTargets = targetsOf(local.targets, localPath);
+    if (localTargets ?? projectTargets) projectScope.targets = localTargets ?? projectTargets;
   }
   return { sources, checkInterval, user: userScope, project: projectScope };
 }
@@ -5993,6 +5999,22 @@ function dedupeWildcards(a, b, path) {
     }
     seen.set(key, w.raw);
     out.push(w);
+  }
+  return out;
+}
+function targetsOf(value, path) {
+  if (value === void 0) return void 0;
+  const allowed = HARNESSES.join(", ");
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ConfigError(`${path}: "targets" must be a non-empty array (of ${allowed})`);
+  }
+  const out = [];
+  for (const v of value) {
+    if (typeof v !== "string" || !HARNESSES.includes(v)) {
+      throw new ConfigError(`${path}: "targets" has unknown harness ${JSON.stringify(v)} (allowed: ${allowed})`);
+    }
+    if (out.includes(v)) throw new ConfigError(`${path}: "targets" lists "${v}" twice`);
+    out.push(v);
   }
   return out;
 }
@@ -6088,12 +6110,97 @@ function removeInstallEntries(path, name, source, type) {
   return removed;
 }
 
-// src/sources/local.ts
-import { existsSync as existsSync2, statSync } from "node:fs";
+// src/targets.ts
+import { existsSync as existsSync2 } from "node:fs";
 import { join as join3 } from "node:path";
+var TargetError = class extends Error {
+  name = "TargetError";
+};
+var LAYOUTS = {
+  claude: { harness: "claude", keyPrefix: "", roots: { skill: ".claude", agent: ".claude", rule: ".claude" } },
+  // Phase 1: skills only. Agents (phase 2) and rules (phase 3) are not written.
+  codex: { harness: "codex", keyPrefix: "codex:", roots: { skill: ".agents" } }
+};
+function defaultMarkers(home, codexHome) {
+  const cx = codexHome || join3(home, ".codex");
+  return {
+    claude: [join3(home, ".claude.json"), join3(home, ".claude", "settings.json"), join3(home, ".claude", "projects")],
+    codex: ["config.toml", "auth.json", "sessions", "installation_id"].map((f) => join3(cx, f))
+  };
+}
+function detectHarnesses(markers) {
+  return HARNESSES.filter((h) => markers[h].some((p) => existsSync2(p)));
+}
+function selectTargets(configured, detected, markers) {
+  const machine = configured.user ?? detected;
+  if (machine.length === 0) {
+    const looked = markers ? ` (looked for ${HARNESSES.map((h) => `${h}: ${markers[h].join(", ")}`).join("; ")})` : "";
+    throw new TargetError(
+      `no agent harness detected${looked}; set "targets": ["claude"] and/or "codex" in ~/.claude/skilletor.json`
+    );
+  }
+  const warnings = [];
+  let project = machine;
+  if (configured.project) {
+    project = machine.filter((h) => configured.project.includes(h));
+    if (project.length === 0) {
+      warnings.push(
+        `project targets (${configured.project.join(", ")}) are not in use on this machine (${machine.join(", ")}); nothing is installed for the project`
+      );
+    }
+  }
+  return { user: [...machine], project, warnings };
+}
+var TYPE_OF_DIR = { skills: "skill", agents: "agent", rules: "rule" };
+function lockKey(harness, target) {
+  return LAYOUTS[harness].keyPrefix + target;
+}
+function parseLockKey(key) {
+  const colon = key.indexOf(":");
+  const slash = key.indexOf("/");
+  let harness = "claude";
+  let target = key;
+  if (colon !== -1 && (slash === -1 || colon < slash)) {
+    const prefix = key.slice(0, colon + 1);
+    harness = HARNESSES.find((h) => LAYOUTS[h].keyPrefix === prefix);
+    target = key.slice(colon + 1);
+  }
+  const [dir, ...rest] = target.split("/");
+  return { harness, target, type: TYPE_OF_DIR[dir] ?? "rule", name: rest.join("/") };
+}
+function supports(harness, type) {
+  return LAYOUTS[harness].roots[type] !== void 0;
+}
+function rootOf(base, harness, type) {
+  const dir = LAYOUTS[harness].roots[type];
+  return dir === void 0 ? void 0 : join3(base, dir);
+}
+function rootOfKey(base, key) {
+  const k = parseLockKey(key);
+  return k.harness ? rootOf(base, k.harness, k.type) : void 0;
+}
+function allRootNames() {
+  const names = /* @__PURE__ */ new Set();
+  for (const h of HARNESSES) for (const d of Object.values(LAYOUTS[h].roots)) if (d) names.add(d);
+  return [...names];
+}
+function targetDrift(keys, active) {
+  const set = new Set(keys);
+  for (const key of keys) {
+    const k = parseLockKey(key);
+    if (!k.harness || !supports(k.harness, k.type)) continue;
+    if (!active.includes(k.harness)) return true;
+    for (const h of active) if (supports(h, k.type) && !set.has(lockKey(h, k.target))) return true;
+  }
+  return false;
+}
+
+// src/sources/local.ts
+import { existsSync as existsSync3, statSync } from "node:fs";
+import { join as join4 } from "node:path";
 function expandHome(path, home) {
   if (path === "~") return home;
-  if (path.startsWith("~/")) return join3(home, path.slice(2));
+  if (path.startsWith("~/")) return join4(home, path.slice(2));
   return path;
 }
 var LocalSource = class {
@@ -6109,7 +6216,7 @@ var LocalSource = class {
     }
   }
   async resolve(_cachedVersion) {
-    if (!existsSync2(this.dir)) {
+    if (!existsSync3(this.dir)) {
       throw new Error(`local source directory does not exist: ${this.dir}`);
     }
     return { dir: this.dir, version: "local" };
@@ -6122,8 +6229,8 @@ var LocalSource = class {
 // src/sources/git.ts
 import { execFile } from "node:child_process";
 import { createHash as createHash2 } from "node:crypto";
-import { existsSync as existsSync3, mkdirSync as mkdirSync2 } from "node:fs";
-import { join as join4 } from "node:path";
+import { existsSync as existsSync4, mkdirSync as mkdirSync2 } from "node:fs";
+import { join as join5 } from "node:path";
 var DEFAULT_TIMEOUT_MS = 6e4;
 var GitSource = class {
   opts;
@@ -6132,7 +6239,7 @@ var GitSource = class {
   }
   cacheDir() {
     const hash = createHash2("sha256").update(this.opts.url).digest("hex").slice(0, 16);
-    return join4(this.opts.cacheRoot, hash);
+    return join5(this.opts.cacheRoot, hash);
   }
   run(cwd, args, timeoutMs) {
     return new Promise((resolvePromise, reject) => {
@@ -6153,7 +6260,7 @@ var GitSource = class {
     });
   }
   isRepo(dir) {
-    return existsSync3(join4(dir, ".git"));
+    return existsSync4(join5(dir, ".git"));
   }
   async resolve(_cachedVersion) {
     const dir = this.cacheDir();
@@ -6214,8 +6321,8 @@ function isCommitish(ref) {
 
 // src/sources/url.ts
 import { createHash as createHash3 } from "node:crypto";
-import { existsSync as existsSync4, mkdirSync as mkdirSync3, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
-import { dirname as dirname2, join as join5, resolve as resolvePath, sep } from "node:path";
+import { existsSync as existsSync5, mkdirSync as mkdirSync3, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { dirname as dirname2, join as join6, resolve as resolvePath, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 var TarError = class extends Error {
   name = "TarError";
@@ -6228,7 +6335,7 @@ var UrlSource = class {
   }
   cacheDir() {
     const hash = createHash3("sha256").update(this.opts.url).digest("hex").slice(0, 16);
-    return join5(this.opts.cacheRoot, hash);
+    return join6(this.opts.cacheRoot, hash);
   }
   assertScheme() {
     const u = new URL(this.opts.url);
@@ -6252,9 +6359,9 @@ var UrlSource = class {
     try {
       const headers = {};
       const etag = cachedVersion?.startsWith("etag:") ? cachedVersion.slice(5) : void 0;
-      if (etag && existsSync4(dir)) headers["If-None-Match"] = etag;
+      if (etag && existsSync5(dir)) headers["If-None-Match"] = etag;
       const res = await this.request("GET", headers);
-      if (res.status === 304 && existsSync4(dir)) {
+      if (res.status === 304 && existsSync5(dir)) {
         return { dir, version: cachedVersion };
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -6268,7 +6375,7 @@ var UrlSource = class {
       if (err instanceof TarError) {
         throw new Error(`url source ${this.opts.url} failed: ${err.message}`);
       }
-      if (existsSync4(dir)) {
+      if (existsSync5(dir)) {
         return {
           dir,
           version: cachedVersion ?? "unknown",
@@ -6362,7 +6469,7 @@ function writeEntries(dir, entries) {
   mkdirSync3(dir, { recursive: true });
   const root = resolvePath(dir);
   for (const e of entries) {
-    const dest = resolvePath(join5(dir, e.name));
+    const dest = resolvePath(join6(dir, e.name));
     if (dest !== root && !dest.startsWith(root + sep)) {
       throw new TarError(`unsafe tar entry (escapes target): ${e.name}`);
     }
@@ -6376,8 +6483,8 @@ function writeEntries(dir, entries) {
 }
 
 // src/catalog.ts
-import { existsSync as existsSync5, lstatSync, readFileSync as readFileSync2, readdirSync } from "node:fs";
-import { join as join6, relative } from "node:path";
+import { existsSync as existsSync6, lstatSync, readFileSync as readFileSync2, readdirSync } from "node:fs";
+import { join as join7, relative } from "node:path";
 var CatalogError = class extends Error {
   name = "CatalogError";
 };
@@ -6396,7 +6503,7 @@ function noSymlink(path) {
 function walkFiles(dir, sourceDir) {
   const out = [];
   for (const entry of readdirSync(dir)) {
-    const p = join6(dir, entry);
+    const p = join7(dir, entry);
     const st = noSymlink(p);
     if (st.isDirectory()) out.push(...walkFiles(p, sourceDir));
     else if (st.isFile()) out.push(relative(sourceDir, p));
@@ -6428,8 +6535,8 @@ function descriptionOf(filePath) {
 }
 function skillFile(dir) {
   for (const candidate of ["SKILL.md", "SKILL.md.njk"]) {
-    const p = join6(dir, candidate);
-    if (existsSync5(p)) {
+    const p = join7(dir, candidate);
+    if (existsSync6(p)) {
       noSymlink(p);
       return p;
     }
@@ -6443,11 +6550,11 @@ function itemName(fileName) {
 function scan(dir) {
   const items = [];
   for (const { dir: sub, type } of TYPE_DIRS) {
-    const typeDir = join6(dir, sub);
-    if (!existsSync5(typeDir)) continue;
+    const typeDir = join7(dir, sub);
+    if (!existsSync6(typeDir)) continue;
     noSymlink(typeDir);
     for (const entry of readdirSync(typeDir)) {
-      const p = join6(typeDir, entry);
+      const p = join7(typeDir, entry);
       const st = noSymlink(p);
       if (type === "skill") {
         if (!st.isDirectory()) continue;
@@ -6465,8 +6572,8 @@ function scan(dir) {
   return { items, meta: readSourceMeta(dir) };
 }
 function readSourceMeta(dir) {
-  const p = join6(dir, "skilletor.json");
-  if (!existsSync5(p)) return {};
+  const p = join7(dir, "skilletor.json");
+  if (!existsSync6(p)) return {};
   noSymlink(p);
   let parsed;
   try {
@@ -6485,7 +6592,7 @@ function readSourceMeta(dir) {
 // src/render.ts
 var import_nunjucks = __toESM(require_nunjucks(), 1);
 import { readFileSync as readFileSync3 } from "node:fs";
-import { join as join7, resolve as resolvePath2, sep as sep2 } from "node:path";
+import { join as join8, resolve as resolvePath2, sep as sep2 } from "node:path";
 var RenderError = class extends Error {
   name = "RenderError";
 };
@@ -6528,7 +6635,7 @@ function build(item, sourceDir, context) {
       }
       out.set(file.slice(0, -".njk".length), Buffer.from(rendered, "utf8"));
     } else {
-      out.set(file, readFileSync3(join7(sourceDir, file)));
+      out.set(file, readFileSync3(join8(sourceDir, file)));
     }
   }
   return out;
@@ -6543,8 +6650,8 @@ function rendersEmpty(item, output) {
 }
 
 // src/apply.ts
-import { existsSync as existsSync6, readFileSync as readFileSync5, readdirSync as readdirSync2, rmdirSync, rmSync as rmSync3 } from "node:fs";
-import { dirname as dirname3, join as join8, resolve as resolvePath3, sep as sep3 } from "node:path";
+import { existsSync as existsSync7, readFileSync as readFileSync5, readdirSync as readdirSync2, rmdirSync, rmSync as rmSync3 } from "node:fs";
+import { dirname as dirname3, join as join9, resolve as resolvePath3, sep as sep3 } from "node:path";
 
 // src/lock.ts
 import { readFileSync as readFileSync4 } from "node:fs";
@@ -6594,17 +6701,24 @@ function isValidItemName(name) {
 }
 function apply(plan, opts) {
   const targetDir = resolvePath3(opts.targetDir);
-  const lockPath = join8(targetDir, "skilletor.lock.json");
+  const lockPath = join9(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const newLock = {};
   const res = { added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [] };
-  const dirsTouched = /* @__PURE__ */ new Set();
+  const dirsTouched = /* @__PURE__ */ new Map();
+  const rootFor = (key) => resolvePath3(opts.rootOf ? opts.rootOf(key) : targetDir);
+  const touched = (root) => {
+    let set = dirsTouched.get(root);
+    if (!set) dirsTouched.set(root, set = /* @__PURE__ */ new Set());
+    return set;
+  };
   const planned = new Set(plan.map((i) => i.key));
   for (const it of plan) {
     if (!NAME_RE.test(it.name)) throw new ApplyError(`invalid item name: ${it.name}`);
+    const root = rootFor(it.key);
     if (it.skipped) {
       const files = Object.keys(oldLock[it.key]?.files ?? {});
-      for (const rel of files) removeFile(safeJoin(targetDir, rel), dirsTouched);
+      for (const rel of files) removeFile(safeJoin(root, rel), touched(root));
       if (files.length > 0) res.removed.push(it.key);
       res.skipped.push(it.key);
       newLock[it.key] = { source: it.source, version: it.version, files: {}, skipped: it.skipped };
@@ -6615,10 +6729,10 @@ function apply(plan, opts) {
     let wrote = false;
     let removedFile = false;
     for (const [rel, buf] of it.output) {
-      const abs = safeJoin(targetDir, rel);
+      const abs = safeJoin(root, rel);
       const desired = hashBuffer(buf);
       const locked = existing?.files[rel];
-      const onDisk = existsSync6(abs);
+      const onDisk = existsSync7(abs);
       if (onDisk) {
         const diskHash = hashBuffer(readFileSync5(abs));
         if (locked === void 0 && !opts.force) {
@@ -6644,7 +6758,7 @@ function apply(plan, opts) {
     if (existing) {
       for (const rel of Object.keys(existing.files)) {
         if (!it.output.has(rel)) {
-          removeFile(safeJoin(targetDir, rel), dirsTouched);
+          removeFile(safeJoin(root, rel), touched(root));
           removedFile = true;
         }
       }
@@ -6668,26 +6782,27 @@ function apply(plan, opts) {
       newLock[key] = oldLock[key];
       continue;
     }
+    const root = rootFor(key);
     for (const rel of Object.keys(oldLock[key].files)) {
-      removeFile(safeJoin(targetDir, rel), dirsTouched);
+      removeFile(safeJoin(root, rel), touched(root));
     }
     if (!oldLock[key].skipped) res.removed.push(key);
   }
-  pruneEmptyDirs(dirsTouched, targetDir);
+  for (const [root, dirs] of dirsTouched) pruneEmptyDirs(dirs, root);
   if (serializeLock(newLock) !== serializeLock(oldLock)) {
     writeLock(lockPath, newLock);
   }
   return res;
 }
 function safeJoin(root, rel) {
-  const abs = resolvePath3(join8(root, rel));
+  const abs = resolvePath3(join9(root, rel));
   if (abs !== root && !abs.startsWith(root + sep3)) {
     throw new ApplyError(`path escapes target: ${rel}`);
   }
   return abs;
 }
 function removeFile(abs, dirsTouched) {
-  if (existsSync6(abs)) {
+  if (existsSync7(abs)) {
     rmSync3(abs, { force: true });
     dirsTouched.add(dirname3(abs));
   }
@@ -6696,7 +6811,7 @@ function pruneEmptyDirs(dirs, root) {
   const sorted = [...dirs].sort((a, b) => b.length - a.length);
   for (let dir of sorted) {
     while (dir !== root && dir.startsWith(root + sep3)) {
-      if (!existsSync6(dir) || readdirSync2(dir).length > 0) break;
+      if (!existsSync7(dir) || readdirSync2(dir).length > 0) break;
       rmdirSync(dir);
       dir = dirname3(dir);
     }
@@ -6704,8 +6819,8 @@ function pruneEmptyDirs(dirs, root) {
 }
 
 // src/state.ts
-import { existsSync as existsSync7, mkdirSync as mkdirSync4, readFileSync as readFileSync6, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
-import { join as join9 } from "node:path";
+import { existsSync as existsSync8, mkdirSync as mkdirSync4, readFileSync as readFileSync6, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import { join as join10 } from "node:path";
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
 var State = class {
   root;
@@ -6714,7 +6829,7 @@ var State = class {
     mkdirSync4(root, { recursive: true });
   }
   path(name) {
-    return join9(this.root, name);
+    return join10(this.root, name);
   }
   readJson(name) {
     try {
@@ -6768,7 +6883,7 @@ var State = class {
     const staleMs = opts.staleMs ?? 3e5;
     const pollMs = opts.pollMs ?? 25;
     const lockDir = this.path("sync.lock");
-    const ownerFile = join9(lockDir, "owner.json");
+    const ownerFile = join10(lockDir, "owner.json");
     const deadline = Date.now() + timeoutMs;
     for (; ; ) {
       try {
@@ -6799,28 +6914,29 @@ var State = class {
       if (typeof owner.at !== "number") return true;
       return Date.now() - owner.at > staleMs;
     } catch {
-      return existsSync7(ownerFile) ? false : true;
+      return existsSync8(ownerFile) ? false : true;
     }
   }
 };
 
 // src/gitignore.ts
-import { existsSync as existsSync8, readFileSync as readFileSync7, rmSync as rmSync5 } from "node:fs";
-import { join as join10 } from "node:path";
+import { existsSync as existsSync9, readFileSync as readFileSync7, rmSync as rmSync5 } from "node:fs";
+import { join as join11 } from "node:path";
 var BEGIN = "# >>> skilletor >>>";
 var END = "# <<< skilletor <<<";
 function updateGitignore(opts) {
-  const path = join10(opts.claudeDir, ".gitignore");
-  const existed = existsSync8(path);
+  const path = join11(opts.dir, ".gitignore");
+  const existed = existsSync9(path);
   const existing = existed ? readFileSync7(path, "utf8") : "";
   const lines = existing.length ? existing.split("\n") : [];
   const begin = lines.indexOf(BEGIN);
   const end = lines.indexOf(END);
   const hasBlock = begin !== -1 && end !== -1 && end > begin;
   const outside = hasBlock ? [...lines.slice(0, begin), ...lines.slice(end + 1)] : lines;
+  const entries = blockEntries(opts.managedPaths, opts.fixed ?? ["skilletor.lock.json", "skilletor.local.json"]);
   let out;
-  if (opts.enabled) {
-    const block = [BEGIN, ...blockEntries(opts.managedPaths), END];
+  if (opts.enabled && entries.length > 0) {
+    const block = [BEGIN, ...entries, END];
     if (hasBlock) {
       out = [...lines.slice(0, begin), ...block, ...lines.slice(end + 1)];
     } else {
@@ -6837,8 +6953,8 @@ function updateGitignore(opts) {
   }
   if (result !== existing) atomicWrite(path, result);
 }
-function blockEntries(managedPaths) {
-  const set = /* @__PURE__ */ new Set([...managedPaths, "skilletor.lock.json", "skilletor.local.json"]);
+function blockEntries(managedPaths, fixed) {
+  const set = /* @__PURE__ */ new Set([...managedPaths, ...fixed]);
   return [...set].sort();
 }
 function trimTrailingEmpty(lines) {
@@ -6853,6 +6969,10 @@ var ACTIVATION = {
   agent: "active after /reload-plugins or restart",
   rule: "active after /reload-plugins or restart"
 };
+var CODEX_ACTIVATION = "active from the next Codex session";
+function activationOf(it) {
+  return parseLockKey(it.key).harness === "codex" ? CODEX_ACTIVATION : ACTIVATION[it.type];
+}
 function emptyScopeReport(scope) {
   return {
     scope,
@@ -6868,9 +6988,8 @@ function emptyScopeReport(scope) {
   };
 }
 function keyToTypeName(key) {
-  const [dir, ...rest] = key.split("/");
-  const type = dir === "skills" ? "skill" : dir === "agents" ? "agent" : "rule";
-  return { type, name: rest.join("/") };
+  const { type, name } = parseLockKey(key);
+  return { type, name };
 }
 function isNotable(s) {
   return Boolean(
@@ -6890,8 +7009,8 @@ function reportText(r) {
     if (!isNotable(s) && s.skipped.length === 0) continue;
     const skipped = new Set(s.skipped.map((it) => it.key));
     lines.push(`skilletor: ${s.scope} scope`);
-    for (const it of s.added) lines.push(`  + ${it.key} (${ACTIVATION[it.type]})`);
-    for (const it of s.updated) lines.push(`  ~ ${it.key} (${ACTIVATION[it.type]})`);
+    for (const it of s.added) lines.push(`  + ${it.key} (${activationOf(it)})`);
+    for (const it of s.updated) lines.push(`  ~ ${it.key} (${activationOf(it)})`);
     for (const it of s.removed) lines.push(`  - ${it.key} (${skipped.has(it.key) ? "removed: renders empty" : "removed"})`);
     const removed = new Set(s.removed.map((it) => it.key));
     for (const it of s.skipped) if (!removed.has(it.key)) lines.push(`  \xB7 ${it.key} skipped (renders empty)`);
@@ -6900,6 +7019,7 @@ function reportText(r) {
     for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${t.url}) \u2014 run: skilletor trust ${t.name}`);
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
+  for (const n of r.notes ?? []) lines.push(`skilletor: note: ${n}`);
   return lines.join("\n");
 }
 function reportHook(r) {
@@ -6919,7 +7039,10 @@ function reportHook(r) {
   const ctx = [];
   if (changed.length) {
     ctx.push("skilletor synced items:");
-    for (const it of changed) ctx.push(`- ${it.type} ${it.name}@${it.source}: ${ACTIVATION[it.type]}`);
+    for (const it of changed) {
+      const codex = parseLockKey(it.key).harness === "codex" ? " (codex)" : "";
+      ctx.push(`- ${it.type} ${it.name}@${it.source}${codex}: ${activationOf(it)}`);
+    }
   }
   for (const s of r.scopes) {
     for (const t of s.trustRequests) ctx.push(`- untrusted source ${t.name} (${t.url}); run: skilletor trust ${t.name}`);
@@ -6930,10 +7053,25 @@ function reportHook(r) {
 
 // src/engine.ts
 function cacheRootOf(ctx) {
-  return ctx.cacheRoot ?? join11(ctx.stateRoot, "cache");
+  return ctx.cacheRoot ?? join12(ctx.stateRoot, "cache");
 }
 function targetDirOf(ctx, scope) {
-  return join11(scope === "user" ? ctx.home : ctx.projectDir, ".claude");
+  return join12(baseOf(ctx, scope), ".claude");
+}
+function baseOf(ctx, scope) {
+  return scope === "user" ? ctx.home : ctx.projectDir;
+}
+function targetsOf2(ctx, config) {
+  const markers = ctx.markers ?? defaultMarkers(ctx.home, process.env.CODEX_HOME);
+  return selectTargets({ user: config.user.targets, project: config.project?.targets }, detectHarnesses(markers), markers);
+}
+function loadWithTargets(ctx) {
+  try {
+    const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+    return { config, targets: targetsOf2(ctx, config) };
+  } catch (err) {
+    return { error: err.message };
+  }
 }
 function identityOf(src) {
   return src.git ?? src.url ?? src.local ?? "";
@@ -6966,11 +7104,12 @@ function gitRemote(dir) {
     return "";
   }
 }
-function makeContext(ctx, scope, targetDir, item, scopeVars, sourceVars) {
+function makeContext(ctx, scope, harness, targetDir, item, scopeVars, sourceVars) {
   return {
     vars: { ...sourceVars, ...scopeVars },
     project: scope === "project" ? { dir: ctx.projectDir, name: basename(ctx.projectDir), git_remote: gitRemote(ctx.projectDir) } : void 0,
     scope,
+    harness,
     target: { dir: targetDir },
     host: ctx.host ?? { name: hostname(), os: platform() },
     user: ctx.user ?? { name: userInfo().username, home: ctx.home },
@@ -6982,27 +7121,43 @@ async function sync(ctx, opts = {}) {
   return state.withLock(() => syncInner(ctx, opts, state));
 }
 async function syncInner(ctx, opts, state) {
-  let config;
-  try {
-    config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
-  } catch (err) {
-    return { scopes: [], error: err.message };
-  }
+  const loaded = loadWithTargets(ctx);
+  if ("error" in loaded) return { scopes: [], error: loaded.error };
+  const { config, targets } = loaded;
   const sel = opts.scope ?? "all";
   const report = { scopes: [] };
+  const unsupported = /* @__PURE__ */ new Map();
   if (sel === "user" || sel === "all") {
-    report.scopes.push(await syncScope(ctx, config, config.user, "user", opts, state));
+    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, unsupported));
   }
   if ((sel === "project" || sel === "all") && config.project) {
-    report.scopes.push(await syncScope(ctx, config, config.project, "project", opts, state));
+    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, unsupported);
+    rep.warnings.unshift(...targets.warnings);
+    report.scopes.push(rep);
   }
+  const notes = unsupportedNotes(unsupported);
+  if (notes.length) report.notes = notes;
   return report;
 }
-async function syncScope(ctx, config, scopeCfg, scope, opts, state) {
+function unsupportedNotes(counts) {
+  const byHarness = /* @__PURE__ */ new Map();
+  for (const [k, n] of counts) {
+    const [harness, type] = k.split(" ");
+    const parts = byHarness.get(harness) ?? [];
+    parts.push(`${n} ${type}(s)`);
+    byHarness.set(harness, parts);
+  }
+  return [...byHarness].map(([h, parts]) => {
+    const label = h === "codex" ? "Codex" : h;
+    return `${parts.join(" and ")} not installed for ${label} (not supported for ${label} yet)`;
+  });
+}
+async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, unsupported) {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
+  const base = baseOf(ctx, scope);
   const cacheRoot = cacheRootOf(ctx);
-  const lockPath = join11(targetDir, "skilletor.lock.json");
+  const lockPath = join12(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const needed = scopeSources(scopeCfg);
   const resolved = /* @__PURE__ */ new Map();
@@ -7030,7 +7185,7 @@ async function syncScope(ctx, config, scopeCfg, scope, opts, state) {
     })
   );
   const plan = [];
-  const keep = [];
+  const keep = Object.keys(oldLock).filter((key) => rootOfKey(base, key) === void 0);
   const catalogs = /* @__PURE__ */ new Map();
   const keyInfo = /* @__PURE__ */ new Map();
   const catalogOf = (source) => {
@@ -7047,37 +7202,54 @@ async function syncScope(ctx, config, scopeCfg, scope, opts, state) {
     catalogs.set(source, cat);
     return cat;
   };
-  const keepIfLocked = (key) => {
-    if (key in oldLock) keep.push(key);
+  const harnessesFor = (type) => harnesses.filter((h) => supports(h, type));
+  const keepIfLocked = (target, type) => {
+    for (const h of harnessesFor(type)) {
+      const key = lockKey(h, target);
+      if (key in oldLock) keep.push(key);
+    }
   };
   const buildItem = (item) => {
-    keyInfo.set(item.target, { key: item.target, type: item.type, name: item.name, source: item.source });
+    const targets = harnessesFor(item.type);
+    for (const h of harnesses) {
+      if (!targets.includes(h)) unsupported.set(`${h} ${item.type}`, (unsupported.get(`${h} ${item.type}`) ?? 0) + 1);
+    }
+    if (targets.length === 0) return;
+    for (const h of targets) {
+      const key = lockKey(h, item.target);
+      keyInfo.set(key, { key, type: item.type, name: item.name, source: item.source });
+    }
     const r = resolved.get(item.source);
     const cat = catalogOf(item.source);
     if (!r || !cat) {
-      keepIfLocked(item.target);
+      keepIfLocked(item.target, item.type);
       return;
     }
     const catItem = cat.items.find((ci) => ci.type === item.type && ci.name === item.name);
     if (!catItem) {
       rep.warnings.push(`item not found in source ${item.source}: ${item.type} ${item.name}`);
-      keepIfLocked(item.target);
+      keepIfLocked(item.target, item.type);
       return;
     }
-    let output;
-    try {
-      output = build(catItem, r.dir, makeContext(ctx, scope, targetDir, item, scopeCfg.vars, cat.meta.vars ?? {}));
-    } catch (err) {
-      rep.warnings.push(`template error in ${item.type} ${item.name}: ${err.message}`);
-      keepIfLocked(item.target);
-      return;
+    for (const h of targets) {
+      const key = lockKey(h, item.target);
+      const root = rootOf(base, h, item.type);
+      let output;
+      try {
+        output = build(catItem, r.dir, makeContext(ctx, scope, h, root, item, scopeCfg.vars, cat.meta.vars ?? {}));
+      } catch (err) {
+        const where = harnesses.length > 1 ? ` (${h})` : "";
+        rep.warnings.push(`template error in ${item.type} ${item.name}${where}: ${err.message}`);
+        if (key in oldLock) keep.push(key);
+        continue;
+      }
+      const planItem = { key, type: item.type, name: item.name, source: item.source, version: r.version, output };
+      if (rendersEmpty(catItem, output)) {
+        planItem.output = /* @__PURE__ */ new Map();
+        planItem.skipped = "renders-empty";
+      }
+      plan.push(planItem);
     }
-    const planItem = { key: item.target, type: item.type, name: item.name, source: item.source, version: r.version, output };
-    if (rendersEmpty(catItem, output)) {
-      planItem.output = /* @__PURE__ */ new Map();
-      planItem.skipped = "renders-empty";
-    }
-    plan.push(planItem);
   };
   const explicit = /* @__PURE__ */ new Map();
   for (const item of scopeCfg.install) {
@@ -7088,7 +7260,7 @@ async function syncScope(ctx, config, scopeCfg, scope, opts, state) {
   const offer = (w, name, live) => {
     const target = `${TYPE_DIR[w.type]}/${name}`;
     const o = offers.get(target) ?? { type: w.type, name, from: [], live };
-    o.from.push(w);
+    if (!o.from.includes(w)) o.from.push(w);
     offers.set(target, o);
   };
   for (const w of scopeCfg.wildcards) {
@@ -7114,12 +7286,12 @@ async function syncScope(ctx, config, scopeCfg, scope, opts, state) {
     }
     if (o.from.length > 1) {
       rep.warnings.push(`${o.type} "${o.name}" offered by ${o.from.map((w2) => w2.raw).join(" and ")}; skipped`);
-      keepIfLocked(target);
+      keepIfLocked(target, o.type);
       continue;
     }
     const w = o.from[0];
     if (!o.live) {
-      keepIfLocked(target);
+      keepIfLocked(target, o.type);
       continue;
     }
     if (!isValidItemName(o.name)) {
@@ -7128,11 +7300,25 @@ async function syncScope(ctx, config, scopeCfg, scope, opts, state) {
     }
     buildItem({ type: o.type, name: o.name, source: w.source, target });
   }
-  const result = apply(plan, { targetDir, force: opts.force, keep });
+  const result = apply(plan, {
+    targetDir,
+    force: opts.force,
+    keep,
+    rootOf: (key) => rootOfKey(base, key) ?? targetDir
+  });
   if (scope === "project") {
     const newLock = readLock(lockPath);
-    const managed = Object.values(newLock).flatMap((e) => Object.keys(e.files));
-    updateGitignore({ claudeDir: targetDir, managedPaths: managed, enabled: scopeCfg.gitignore !== false });
+    for (const rootName of allRootNames()) {
+      const rootDir = join12(base, rootName);
+      const managed = Object.entries(newLock).filter(([key]) => rootOfKey(base, key) === rootDir).flatMap(([, e]) => Object.keys(e.files));
+      const isClaude = rootDir === targetDir;
+      updateGitignore({
+        dir: rootDir,
+        managedPaths: managed,
+        fixed: isClaude ? void 0 : [],
+        enabled: scopeCfg.gitignore !== false
+      });
+    }
   }
   const toChange = (key) => keyInfo.get(key) ?? { key, ...keyToTypeName(key), source: oldLock[key]?.source ?? "?" };
   rep.added = result.added.map(toChange);
@@ -7140,17 +7326,18 @@ async function syncScope(ctx, config, scopeCfg, scope, opts, state) {
   rep.removed = result.removed.map(toChange);
   rep.unchanged = result.unchanged.map(toChange);
   rep.skipped = result.skipped.map(toChange);
-  rep.conflicts = result.conflicts.map((c) => ({ path: c.path }));
-  rep.overwritten = result.overwritten.map((c) => ({ path: c.path }));
+  const shown = (c) => {
+    const root = rootOfKey(base, c.key) ?? targetDir;
+    return { path: root === targetDir ? c.path : join12(relative2(base, root), c.path) };
+  };
+  rep.conflicts = result.conflicts.map(shown);
+  rep.overwritten = result.overwritten.map(shown);
   return rep;
 }
 async function check(ctx, opts = {}) {
-  let config;
-  try {
-    config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
-  } catch (err) {
-    return { changed: false, sources: [], warnings: [], error: err.message };
-  }
+  const loaded = loadWithTargets(ctx);
+  if ("error" in loaded) return { changed: false, sources: [], warnings: [], error: loaded.error };
+  const { config, targets } = loaded;
   const state = new State(ctx.stateRoot);
   const cacheRoot = cacheRootOf(ctx);
   const sel = opts.scope ?? "all";
@@ -7159,7 +7346,11 @@ async function check(ctx, opts = {}) {
   if (sel === "user" || sel === "all") scopes.push(["user", config.user]);
   if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
   for (const [scope, scopeCfg] of scopes) {
-    const oldLock = readLock(join11(targetDirOf(ctx, scope), "skilletor.lock.json"));
+    const oldLock = readLock(join12(targetDirOf(ctx, scope), "skilletor.lock.json"));
+    if (targetDrift(Object.keys(oldLock), targets[scope])) {
+      out.changed = true;
+      (out.targetsChanged ??= []).push(scope);
+    }
     for (const name of scopeSources(scopeCfg)) {
       const src = config.sources.get(name);
       if (!src || !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
@@ -7175,12 +7366,9 @@ async function check(ctx, opts = {}) {
   return out;
 }
 function status(ctx, opts = {}) {
-  let config;
-  try {
-    config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
-  } catch (err) {
-    return { scopes: [], error: err.message };
-  }
+  const loaded = loadWithTargets(ctx);
+  if ("error" in loaded) return { scopes: [], error: loaded.error };
+  const { config, targets } = loaded;
   const state = new State(ctx.stateRoot);
   const sel = opts.scope ?? "all";
   const scopes = [];
@@ -7188,8 +7376,10 @@ function status(ctx, opts = {}) {
   if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
   const out = { scopes: [] };
   for (const [scope, scopeCfg] of scopes) {
-    const lock = readLock(join11(targetDirOf(ctx, scope), "skilletor.lock.json"));
-    const declaredKeys = new Set(scopeCfg.install.map((i) => i.target));
+    const lock = readLock(join12(targetDirOf(ctx, scope), "skilletor.lock.json"));
+    const active = targets[scope];
+    const rows = scopeCfg.install.flatMap((i) => active.filter((h) => supports(h, i.type)).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
+    const declaredKeys = new Set(rows.map((r) => r.key));
     const sourceVersions = {};
     for (const entry of Object.values(lock)) sourceVersions[entry.source] = entry.version;
     const trustRequests = [];
@@ -7199,22 +7389,23 @@ function status(ctx, opts = {}) {
         trustRequests.push({ name, url: identityOf(src) });
       }
     }
-    const declared = scopeCfg.install.map((i) => {
-      const entry = lock[i.target];
+    const declared = rows.map((i) => {
+      const entry = lock[i.key];
       const d = {
-        key: i.target,
+        key: i.key,
         source: i.source,
         installed: entry !== void 0 && !entry.skipped
       };
       if (entry?.skipped) d.skipped = entry.skipped;
       return d;
     });
-    const viaCount = /* @__PURE__ */ new Map();
+    const via = /* @__PURE__ */ new Map();
     const orphans = [];
     for (const [key, entry] of Object.entries(lock)) {
       if (declaredKeys.has(key)) continue;
-      const type = keyToTypeName(key).type;
-      const w = scopeCfg.wildcards.find((x) => x.source === entry.source && x.type === type);
+      const k = parseLockKey(key);
+      const type = k.type;
+      const w = k.harness && active.includes(k.harness) ? scopeCfg.wildcards.find((x) => x.source === entry.source && x.type === type) : void 0;
       if (!w) {
         orphans.push(key);
         continue;
@@ -7224,17 +7415,18 @@ function status(ctx, opts = {}) {
         continue;
       }
       declared.push({ key, source: entry.source, installed: true, via: w.raw });
-      viaCount.set(w, (viaCount.get(w) ?? 0) + 1);
+      via.set(w, (via.get(w) ?? /* @__PURE__ */ new Set()).add(k.target));
     }
     out.scopes.push({
       scope,
+      targets: active,
       declared,
       orphans,
       wildcards: scopeCfg.wildcards.map((w) => ({
         type: w.type,
         source: w.source,
         entry: w.raw,
-        installed: viaCount.get(w) ?? 0
+        installed: via.get(w)?.size ?? 0
       })),
       trustRequests,
       sourceVersions
@@ -7244,7 +7436,7 @@ function status(ctx, opts = {}) {
 }
 
 // src/commands.ts
-import { join as join12 } from "node:path";
+import { join as join13 } from "node:path";
 
 // src/spec.ts
 var SpecError = class extends Error {
@@ -7387,7 +7579,7 @@ var CommandError = class extends Error {
 };
 function configPath(ctx, project) {
   const root = project ? ctx.projectDir : ctx.home;
-  return join12(root, ".claude", "skilletor.json");
+  return join13(root, ".claude", "skilletor.json");
 }
 var TYPE_DIR2 = { skill: "skills", agent: "agents", rule: "rules" };
 async function cmdAdd(ctx, args) {
@@ -7485,7 +7677,7 @@ async function cmdUninstall(ctx, args) {
   const project = Boolean(args.project);
   const path = configPath(ctx, project);
   const scopeName = project ? "project" : "user";
-  const lock = readLock(join12(project ? ctx.projectDir : ctx.home, ".claude", "skilletor.lock.json"));
+  const lock = readLock(join13(project ? ctx.projectDir : ctx.home, ".claude", "skilletor.lock.json"));
   const parsed = args.items.map((spec) => ({ spec, ...parseItemSpec(spec) }));
   const errors = [];
   const hints = [];
@@ -7519,7 +7711,10 @@ async function cmdUninstall(ctx, args) {
 }
 function coveringWildcards(path, lock, name, source, type, explicitTypes) {
   const found = findInstallEntries(path, WILDCARD, source, type).map((w) => w.type);
-  const inLock = (t) => lock[`${TYPE_DIR2[t]}/${name}`]?.source === source;
+  const inLock = (t) => Object.entries(lock).some(([key, e]) => {
+    const k = parseLockKey(key);
+    return k.target === `${TYPE_DIR2[t]}/${name}` && e.source === source;
+  });
   const confirmed = found.some(inLock);
   if (type) return { types: found, confirmed };
   const known = found.filter((t) => explicitTypes.includes(t) || inLock(t));
@@ -7591,18 +7786,18 @@ function installedSet(ctx, config) {
   const set = /* @__PURE__ */ new Set();
   for (const i of declaredItems(config)) set.add(`${i.key}@${i.source}`);
   for (const scope of ["user", "project"]) {
-    const dir = join12(scope === "user" ? ctx.home : ctx.projectDir ?? "", ".claude");
+    const dir = join13(scope === "user" ? ctx.home : ctx.projectDir ?? "", ".claude");
     if (scope === "project" && !ctx.projectDir) continue;
-    for (const [key, entry] of Object.entries(readLock(join12(dir, "skilletor.lock.json")))) {
+    for (const [key, entry] of Object.entries(readLock(join13(dir, "skilletor.lock.json")))) {
       if (entry.skipped) continue;
-      set.add(`${key}@${entry.source}`);
+      set.add(`${parseLockKey(key).target}@${entry.source}`);
     }
   }
   return set;
 }
 
 // src/hooks.ts
-import { spawn } from "node:child_process";
+import { execFileSync as execFileSync3, spawn } from "node:child_process";
 var SESSION_START_TIMEOUT_MS = 5e3;
 var DEFAULT_INTERVAL = 600;
 function projectKeyOf(ctx, input) {
@@ -7619,8 +7814,21 @@ function toOutput(report, eventName) {
     hookSpecificOutput: { hookEventName: eventName, additionalContext: h.additionalContext }
   };
 }
-async function runHook(event, input, ctx) {
+function projectRootOf(cwd) {
   try {
+    const top = execFileSync3("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2e3
+    }).trim();
+    return top || cwd;
+  } catch {
+    return cwd;
+  }
+}
+async function runHook(event, input, hookCtx) {
+  try {
+    const ctx = hookCtx.projectDir ? hookCtx : { ...hookCtx, projectDir: projectRootOf(input.cwd || process.cwd()) };
     switch (event) {
       case "session-start":
         return await sessionStart(input, ctx);
@@ -7739,14 +7947,15 @@ function makeContext2(flags) {
   return {
     home,
     projectDir: flags.projectDir ?? process.cwd(),
-    stateRoot: join13(home, ".claude", "skilletor")
+    stateRoot: join14(home, ".claude", "skilletor")
   };
 }
 function statusText(report) {
   if (report.error) return `skilletor: config error \u2014 ${report.error}`;
   const lines = [];
   for (const s of report.scopes) {
-    lines.push(`${s.scope} scope:`);
+    const claudeOnly = s.targets.length === 1 && s.targets[0] === "claude";
+    lines.push(claudeOnly ? `${s.scope} scope:` : `${s.scope} scope (${s.targets.join(", ") || "no targets"}):`);
     for (const d of s.declared) {
       const mark = d.installed ? "\u2713" : d.skipped ? "-" : "\xB7";
       const note = d.skipped ? " (skipped: renders empty)" : "";
@@ -7916,11 +8125,11 @@ async function runHookCommand(event) {
   } catch {
   }
   const home = homedir();
-  const projectDir = process.env.SKILLETOR_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
+  const projectDir = process.env.SKILLETOR_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || void 0;
   const ctx = {
     home,
     projectDir,
-    stateRoot: join13(home, ".claude", "skilletor"),
+    stateRoot: join14(home, ".claude", "skilletor"),
     binPath: fileURLToPath(import.meta.url)
   };
   try {

@@ -30,6 +30,7 @@ types under the same roof.
 | **Type** | `skill`, `agent`, `rule` – a fixed table in code, not config-extensible |
 | **Scope** | `user` (`~/.claude/`) or `project` (`<project>/.claude/`) |
 | **Lock** | Per scope: what skilletor installed, with output hashes |
+| **Target** | A harness installed for: `claude` or `codex` (§14) |
 
 ## 3. Config
 
@@ -65,6 +66,8 @@ The scope follows from which file declares an item.
 - `gitignore` (project only, default `true`): see 6.4.
 - `checkInterval` (user only, seconds, default 1800 = 30 min): throttle for the
   in-session check. `0` or a negative value disables it (SessionStart still syncs).
+- `targets` (optional, user, project or local): which agent harnesses to install for,
+  `["claude"]`, `["codex"]` or both. Default: auto-detected. Merge rule in §14.
 - Duplicate target names within one type and scope (`foo@shared` + `foo@team`) are a
   config error. So is the same wildcard (`*@shared` under one type) declared twice in
   one scope.
@@ -170,6 +173,7 @@ name is `skills` everywhere.
 | `scope`, `target.dir` | `user`/`project`, target root |
 | `host.name`, `host.os`, `user.name`, `user.home` | instance |
 | `item.name`, `item.type`, `item.source` | the item itself |
+| `harness` | `claude` or `codex`: the harness this copy is rendered for (§14) |
 
 Deliberately excluded: `env.*` (otherwise secrets end up in files) and the git branch
 (would re-render on every switch).
@@ -394,4 +398,111 @@ item.
 
 Monitor-based timer instead of a prompt hook · checksum pins for tarballs · aliases
 (`as`) for items · further types (`commands`, `output-styles`) · automatic import of a
-manage-skills configuration · Codex target.
+manage-skills configuration. (The Codex target moved into scope: §14.)
+
+## 14. Harness targets / Codex
+
+skilletor installs for one or both of two **harnesses**: Claude Code (`claude`) and the
+OpenAI Codex CLI (`codex`). Phase 1 (this section) covers detection, the per-target
+layout, skills for Codex, and the Codex plugin wiring. Codex agents (phase 2, converted to
+TOML) and rules (phase 3, a managed block in `AGENTS.md`) come later.
+
+### 14.1 Which harnesses: detection and `targets`
+
+By default skilletor **auto-detects** the harnesses in use on the machine, by markers the
+harness itself creates and skilletor never does (so `~/.claude/` alone does not count –
+skilletor's own config lives there):
+
+| Harness | In use when any of these exists |
+|---|---|
+| `claude` | `~/.claude.json`, `~/.claude/settings.json`, `~/.claude/projects/` |
+| `codex` | in `$CODEX_HOME` (default `~/.codex`): `config.toml`, `auth.json`, `sessions/`, `installation_id` |
+
+Codex writes `installation_id` on its first run of any kind; Claude Code writes
+`~/.claude.json` on its first run. The marker lists are injectable (`EngineContext.markers`)
+so tests never look at the real machine.
+
+The optional config key `targets` overrides detection. Merge rule – the simplest honest
+one:
+
+1. **Machine targets** = `targets` from the user config if set, else the detected set.
+   If that is empty, `sync`, `check` and `status` fail with a config-style error that names
+   the markers and tells the user to set `targets` in `~/.claude/skilletor.json`
+   (nothing is touched).
+2. **User scope** installs for the machine targets.
+3. **Project scope** installs for the machine targets, restricted to the project's
+   `targets` if one is set: `skilletor.local.json` `targets` if present, else
+   `skilletor.json` `targets`, intersected with the machine targets. A project can only
+   narrow, never add a harness the machine does not use. An empty intersection installs
+   nothing for the project and warns once.
+
+`targets` must be a non-empty array of known harness names without duplicates.
+
+### 14.2 Layout per target
+
+| Type | `claude` | `codex` |
+|---|---|---|
+| skill | `<base>/.claude/skills/<name>/` | `<base>/.agents/skills/<name>/` |
+| agent | `<base>/.claude/agents/<name>.md` | not written (phase 2) |
+| rule | `<base>/.claude/rules/<name>.md` | not written (phase 3) |
+
+`<base>` is `~` (user scope) or the project root (project scope). Codex reads user skills
+from `~/.agents/skills` and project skills from `<repo>/.agents/skills`; SKILL.md files are
+compatible as they are (Claude-only frontmatter keys are accepted). In code the table is
+`LAYOUTS` in `targets.ts`: per harness a lock-key prefix and a root directory per supported
+type. `apply` receives a key → root function and knows nothing else about harnesses;
+phase 2 adds a per-type output mapping (agent Markdown → TOML) at the same seam.
+
+A declared agent or rule while `codex` is a target is simply not written for Codex; the
+report says so in one line per run (a note, not a warning, so the hooks stay quiet).
+
+### 14.3 Rendering, lock, ownership
+
+- Every item is rendered **once per target**, with `harness` in the context and
+  `target.dir` set to that target's root. The empty-render skip (§5) applies per target: a
+  skill gated by `{% if harness == "claude" %}` is installed for Claude and skipped for
+  Codex.
+- **One lock per scope**, still at `<base>/.claude/skilletor.lock.json`. Claude entries keep
+  their key (`skills/foo`) so existing locks stay valid; Codex entries are keyed
+  `codex:skills/foo`, with file paths relative to the Codex root (`.agents`). Ownership,
+  conflicts, `--force` and drift rules (§6.3) apply per path, unchanged.
+- A target that is no longer active (switched off in `targets`, or no longer detected) has
+  its entries deleted like undeclared items on the next sync. Entries with a harness prefix
+  this version does not know are kept untouched.
+- `check` reports a change not only when a source moved but also when the lock does not
+  match the active targets (an item locked for one active target but not another, or an
+  entry for an inactive target), so SessionStart syncs a newly enabled harness without
+  waiting for a source change.
+- **Git hygiene:** besides the block in `<project>/.claude/.gitignore`, skilletor maintains
+  the same kind of block in `<project>/.agents/.gitignore` listing the managed Codex paths.
+  It is created only when there are such paths and removed when they are gone.
+
+### 14.4 Report and status
+
+Claude-only output is unchanged. Codex items appear under their lock key (`codex:skills/foo`)
+in the text report, and the hook context marks them `(codex)` with the activation hint
+"active from the next Codex session" (not yet measured whether Codex picks up a skill
+written by its own SessionStart hook in the same session). `status` lists each declared item
+once per target and names the targets in the scope header when they are not just `claude`;
+`status --json` carries `targets` per scope.
+
+### 14.5 Plugin wiring for Codex
+
+- `.codex-plugin/plugin.json` (name `skilletor`, same version as `package.json` and
+  `.claude-plugin/plugin.json`, enforced by a test) points at `./skills/` and the shared
+  `./hooks/hooks.json`. Codex has the same `SessionStart`/`UserPromptSubmit` events and
+  hook JSON shape, and sets `CLAUDE_PLUGIN_ROOT` for plugin hook commands, so one hooks
+  file serves both.
+- Codex does not set `CLAUDE_PROJECT_DIR`. The hook then takes the git top level of the
+  hook input's `cwd` (else `cwd` itself) as the project root, so a session started in a
+  subdirectory still finds `<repo>/.claude/skilletor.json`.
+- Plugin hooks run in Codex only after the user trusts them (`/hooks`). Codex cannot put a
+  plugin's `bin/` on `PATH`, so the CLI is not on the model's `PATH` there.
+
+### 14.6 Known warts (phase 1)
+
+- Config, lock and state stay under `.claude/` (`~/.claude/skilletor.json`,
+  `<repo>/.claude/skilletor.json`) for both harnesses, even on a Codex-only machine.
+- `CLAUDE_CONFIG_DIR` is not honoured, neither for markers nor for the target directory.
+- Detection is re-evaluated on every run: a harness that disappears (e.g. `~/.codex`
+  deleted) has its installed items removed on the next sync. Pin `targets` to avoid that.

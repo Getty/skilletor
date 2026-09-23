@@ -1,10 +1,11 @@
 // Black-box test of the built CLI bundle: build it, run it, assert on its output.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildToString } from "../scripts/esbuild.config.mjs";
+import { claudeOnlyEnv } from "./helpers/harness.ts";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 
 let tmp: TmpDir;
@@ -19,8 +20,8 @@ before(async () => {
 
 after(() => tmp.cleanup());
 
-function runCli(args: string[], env?: NodeJS.ProcessEnv) {
-  return spawnSync(process.execPath, [bundle, ...args], { encoding: "utf8", env: env ?? process.env });
+function runCli(args: string[], env?: NodeJS.ProcessEnv, input?: string) {
+  return spawnSync(process.execPath, [bundle, ...args], { encoding: "utf8", env: env ?? process.env, input });
 }
 
 test("--version prints the package version", () => {
@@ -75,7 +76,7 @@ test("install 'rule:*@src' and status text marks wildcard items", () => {
   mkdirSync(join(src, "rules"), { recursive: true });
   writeFileSync(join(src, "rules", "r1.md"), "---\ndescription: r1\n---\nR1\n");
   writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { shared: { local: src } } }));
-  const env = { ...process.env, HOME: home };
+  const env = claudeOnlyEnv(home);
   const common = ["--project-dir", proj];
 
   const bare = runCli(["install", "*@shared", ...common], env);
@@ -104,7 +105,7 @@ test("uninstall of a wildcard-covered item: exit 1 alone, exit 0 with a warning 
   writeFileSync(join(src, "rules", "r1.md"), "---\ndescription: r1\n---\nR1\n");
   const cfg = join(home, ".claude", "skilletor.json");
   writeFileSync(cfg, JSON.stringify({ sources: { shared: { local: src } }, install: { rules: ["*@shared"] } }));
-  const env = { ...process.env, HOME: home };
+  const env = claudeOnlyEnv(home);
   const common = ["--project-dir", proj];
 
   const only = runCli(["uninstall", "r1@shared", ...common], env);
@@ -136,7 +137,7 @@ test("sync reports a rule that renders empty as skipped and exits 0", () => {
     join(home, ".claude", "skilletor.json"),
     JSON.stringify({ sources: { s: { local: src } }, install: { rules: ["k8s@s"] }, vars: { k8s: false } }),
   );
-  const env = { ...process.env, HOME: home };
+  const env = claudeOnlyEnv(home);
   const common = ["--scope", "user", "--project-dir", proj];
 
   const r = runCli(["sync", ...common], env);
@@ -144,4 +145,48 @@ test("sync reports a rule that renders empty as skipped and exits 0", () => {
   assert.match(r.stdout, /rules\/k8s skipped \(renders empty\)/);
   const st = runCli(["status", ...common], env);
   assert.match(st.stdout, /rules\/k8s @s \(skipped: renders empty\)/);
+});
+
+// spec §14: a Codex-only machine (temp HOME + CODEX_HOME), hook input as Codex
+// sends it — no CLAUDE_PROJECT_DIR, cwd in a subdirectory of the repo.
+test("codex hook through the binary: project skill lands in <repo>/.agents/skills, JSON out, exit 0", () => {
+  const home = join(tmp.dir, "codex-home");
+  const codexHome = join(home, ".codex");
+  const repo = join(tmp.dir, "codex-repo");
+  const src = join(tmp.dir, "codex-src");
+  mkdirSync(codexHome, { recursive: true });
+  writeFileSync(join(codexHome, "installation_id"), "test\n"); // what Codex writes on first run
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(src, "skills", "bar"), { recursive: true });
+  writeFileSync(join(src, "skills", "bar", "SKILL.md"), "---\nname: bar\ndescription: bar\n---\nBAR\n");
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } } }));
+  mkdirSync(join(repo, ".claude"), { recursive: true });
+  mkdirSync(join(repo, "sub"), { recursive: true });
+  writeFileSync(join(repo, ".claude", "skilletor.json"), JSON.stringify({ install: { skills: ["bar@s"] } }));
+  execFileSync("git", ["init", "-q", "-b", "main", repo]);
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, CODEX_HOME: codexHome };
+  delete env.CLAUDE_PROJECT_DIR;
+  delete env.SKILLETOR_PROJECT_DIR;
+
+  const input = JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: join(repo, "sub"), session_id: "s1" });
+  const r = runCli(["hook", "session-start"], env, input);
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.hookEventName, "SessionStart");
+  assert.match(out.hookSpecificOutput.additionalContext, /skill bar@s \(codex\): active from the next Codex session/);
+  assert.equal(existsSync(join(realpathSync(repo), ".agents/skills/bar/SKILL.md")), true);
+  assert.equal(existsSync(join(repo, ".claude/skills")), false); // Claude not in use here
+
+  const st = runCli(["status", "--project-dir", repo], env);
+  assert.match(st.stdout, /^project scope \(codex\):$/m);
+  assert.match(st.stdout, /✓ codex:skills\/bar @s/);
+});
+
+test("no harness on the machine: sync fails with the fix named, exit 2", () => {
+  const home = join(tmp.dir, "bare-home");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  writeFileSync(join(home, ".claude", "skilletor.json"), "{}");
+  const r = runCli(["sync", "--scope", "user"], { ...process.env, HOME: home, CODEX_HOME: join(home, "nope") });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /no agent harness detected.*set "targets"/);
 });

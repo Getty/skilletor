@@ -5,10 +5,14 @@
 // as it was.
 import { execFileSync } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, relative } from "node:path";
 import {
-  loadConfig, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig, type WildcardItem,
+  loadConfig, type Harness, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig, type WildcardItem,
 } from "./config.ts";
+import {
+  defaultMarkers, detectHarnesses, lockKey, parseLockKey, rootOf, rootOfKey, selectTargets, supports, targetDrift,
+  allRootNames, type HarnessMarkers, type TargetSelection,
+} from "./targets.ts";
 import { LocalSource } from "./sources/local.ts";
 import { GitSource } from "./sources/git.ts";
 import { UrlSource } from "./sources/url.ts";
@@ -32,6 +36,8 @@ export interface EngineContext {
   user?: { name: string; home: string };
   /** Per-source network timeout (the SessionStart hook uses 5 s). */
   timeoutMs?: number;
+  /** Harness detection markers (spec §14.1); default from `home` and `$CODEX_HOME`. */
+  markers?: HarnessMarkers;
 }
 
 export interface SyncOptions {
@@ -45,8 +51,30 @@ export function cacheRootOf(ctx: EngineContext): string {
   return ctx.cacheRoot ?? join(ctx.stateRoot, "cache");
 }
 
+/** The scope's `.claude` directory: config, lock and the claude target root. */
 export function targetDirOf(ctx: EngineContext, scope: ScopeName): string {
-  return join(scope === "user" ? ctx.home : ctx.projectDir!, ".claude");
+  return join(baseOf(ctx, scope), ".claude");
+}
+
+/** The directory every target root of a scope lives under: `~` or the project root. */
+function baseOf(ctx: EngineContext, scope: ScopeName): string {
+  return scope === "user" ? ctx.home : ctx.projectDir!;
+}
+
+/** Active targets per scope (spec §14.1); throws a TargetError when none apply. */
+export function targetsOf(ctx: EngineContext, config: LoadedConfig): TargetSelection {
+  const markers = ctx.markers ?? defaultMarkers(ctx.home, process.env.CODEX_HOME);
+  return selectTargets({ user: config.user.targets, project: config.project?.targets }, detectHarnesses(markers), markers);
+}
+
+/** Load config and select targets; either failure is one message, nothing touched. */
+function loadWithTargets(ctx: EngineContext): { config: LoadedConfig; targets: TargetSelection } | { error: string } {
+  try {
+    const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+    return { config, targets: targetsOf(ctx, config) };
+  } catch (err) {
+    return { error: (err as Error).message };
+  }
 }
 
 export function identityOf(src: ResolvedSource): string {
@@ -90,6 +118,7 @@ function gitRemote(dir: string): string {
 function makeContext(
   ctx: EngineContext,
   scope: ScopeName,
+  harness: Harness,
   targetDir: string,
   item: { type: ItemType; name: string; source: string },
   scopeVars: Record<string, unknown>,
@@ -102,6 +131,7 @@ function makeContext(
         ? { dir: ctx.projectDir!, name: basename(ctx.projectDir!), git_remote: gitRemote(ctx.projectDir!) }
         : undefined,
     scope,
+    harness,
     target: { dir: targetDir },
     host: ctx.host ?? { name: hostname(), os: platform() },
     user: ctx.user ?? { name: userInfo().username, home: ctx.home },
@@ -117,21 +147,38 @@ export async function sync(ctx: EngineContext, opts: SyncOptions = {}): Promise<
 }
 
 async function syncInner(ctx: EngineContext, opts: SyncOptions, state: State): Promise<SyncReport> {
-  let config: LoadedConfig;
-  try {
-    config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
-  } catch (err) {
-    return { scopes: [], error: (err as Error).message };
-  }
+  const loaded = loadWithTargets(ctx);
+  if ("error" in loaded) return { scopes: [], error: loaded.error };
+  const { config, targets } = loaded;
   const sel = opts.scope ?? "all";
   const report: SyncReport = { scopes: [] };
+  const unsupported = new Map<string, number>(); // "harness type" -> declared items not written
   if (sel === "user" || sel === "all") {
-    report.scopes.push(await syncScope(ctx, config, config.user, "user", opts, state));
+    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, unsupported));
   }
   if ((sel === "project" || sel === "all") && config.project) {
-    report.scopes.push(await syncScope(ctx, config, config.project, "project", opts, state));
+    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, unsupported);
+    rep.warnings.unshift(...targets.warnings);
+    report.scopes.push(rep);
   }
+  const notes = unsupportedNotes(unsupported);
+  if (notes.length) report.notes = notes;
   return report;
+}
+
+/** One line per harness naming the declared items it does not receive yet (spec §14.2). */
+function unsupportedNotes(counts: Map<string, number>): string[] {
+  const byHarness = new Map<string, string[]>();
+  for (const [k, n] of counts) {
+    const [harness, type] = k.split(" ");
+    const parts = byHarness.get(harness!) ?? [];
+    parts.push(`${n} ${type}(s)`);
+    byHarness.set(harness!, parts);
+  }
+  return [...byHarness].map(([h, parts]) => {
+    const label = h === "codex" ? "Codex" : h;
+    return `${parts.join(" and ")} not installed for ${label} (not supported for ${label} yet)`;
+  });
 }
 
 async function syncScope(
@@ -139,11 +186,14 @@ async function syncScope(
   config: LoadedConfig,
   scopeCfg: ScopeConfig,
   scope: ScopeName,
+  harnesses: Harness[],
   opts: SyncOptions,
   state: State,
+  unsupported: Map<string, number>,
 ): Promise<ScopeReport> {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
+  const base = baseOf(ctx, scope);
   const cacheRoot = cacheRootOf(ctx);
   const lockPath = join(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
@@ -177,7 +227,8 @@ async function syncScope(
 
   // Build each declared item; keep (don't delete) items whose source is unavailable.
   const plan: PlanItem[] = [];
-  const keep: string[] = [];
+  // Entries this version cannot place (unknown harness prefix) are never touched.
+  const keep: string[] = Object.keys(oldLock).filter((key) => rootOfKey(base, key) === undefined);
   const catalogs = new Map<string, Catalog | null>();
   const keyInfo = new Map<string, ItemChange>();
 
@@ -196,39 +247,59 @@ async function syncScope(
     catalogs.set(source, cat);
     return cat;
   };
-  const keepIfLocked = (key: string) => {
-    if (key in oldLock) keep.push(key);
+  /** The active harnesses that receive this type (spec §14.2). */
+  const harnessesFor = (type: ItemType) => harnesses.filter((h) => supports(h, type));
+  /** Keep the item's lock entries, for every active target, untouched. */
+  const keepIfLocked = (target: string, type: ItemType) => {
+    for (const h of harnessesFor(type)) {
+      const key = lockKey(h, target);
+      if (key in oldLock) keep.push(key);
+    }
   };
 
   const buildItem = (item: { type: ItemType; name: string; source: string; target: string }) => {
-    keyInfo.set(item.target, { key: item.target, type: item.type, name: item.name, source: item.source });
+    const targets = harnessesFor(item.type);
+    for (const h of harnesses) {
+      if (!targets.includes(h)) unsupported.set(`${h} ${item.type}`, (unsupported.get(`${h} ${item.type}`) ?? 0) + 1);
+    }
+    if (targets.length === 0) return;
+    for (const h of targets) {
+      const key = lockKey(h, item.target);
+      keyInfo.set(key, { key, type: item.type, name: item.name, source: item.source });
+    }
     const r = resolved.get(item.source);
     const cat = catalogOf(item.source);
     if (!r || !cat) {
-      keepIfLocked(item.target);
+      keepIfLocked(item.target, item.type);
       return;
     }
     const catItem = cat.items.find((ci) => ci.type === item.type && ci.name === item.name);
     if (!catItem) {
       rep.warnings.push(`item not found in source ${item.source}: ${item.type} ${item.name}`);
-      keepIfLocked(item.target);
+      keepIfLocked(item.target, item.type);
       return;
     }
-    let output: Map<string, Buffer>;
-    try {
-      output = build(catItem, r.dir, makeContext(ctx, scope, targetDir, item, scopeCfg.vars, cat.meta.vars ?? {}));
-    } catch (err) {
-      rep.warnings.push(`template error in ${item.type} ${item.name}: ${(err as Error).message}`);
-      keepIfLocked(item.target);
-      return;
+    // Rendered once per target, with that target's harness and root (spec §14.3).
+    for (const h of targets) {
+      const key = lockKey(h, item.target);
+      const root = rootOf(base, h, item.type)!;
+      let output: Map<string, Buffer>;
+      try {
+        output = build(catItem, r.dir, makeContext(ctx, scope, h, root, item, scopeCfg.vars, cat.meta.vars ?? {}));
+      } catch (err) {
+        const where = harnesses.length > 1 ? ` (${h})` : "";
+        rep.warnings.push(`template error in ${item.type} ${item.name}${where}: ${(err as Error).message}`);
+        if (key in oldLock) keep.push(key);
+        continue;
+      }
+      const planItem: PlanItem = { key, type: item.type, name: item.name, source: item.source, version: r.version, output };
+      // Main template renders empty: not applicable here (spec §5).
+      if (rendersEmpty(catItem, output)) {
+        planItem.output = new Map();
+        planItem.skipped = "renders-empty";
+      }
+      plan.push(planItem);
     }
-    const planItem: PlanItem = { key: item.target, type: item.type, name: item.name, source: item.source, version: r.version, output };
-    // Main template renders empty: not applicable here (spec §5).
-    if (rendersEmpty(catItem, output)) {
-      planItem.output = new Map();
-      planItem.skipped = "renders-empty";
-    }
-    plan.push(planItem);
   };
 
   const explicit = new Map<string, { source: string; raw: string }>();
@@ -238,12 +309,13 @@ async function syncScope(
   }
 
   // Expand wildcards (spec §3, §6.1). An unresolvable source offers what it
-  // installed before, so its items are kept and still count for collisions.
+  // installed before (for any target), so its items are kept and still count
+  // for collisions.
   const offers = new Map<string, { type: ItemType; name: string; from: WildcardItem[]; live: boolean }>();
   const offer = (w: WildcardItem, name: string, live: boolean) => {
     const target = `${TYPE_DIR[w.type]}/${name}`;
     const o = offers.get(target) ?? { type: w.type, name, from: [], live };
-    o.from.push(w);
+    if (!o.from.includes(w)) o.from.push(w);
     offers.set(target, o);
   };
   for (const w of scopeCfg.wildcards) {
@@ -269,12 +341,12 @@ async function syncScope(
     }
     if (o.from.length > 1) {
       rep.warnings.push(`${o.type} "${o.name}" offered by ${o.from.map((w) => w.raw).join(" and ")}; skipped`);
-      keepIfLocked(target);
+      keepIfLocked(target, o.type);
       continue;
     }
     const w = o.from[0]!;
     if (!o.live) {
-      keepIfLocked(target);
+      keepIfLocked(target, o.type);
       continue;
     }
     if (!isValidItemName(o.name)) {
@@ -284,12 +356,27 @@ async function syncScope(
     buildItem({ type: o.type, name: o.name, source: w.source, target });
   }
 
-  const result = apply(plan, { targetDir, force: opts.force, keep });
+  const result = apply(plan, {
+    targetDir, force: opts.force, keep, rootOf: (key) => rootOfKey(base, key) ?? targetDir,
+  });
 
   if (scope === "project") {
+    // One managed block per target root: `.claude/.gitignore` (with the lock and
+    // local config) and `.agents/.gitignore` for Codex paths (spec §6.4, §14.3).
     const newLock = readLock(lockPath);
-    const managed = Object.values(newLock).flatMap((e) => Object.keys(e.files));
-    updateGitignore({ claudeDir: targetDir, managedPaths: managed, enabled: scopeCfg.gitignore !== false });
+    for (const rootName of allRootNames()) {
+      const rootDir = join(base, rootName);
+      const managed = Object.entries(newLock)
+        .filter(([key]) => rootOfKey(base, key) === rootDir)
+        .flatMap(([, e]) => Object.keys(e.files));
+      const isClaude = rootDir === targetDir;
+      updateGitignore({
+        dir: rootDir,
+        managedPaths: managed,
+        fixed: isClaude ? undefined : [],
+        enabled: scopeCfg.gitignore !== false,
+      });
+    }
   }
 
   const toChange = (key: string): ItemChange =>
@@ -299,8 +386,13 @@ async function syncScope(
   rep.removed = result.removed.map(toChange);
   rep.unchanged = result.unchanged.map(toChange);
   rep.skipped = result.skipped.map(toChange);
-  rep.conflicts = result.conflicts.map((c) => ({ path: c.path }));
-  rep.overwritten = result.overwritten.map((c) => ({ path: c.path }));
+  // Claude paths stay relative to `.claude` as before; other roots are named (`.agents/…`).
+  const shown = (c: { key: string; path: string }) => {
+    const root = rootOfKey(base, c.key) ?? targetDir;
+    return { path: root === targetDir ? c.path : join(relative(base, root), c.path) };
+  };
+  rep.conflicts = result.conflicts.map(shown);
+  rep.overwritten = result.overwritten.map(shown);
   return rep;
 }
 
@@ -309,17 +401,16 @@ async function syncScope(
 export interface CheckReport {
   changed: boolean;
   sources: { name: string; scope: ScopeName; changed: boolean }[];
+  /** Scopes whose lock does not match the active targets (spec §14.3). Absent when none. */
+  targetsChanged?: ScopeName[];
   warnings: string[];
   error?: string;
 }
 
 export async function check(ctx: EngineContext, opts: SyncOptions = {}): Promise<CheckReport> {
-  let config: LoadedConfig;
-  try {
-    config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
-  } catch (err) {
-    return { changed: false, sources: [], warnings: [], error: (err as Error).message };
-  }
+  const loaded = loadWithTargets(ctx);
+  if ("error" in loaded) return { changed: false, sources: [], warnings: [], error: loaded.error };
+  const { config, targets } = loaded;
   const state = new State(ctx.stateRoot);
   const cacheRoot = cacheRootOf(ctx);
   const sel = opts.scope ?? "all";
@@ -331,6 +422,10 @@ export async function check(ctx: EngineContext, opts: SyncOptions = {}): Promise
 
   for (const [scope, scopeCfg] of scopes) {
     const oldLock = readLock(join(targetDirOf(ctx, scope), "skilletor.lock.json"));
+    if (targetDrift(Object.keys(oldLock), targets[scope])) {
+      out.changed = true;
+      (out.targetsChanged ??= []).push(scope);
+    }
     for (const name of scopeSources(scopeCfg)) {
       const src = config.sources.get(name);
       if (!src || !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
@@ -351,6 +446,8 @@ export async function check(ctx: EngineContext, opts: SyncOptions = {}): Promise
 export interface StatusReport {
   scopes: {
     scope: ScopeName;
+    /** The harnesses this scope installs for (spec §14.1). */
+    targets: Harness[];
     /** `via` names the wildcard entry an item was installed through. */
     declared: { key: string; source: string; installed: boolean; via?: string; skipped?: SkipReason }[];
     orphans: string[];
@@ -363,12 +460,9 @@ export interface StatusReport {
 }
 
 export function status(ctx: EngineContext, opts: SyncOptions = {}): StatusReport {
-  let config: LoadedConfig;
-  try {
-    config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
-  } catch (err) {
-    return { scopes: [], error: (err as Error).message };
-  }
+  const loaded = loadWithTargets(ctx);
+  if ("error" in loaded) return { scopes: [], error: loaded.error };
+  const { config, targets } = loaded;
   const state = new State(ctx.stateRoot);
   const sel = opts.scope ?? "all";
   const scopes: [ScopeName, ScopeConfig][] = [];
@@ -378,7 +472,11 @@ export function status(ctx: EngineContext, opts: SyncOptions = {}): StatusReport
   const out: StatusReport = { scopes: [] };
   for (const [scope, scopeCfg] of scopes) {
     const lock = readLock(join(targetDirOf(ctx, scope), "skilletor.lock.json"));
-    const declaredKeys = new Set(scopeCfg.install.map((i) => i.target));
+    const active = targets[scope];
+    // One row per declared item and active target that receives its type.
+    const rows = scopeCfg.install.flatMap((i) =>
+      active.filter((h) => supports(h, i.type)).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
+    const declaredKeys = new Set(rows.map((r) => r.key));
     const sourceVersions: Record<string, string> = {};
     for (const entry of Object.values(lock)) sourceVersions[entry.source] = entry.version;
     const trustRequests: { name: string; url: string }[] = [];
@@ -389,20 +487,23 @@ export function status(ctx: EngineContext, opts: SyncOptions = {}): StatusReport
       }
     }
     // A skip entry (spec §6.2) is declared but deliberately not installed.
-    const declared: StatusReport["scopes"][number]["declared"] = scopeCfg.install.map((i) => {
-      const entry = lock[i.target];
+    const declared: StatusReport["scopes"][number]["declared"] = rows.map((i) => {
+      const entry = lock[i.key];
       const d: StatusReport["scopes"][number]["declared"][number] = {
-        key: i.target, source: i.source, installed: entry !== undefined && !entry.skipped,
+        key: i.key, source: i.source, installed: entry !== undefined && !entry.skipped,
       };
       if (entry?.skipped) d.skipped = entry.skipped;
       return d;
     });
-    const viaCount = new Map<WildcardItem, number>();
+    const via = new Map<WildcardItem, Set<string>>(); // distinct item names per wildcard
     const orphans: string[] = [];
     for (const [key, entry] of Object.entries(lock)) {
       if (declaredKeys.has(key)) continue;
-      const type = keyToTypeName(key).type;
-      const w = scopeCfg.wildcards.find((x) => x.source === entry.source && x.type === type);
+      const k = parseLockKey(key);
+      const type = k.type;
+      const w = k.harness && active.includes(k.harness)
+        ? scopeCfg.wildcards.find((x) => x.source === entry.source && x.type === type)
+        : undefined;
       if (!w) {
         orphans.push(key);
         continue;
@@ -412,14 +513,15 @@ export function status(ctx: EngineContext, opts: SyncOptions = {}): StatusReport
         continue;
       }
       declared.push({ key, source: entry.source, installed: true, via: w.raw });
-      viaCount.set(w, (viaCount.get(w) ?? 0) + 1);
+      via.set(w, (via.get(w) ?? new Set()).add(k.target));
     }
     out.scopes.push({
       scope,
+      targets: active,
       declared,
       orphans,
       wildcards: scopeCfg.wildcards.map((w) => ({
-        type: w.type, source: w.source, entry: w.raw, installed: viaCount.get(w) ?? 0,
+        type: w.type, source: w.source, entry: w.raw, installed: via.get(w)?.size ?? 0,
       })),
       trustRequests,
       sourceVersions,

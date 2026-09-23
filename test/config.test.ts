@@ -373,3 +373,47 @@ test("a partial wildcard name is rejected", () => {
     cleanup();
   }
 });
+
+// ---- targets (spec §14.1) -----------------------------------------------------
+
+test("targets: unset everywhere reads as undefined (auto-detect)", () => {
+  const { home, projectDir, cleanup } = setup({ user: {}, project: {} });
+  try {
+    const cfg = loadConfig({ home, projectDir });
+    assert.equal(cfg.user.targets, undefined);
+    assert.equal(cfg.project?.targets, undefined);
+  } finally {
+    cleanup();
+  }
+});
+
+test("targets: user, project and local are read; local wins over project", () => {
+  const { home, projectDir, cleanup } = setup({
+    user: { targets: ["claude", "codex"] },
+    project: { targets: ["claude"] },
+    local: { targets: ["codex"] },
+  });
+  try {
+    const cfg = loadConfig({ home, projectDir });
+    assert.deepEqual(cfg.user.targets, ["claude", "codex"]);
+    assert.deepEqual(cfg.project?.targets, ["codex"]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("targets: must be a non-empty array of known harnesses without duplicates", () => {
+  for (const [bad, re] of [
+    [[], /non-empty array/],
+    ["claude", /non-empty array/],
+    [["cursor"], /unknown harness "cursor"/],
+    [["claude", "claude"], /"claude" twice/],
+  ] as const) {
+    const { home, projectDir, cleanup } = setup({ project: { targets: bad } });
+    try {
+      assert.throws(() => loadConfig({ home, projectDir }), (err: Error) => err instanceof ConfigError && re.test(err.message));
+    } finally {
+      cleanup();
+    }
+  }
+});

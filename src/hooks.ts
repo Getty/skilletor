@@ -5,7 +5,10 @@
 // background sync that writes a pending report for a later prompt; deliver any
 // pending report for this project. A hook must never disturb the session — every
 // path catches, exits 0, and surfaces errors as a single warning line.
-import { spawn } from "node:child_process";
+//
+// The same hooks serve Codex (spec §14.5). Codex sets no CLAUDE_PROJECT_DIR, so
+// without a project dir the git top level of the input's cwd (else cwd) is used.
+import { execFileSync, spawn } from "node:child_process";
 import { loadConfig } from "./config.ts";
 import { State } from "./state.ts";
 import { check, sync, type EngineContext } from "./engine.ts";
@@ -50,9 +53,26 @@ function toOutput(report: SyncReport, eventName: string): HookOutput {
   };
 }
 
-/** Dispatch a hook event; never throws. */
-export async function runHook(event: string, input: HookInput, ctx: HookContext): Promise<HookOutput> {
+/** The project root for a cwd: its git top level, else the cwd itself. Never throws. */
+export function projectRootOf(cwd: string): string {
   try {
+    const top = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2_000,
+    }).trim();
+    return top || cwd;
+  } catch {
+    return cwd;
+  }
+}
+
+/** Dispatch a hook event; never throws. */
+export async function runHook(event: string, input: HookInput, hookCtx: HookContext): Promise<HookOutput> {
+  try {
+    const ctx: HookContext = hookCtx.projectDir
+      ? hookCtx
+      : { ...hookCtx, projectDir: projectRootOf(input.cwd || process.cwd()) };
     switch (event) {
       case "session-start":
         return await sessionStart(input, ctx);

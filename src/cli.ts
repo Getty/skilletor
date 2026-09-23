@@ -85,7 +85,9 @@ function statusText(report: ReturnType<typeof status>): string {
   if (report.error) return `skilletor: config error — ${report.error}`;
   const lines: string[] = [];
   for (const s of report.scopes) {
-    lines.push(`${s.scope} scope:`);
+    // Name the targets unless they are just claude (output unchanged for Claude-only users).
+    const claudeOnly = s.targets.length === 1 && s.targets[0] === "claude";
+    lines.push(claudeOnly ? `${s.scope} scope:` : `${s.scope} scope (${s.targets.join(", ") || "no targets"}):`);
     for (const d of s.declared) {
       const mark = d.installed ? "✓" : d.skipped ? "-" : "·";
       const note = d.skipped ? " (skipped: renders empty)" : "";
@@ -255,8 +257,8 @@ async function runHookCommand(event: string | undefined): Promise<number> {
     // ignore malformed hook input
   }
   const home = homedir();
-  const projectDir =
-    process.env.SKILLETOR_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
+  // Unset under Codex: runHook then takes the git top level of input.cwd (spec §14.5).
+  const projectDir = process.env.SKILLETOR_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || undefined;
   const ctx: HookContext = {
     home,
     projectDir,

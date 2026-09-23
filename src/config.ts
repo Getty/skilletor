@@ -15,6 +15,9 @@ export type ItemType = "skill" | "agent" | "rule";
 export const ITEM_TYPES: readonly ItemType[] = ["skill", "agent", "rule"];
 /** Config install keys (`skills`/`agents`/`rules`) mapped to the item type. */
 const INSTALL_KEYS: Record<string, ItemType> = { skills: "skill", agents: "agent", rules: "rule" };
+/** Agent harnesses skilletor can install for (spec §14). */
+export type Harness = "claude" | "codex";
+export const HARNESSES: readonly Harness[] = ["claude", "codex"];
 /** The item name that declares every item of a type in a source (`*@source`). */
 export const WILDCARD = "*";
 
@@ -57,6 +60,8 @@ export interface ScopeConfig {
   vars: Record<string, unknown>;
   /** Project scope only: maintain the managed gitignore block (default true). */
   gitignore?: boolean;
+  /** `targets` as written (project: local over committed); unset = not restricted (spec §14.1). */
+  targets?: Harness[];
 }
 
 export interface LoadedConfig {
@@ -77,7 +82,7 @@ export interface LoadOptions {
   projectDir?: string;
 }
 
-const ALLOWED_KEYS = new Set(["sources", "install", "vars", "gitignore", "checkInterval"]);
+const ALLOWED_KEYS = new Set(["sources", "install", "vars", "gitignore", "checkInterval", "targets"]);
 const SOURCE_KEYS = new Set(["git", "ref", "url", "local"]);
 
 type Json = Record<string, unknown>;
@@ -282,6 +287,8 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
     wildcards: userInstall.wildcards,
     vars: mergeVars(asObject(user.vars, userPath, "vars")),
   };
+  const userTargets = targetsOf(user.targets, userPath);
+  if (userTargets) userScope.targets = userTargets;
 
   let projectScope: ScopeConfig | undefined;
   if (hasProject) {
@@ -299,6 +306,9 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
       ),
       gitignore: boolOr(local.gitignore ?? project.gitignore, true, projectPath, "gitignore"),
     };
+    const projectTargets = targetsOf(project.targets, projectPath);
+    const localTargets = targetsOf(local.targets, localPath);
+    if (localTargets ?? projectTargets) projectScope.targets = localTargets ?? projectTargets;
   }
 
   return { sources, checkInterval, user: userScope, project: projectScope };
@@ -334,6 +344,24 @@ function dedupeWildcards(a: WildcardItem[], b: WildcardItem[], path: string): Wi
     }
     seen.set(key, w.raw);
     out.push(w);
+  }
+  return out;
+}
+
+/** Validate a `targets` value: a non-empty array of known harnesses, no duplicates. */
+function targetsOf(value: unknown, path: string): Harness[] | undefined {
+  if (value === undefined) return undefined;
+  const allowed = HARNESSES.join(", ");
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ConfigError(`${path}: "targets" must be a non-empty array (of ${allowed})`);
+  }
+  const out: Harness[] = [];
+  for (const v of value) {
+    if (typeof v !== "string" || !(HARNESSES as readonly string[]).includes(v)) {
+      throw new ConfigError(`${path}: "targets" has unknown harness ${JSON.stringify(v)} (allowed: ${allowed})`);
+    }
+    if (out.includes(v as Harness)) throw new ConfigError(`${path}: "targets" lists "${v}" twice`);
+    out.push(v as Harness);
   }
   return out;
 }

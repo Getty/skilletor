@@ -13,6 +13,7 @@ import type { SyncReport } from "./report.ts";
 import { scan } from "./catalog.ts";
 import { State } from "./state.ts";
 import { readLock, type Lock } from "./lock.ts";
+import { parseLockKey } from "./targets.ts";
 
 export interface CommandContext extends EngineContext {
   probe?: Probe;
@@ -228,7 +229,11 @@ function coveringWildcards(
   path: string, lock: Lock, name: string, source: string, type: ItemType | undefined, explicitTypes: ItemType[],
 ): { types: ItemType[]; confirmed: boolean } {
   const found = findInstallEntries(path, WILDCARD, source, type).map((w) => w.type);
-  const inLock = (t: ItemType) => lock[`${TYPE_DIR[t]}/${name}`]?.source === source;
+  // Any target's entry counts (claude `skills/x`, codex `codex:skills/x`, spec §14.3).
+  const inLock = (t: ItemType) => Object.entries(lock).some(([key, e]) => {
+    const k = parseLockKey(key);
+    return k.target === `${TYPE_DIR[t]}/${name}` && e.source === source;
+  });
   const confirmed = found.some(inLock);
   if (type) return { types: found, confirmed };
   const known = found.filter((t) => explicitTypes.includes(t) || inLock(t));
@@ -325,7 +330,7 @@ function installedSet(ctx: CommandContext, config: LoadedConfig): Set<string> {
     if (scope === "project" && !ctx.projectDir) continue;
     for (const [key, entry] of Object.entries(readLock(join(dir, "skilletor.lock.json")))) {
       if (entry.skipped) continue; // renders empty here: nothing installed
-      set.add(`${key}@${entry.source}`);
+      set.add(`${parseLockKey(key).target}@${entry.source}`); // any target counts
     }
   }
   return set;

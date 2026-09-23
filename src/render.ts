@@ -10,7 +10,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve as resolvePath, sep } from "node:path";
 import nunjucks from "nunjucks";
-import type { ItemType } from "./config.ts";
+import type { Harness, ItemType } from "./config.ts";
 import type { CatalogItem } from "./catalog.ts";
 
 export class RenderError extends Error {
@@ -22,6 +22,8 @@ export interface RenderContext {
   vars: Record<string, unknown>;
   project?: { dir: string; name: string; git_remote?: string };
   scope: "user" | "project";
+  /** The harness this copy is rendered for (spec §14.3). */
+  harness: Harness;
   target: { dir: string };
   host: { name: string; os: string };
   user: { name: string; home: string };

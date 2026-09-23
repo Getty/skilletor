@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
+import { claudeOnlyEnv } from "./helpers/harness.ts";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 import { buildToString } from "../scripts/esbuild.config.mjs";
 
@@ -56,7 +57,7 @@ test("full lifecycle: add, install, update, re-render, author mode, uninstall", 
       spawnSync(process.execPath, [bundle, ...args], {
         encoding: "utf8",
         input,
-        env: { ...process.env, HOME: home, CLAUDE_PROJECT_DIR: project },
+        env: claudeOnlyEnv(home, { CLAUDE_PROJECT_DIR: project }),
       });
 
     // A hand-written own skill that must never be touched.

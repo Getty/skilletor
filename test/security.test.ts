@@ -7,6 +7,7 @@ import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
+import { claudeOnly } from "./helpers/harness.ts";
 import { loadConfig, ConfigError } from "../src/config.ts";
 import { scan, CatalogError } from "../src/catalog.ts";
 import { build, RenderError, type RenderContext } from "../src/render.ts";
@@ -20,6 +21,7 @@ function ctx(vars: Record<string, unknown> = {}): RenderContext {
   return {
     vars,
     scope: "user",
+    harness: "claude",
     target: { dir: "/t" },
     host: { name: "h", os: "linux" },
     user: { name: "u", home: "/home/u" },
@@ -156,7 +158,7 @@ function engineEnv() {
   const projectDir = join(tmp.dir, "proj");
   mkdirSync(join(home, ".claude"), { recursive: true });
   mkdirSync(join(projectDir, ".claude"), { recursive: true });
-  const ectx: EngineContext = { home, projectDir, stateRoot: join(tmp.dir, "state"), host: { name: "h", os: "linux" }, user: { name: "u", home } };
+  const ectx: EngineContext = { home, projectDir, stateRoot: join(tmp.dir, "state"), host: { name: "h", os: "linux" }, user: { name: "u", home }, markers: claudeOnly(home) };
   return { tmp, ectx, home, projectDir, cleanup: () => tmp.cleanup() };
 }
 
