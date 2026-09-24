@@ -1,0 +1,19 @@
+---
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-24T04:13:11Z
+id: 53
+priority: medium
+started: 2026-09-24T19:31:15Z
+status: done
+tags:
+- engine
+- spec
+- catalog
+title: 'Sources: read skill paths from .claude-plugin/plugin.json (e.g. mattpocock/skills)'
+updated: 2026-09-24T19:31:15Z
+---
+
+mattpocock/skills nests skills by category (skills/engineering/tdd/SKILL.md) and lists them in .claude-plugin/plugin.json "skills"; today's scan (catalog.ts, skills/<name>/ only) finds nothing. Spec §4.1 ("Claude plugin repos") defines the rule: string or array of paths; dir with SKILL.md = one skill, else one level deep; union with skills/<name>/; same dir counts once; errors (absolute, .., symlink, missing, name collision, bad JSON/type) make the source unresolvable; plugin.json without skills ignored; agents/commands/hooks ignored. Docs: add the three example sources (anthropics, obra/superpowers, mattpocock) to README and the bundled SKILL.md.
+
+Done: 1881830 (spec) + 240eaca. 404/404, check-dist ok. Real repos verified (mattpocock 25, anthropics 19, obra 15). Follow-up: source-root path must be an error (spec amended), fixed in the next worker run.
