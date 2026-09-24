@@ -4,7 +4,8 @@
 //
 //   node skill-static-check.mjs [--inventory] [--home <dir>] <path>...
 //
-// A path may be a SKILL.md, an agent/rule .md, a skill directory, or a
+// A path may be a SKILL.md, an agent/rule .md, a skill directory, a skills/,
+// agents/ or rules/ directory, or a
 // directory holding skills/, agents/, rules/ (a .claude dir or a skilletor
 // source). Eval suites (`evals/`, a case dir, `graders/`) are checked as eval
 // files — prompt body present, grader `type:` set — never as skills. One line
@@ -145,9 +146,9 @@ function checkFile(file) {
     if (bodyLines > RULES_MAX_LINES) report(file, "WARN", `rules file is ${bodyLines} lines (budget ~${RULES_MAX_LINES}, loaded every turn)`);
     const ruleProse = body.replace(/`[^`\n]*`/g, "").replace(/\S*\/\S*/g, "");
     if (TIME_SENSITIVE.test(ruleProse)) report(file, "WARN", `time-sensitive wording: ${TIME_SENSITIVE.exec(ruleProse)[0]}`);
-    return;
+    return { type, name: basename(file, ".md"), description: "" };
   }
-  if (!hasFm) { report(file, "ERROR", "no frontmatter"); return; }
+  if (!hasFm) { report(file, "ERROR", "no frontmatter"); return { type, name: basename(file), description: "" }; }
   if (!description) report(file, "ERROR", "description missing");
   else {
     if (description.length > DESCRIPTION_MAX_CHARS) report(file, "ERROR", `description ${description.length} chars (budget ${DESCRIPTION_MAX_CHARS}) — the router is truncated in listings`);
@@ -193,8 +194,9 @@ function collect(p) {
   if (isCase(p)) return caseFiles(p);
   if (basename(p) === "graders") return safeReaddir(p).filter((e) => e.endsWith(".md")).map((e) => join(p, e));
   if (basename(p) === "evals") return safeReaddir(p).map((e) => join(p, e)).filter((d) => statSync(d).isDirectory() && isCase(d)).flatMap(caseFiles);
-  for (const sub of ["skills", "agents", "rules"]) {
-    const d = join(p, sub);
+  const typeDirs = ["skills", "agents", "rules"];
+  // p is itself a type dir (.claude/rules, a source's skills/) or holds them
+  for (const [sub, d] of typeDirs.includes(basename(resolve(p))) ? [[basename(resolve(p)), p]] : typeDirs.map((t) => [t, join(p, t)])) {
     if (!existsSync(d)) continue;
     for (const e of readdirSync(d)) {
       const f = join(d, e);
