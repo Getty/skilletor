@@ -1,0 +1,34 @@
+---
+claimed_at: 2026-09-24T17:29:47Z
+claimed_by: claude
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-24T17:28:07Z
+id: 59
+priority: high
+started: 2026-09-24T17:29:47Z
+status: done
+tags:
+- docs
+- release
+title: docs/release.md is a one-time v0.1.0 bootstrap runbook, stale for v0.2.0+
+updated: 2026-09-24T19:31:15Z
+---
+
+docs/release.md (last touched at k18/k19, before v0.1.0 shipped) still reads as
+first-time bootstrap: step 1 "Create the GitHub repo Getty/skilletor and push main" (already
+done - origin exists, tags v0.1.0/v0.1.1 exist), step 4 hardcodes `git tag v0.1.0`, and the
+"Marketplace entry (add to Getty/marketplace)" JSON block is the text that went in for v0.1.0,
+already added - nothing marks it done or shows how to update it for a later release.
+
+For v0.2.0 the doc gives no guidance: whether the GitHub repo/CI/marketplace-entry steps are
+one-time (skip them) or need re-verification, and what the tag command should say this time.
+It also does not mention checking the marketplace entry description against the current
+plugin.json as part of a release (see the sibling ticket on that drift).
+
+Rework into a repeatable release checklist: split one-time bootstrap (repo creation, first
+marketplace entry, CI setup) from what repeats every release (version bump in package.json +
+both plugin.json, tag matching, dist rebuilt, README/SKILL.md CLI reference review,
+marketplace description still matching plugin.json). Audit-only per house rules - the
+release-checker/worker prep the text, the maintainer edits docs/release.md, Getty/marketplace
+and tags/pushes.
