@@ -133,9 +133,10 @@ level deep like `skills/`. The skill's name is its directory's basename. These s
 added to the ones found under `skills/<name>/`; the same directory reached both ways counts
 once. Everything else in the plugin (`agents`, `commands`, `hooks`, MCP servers) is ignored.
 Errors make the source unresolvable (§6.1): a path that is absolute, contains `..`, is a
-symlink or does not exist; two different directories yielding the same skill name;
+symlink (dangling included), does not exist, is not a directory, or is the source root
+itself (`""`, `.` – its name would be the cache directory's); two different directories yielding the same skill name;
 `plugin.json` that is not valid JSON or whose `skills` is neither a string nor an array of
-strings. A `plugin.json` without `skills` is ignored.
+strings. A `plugin.json` without `skills`, or whose top level is not an object, is ignored.
 
 Known public sources as examples: `skilletor add anthropics` (→ `anthropics/skills`, flat
 `skills/`), `skilletor add obra/superpowers` (flat `skills/`), `skilletor add mattpocock`
