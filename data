@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T04:33:31Z
+claimed_by: claude
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-24T04:14:47Z
+id: 57
+priority: low
+started: 2026-09-24T04:33:31Z
+status: done
+tags:
+- docs
+- briefing
+- templating
+title: 'Docs: {% if %} inside a briefing: block in a .njk agent drops skills silently'
+updated: 2026-09-24T19:31:15Z
+---
+
+render.ts runs Nunjucks without trimBlocks/lstripBlocks; tag lines become blank lines and briefing's block regex stops at the first blank line -> skills after the tag are dropped (verified with briefing's parse_skills_list). Document {%- ... -%} for frontmatter in the bundled skill/references; optionally warn on blank lines inside a rendered agent's frontmatter mapping. Lane: skilletor-skill-author (docs), skilletor-worker (warning). (review 2026-09-24)
