@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T00:04:00Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-22T22:20:30Z
+id: 29
+priority: low
+started: 2026-09-23T00:03:22Z
+status: done
+tags:
+- skills
+- docs
+title: skills/skilletor/SKILL.md omits --project for uninstall and source remove
+updated: 2026-09-24T19:31:15Z
+---
+
+src/cli.ts accepts --project for add, install, uninstall and source remove; the bundled skill documents it only for some. Align SKILL.md (and README CLI reference) with src/cli.ts. Found during #24. Target: skilletor-skill-author.
+
+2026-09-23 00:03 skilletor-skill-author: added [--project] to 'uninstall' and 'source remove' in skills/skilletor/SKILL.md and README.md CLI reference, verified against src/cli.ts switch + parseFlags (cmdUninstall and cmdSourceRemove both receive flags.project). Static check: 0 errors, 0 warnings. Not changed (residual, out of scope): --json also applies to 'source list' and 'available' (skill omits it for available; README has it); --force is only read by sync and source remove, not check/status. Uncommitted.
+
+2026-09-23 00:04 SKILL.md + README CLI reference aligned for --project; uncommitted, ready for review
