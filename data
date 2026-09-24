@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-23T01:20:15Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T01:00:32Z
+id: 33
+priority: low
+started: 2026-09-23T01:16:32Z
+status: done
+tags:
+- eval
+- skills
+title: 'config-question grader: make the checkInterval-scope and placeholder rulings
+  explicit'
+updated: 2026-09-24T19:31:15Z
+---
+
+Found in the k30 assessment. Judges split on answers that are correct on criteria (1)-(3): with-run 0 FAIL FAIL FAIL, with-run 2 PASS PASS FAIL. No judge rationale is recorded (the JSON has only votes; the traces under /tmp are gone), so the grader text has to carry the ruling. Two open readings in evals/config-question/graders/answer.md: (a) the parenthetical "skilletor rejects it there as user-only" invites judges to fail any wrong statement about the consequence, but the FAIL list only names "puts checkInterval in a project file". (b) Nothing says whether placeholders for the user's existing content (`"install": { ... }`, `"<your platform URL>"`, an empty `"skills": []`) are acceptable when the prompt asks for "exactly what goes in them". Fix: add one FAIL clause, "claims checkInterval in a project file is ignored or harmless (it is a config error)", and one PASS clause, "placeholders for values the agent cannot know (existing sources, URLs) are fine". Do not touch the flag/file/key list. Land it after the SKILL.md fix (k32) so the grader tests a fact the skill states. Done when answer.md states both rulings and shares no item or source name with SKILL.md. Re-running is billed and needs the maintainer's go-ahead. Target agent: skilletor-skill-author.
+
+2026-09-23 01:20 evals/config-question/graders/answer.md: PASS note — placeholders for values the agent cannot know (the platform source's URL, existing sources/install entries) are fine; FAIL clause — claims checkInterval in a project file is ignored or harmless (config error, config fails to load). Flag/file/key list untouched. No go-lint/platform in SKILL.md. Not re-run (billed).
+
+2026-09-23 01:20 Grader rulings added, uncommitted; re-measure needs maintainer go-ahead
