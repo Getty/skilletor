@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-24T19:31:28Z
+claimed_by: claude
+class: standard
+completed: 2026-09-24T19:31:28Z
+created: 2026-09-22T04:00:31Z
+id: 21
+priority: medium
+started: 2026-09-24T18:59:44Z
+status: done
+tags:
+- codex
+- plugin
+title: 'Codex support: hooks + list skilletor in Getty/marketplace Codex manifest'
+updated: 2026-09-24T19:31:28Z
+---
+
+skilletor is Claude-only for now (auto-sync relies on Claude Code SessionStart/UserPromptSubmit hooks). Getty/marketplace check-manifests.py now allows single-harness plugins, so skilletor is listed for Claude only. To make it work on Codex: add Codex hook wiring (Codex event model differs), add .codex-plugin/plugin.json to the repo, then add the entry to .agents/plugins/marketplace.json (policy AVAILABLE/ON_USE, category Productivity) so it is listed for both. Verify with scripts/check-manifests.py.
+
+2026-09-24 17:28 Status check at v0.2.0 pre-release audit: Codex hook wiring and .codex-plugin/plugin.json both shipped (k39/k47). Confirmed via scripts/check-manifests.py --offline in ~/dev/marketplace: 'note: Claude Code only (not on Codex): skilletor' — the .agents/plugins/marketplace.json entry is still the only remaining part of this ticket's scope. See also k60 (Claude-side description text in marketplace.json also stale vs plugin.json).
