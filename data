@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T03:16:33Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T03:15:22Z
+id: 47
+priority: low
+started: 2026-09-23T03:16:10Z
+status: done
+tags:
+- docs
+- codex
+title: .codex-plugin description still says skills only
+updated: 2026-09-24T19:31:15Z
+---
+
+Found during k46: .codex-plugin/plugin.json description reads 'Remote skills for Codex and Claude Code ... Installs skills into ~/.agents/skills and <repo>/.agents/skills.' Since k40/k41 Codex also gets agents (TOML under $CODEX_HOME/agents, <repo>/.codex/agents) and rules (AGENTS.md block). package.json and .claude-plugin descriptions now say 'skills, agents and rules for Claude Code and Codex'. Done: codex manifest description matches; manifest test green.
+
+2026-09-23 03:16 Codex manifest description now covers skills, agents and rules (Codex layout named); keywords gained agents, rules. No version bump. manifest test 3/3, full chain 319/319, check-dist clean. Uncommitted.
+
+2026-09-23 03:16 Implemented, uncommitted; needs review
