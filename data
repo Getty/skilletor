@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-09-23T01:00:56Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-22T23:26:49Z
+id: 30
+priority: low
+started: 2026-09-23T00:57:13Z
+status: done
+tags:
+- eval
+- skills
+title: 'config-question eval: prompt reuses the skill''s own example names'
+updated: 2026-09-24T19:31:15Z
+---
+
+Found in the k26 assessment. evals/config-question/prompt.md asks for perl-moo from source 'shared'. Those are the exact names in the skills/skilletor/SKILL.md example (lines 59-64). All 3 with-arm answers in k26 copied that example block, including the https://github.com/Getty/skills URL. So the case measures retrieval plus copying, not whether the agent adapts the skill to a different request. Fix: use names that do not appear in the skill (for example skill 'go-lint' from source 'team', or an agent instead of a skill), and update expected_outcome and graders/answer.md criterion (2) to match. Done when prompt.md and answer.md share no item or source name with SKILL.md. Re-running afterwards is a billed run and needs the maintainer's go-ahead. Target agent: skilletor-skill-author.
+
+2026-09-23 00:57 Case renamed to go-lint@platform (neither name occurs in skills/skilletor/ or README.md; 'team' rejected because the skill example uses it). Changed prompt.md body + expected_outcome and graders/answer.md criteria (1)/(2); flag/file/key list untouched. Not re-run, not committed; off-target untouched.
+
+2026-09-23 01:00 Assessed (skilletor-skill-auditor). Run: evals/results/k30.json (+ k30.html), Claude Code 2.1.280, plugin 0.1.1, prompt go-lint@platform, 3 runs per arm, $0.51, 63s. Static check skills/skilletor: 0/0. with-arm 2/3 (Skill fired 3/3), without-arm 0/3 (runs 0/1 exit "Reached maximum number of turns (4)" with empty evidence, run 2 declined: "I don't know skilletor"). Delta +0.667 (k26: +1.0).
+Adaptation: all 3 with-answers wrote go-lint@platform under install.skills in .claude/skilletor.json and checkInterval 0 in ~/.claude/skilletor.json, with the session-start explanation. None copied the example source URL; all used placeholders instead. So criteria (1)-(3) hold 3/3. The copying caveat from k26 is gone.
+Why with-run 0 failed (FAIL x3): no judge rationale is recorded (only votes; the /tmp traces are gone), so this is inferred from the text. The one statement that sets run 0 apart from runs 1/2 is "checkInterval only works in the user config. It is ignored in a project file." That is false. src/config.ts:234-235 throws ConfigError, the config fails to load and sync stops. The grader states that fact directly ("skilletor rejects it there as user-only"), so a judge that reads the answer against the grader text sees a contradiction. Runs 1 and 2 only say "only read from"/"only works at" user level and make no claim about the consequence. Second, weaker factor: run 0's user snippet has `"install": { ... }`, which is not valid JSON, although the prompt asked for "exactly what goes in them". Run 2's single FAIL vote is probably its user snippet `"install": {"skills": []}` (reads as wiping the user installs); that one is noise.
+Is the FAIL justified? Mostly yes. The claim is wrong in the way that matters: a user who reads "ignored" would expect a harmless no-op and get a broken config. Cause: a skill gap. SKILL.md:79 says only "user only" (same for gitignore at :76), and the agent invented the consequence. The grader shares some blame: its FAIL list does not name this case, which is why judges split (0/3 vs 2/3). Filed k32 (skill: name the consequence) and k33 (grader: explicit ruling for the consequence claim and for placeholders). Both go to skilletor-skill-author, k32 first.
+Strength: S2 holds on real Claude, now measured without copying. Delta +0.667, n=3 per arm, one case. The drop from +1.0 is one factual embellishment the skill left room for, not a failure to adapt.
+
+2026-09-23 01:00 Verdict: S2 holds without copying (delta +0.667, n=3). with-run 0 failed on the false claim "ignored in a project file" (it is a ConfigError, config.ts:234). Fixes: k32 (skill), k33 (grader).
