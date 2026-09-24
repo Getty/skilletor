@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T04:19:16Z
+claimed_by: claude
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-24T04:14:34Z
+id: 54
+priority: medium
+started: 2026-09-24T04:19:16Z
+status: done
+tags:
+- rules
+- agents
+title: 'Rules file: delegation lock hits skill-author/auditor (they have the Agent
+  tool)'
+updated: 2026-09-24T19:31:15Z
+---
+
+skilletor-rules.md:30-43 keys the lock on 'whether the Agent tool is available'. skilletor-skill-author and skilletor-skill-auditor list Agent in tools:, and subagents receive the rules file -> the author is told not to touch skill text, i.e. its own lane. Fix: key on identity ('unless you are a skilletor-* agent') or drop Agent from those two. Lane: skilletor-skill-author. (review 2026-09-24)
