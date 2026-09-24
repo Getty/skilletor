@@ -224,6 +224,10 @@ function pluginPath(dir: string, pluginFile: string, entry: string): string {
   if (segments.includes("..")) {
     throw new CatalogError(`${pluginFile}: skills path must not contain "..": ${entry}`);
   }
+  if (segments.length === 0) {
+    // Its name would be the source root's basename, i.e. the cache directory's.
+    throw new CatalogError(`${pluginFile}: skills path must not be the source root: ${JSON.stringify(entry)}`);
+  }
   let cur = dir;
   for (const seg of segments) {
     cur = join(cur, seg);

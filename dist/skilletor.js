@@ -7759,6 +7759,9 @@ function pluginPath(dir, pluginFile, entry) {
   if (segments.includes("..")) {
     throw new CatalogError(`${pluginFile}: skills path must not contain "..": ${entry}`);
   }
+  if (segments.length === 0) {
+    throw new CatalogError(`${pluginFile}: skills path must not be the source root: ${JSON.stringify(entry)}`);
+  }
   let cur = dir;
   for (const seg of segments) {
     cur = join8(cur, seg);

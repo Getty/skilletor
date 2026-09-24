@@ -108,6 +108,27 @@ test("plugin.json without skills, or with an empty list, adds nothing", () => {
   }
 });
 
+test("a plugin.json whose top level is not an object is ignored", () => {
+  for (const plugin of ["[1, 2]", "null", "\"skills\"", "3"]) {
+    const s = makeSource({ "skills/flat/SKILL.md": SKILL("flat") }, plugin);
+    try {
+      assert.deepEqual(skillsOf(s.dir).map((i) => i.name), ["flat"], plugin);
+    } finally {
+      s.cleanup();
+    }
+  }
+});
+
+test("a dangling symlink on a listed path is reported as a symlink", () => {
+  const s = makeSource({}, { skills: ["gone"] });
+  try {
+    symlinkSync(join(s.dir, "nowhere"), join(s.dir, "gone"));
+    assert.throws(() => scan(s.dir), (e: unknown) => e instanceof CatalogError && /symlink/.test(e.message));
+  } finally {
+    s.cleanup();
+  }
+});
+
 test("every invalid plugin.json makes the source unresolvable", () => {
   const cases: { why: string; files?: Record<string, string>; plugin: unknown; re: RegExp }[] = [
     { why: "invalid JSON", plugin: "{ nope", re: /invalid JSON/ },
@@ -118,6 +139,11 @@ test("every invalid plugin.json makes the source unresolvable", () => {
     { why: ".. segment", plugin: { skills: ["skills/../../x"] }, re: /\.\./ },
     { why: "bare ..", plugin: { skills: [".."] }, re: /\.\./ },
     { why: "missing path", plugin: { skills: ["./nowhere"] }, re: /does not exist/ },
+    { why: "a file, not a directory", files: { "notes.md": "x\n" }, plugin: { skills: ["notes.md"] }, re: /not a directory/ },
+    { why: "source root as \"\"", plugin: { skills: [""] }, re: /source root/ },
+    { why: "source root as .", plugin: { skills: "." }, re: /source root/ },
+    { why: "source root as ./", plugin: { skills: ["./"] }, re: /source root/ },
+    { why: "source root as a dotted chain", plugin: { skills: ["././"] }, re: /source root/ },
     {
       why: "two dirs, same name",
       files: { "a/tdd/SKILL.md": SKILL("tdd"), "b/tdd/SKILL.md": SKILL("tdd") },
