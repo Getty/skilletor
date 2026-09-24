@@ -279,6 +279,11 @@ scope), `scope`, `harness` (`claude` or `codex`), `target.dir`, `host.*`, `user.
 `item.*`. There is deliberately no `env.*`, and printing an undefined variable (`{{ vars.x }}`) is an error (so a typo can't
 ship an empty skill). Testing one (`{% if vars.x %}`) is not: it is simply false.
 
+Tags are not whitespace-trimmed, so a `{% if %}` on its own line leaves a blank line. In
+frontmatter that matters: briefing stops reading a `briefing:` list at the first blank
+line. Use `{%- if … %}` / `{%- endif %}` there (left side only – `-%}` would also eat the
+next line break and glue the list items together).
+
 ### Switching items on and off with vars
 
 If an item's main file is a template — `SKILL.md.njk` for a skill, `<name>.md.njk` for
