@@ -1,49 +1,39 @@
-# skilletor – release prep (k19)
+# skilletor – release checklist
 
-Everything here is **offline preparation**. Each outward-facing step below needs Getty's
-explicit go-ahead and is done by a human — nothing in this file has been pushed anywhere.
+Every outward-facing step (push, tag, GitHub release, `Getty/marketplace`) needs Getty's
+explicit go-ahead. Everything before step 4 is local and can run anytime.
 
-## Release checklist (human-run)
+## Per release
 
-1. **Create the GitHub repo `Getty/skilletor`** and push `main`.
-   ```bash
-   git remote add origin git@github.com:Getty/skilletor.git
-   git push -u origin main
-   ```
-   See the `refs/karr/*` decision below before pushing.
-2. **CI** — `.github/workflows/ci.yml` is committed (Linux + macOS, Node 24: `npm ci`,
-   `typecheck`, `test`, `check-dist`). Confirm it's green on the first push.
-   - Windows is intentionally omitted for now: several tests create symlinks, which need
-     elevated privileges on Windows. Add a Windows job later behind a symlink-capable
-     runner or by skipping the symlink cases there.
-3. **Marketplace** — add the entry below to `Getty/marketplace`'s
-   `.claude-plugin/marketplace.json` `plugins` array, then verify a clean install on a
-   fresh machine/home:
-   ```
-   /plugin marketplace add Getty/marketplace
-   /plugin install skilletor@getty
-   ```
-4. **Tag the release** — `git tag v0.1.0 && git push origin v0.1.0` (match
-   `package.json` / `plugin.json`).
-5. **manage-skills note** — add the paragraph below to the manage-skills README pointing
-   at skilletor as the preferred successor.
+1. **Version** — bump `package.json`, `package-lock.json` (root and `packages[""]`),
+   `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` to the same version;
+   `npm run build` (the CLI version is injected from `package.json` at build time).
+2. **Verify** — `npm run typecheck && npm test && npm run build && npm run check-dist`;
+   `HOME=$(mktemp -d) bin/skilletor --version` prints the new version.
+3. **Audit** — run the `skilletor-release-checker` agent: versions, dist, CLI reference in
+   README and the bundled skill, marketplace entries, release notes.
+4. **Push and tag** — `git push origin main`, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
+   CI (`.github/workflows/ci.yml`: Linux + macOS, `npm ci`, typecheck, test, check-dist)
+   must be green on the pushed commit.
+5. **GitHub release** — `gh release create vX.Y.Z --title vX.Y.Z --notes-file <notes>`;
+   the notes list user-visible changes since the previous tag, grouped by area.
+6. **Marketplace** — only when the descriptions below changed or a harness listing is new:
+   edit `Getty/marketplace`, then `python3 scripts/check-manifests.py`. Entries carry no
+   version, so a plain release needs no marketplace change.
 
-## Decision: should `refs/karr/*` go to the public remote?
+`refs/karr/*` (the board) is never pushed: `git push origin main` does not include it.
 
-The karr board lives in `refs/karr/*`, not in the work tree. A plain `git push origin main`
-**does not** push it — the board stays local unless you explicitly push those refs.
+## Marketplace entries (Getty/marketplace)
 
-**Recommendation: keep the board private** (don't push `refs/karr/*`). It's internal task
-tracking. If you want the history public for transparency, push it deliberately:
-`git push origin 'refs/karr/*:refs/karr/*'`.
+The description follows `.claude-plugin/plugin.json`.
 
-## Marketplace entry (add to Getty/marketplace)
+Claude (`.claude-plugin/marketplace.json`, `plugins`):
 
 ```json
 {
   "name": "skilletor",
   "source": { "source": "github", "repo": "Getty/skilletor" },
-  "description": "Remote skills, agents and rules for Claude Code — declared once, synced on every session, templated per project.",
+  "description": "Remote skills, agents and rules for Claude Code and Codex — declared once in skilletor.json, synced on every session, templated per project. The preferred successor to manage-skills.",
   "license": "MIT",
   "homepage": "https://github.com/Getty/skilletor",
   "category": "productivity",
@@ -51,20 +41,19 @@ tracking. If you want the history public for transparency, push it deliberately:
 }
 ```
 
-## manage-skills README note (draft)
+Codex (`.agents/plugins/marketplace.json`, `plugins`):
 
-> ### Successor: skilletor
->
-> [skilletor](https://github.com/Getty/skilletor) is the preferred successor to
-> manage-skills. Where manage-skills hardlinks a single source-of-truth file into each
-> project, skilletor installs **build artifacts** — skills, agents and rules rendered per
-> instance from remote sources — and keeps them up to date every session. Reach for
-> skilletor when you want templated, auto-updating items from a shared remote;
-> manage-skills remains for hardlinked local sharing.
+```json
+{
+  "name": "skilletor",
+  "description": "Remote skills, agents and rules for Codex and Claude Code — declared once in skilletor.json, synced on every session, templated per project.",
+  "source": { "source": "url", "url": "https://github.com/Getty/skilletor.git", "ref": "main" },
+  "policy": { "installation": "AVAILABLE", "authentication": "ON_USE" },
+  "category": "Productivity"
+}
+```
 
 ## Social preview
 
-`assets/github.png` is both the README banner and the GitHub **social preview**: 1280×640,
-461 KB — GitHub's recommended size, comfortably under 1 MB. Upload it at
-Settings → General → Social preview. (The original 1774×887 / 2.8 MB render is in git
-history at the k10 commit if a higher-res version is ever needed.)
+`assets/github.png` is both the README banner and the GitHub social preview (1280×640,
+under 1 MB). Upload it at Settings → General → Social preview when it changes.
