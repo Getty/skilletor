@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-23T00:04:42Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-22T22:20:26Z
+id: 28
+priority: medium
+started: 2026-09-23T00:03:18Z
+status: done
+tags:
+- cli
+- docs
+title: 'cli.ts USAGE drift: add/install/uninstall/trust marked ''coming soon'', missing
+  available/source/--project'
+updated: 2026-09-24T19:31:15Z
+---
+
+src/cli.ts:27-30 USAGE still marks add/install/uninstall/trust as '(coming soon)' although implemented; it omits 'available', 'source list|remove' and the --project flag. Update USAGE to match the switch/parseFlags, rebuild dist. Found during #24. Target: skilletor-worker.
+
+2026-09-23 00:04 USAGE in src/cli.ts rewritten against run() switch + parseFlags: add/install/uninstall/trust no longer 'coming soon'; added source list, source remove <name>, available [source], --project; per-flag scope noted (--scope: sync/check/status; --json: sync/check/status/source list/available; --force: sync + source remove). hook stays undocumented. New test in test/cli.test.ts extracts case labels and parseFlags literals from src/cli.ts and asserts each appears in --help, no 'coming soon'. dist rebuilt; typecheck, 154/154 tests, check-dist green. Not committed. README/SKILL.md untouched (owned elsewhere) and may need to catch up.
+
+2026-09-23 00:04 USAGE matches dispatcher; drift test added; dist rebuilt; uncommitted
