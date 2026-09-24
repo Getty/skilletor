@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-09-23T01:01:00Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-22T20:11:12Z
+id: 26
+priority: low
+started: 2026-09-22T23:22:35Z
+status: done
+tags:
+- eval
+- skills
+title: Re-run config-question eval on a real Claude backend after T1/T2 fixes
+updated: 2026-09-24T19:31:15Z
+---
+
+The k23 S2 rating for evals/config-question is measured only on GPT-5.6 (Sol/Terra/Luna) via the claude_with_openai proxy, not on a real Claude model. After #24 and #25 are fixed, re-run `claude plugin eval` (--runs 3, -j <= 2) on a real Claude model before claiming S2 strength for Claude Code proper. NEEDS MAINTAINER GO-AHEAD before starting -- billed run, do not start without explicit permission. Target agent: skilletor-skill-auditor.
+
+2026-09-22 23:26 Assessed (skilletor-skill-auditor). Run: claude plugin eval . --case config-question --runs 3 -j 2, Claude Code 2.1.280, real Claude backend (default model), plugin 0.1.1 @ 2b0786c; results evals/results/k26.json (uncommitted, gitignored). $0.495, 51s. Static check skills/skilletor: 0 errors/0 warnings.
+VERDICT config-question: S2 on Claude, n=3 per arm, one case. with 3/3 PASS (judges PASS x3 each run, Skill fired 1x each run); without 0/3 (run1 cut by 'Reached maximum number of turns (4)', empty evidence; runs 2+3 answered and declined: 'I don't know skilletor's config format', asked for file access or docs). Delta +1.0 (k23 GPT proxy: +0.667).
+What the delta measures: correct answer vs honest refusal, not vs invented config. On Claude the skill does not stop hallucination, because there is none to stop. It supplies facts the agent cannot know or derive (file paths, name@source, user-only checkInterval). That still counts as S2 (without the skill the user gets no usable answer), but the reason for it is enabling, not correcting. Do not cite 'prevents invented config' as the effect on Claude.
+vs k23: same direction, cleaner result. k23 baseline timed out after ~21 turns crawling the repo ($4.32 of $4.74), and one with-run fail was a grader bug (k24). Here the baseline actually answers, the grader passes all real flags, and the run cost ~10x less. The off-target case was not re-run, so retrieval precision on Claude is still unmeasured (k23 GPT only: 0 false fires).
+max_turns: enforced. The CLI stopped without-run 1 with 'Reached maximum number of turns (4)'. The reported 'turns' field does not count the same way: with-run 2 reports 5 and without-runs 2/3 report 6 against max 4, with no error. So a reported turns > max_turns is not a violation. k23's 21-22 vs 6 is most likely this counting mismatch plus the no-result-event fallback on timeout. That is not proven for the GPT proxy path, since those traces are gone.
+Caveat: the prompt reuses the skill's own example names (perl-moo, shared; SKILL.md:59-64). All 3 with-answers copy the example block including the https://github.com/Getty/skills URL, marked as a placeholder. So the with-arm tests retrieval plus copying, not adapting the example. Follow-up filed.
+
+2026-09-22 23:26 Verdict S2 on real Claude (delta +1.0, n=3); see notes
+
+2026-09-23 01:01 Off-target now measured on real Claude (skilletor-skill-auditor). Run: evals/results/k-offtarget.json, Claude Code 2.1.280, plugin 0.1.1, case off-target (Node fs.rename atomic-write question), 3 runs per arm, $0.28. 6/6 PASS, skilletor Skill fired 0 times in both arms, 1 turn each, delta 0 (expected for a negative case). No false fires on Claude, same as the k23 GPT-proxy result, so the retrieval-precision gap noted above is closed. Limit: one unrelated prompt far from the trigger domain, so this shows no false fire on clearly unrelated work. It does not test near-miss prompts (for example a generic Claude Code skills or plugin question).
