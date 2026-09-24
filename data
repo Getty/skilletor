@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-23T03:12:41Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T02:37:31Z
+id: 44
+priority: medium
+started: 2026-09-23T03:09:35Z
+status: done
+tags:
+- engine
+- bug
+title: Project dir equal to home loads ~/.claude/skilletor.json as user and project
+  config
+updated: 2026-09-24T19:31:15Z
+---
+
+If the project dir resolves to $HOME (Claude/Codex started in ~, or ~ is a git repo such as a dotfiles checkout, now that hooks use the git top level of cwd), loadConfig reads <home>/.claude/skilletor.json both as user and project config, and the user and project scopes share one lock and one target dir. Pre-existing for CLAUDE_PROJECT_DIR=$HOME; k39 makes it reachable via git top level too. Expected: skip the project scope when projectDir == home (realpath). Found while doing k39; not fixed there.
+
+2026-09-23 03:12 Fixed: engine.projectDirOf/projectIsHome (realpath compare via fsutil.samePath). sync/check/status drop the project scope when projectDir == home; hook userPromptSubmit loads config without it; commands --project edits throw CommandError 'no project scope: ...' before touching anything; status text/json: 'project scope: none (...)' / projectIsHome. Tests: engine (plain + symlinked home), commands, hooks (runHook, cwd=~ and projectDir=~), cli black-box. Spec §3 paragraph. Uncommitted.
+
+2026-09-23 03:12 Implemented, uncommitted; needs review
