@@ -1,6 +1,6 @@
 {
   "name": "skilletor",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Remote skills, agents and rules for Codex and Claude Code — declared once in skilletor.json, synced on every session, templated per project. For Codex: skills in .agents/skills, agents as agent-role TOML, rules injected at session start by the hook.",
   "author": {
     "name": "Torsten Raudssus",
