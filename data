@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T01:31:50Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T01:27:58Z
+id: 38
+priority: medium
+started: 2026-09-24T19:31:15Z
+status: done
+tags:
+- docs
+- skills
+title: 'Docs: wildcard items (#34) and empty-render skip (#35) in SKILL.md and README'
+updated: 2026-09-24T19:31:15Z
+---
+
+Document #34 and #35 for users. Worker's doc notes are in the #34/#35 cards and commits 7d86514, and the new spec sections. Target: skilletor-skill-author.
+
+2026-09-23 01:31 Docs done (uncommitted): skills/skilletor/SKILL.md (+wildcard subsection under Config, empty-render paragraph + gated-rule pattern under Templates, install/uninstall wildcard CLI lines, description triggers) and README.md (Wildcards subsection, 'Switching items on and off with vars' subsection, CLI reference). All claims checked against src/ and an end-to-end sync in a temp HOME (report/status lines quoted verbatim). A/B with fresh subagents: baseline guessed unquoted rule:*@shared, invented a need for a source default for an if-gated var, had no report lines, guessed wrong on the two-wildcard collision; with skill all 4 answers correct. Static check 0 errors. Nuance documented: user-scope items see only user vars.
+
+2026-09-23 01:31 SKILL.md + README documented #34/#35; needs review and commit
