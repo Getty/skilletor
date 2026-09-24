@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-24T04:33:44Z
+claimed_by: claude
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-24T04:19:39Z
+id: 58
+priority: low
+started: 2026-09-24T04:33:44Z
+status: done
+tags:
+- tooling
+title: 'skill-static-check: a rule file or .claude/rules/ as argument checks 0 items'
+updated: 2026-09-24T19:31:15Z
+---
+
+skill-assessment/scripts/skill-static-check.mjs on .claude/rules/skilletor-rules.md or on .claude/rules/ reports '0 item(s) checked'; only scanning .claude/ inventories the rule. Found during #54. Lane: skilletor-worker (script lives in .claude/skills/skill-assessment).
