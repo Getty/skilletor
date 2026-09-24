@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-23T06:22:29Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T06:16:44Z
+id: 49
+priority: high
+started: 2026-09-24T19:31:15Z
+status: done
+tags:
+- docs
+- skills
+- bundles
+title: 'Docs: bundles, name patterns, foreign bundle entries (#48)'
+updated: 2026-09-24T19:31:15Z
+---
+
+Document #48 (commits 5d6b0e8, phase B, spec §3/§15) in SKILL.md and README. Target: skilletor-skill-author.
+
+2026-09-23 06:22 Documented bundles + name patterns: skills/skilletor/SKILL.md (Bundles section, patterns in Wildcards; body kept at 150 lines by folding Author mode into the managed-file section and compacting Config), new skills/skilletor/references/bundles.md (full reference), README (Wildcards and name patterns, new Bundles section, source layout, CLI reference). Every claim hand-run in a scratch HOME/CODEX_HOME with local sources; a foreign entry was matched via a git URL + local override under a different config name. Static check skills/skilletor: 0 errors, 0 warnings. Smoke test: the baseline (old skill) could not answer 4 of 5 bundle questions and said patterns were ruled out; with the new skill all 5 were answered correctly. Not committed.
+
+2026-09-23 06:22 Docs ready for review; uncommitted in the working tree
