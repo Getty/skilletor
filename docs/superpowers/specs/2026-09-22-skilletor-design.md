@@ -355,6 +355,12 @@ is not installed yet. It marks items that were declared through a wildcard (`via
 field in `--json`) and lists each wildcard with the number of items it currently has
 installed.
 
+**Argument hygiene** (#55): `-h`/`--help` anywhere in the arguments prints help (that
+command's help where one exists, else the general usage) and does nothing else – `sync
+--help` never syncs. `-v`/`--version` counts only as the first argument. An option (an
+argument starting with `-`) that the command does not accept is a usage error: exit 2, a
+message naming the option, nothing touched.
+
 ## 8. Hooks and messages
 
 | Event | Behavior |
@@ -603,12 +609,16 @@ Markdown (`agents/<name>.md[.njk]`) **for the `codex` harness** – so a templat
   and nothing is reported for them: there is no faithful mapping, and a silent guess
   (`model: sonnet` → some Codex model) would be worse than none. Put Codex values under
   `codex:` instead, e.g. `codex: { model_reasoning_effort: high, sandbox_mode: read-only }`.
-- **`briefing.skills` is not carried over either** (deviation from the phase-2 ticket, which
-  asked for a `[briefing]` table). Measured on Codex 0.153.4: agent-role files are
-  deserialized strictly, and any unknown key – `[briefing]` included – makes Codex ignore the
-  whole role ("unknown field `briefing`"), in user and trusted-project roots alike. The
-  report carries one note per run counting the Codex agents whose `briefing.skills` was
-  dropped. Writing it is a one-line switch in `convert.ts` should Codex start tolerating it.
+- **`briefing.skills` becomes a comment line** (#52). Codex deserializes agent-role files
+  strictly: any unknown key – a `[briefing]` table included – makes it ignore the whole role
+  (measured on Codex 0.153.4). The briefing plugin (0.3.1+) therefore reads a comment:
+  `# briefing: skills = ["a", "b"]`, placed among the top-level keys directly before
+  `developer_instructions`, never inside a multi-line string. Items are written as
+  double-quoted TOML strings. A skill name that is not a non-empty string, or that
+  contains `"`, `\`, `]` or a line break, is a conversion error (see below). An empty
+  `skills` list or a `briefing` without `skills` writes no line. A `briefing` key under
+  `codex:` is a conversion error too – passed through it would become the very table that
+  makes Codex drop the role.
 - **Empty body = skipped for Codex** (§5 per target): Codex rejects a blank
   `developer_instructions`, so an agent whose body is whitespace-only after the frontmatter
   is skipped for Codex – template or not – and a copy installed earlier is removed.
