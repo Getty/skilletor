@@ -7198,7 +7198,6 @@ function stringifyToml(table, opts = {}) {
 var ConvertError = class extends Error {
   name = "ConvertError";
 };
-var CODEX_BRIEFING_TABLE = false;
 function tomlLeaf(v) {
   if (typeof v === "string" || typeof v === "boolean") return v;
   if (typeof v === "number") return v;
@@ -7219,7 +7218,21 @@ function asText(v) {
   if (v === void 0 || v === null || typeof v === "object") return void 0;
   return String(v);
 }
-function codexAgentToml(markdown, itemName2, opts = {}) {
+var BAD_SKILL_CHAR = /["\\\]\u0000-\u001f\u007f]/;
+function briefingComment(briefing) {
+  if (!isMapping(briefing) || briefing.skills === void 0) return void 0;
+  const skills = briefing.skills;
+  if (!Array.isArray(skills)) throw new ConvertError("briefing.skills must be a list of skill names");
+  if (skills.length === 0) return void 0;
+  skills.forEach((s, i) => {
+    if (typeof s !== "string" || s === "" || BAD_SKILL_CHAR.test(s)) {
+      throw new ConvertError(`briefing.skills item ${i + 1} (${JSON.stringify(s)}) must be a non-empty string without a double quote, backslash, ] or line break`);
+    }
+  });
+  return `# briefing: skills = [${skills.map((s) => `"${s}"`).join(", ")}]
+`;
+}
+function codexAgentToml(markdown, itemName2) {
   let fm;
   try {
     fm = splitFrontmatter(markdown);
@@ -7234,24 +7247,16 @@ function codexAgentToml(markdown, itemName2, opts = {}) {
     description: asText(data.description) ?? ""
   };
   const tables = {};
-  const briefing = data.briefing;
-  const skills = isMapping(briefing) ? briefing.skills : void 0;
-  let briefingDropped = false;
-  if (Array.isArray(skills)) {
-    if (opts.briefingTable ?? CODEX_BRIEFING_TABLE) {
-      const leaf = tomlLeaf(skills);
-      if (isReason(leaf)) warnings.push(`briefing.skills: ${leaf.reason}; dropped`);
-      else tables.briefing = { skills: leaf };
-    } else {
-      briefingDropped = true;
-    }
-  }
+  const briefing = briefingComment(data.briefing);
   let instructions = body;
   const codex = data.codex;
   if (codex !== void 0 && !isMapping(codex)) {
     warnings.push("codex: must be a mapping; ignored");
   } else if (codex) {
     for (const [key, v] of Object.entries(codex)) {
+      if (key === "briefing") {
+        throw new ConvertError("codex.briefing: would become a [briefing] table, and Codex ignores a role with one; declare skills in the top-level briefing.skills");
+      }
       if (isMapping(v) && (key in top || key === "developer_instructions" || key in tables)) {
         warnings.push(`codex.${key}: a table cannot replace the ${key} key; dropped`);
         continue;
@@ -7284,9 +7289,10 @@ function codexAgentToml(markdown, itemName2, opts = {}) {
     throw new ConvertError("has no description (Codex rejects an agent role without one)");
   }
   if (typeof instructions !== "string") throw new ConvertError("developer_instructions must be a string");
-  if (instructions.trim() === "") return { warnings, briefingDropped };
-  const table = { ...top, developer_instructions: instructions, ...tables };
-  return { toml: stringifyToml(table, { multiline: ["developer_instructions"] }), warnings, briefingDropped };
+  if (instructions.trim() === "") return { warnings };
+  const rest = { developer_instructions: instructions, ...tables };
+  const text = stringifyToml(top) + (briefing ?? "") + stringifyToml(rest, { multiline: ["developer_instructions"] });
+  return { toml: text, warnings };
 }
 function codexRuleSection(markdown, itemName2) {
   let fm;
@@ -7307,22 +7313,22 @@ function codexRuleSection(markdown, itemName2) {
 ` : "";
   return normalizeSection(lead + fm.body);
 }
-function convertForTarget(harness, type, name, output, opts = {}) {
+function convertForTarget(harness, type, name, output) {
   if (harness === "codex" && type === "rule") {
     const md2 = output.get(`rules/${name}.md`);
     if (md2 === void 0) throw new ConvertError(`rules/${name}.md missing from the build`);
     const section = codexRuleSection(md2.toString("utf8"), name);
     const out2 = /* @__PURE__ */ new Map();
     if (section !== void 0) out2.set(RULES_FILE, Buffer.from(section, "utf8"));
-    return { output: out2, skipped: section === void 0, warnings: [], briefingDropped: false };
+    return { output: out2, skipped: section === void 0, warnings: [] };
   }
-  if (harness !== "codex" || type !== "agent") return { output, skipped: false, warnings: [], briefingDropped: false };
+  if (harness !== "codex" || type !== "agent") return { output, skipped: false, warnings: [] };
   const md = output.get(`agents/${name}.md`);
   if (md === void 0) throw new ConvertError(`agents/${name}.md missing from the build`);
-  const conv = codexAgentToml(md.toString("utf8"), name, opts);
+  const conv = codexAgentToml(md.toString("utf8"), name);
   const out = /* @__PURE__ */ new Map();
   if (conv.toml !== void 0) out.set(`agents/${name}.toml`, Buffer.from(conv.toml, "utf8"));
-  return { output: out, skipped: conv.toml === void 0, warnings: conv.warnings, briefingDropped: conv.briefingDropped };
+  return { output: out, skipped: conv.toml === void 0, warnings: conv.warnings };
 }
 
 // src/sources/local.ts
@@ -8460,17 +8466,14 @@ async function syncInner(ctx, opts, state) {
   const { config, targets } = loaded;
   const sel = opts.scope ?? "all";
   const report = { scopes: [] };
-  const noteCounts = /* @__PURE__ */ new Map();
   if (sel === "user" || sel === "all") {
-    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, noteCounts));
+    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state));
   }
   if ((sel === "project" || sel === "all") && config.project) {
-    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, noteCounts);
+    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state);
     rep.warnings.unshift(...targets.warnings);
     report.scopes.push(rep);
   }
-  const notes = runNotes(noteCounts);
-  if (notes.length) report.notes = notes;
   const trust = hookTrustWarning(ctx, targets);
   if (trust) report.warnings = [trust];
   return report;
@@ -8481,21 +8484,7 @@ function hookTrustWarning(ctx, targets) {
   if (codexHookTrusted(codexHome)) return void 0;
   return `Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${join13(codexHome, "config.toml")}); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules`;
 }
-function bump(counts, kind) {
-  counts.set(kind, (counts.get(kind) ?? 0) + 1);
-}
-var HARNESS_LABEL = { claude: "Claude Code", codex: "Codex" };
-function runNotes(counts) {
-  const notes = [];
-  for (const [kind, n] of counts) {
-    const [what, harness] = kind.split(" ");
-    if (what === "briefing") {
-      notes.push(`briefing.skills of ${n} agent(s) not written for ${HARNESS_LABEL[harness]} (Codex ignores an agent file with unknown keys)`);
-    }
-  }
-  return notes;
-}
-async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, noteCounts) {
+async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
   const base = baseOf(ctx, scope);
@@ -8599,7 +8588,6 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
         try {
           const conv = convertForTarget(h, item.type, item.name, output);
           for (const w of conv.warnings) rep.warnings.push(`${item.type} ${item.name} (${h}): ${w}`);
-          if (conv.briefingDropped) bump(noteCounts, `briefing ${h}`);
           planItem.output = conv.output;
           if (conv.skipped) planItem.skipped = "renders-empty";
         } catch (err) {

@@ -11,6 +11,7 @@ import { readLock } from "../src/lock.ts";
 import type { Harness } from "../src/config.ts";
 import { cmdAvailable, cmdUninstall } from "../src/commands.ts";
 import { State } from "../src/state.ts";
+import { parse as parseToml } from "smol-toml";
 
 function env(harnesses: Harness[]) {
   const tmp = makeTmpDir();
@@ -463,17 +464,32 @@ test("an agent with a blank body is skipped for Codex only (Codex rejects blank 
   }
 });
 
-test("briefing.skills is not written for Codex; one note per run counts the agents", async () => {
-  const e = env(["codex"]);
+test("briefing.skills reaches the Codex agent as a comment line; no run note", async () => {
+  const e = env(["claude", "codex"]);
   try {
     const briefed = (n: string) => `---\nname: ${n}\ndescription: d\nbriefing:\n  skills:\n    - a\n---\nB\n`;
     const src = source(e.tmp.dir, "s", { "agents/b1.md": briefed("b1"), "agents/b2.md": briefed("b2") });
     e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["b1@mine", "b2@mine"] } });
     const r = await sync(e.ctx, { scope: "user" });
-    assert.doesNotMatch(readFileSync(join(e.home, ".codex/agents/b1.toml"), "utf8"), /briefing/);
-    assert.equal(r.notes?.length, 1);
-    assert.match(r.notes![0]!, /briefing\.skills of 2 agent\(s\) not written for Codex/);
+    const text = readFileSync(join(e.home, ".codex/agents/b1.toml"), "utf8");
+    assert.match(text, /^# briefing: skills = \["a"\]\ndeveloper_instructions = /m);
+    assert.equal("briefing" in (parseToml(text) as Record<string, unknown>), false);
+    assert.equal(r.notes, undefined);
     assert.equal(reportHook(r).additionalContext?.includes("briefing"), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("a bad briefing skill name fails the Codex copy only; the Claude copy is written", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "agents/b.md": "---\ndescription: d\nbriefing:\n  skills: [\"a]b\"]\n---\nB\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["b@mine"] } });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.match(r.scopes[0]!.warnings.join("\n"), /agent b \(codex\): briefing\.skills/);
+    assert.equal(existsSync(join(e.home, ".claude/agents/b.md")), true);
+    assert.equal(existsSync(join(e.home, ".codex/agents/b.toml")), false);
   } finally {
     e.cleanup();
   }

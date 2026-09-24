@@ -15,20 +15,7 @@ export interface AgentConversion {
   toml?: string;
   /** One line per dropped `codex:` key ("codex.key: reason; dropped"). */
   warnings: string[];
-  /** The agent declared `briefing.skills`, which was not written (see `briefingTable`). */
-  briefingDropped: boolean;
 }
-
-export interface ConvertOptions {
-  /**
-   * Write `briefing.skills` as a `[briefing]` table. Off: Codex 0.153 rejects
-   * unknown keys in agent-role files and then ignores the whole role (spec §14.7).
-   */
-  briefingTable?: boolean;
-}
-
-/** The switch for `briefing.skills` → `[briefing]`; flip once Codex tolerates it. */
-export const CODEX_BRIEFING_TABLE = false;
 
 type Scalar = string | number | boolean | TomlFloat;
 
@@ -57,7 +44,30 @@ function asText(v: YamlValue | undefined): string | undefined {
   return String(v);
 }
 
-export function codexAgentToml(markdown: string, itemName: string, opts: ConvertOptions = {}): AgentConversion {
+/** A briefing skill name the comment line cannot carry: `"`, `\`, `]`, or any control
+ *  character (line breaks included; TOML allows none but tab in a comment). */
+const BAD_SKILL_CHAR = /["\\\]\u0000-\u001f\u007f]/;
+
+/**
+ * `briefing.skills` as the comment line the briefing plugin reads for Codex
+ * (spec §14.7): Codex drops a role with any unknown key, so a `[briefing]` table
+ * is not an option. Undefined when there is nothing to declare.
+ */
+function briefingComment(briefing: YamlValue | undefined): string | undefined {
+  if (!isMapping(briefing) || briefing.skills === undefined) return undefined;
+  const skills = briefing.skills;
+  if (!Array.isArray(skills)) throw new ConvertError("briefing.skills must be a list of skill names");
+  if (skills.length === 0) return undefined;
+  skills.forEach((s, i) => {
+    if (typeof s !== "string" || s === "" || BAD_SKILL_CHAR.test(s)) {
+      throw new ConvertError(`briefing.skills item ${i + 1} (${JSON.stringify(s)}) must be a non-empty string ` +
+        "without a double quote, backslash, ] or line break");
+    }
+  });
+  return `# briefing: skills = [${(skills as string[]).map((s) => `"${s}"`).join(", ")}]\n`;
+}
+
+export function codexAgentToml(markdown: string, itemName: string): AgentConversion {
   let fm: ReturnType<typeof splitFrontmatter>;
   try {
     fm = splitFrontmatter(markdown);
@@ -74,18 +84,7 @@ export function codexAgentToml(markdown: string, itemName: string, opts: Convert
   };
   const tables: Record<string, Record<string, TomlValue>> = {};
 
-  const briefing = data.briefing;
-  const skills = isMapping(briefing) ? briefing.skills : undefined;
-  let briefingDropped = false;
-  if (Array.isArray(skills)) {
-    if (opts.briefingTable ?? CODEX_BRIEFING_TABLE) {
-      const leaf = tomlLeaf(skills);
-      if (isReason(leaf)) warnings.push(`briefing.skills: ${leaf.reason}; dropped`);
-      else tables.briefing = { skills: leaf };
-    } else {
-      briefingDropped = true;
-    }
-  }
+  const briefing = briefingComment(data.briefing);
 
   let instructions: TomlValue = body;
   const codex = data.codex;
@@ -93,6 +92,10 @@ export function codexAgentToml(markdown: string, itemName: string, opts: Convert
     warnings.push("codex: must be a mapping; ignored");
   } else if (codex) {
     for (const [key, v] of Object.entries(codex)) {
+      if (key === "briefing") {
+        throw new ConvertError("codex.briefing: would become a [briefing] table, and Codex ignores a role with one; " +
+          "declare skills in the top-level briefing.skills");
+      }
       if (isMapping(v) && (key in top || key === "developer_instructions" || key in tables)) {
         warnings.push(`codex.${key}: a table cannot replace the ${key} key; dropped`);
         continue;
@@ -126,10 +129,13 @@ export function codexAgentToml(markdown: string, itemName: string, opts: Convert
     throw new ConvertError("has no description (Codex rejects an agent role without one)");
   }
   if (typeof instructions !== "string") throw new ConvertError("developer_instructions must be a string");
-  if (instructions.trim() === "") return { warnings, briefingDropped };
+  if (instructions.trim() === "") return { warnings };
 
-  const table: TomlTable = { ...top, developer_instructions: instructions, ...tables };
-  return { toml: stringifyToml(table, { multiline: ["developer_instructions"] }), warnings, briefingDropped };
+  // `top` holds no tables, so its keys come out first; the briefing line sits between
+  // them and developer_instructions, never inside the multi-line string.
+  const rest: TomlTable = { developer_instructions: instructions, ...tables };
+  const text = stringifyToml(top) + (briefing ?? "") + stringifyToml(rest, { multiline: ["developer_instructions"] });
+  return { toml: text, warnings };
 }
 
 // ---- rules -> sections of the Codex rules file (spec §14.8) ----------------------
@@ -166,7 +172,6 @@ export interface TargetConversion {
   /** Not applicable for this target (e.g. a blank Codex agent body): skip, like an empty render. */
   skipped: boolean;
   warnings: string[];
-  briefingDropped: boolean;
 }
 
 /**
@@ -176,7 +181,7 @@ export interface TargetConversion {
  * assembles the file). Throws a ConvertError when the item cannot be converted.
  */
 export function convertForTarget(
-  harness: Harness, type: ItemType, name: string, output: Map<string, Buffer>, opts: ConvertOptions = {},
+  harness: Harness, type: ItemType, name: string, output: Map<string, Buffer>,
 ): TargetConversion {
   if (harness === "codex" && type === "rule") {
     const md = output.get(`rules/${name}.md`);
@@ -184,13 +189,13 @@ export function convertForTarget(
     const section = codexRuleSection(md.toString("utf8"), name);
     const out = new Map<string, Buffer>();
     if (section !== undefined) out.set(RULES_FILE, Buffer.from(section, "utf8"));
-    return { output: out, skipped: section === undefined, warnings: [], briefingDropped: false };
+    return { output: out, skipped: section === undefined, warnings: [] };
   }
-  if (harness !== "codex" || type !== "agent") return { output, skipped: false, warnings: [], briefingDropped: false };
+  if (harness !== "codex" || type !== "agent") return { output, skipped: false, warnings: [] };
   const md = output.get(`agents/${name}.md`);
   if (md === undefined) throw new ConvertError(`agents/${name}.md missing from the build`);
-  const conv = codexAgentToml(md.toString("utf8"), name, opts);
+  const conv = codexAgentToml(md.toString("utf8"), name);
   const out = new Map<string, Buffer>();
   if (conv.toml !== undefined) out.set(`agents/${name}.toml`, Buffer.from(conv.toml, "utf8"));
-  return { output: out, skipped: conv.toml === undefined, warnings: conv.warnings, briefingDropped: conv.briefingDropped };
+  return { output: out, skipped: conv.toml === undefined, warnings: conv.warnings };
 }

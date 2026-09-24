@@ -423,9 +423,12 @@ You review code. …
 - `codex:` values may be strings, numbers, booleans, string arrays, or one level of tables
   of those. Anything else is dropped with a warning naming the key. skilletor does not
   check the values against Codex's schema — Codex ignores the whole role on a bad value.
-- **`briefing.skills` is not written for Codex.** Codex reads agent-role files strictly
-  and ignores the whole role over any unknown key, a `[briefing]` table included; the
-  sync report notes how many agents lost their `briefing.skills`.
+- **`briefing.skills` becomes a comment line**, `# briefing: skills = ["a", "b"]`, directly
+  before `developer_instructions` — the form the briefing plugin (0.3.1+) reads for Codex.
+  Codex reads agent-role files strictly and ignores the whole role over any unknown key, so
+  a `[briefing]` table is not an option: a `briefing` key under `codex:` is an error, and so
+  is a skill name that is empty or contains `"`, `\`, `]` or a line break (the Codex copy
+  stays as it was; the Claude copy is written).
 - An agent without a `description` is not written for Codex (warning) — Codex rejects
   such a role. An agent whose body is empty is skipped for Codex.
 

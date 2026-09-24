@@ -254,17 +254,14 @@ async function syncInner(ctx: EngineContext, opts: SyncOptions, state: State): P
   const { config, targets } = loaded;
   const sel = opts.scope ?? "all";
   const report: SyncReport = { scopes: [] };
-  const noteCounts = new Map<string, number>(); // note kind -> count, reported once per run
   if (sel === "user" || sel === "all") {
-    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, noteCounts));
+    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state));
   }
   if ((sel === "project" || sel === "all") && config.project) {
-    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, noteCounts);
+    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state);
     rep.warnings.unshift(...targets.warnings);
     report.scopes.push(rep);
   }
-  const notes = runNotes(noteCounts);
-  if (notes.length) report.notes = notes;
   const trust = hookTrustWarning(ctx, targets);
   if (trust) report.warnings = [trust];
   return report;
@@ -283,26 +280,6 @@ function hookTrustWarning(ctx: EngineContext, targets: TargetSelection): string 
     "until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules";
 }
 
-/** Count one occurrence of a note kind ("briefing <harness>"). */
-function bump(counts: Map<string, number>, kind: string): void {
-  counts.set(kind, (counts.get(kind) ?? 0) + 1);
-}
-
-const HARNESS_LABEL: Record<Harness, string> = { claude: "Claude Code", codex: "Codex" };
-
-/** The run's notes (spec §14.7): one line per harness and kind. */
-function runNotes(counts: Map<string, number>): string[] {
-  const notes: string[] = [];
-  for (const [kind, n] of counts) {
-    const [what, harness] = kind.split(" ") as [string, Harness];
-    if (what === "briefing") {
-      notes.push(`briefing.skills of ${n} agent(s) not written for ${HARNESS_LABEL[harness]} ` +
-        "(Codex ignores an agent file with unknown keys)");
-    }
-  }
-  return notes;
-}
-
 async function syncScope(
   ctx: EngineContext,
   config: LoadedConfig,
@@ -311,7 +288,6 @@ async function syncScope(
   harnesses: Harness[],
   opts: SyncOptions,
   state: State,
-  noteCounts: Map<string, number>,
 ): Promise<ScopeReport> {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
@@ -431,7 +407,6 @@ async function syncScope(
         try {
           const conv = convertForTarget(h, item.type, item.name, output);
           for (const w of conv.warnings) rep.warnings.push(`${item.type} ${item.name} (${h}): ${w}`);
-          if (conv.briefingDropped) bump(noteCounts, `briefing ${h}`);
           planItem.output = conv.output;
           if (conv.skipped) planItem.skipped = "renders-empty";
         } catch (err) {

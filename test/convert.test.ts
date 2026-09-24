@@ -25,7 +25,6 @@ test("name, description and the body become the three required keys; Claude-only
     name: "helper", description: 'Helps — with "quotes"', developer_instructions: "You are helper.\n",
   });
   assert.deepEqual(r.warnings, []);
-  assert.equal(r.briefingDropped, false);
 });
 
 test("name falls back to the item name", () => {
@@ -48,15 +47,74 @@ test("a blank body means: not applicable for Codex (no TOML)", () => {
   assert.equal(r.toml, undefined);
 });
 
-test("briefing.skills is dropped by default (Codex rejects unknown keys); the switch writes a [briefing] table", () => {
-  const md = "---\ndescription: d\nbriefing:\n  skills:\n    - a\n    - b\n---\nB\n";
-  const r = codexAgentToml(md, "a");
-  assert.equal(r.briefingDropped, true);
-  assert.equal("briefing" in toml(r.toml), false);
-  const on = codexAgentToml(md, "a", { briefingTable: true });
-  assert.equal(on.briefingDropped, false);
-  assert.deepEqual(toml(on.toml).briefing, { skills: ["a", "b"] });
-  assert.equal(codexAgentToml("---\ndescription: d\nbriefing:\n  other: x\n---\nB\n", "a").briefingDropped, false);
+/** briefing's own matcher (hooks/briefing-preload, parse_skills_comment). */
+const BRIEFING_RE = /^[ \t]*#[ \t]*briefing:[ \t]*skills[ \t]*=[ \t]*\[([^\]\r\n]*)\]/;
+
+/** The first briefing comment line of a TOML text (first match wins), its index and items. */
+function briefingLine(text: string) {
+  const lines = text.split("\n");
+  const i = lines.findIndex((l) => BRIEFING_RE.test(l));
+  if (i === -1) return undefined;
+  const items = [...BRIEFING_RE.exec(lines[i]!)![1]!.matchAll(/"([^"]*)"/g)].map((m) => m[1]);
+  return { i, lines, items };
+}
+
+test("briefing.skills becomes a comment line directly before developer_instructions, not a key", () => {
+  const md = "---\ndescription: d\ncodex:\n  model: m\n  sandbox_workspace_write:\n    network_access: true\n" +
+    "briefing:\n  skills:\n    - a\n    - \"plug:b c\"\n---\nB\n";
+  const r = codexAgentToml(md, "x");
+  const parsed = toml(r.toml);
+  assert.equal("briefing" in parsed, false);
+  assert.equal(parsed.model, "m");
+  assert.equal(parsed.developer_instructions, "B\n");
+  const b = briefingLine(r.toml!)!;
+  assert.equal(b.lines[b.i], '# briefing: skills = ["a", "plug:b c"]');
+  assert.match(b.lines[b.i + 1]!, /^developer_instructions = /);
+  assert.deepEqual(b.items, ["a", "plug:b c"]);
+  assert.deepEqual(r.warnings, []);
+});
+
+test("a # briefing: line in the body stays prose; the real line comes first, outside the string", () => {
+  const bodies = [
+    '# briefing: skills = ["evil"]\nB\n',
+    "it's '''quoted''' \\ \"x\"\n# briefing: skills = [\"evil\"]\n", // forces the basic """ form
+  ];
+  for (const body of bodies) {
+    const r = codexAgentToml(`---\ndescription: d\nbriefing:\n  skills: [good]\n---\n${body}`, "x");
+    assert.equal(toml(r.toml).developer_instructions, body);
+    const b = briefingLine(r.toml!)!;
+    assert.deepEqual(b.items, ["good"], body);
+    assert.match(b.lines[b.i + 1]!, /^developer_instructions = /);
+  }
+  // Without briefing.skills the body's line is the only match, and it sits inside the string.
+  const r = codexAgentToml('---\ndescription: d\n---\n# briefing: skills = ["evil"]\n', "x");
+  const b = briefingLine(r.toml!)!;
+  assert.ok(b.i > b.lines.findIndex((l) => l.startsWith("developer_instructions = ")));
+});
+
+test("no line for an empty list, a briefing without skills, or no briefing", () => {
+  for (const fm of ["briefing:\n  skills: []\n", "briefing:\n  other: x\n", ""]) {
+    const r = codexAgentToml(`---\ndescription: d\n${fm}---\nB\n`, "x");
+    assert.doesNotMatch(r.toml!, /briefing/, fm);
+  }
+});
+
+test("a skill name that cannot sit in the comment line is a conversion error", () => {
+  const bad = ['""', '"a\\"b"', "'a\\b'", "a]b", '"a\\nb"', '"a\\rb"', '"a\\u0001b"', "3", "true", "null"];
+  for (const item of bad) {
+    const md = `---\ndescription: d\nbriefing:\n  skills:\n    - ok\n    - ${item}\n---\nB\n`;
+    assert.throws(() => codexAgentToml(md, "x"),
+      (err: Error) => err instanceof ConvertError && /briefing\.skills/.test(err.message), item);
+  }
+  assert.throws(() => codexAgentToml("---\ndescription: d\nbriefing:\n  skills: a\n---\nB\n", "x"),
+    (err: Error) => err instanceof ConvertError && /briefing\.skills/.test(err.message));
+});
+
+test("a briefing key under codex: is a conversion error (it would be the table Codex rejects)", () => {
+  for (const v of ["\n    skills: [a]\n", " x\n"]) {
+    assert.throws(() => codexAgentToml(`---\ndescription: d\ncodex:\n  briefing:${v}---\nB\n`, "x"),
+      (err: Error) => err instanceof ConvertError && /codex\.briefing/.test(err.message), v);
+  }
 });
 
 test("codex: passes scalars, string arrays and one level of tables through, overriding derived keys", () => {
