@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-22T23:26:52Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-22T20:11:03Z
+id: 25
+priority: medium
+started: 2026-09-22T22:16:33Z
+status: done
+tags:
+- eval
+- skills
+title: 'config-question eval: baseline (without-plugin) arm times out instead of answering'
+updated: 2026-09-24T19:31:15Z
+---
+
+In the k23 eval run (2026-09-22, GPT-5.6 via claude_with_openai), all 3 without-plugin runs of evals/config-question hit the 120s timeout after 21-22 turns (despite case.maxTurns=6) searching the repo for docs, and produced no answer at all (empty or partial evidence). So the reported delta (+0.667) measures 'answers vs. no answer' rather than 'correct vs. invented config' -- the without-arm alone cost $4.32 of the run's $4.74. Fix: add a variant with allowed_tools restricted (e.g. only Skill) or a tighter turn/time budget so the baseline is forced to answer from its own knowledge instead of exploring the repo; also check whether the eval runner actually honors max_turns (21-22 turns ran against a configured max of 6). Target agent: skilletor-skill-author.
+
+2026-09-22 22:19 prompt.md: allowed_tools [Skill] (was Read,Glob,Grep,Skill), max_turns 4, prompt ends 'Answer directly with the file contents.' Runner facts from claude 2.1.280 bundle: prompt.md keys are max_turns, timeout_seconds, allowed_tools, model, runs; max_turns is passed to the child as --max-turns; child runs --permission-mode dontAsk. Bare Read/Glob/Grep are expanded to path-scoped rules over sandbox home/tmp + read roots (plugin/case dirs), which is how the baseline could crawl for docs. The reported 'turns' comes from result.num_turns; a timed-out run has no result event, so it falls back to another count (likely assistant events) - so 21-22 vs max 6 is probably not a max_turns violation, but traces are gone, unverified. Skill is not a gated tool, so the with arm can still load the skill.
+
+2026-09-22 22:19 Case config tightened, not committed; needs re-run (k26) to confirm baseline now answers
+
+2026-09-22 23:26 k26 (real Claude, 2.1.280) confirms the tightened case works: the baseline now answers in 2 of 3 runs (it declines honestly, no crawl), and the without arm cost $0.23 instead of $4.32. max_turns is enforced: without-run 1 ended with 'Reached maximum number of turns (4)'. The reported 'turns' can exceed max_turns (5-6 vs 4) without an error, so that field counts differently. Details in k26.
