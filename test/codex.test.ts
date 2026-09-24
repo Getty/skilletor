@@ -475,7 +475,7 @@ test("briefing.skills reaches the Codex agent as a comment line; no run note", a
     assert.match(text, /^# briefing: skills = \["a"\]\ndeveloper_instructions = /m);
     assert.equal("briefing" in (parseToml(text) as Record<string, unknown>), false);
     assert.equal(r.notes, undefined);
-    assert.equal(reportHook(r).additionalContext?.includes("briefing"), false);
+    assert.doesNotMatch(reportHook(r).additionalContext ?? "", /not written/);
   } finally {
     e.cleanup();
   }

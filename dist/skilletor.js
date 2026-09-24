@@ -3965,7 +3965,7 @@ var require_filters = __commonJS({
       return r.copySafeness(str, res);
     }
     _exports.indent = indent;
-    function join16(arr, del, attr) {
+    function join17(arr, del, attr) {
       del = del || "";
       if (attr) {
         arr = lib.map(arr, function(v) {
@@ -3974,7 +3974,7 @@ var require_filters = __commonJS({
       }
       return arr.join(del);
     }
-    _exports.join = join16;
+    _exports.join = join17;
     function last(arr) {
       return arr[arr.length - 1];
     }
@@ -5741,13 +5741,13 @@ import { realpathSync as realpathSync2 } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { join as join15 } from "node:path";
+import { join as join16 } from "node:path";
 
 // src/engine.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
-import { existsSync as existsSync10, readFileSync as readFileSync9, rmSync as rmSync6 } from "node:fs";
-import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join13, relative as relative3, sep as sep4 } from "node:path";
+import { existsSync as existsSync11, readFileSync as readFileSync10, rmSync as rmSync6 } from "node:fs";
+import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative3, sep as sep4 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -8250,6 +8250,77 @@ function isGitWorkTree(dir) {
   }
 }
 
+// src/briefing.ts
+import { existsSync as existsSync10, readdirSync as readdirSync3, readFileSync as readFileSync9 } from "node:fs";
+import { join as join13 } from "node:path";
+var COMMENT = /^[ \t]*#[ \t]*briefing:[ \t]*skills[ \t]*=[ \t]*\[([^\]\r\n]*)\]/;
+function declaredSkills(harness, text) {
+  if (harness === "codex") {
+    for (const line of text.split("\n")) {
+      if (/^developer_instructions[ \t]*=/.test(line)) break;
+      const m = COMMENT.exec(line);
+      if (m) return [...m[1].matchAll(/"([^"]*)"|'([^']*)'/g)].map((x) => x[1] ?? x[2]);
+    }
+    return [];
+  }
+  let data;
+  try {
+    data = splitFrontmatter(text).data;
+  } catch {
+    return void 0;
+  }
+  const briefing = data.briefing;
+  if (briefing === null || typeof briefing !== "object" || Array.isArray(briefing)) return [];
+  const skills = briefing.skills;
+  return Array.isArray(skills) ? skills.filter((s) => typeof s === "string" && s !== "") : [];
+}
+function skillRoots(harness, scope, r) {
+  const project = scope === "project" && r.projectDir ? r.projectDir : void 0;
+  if (harness === "codex") {
+    const codexHome = r.codexHome || join13(r.home, ".codex");
+    const user2 = [join13(codexHome, "skills"), join13(r.home, ".agents", "skills")];
+    return project ? [join13(project, ".agents", "skills"), join13(project, ".codex", "skills"), ...user2] : user2;
+  }
+  const user = join13(r.home, ".claude", "skills");
+  return [...project ? [join13(project, ".claude", "skills")] : [], user, ...pluginCacheRoots(r.home)];
+}
+function pluginCacheRoots(home) {
+  const cache = join13(home, ".claude", "plugins", "cache");
+  const out = [];
+  for (const a of subdirs(cache)) {
+    out.push(join13(cache, a, "skills"));
+    for (const b of subdirs(join13(cache, a))) out.push(join13(cache, a, b, "skills"));
+  }
+  return out;
+}
+function subdirs(dir) {
+  try {
+    return readdirSync3(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
+  } catch {
+    return [];
+  }
+}
+function missingSkills(harness, file, roots) {
+  let text;
+  try {
+    text = readFileSync9(file, "utf8");
+  } catch {
+    return void 0;
+  }
+  const declared = declaredSkills(harness, text);
+  if (declared === void 0) return void 0;
+  const missing = [];
+  for (const name of declared) {
+    if (name.includes(":") || missing.includes(name)) continue;
+    const segment = !/[\\/]/.test(name) && name !== "." && name !== "..";
+    if (!segment || !roots.some((root) => existsSync10(join13(root, name, "SKILL.md")))) missing.push(name);
+  }
+  return missing;
+}
+function briefingWarning(name, harness, missing) {
+  return `agent ${name} (${harness}): briefing skills not installed: ${missing.join(", ")} \u2014 install them, or ship the agent and its skills together as a bundle`;
+}
+
 // src/report.ts
 var ACTIVATION = {
   skill: "active now",
@@ -8277,6 +8348,9 @@ function emptyScopeReport(scope) {
 function keyToTypeName(key) {
   const { type, name } = parseLockKey(key);
   return { type, name };
+}
+function hasChanges(r) {
+  return r.scopes.some((s) => s.added.length || s.updated.length || s.removed.length);
 }
 function isNotable(s) {
   return Boolean(
@@ -8310,7 +8384,19 @@ function reportText(r) {
   for (const n of r.notes ?? []) lines.push(`skilletor: note: ${n}`);
   return lines.join("\n");
 }
-function reportHook(r) {
+function withoutBriefing(r) {
+  return {
+    ...r,
+    scopes: r.scopes.map((s) => {
+      if (!s.briefingMissing?.length) return s;
+      const lines = new Set(s.briefingMissing.map((b) => briefingWarning(parseLockKey(b.key).name, b.harness, b.missing)));
+      const { briefingMissing: _, ...rest } = s;
+      return { ...rest, warnings: s.warnings.filter((w) => !lines.has(w)) };
+    })
+  };
+}
+function reportHook(report) {
+  const r = hasChanges(report) ? report : withoutBriefing(report);
   if (!hasNotable(r)) return {};
   const changed = [];
   let warnings = 0;
@@ -8341,10 +8427,10 @@ function reportHook(r) {
 
 // src/engine.ts
 function cacheRootOf(ctx) {
-  return ctx.cacheRoot ?? join13(ctx.stateRoot, "cache");
+  return ctx.cacheRoot ?? join14(ctx.stateRoot, "cache");
 }
 function targetDirOf(ctx, scope) {
-  return join13(baseOf(ctx, scope), ".claude");
+  return join14(baseOf(ctx, scope), ".claude");
 }
 function baseOf(ctx, scope) {
   return scope === "user" ? ctx.home : ctx.projectDir;
@@ -8361,7 +8447,7 @@ function scoped(ctx) {
 }
 function claudeMemoryFiles(ctx, scope) {
   const base = baseOf(ctx, scope);
-  return scope === "user" ? [join13(base, ".claude", "CLAUDE.md")] : [join13(base, "CLAUDE.md"), join13(base, ".claude", "CLAUDE.md")];
+  return scope === "user" ? [join14(base, ".claude", "CLAUDE.md")] : [join14(base, "CLAUDE.md"), join14(base, ".claude", "CLAUDE.md")];
 }
 function codexHomeOf(ctx) {
   return (ctx.codexHome ?? process.env.CODEX_HOME) || void 0;
@@ -8480,9 +8566,9 @@ async function syncInner(ctx, opts, state) {
 }
 function hookTrustWarning(ctx, targets) {
   if (!targets.user.includes("codex")) return void 0;
-  const codexHome = codexHomeOf(ctx) || join13(ctx.home, ".codex");
+  const codexHome = codexHomeOf(ctx) || join14(ctx.home, ".codex");
   if (codexHookTrusted(codexHome)) return void 0;
-  return `Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${join13(codexHome, "config.toml")}); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules`;
+  return `Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${join14(codexHome, "config.toml")}); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules`;
 }
 async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   const rep = emptyScopeReport(scope);
@@ -8490,7 +8576,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   const base = baseOf(ctx, scope);
   const rc = { base, scope, codexHome: codexHomeOf(ctx) };
   const cacheRoot = cacheRootOf(ctx);
-  const lockPath = join13(targetDir, "skilletor.lock.json");
+  const lockPath = join14(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const needed = scopeSources(scopeCfg);
   const resolved = /* @__PURE__ */ new Map();
@@ -8725,7 +8811,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
     keep,
     rootOf: (key) => rootOfKey(rc, key) ?? targetDir
   });
-  const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) || existsSync10(join13(rootOf(rc, "codex", "rule"), RULES_FILE)) ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings }) : { overwritten: [], exists: false };
+  const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) || existsSync11(join14(rootOf(rc, "codex", "rule"), RULES_FILE)) ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings }) : { overwritten: [], exists: false };
   {
     const newLock = readLock(lockPath);
     const rulesRoot = rootOf(rc, "codex", "rule");
@@ -8743,7 +8829,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
       const fixed = !isClaude ? [] : scope === "project" ? void 0 : userClaudeFixed(targetDir, ctx.stateRoot);
       let enabled = scopeCfg.gitignore !== false;
       if (enabled && scope === "user") {
-        const relevant = managed.length > 0 || fixed.length > 0 || existsSync10(join13(rootDir, ".gitignore"));
+        const relevant = managed.length > 0 || fixed.length > 0 || existsSync11(join14(rootDir, ".gitignore"));
         enabled = relevant && inWorkTree(rootDir);
       }
       updateGitignore({ dir: rootDir, managedPaths: managed, fixed, enabled });
@@ -8757,22 +8843,42 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   rep.skipped = result.skipped.map(toChange);
   const shown = (c) => {
     const root = rootOfKey(rc, c.key) ?? targetDir;
-    return { path: root === targetDir ? c.path : labelOf(join13(root, c.path)) };
+    return { path: root === targetDir ? c.path : labelOf(join14(root, c.path)) };
   };
   rep.conflicts = result.conflicts.map(shown);
   rep.overwritten = [...result.overwritten.map(shown), ...rules.overwritten.map((path) => ({ path }))];
+  const briefing = briefingOf(ctx, scope, readLock(lockPath));
+  for (const b of briefing) rep.warnings.push(briefingWarning(parseLockKey(b.key).name, b.harness, b.missing));
+  if (briefing.length) rep.briefingMissing = briefing;
   return rep;
+}
+function briefingOf(ctx, scope, lock, only) {
+  const rc = { base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) };
+  const roots = { home: ctx.home, codexHome: codexHomeOf(ctx), projectDir: scope === "project" ? ctx.projectDir : void 0 };
+  const rootsOf = /* @__PURE__ */ new Map();
+  const out = [];
+  for (const [key, entry] of Object.entries(lock)) {
+    const k = parseLockKey(key);
+    if (!k.harness || k.type !== "agent" || entry.skipped || entry.block || only && !only.has(key)) continue;
+    const root = rootOfKey(rc, key);
+    const file = Object.keys(entry.files)[0];
+    if (!root || !file) continue;
+    if (!rootsOf.has(k.harness)) rootsOf.set(k.harness, skillRoots(k.harness, scope, roots));
+    const missing = missingSkills(k.harness, join14(root, file), rootsOf.get(k.harness));
+    if (missing?.length) out.push({ key, harness: k.harness, missing });
+  }
+  return out;
 }
 function syncCodexRules(a) {
   const { ctx, scope, rc, oldLock, labelOf, warnings } = a;
-  const rulesFile = join13(rootOf(rc, "codex", "rule"), RULES_FILE);
+  const rulesFile = join14(rootOf(rc, "codex", "rule"), RULES_FILE);
   const rulesLabel = labelOf(rulesFile);
-  const agentsFile = join13(scope === "user" ? rootOf(rc, "codex", "rule") : rc.base, "AGENTS.md");
+  const agentsFile = join14(scope === "user" ? rootOf(rc, "codex", "rule") : rc.base, "AGENTS.md");
   const agentsLabel = labelOf(agentsFile);
   const LEGACY = "AGENTS.md";
   let fileText = null;
   try {
-    fileText = readFileSync9(rulesFile, "utf8");
+    fileText = readFileSync10(rulesFile, "utf8");
   } catch {
   }
   const current = fileText === null ? /* @__PURE__ */ new Map() : parseRulesFile(fileText);
@@ -8832,12 +8938,12 @@ function syncCodexRules(a) {
     else atomicWrite(agentsFile, agentsNext);
   }
   if (want) {
-    const override = join13(dirname4(agentsFile), "AGENTS.override.md");
-    if (existsSync10(override)) {
+    const override = join14(dirname4(agentsFile), "AGENTS.override.md");
+    if (existsSync11(override)) {
       warnings.push(`${labelOf(override)} exists; Codex reads it instead of AGENTS.md, so the pointer to the skilletor rules is not seen`);
     }
     if (scope === "project" && agentsNext !== null) {
-      const limit = projectDocLimit(codexHomeOf(ctx) || join13(ctx.home, ".codex"));
+      const limit = projectDocLimit(codexHomeOf(ctx) || join14(ctx.home, ".codex"));
       const bytes = Buffer.byteLength(agentsNext, "utf8");
       if (bytes > limit) {
         warnings.push(
@@ -8855,8 +8961,8 @@ function codexRulesFiles(given) {
   const scopes = ctx.projectDir ? ["user", "project"] : ["user"];
   for (const scope of scopes) {
     if (!("error" in loaded) && !loaded.targets[scope].includes("codex")) continue;
-    const file = join13(rootOf({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }, "codex", "rule"), RULES_FILE);
-    if (existsSync10(file)) out.push(file);
+    const file = join14(rootOf({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }, "codex", "rule"), RULES_FILE);
+    if (existsSync11(file)) out.push(file);
   }
   return out;
 }
@@ -8873,7 +8979,7 @@ async function check(given, opts = {}) {
   if (sel === "user" || sel === "all") scopes.push(["user", config.user]);
   if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
   for (const [scope, scopeCfg] of scopes) {
-    const oldLock = readLock(join13(targetDirOf(ctx, scope), "skilletor.lock.json"));
+    const oldLock = readLock(join14(targetDirOf(ctx, scope), "skilletor.lock.json"));
     if (targetDrift(Object.keys(oldLock), targets[scope])) {
       out.changed = true;
       (out.targetsChanged ??= []).push(scope);
@@ -8906,7 +9012,7 @@ function status(given, opts = {}) {
   const out = { scopes: [] };
   if (sel !== "user" && projectIsHome(given)) out.projectIsHome = true;
   for (const [scope, scopeCfg] of scopes) {
-    const lock = readLock(join13(targetDirOf(ctx, scope), "skilletor.lock.json"));
+    const lock = readLock(join14(targetDirOf(ctx, scope), "skilletor.lock.json"));
     const active = targets[scope];
     const rows = scopeCfg.install.flatMap((i) => active.filter((h) => supports(h, i.type)).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
     const declaredKeys = new Set(rows.map((r) => r.key));
@@ -8952,6 +9058,9 @@ function status(given, opts = {}) {
       declared.push({ key, source: entry.source, installed: true, via: label });
       for (const c of covering2) via.set(c, (via.get(c) ?? /* @__PURE__ */ new Set()).add(k.target));
     }
+    const installed = new Set(declared.filter((d) => d.installed).map((d) => d.key));
+    const missing = new Map(briefingOf(ctx, scope, lock, installed).map((b) => [b.key, b.missing]));
+    for (const d of declared) if (missing.has(d.key)) d.briefingMissing = missing.get(d.key);
     out.scopes.push({
       scope,
       targets: active,
@@ -8979,7 +9088,7 @@ function status(given, opts = {}) {
 }
 
 // src/commands.ts
-import { dirname as dirname5, join as join14 } from "node:path";
+import { dirname as dirname5, join as join15 } from "node:path";
 
 // src/probe.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
@@ -9021,7 +9130,7 @@ function projectRoot(ctx) {
 }
 function configPath(ctx, project) {
   const root = project ? projectRoot(ctx) : ctx.home;
-  return join14(root, ".claude", "skilletor.json");
+  return join15(root, ".claude", "skilletor.json");
 }
 function load(ctx) {
   return loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx) });
@@ -9229,7 +9338,7 @@ async function cmdUninstall(ctx, args) {
   const project = Boolean(args.project);
   const path = configPath(ctx, project);
   const scopeName = project ? "project" : "user";
-  const lock = readLock(join14(dirname5(path), "skilletor.lock.json"));
+  const lock = readLock(join15(dirname5(path), "skilletor.lock.json"));
   const parsed = args.items.map((spec) => ({ spec, ...parseItemSpec(spec) }));
   const errors = [];
   const hints = [];
@@ -9382,9 +9491,9 @@ function installedSet(ctx, config) {
   for (const i of declaredItems(config)) set.add(`${i.key}@${i.source}`);
   const projectDir = projectDirOf(ctx);
   for (const scope of ["user", "project"]) {
-    const dir = join14(scope === "user" ? ctx.home : projectDir ?? "", ".claude");
+    const dir = join15(scope === "user" ? ctx.home : projectDir ?? "", ".claude");
     if (scope === "project" && !projectDir) continue;
-    for (const [key, entry] of Object.entries(readLock(join14(dir, "skilletor.lock.json")))) {
+    for (const [key, entry] of Object.entries(readLock(join15(dir, "skilletor.lock.json")))) {
       if (entry.skipped) continue;
       set.add(`${parseLockKey(key).target}@${entry.source}`);
     }
@@ -9394,7 +9503,7 @@ function installedSet(ctx, config) {
 
 // src/hooks.ts
 import { execFileSync as execFileSync4, spawn } from "node:child_process";
-import { readFileSync as readFileSync10 } from "node:fs";
+import { readFileSync as readFileSync11 } from "node:fs";
 var SESSION_START_TIMEOUT_MS = 5e3;
 var DEFAULT_INTERVAL = 600;
 function projectKeyOf(ctx, input) {
@@ -9459,7 +9568,7 @@ function withCodexRules(out, ctx) {
   const problems = [];
   for (const file of codexRulesFiles(ctx)) {
     try {
-      texts.push(readFileSync10(file, "utf8"));
+      texts.push(readFileSync11(file, "utf8"));
     } catch (err) {
       problems.push(`cannot read ${file} (${err.message})`);
     }
@@ -9604,7 +9713,7 @@ function makeContext2(flags) {
     home,
     // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd.
     projectDir: flags.projectDir ?? projectRootOf(process.cwd()),
-    stateRoot: join15(home, ".claude", "skilletor")
+    stateRoot: join16(home, ".claude", "skilletor")
   };
 }
 function ttyPrompter() {
@@ -9628,7 +9737,7 @@ function statusText(report) {
     lines.push(claudeOnly ? `${s.scope} scope:` : `${s.scope} scope (${s.targets.join(", ") || "no targets"}):`);
     for (const d of s.declared) {
       const mark = d.installed ? "\u2713" : d.skipped ? "-" : "\xB7";
-      const note = d.skipped ? " (skipped: renders empty)" : "";
+      const note = (d.skipped ? " (skipped: renders empty)" : "") + (d.briefingMissing ? ` (briefing skills not installed: ${d.briefingMissing.join(", ")})` : "");
       lines.push(`  ${mark} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}${note}`);
     }
     for (const w of s.wildcards) {
@@ -9829,7 +9938,7 @@ async function runHookCommand(args) {
   const ctx = {
     home,
     projectDir,
-    stateRoot: join15(home, ".claude", "skilletor"),
+    stateRoot: join16(home, ".claude", "skilletor"),
     binPath: fileURLToPath(import.meta.url)
   };
   if (harness === "codex") ctx.harness = "codex";

@@ -236,6 +236,17 @@ marks items `via bundle:perl@shared` and adds `* bundle:perl@shared (7 installed
 only a bundle declares cannot be uninstalled by name: the error names the bundle — uninstall
 the bundle, or switch the item off via vars.
 
+**Agents and their briefing skills.** An agent that declares skills for the briefing plugin
+(`briefing: { skills: [...] }`) fails at spawn time when they are missing. After every sync
+skilletor checks each installed agent, per target, against the skill roots that agent's
+harness searches (Claude: `~/.claude/skills`, plus the project's `.claude/skills` for a
+project agent, plus Claude plugin caches; Codex: `$CODEX_HOME/skills`, `~/.agents/skills`,
+plus the project's `.agents/skills` and `.codex/skills`) and warns:
+`agent reviewer (codex): briefing skills not installed: perl-core`. `plugin:skill` names
+are not checked. `status` shows the same per agent (`briefingMissing` in `--json`); the
+`SessionStart` hook mentions it only when it changed something. Ship an agent and its
+skills together in one bundle so they are always installed as a set.
+
 ### The in-session check (and how to quiet it)
 
 skilletor always reconciles at **session start**. During a session it also

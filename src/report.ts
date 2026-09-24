@@ -5,6 +5,7 @@
 // (lock key `codex:…`, spec §14.4) carry their own, unmeasured-so-conservative hint.
 import type { ItemType } from "./config.ts";
 import { parseLockKey } from "./targets.ts";
+import { briefingWarning, type BriefingMissing } from "./briefing.ts";
 
 export const ACTIVATION: Record<ItemType, string> = {
   skill: "active now",
@@ -39,6 +40,9 @@ export interface ScopeReport {
   overwritten: { path: string }[];
   warnings: string[];
   trustRequests: { name: string; url: string }[];
+  /** Installed agents whose briefing skills do not resolve (spec §6.7); each also has
+   *  its line in `warnings`. Absent when empty. */
+  briefingMissing?: BriefingMissing[];
 }
 
 export interface SyncReport {
@@ -109,8 +113,23 @@ export function reportText(r: SyncReport): string {
   return lines.join("\n");
 }
 
+/** `r` without its briefing warnings (spec §6.7): the hooks show them only in a run
+ *  that changed something, instead of in every session. */
+function withoutBriefing(r: SyncReport): SyncReport {
+  return {
+    ...r,
+    scopes: r.scopes.map((s) => {
+      if (!s.briefingMissing?.length) return s;
+      const lines = new Set(s.briefingMissing.map((b) => briefingWarning(parseLockKey(b.key).name, b.harness, b.missing)));
+      const { briefingMissing: _, ...rest } = s;
+      return { ...rest, warnings: s.warnings.filter((w) => !lines.has(w)) };
+    }),
+  };
+}
+
 /** Hook output: a one-line systemMessage and a terse additionalContext. */
-export function reportHook(r: SyncReport): { systemMessage?: string; additionalContext?: string } {
+export function reportHook(report: SyncReport): { systemMessage?: string; additionalContext?: string } {
+  const r = hasChanges(report) ? report : withoutBriefing(report);
   if (!hasNotable(r)) return {};
   const changed: ItemChange[] = [];
   let warnings = 0;

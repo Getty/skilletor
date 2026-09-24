@@ -141,7 +141,8 @@ function statusText(report: ReturnType<typeof status>): string {
     lines.push(claudeOnly ? `${s.scope} scope:` : `${s.scope} scope (${s.targets.join(", ") || "no targets"}):`);
     for (const d of s.declared) {
       const mark = d.installed ? "✓" : d.skipped ? "-" : "·";
-      const note = d.skipped ? " (skipped: renders empty)" : "";
+      const note = (d.skipped ? " (skipped: renders empty)" : "") +
+        (d.briefingMissing ? ` (briefing skills not installed: ${d.briefingMissing.join(", ")})` : "");
       lines.push(`  ${mark} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}${note}`);
     }
     for (const w of s.wildcards) {

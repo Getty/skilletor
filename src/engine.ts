@@ -34,6 +34,7 @@ import { apply, isValidItemName, type PlanItem } from "./apply.ts";
 import { readLock, writeLock, type Lock, type SkipReason } from "./lock.ts";
 import { State } from "./state.ts";
 import { isGitWorkTree, updateGitignore } from "./gitignore.ts";
+import { briefingWarning, missingSkills, skillRoots, type BriefingMissing } from "./briefing.ts";
 import {
   emptyScopeReport, keyToTypeName, type ItemChange, type ScopeReport, type SyncReport,
 } from "./report.ts";
@@ -623,7 +624,32 @@ async function syncScope(
   };
   rep.conflicts = result.conflicts.map(shown);
   rep.overwritten = [...result.overwritten.map(shown), ...rules.overwritten.map((path) => ({ path }))];
+
+  // Briefing check (spec §6.7): every agent the lock holds now, from its installed file.
+  const briefing = briefingOf(ctx, scope, readLock(lockPath));
+  for (const b of briefing) rep.warnings.push(briefingWarning(parseLockKey(b.key).name, b.harness, b.missing));
+  if (briefing.length) rep.briefingMissing = briefing;
   return rep;
+}
+
+/** Installed agents of a scope's lock whose declared briefing skills do not resolve
+ *  (spec §6.7). Reads only the disk; a file that cannot be parsed is skipped. */
+function briefingOf(ctx: EngineContext, scope: ScopeName, lock: Lock, only?: Set<string>): BriefingMissing[] {
+  const rc: RootContext = { base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) };
+  const roots = { home: ctx.home, codexHome: codexHomeOf(ctx), projectDir: scope === "project" ? ctx.projectDir : undefined };
+  const rootsOf = new Map<Harness, string[]>();
+  const out: BriefingMissing[] = [];
+  for (const [key, entry] of Object.entries(lock)) {
+    const k = parseLockKey(key);
+    if (!k.harness || k.type !== "agent" || entry.skipped || entry.block || (only && !only.has(key))) continue;
+    const root = rootOfKey(rc, key);
+    const file = Object.keys(entry.files)[0];
+    if (!root || !file) continue;
+    if (!rootsOf.has(k.harness)) rootsOf.set(k.harness, skillRoots(k.harness, scope, roots));
+    const missing = missingSkills(k.harness, join(root, file), rootsOf.get(k.harness)!);
+    if (missing?.length) out.push({ key, harness: k.harness, missing });
+  }
+  return out;
 }
 
 /**
@@ -817,7 +843,10 @@ export interface StatusReport {
     /** The harnesses this scope installs for (spec §14.1). */
     targets: Harness[];
     /** `via` names the wildcard entry or bundle (`bundle:perl@shared`) an item was installed through. */
-    declared: { key: string; source: string; installed: boolean; via?: string; skipped?: SkipReason }[];
+    /** `briefingMissing`: an installed agent's declared briefing skills that do not resolve (spec §6.7). */
+    declared: {
+      key: string; source: string; installed: boolean; via?: string; skipped?: SkipReason; briefingMissing?: string[];
+    }[];
     orphans: string[];
     /** Each wildcard with the number of items currently installed through it. */
     wildcards: { type: ItemType; source: string; entry: string; installed: number }[];
@@ -895,6 +924,9 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
       declared.push({ key, source: entry.source, installed: true, via: label });
       for (const c of covering) via.set(c, (via.get(c) ?? new Set()).add(k.target));
     }
+    const installed = new Set(declared.filter((d) => d.installed).map((d) => d.key));
+    const missing = new Map(briefingOf(ctx, scope, lock, installed).map((b) => [b.key, b.missing]));
+    for (const d of declared) if (missing.has(d.key)) d.briefingMissing = missing.get(d.key);
     out.scopes.push({
       scope,
       targets: active,

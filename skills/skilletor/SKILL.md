@@ -128,6 +128,10 @@ vars: { perl_version: "5.40" }
 - Another source is matched by resolved URL, not config name. `install bundle:` offers to
   add a missing one (no TTY: exit 1, prints `skilletor add …`); **`sync` and hooks never
   add sources** — they warn and skip those items.
+- An agent's `briefing.skills` must be installed where its harness looks (a user agent
+  never sees project skills; a skill for claude only is missing for codex). Sync warns
+  `agent X (codex): briefing skills not installed: …`, `status` shows `briefingMissing`;
+  `plugin:skill` names are not checked. Put an agent and its skills in one bundle.
 
 ## Templates
 
