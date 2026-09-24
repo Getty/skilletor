@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T03:00:45Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T02:23:14Z
+id: 39
+priority: high
+started: 2026-09-24T19:31:15Z
+status: done
+tags:
+- codex
+- engine
+title: 'Codex phase 1: harness detection, Codex plugin wiring, skills to .agents/skills'
+updated: 2026-09-24T19:31:15Z
+---
+
+Part of #21. Harness targets (auto-detect + targets override), .codex-plugin/plugin.json, hooks on Codex, repo-root detection without CLAUDE_PROJECT_DIR, skills installed to ~/.agents/skills and <repo>/.agents/skills when codex is a target. Research summary in the orchestrator session 2026-09-23.
+
+2026-09-23 02:37 Phase 1 implemented, uncommitted: src/targets.ts (LAYOUTS, markers, selectTargets, lock keys codex:skills/x, targetDrift), engine per-target build/apply/gitignore(.agents/.gitignore), config 'targets', render ctx 'harness', report notes + codex activation, hooks resolve project root via git toplevel of cwd, .codex-plugin/plugin.json reusing hooks/hooks.json. 254 tests green, dist rebuilt. Verified in temp CODEX_HOME: plugin installs, app-server hooks/list shows both hooks once (CLAUDE_PLUGIN_ROOT expanded, trustStatus untrusted), hook run writes ~/.agents/skills + <repo>/.agents/skills, codex debug prompt-input lists both sentinel skills. Open: docs (README, SKILL.md, usage), Codex skill activation timing unmeasured.
+
+2026-09-23 03:00 Codex support phases 1-3 complete (k39 468fa12, k40 2ca9bb1, k41 uncommitted in working tree). Needs review + commit of k41, then doc work (README, skills/skilletor/SKILL.md, usage) by the skill-author.
