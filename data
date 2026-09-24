@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-23T01:20:23Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-22T22:20:22Z
+id: 27
+priority: low
+started: 2026-09-23T01:16:20Z
+status: done
+tags:
+- eval
+- tooling
+title: skill-static-check treats evals/*/graders/*.md as skills (false 'description
+  missing')
+updated: 2026-09-24T19:31:15Z
+---
+
+node .claude/skills/skill-assessment/scripts/skill-static-check.mjs reports ERROR 'description missing' on evals/config-question/graders/answer.md and evals/off-target/graders/not-fired.md (also at HEAD). Grader files are not skills; the checker should skip or classify files under evals/*/graders/. Found during #24. Target: skilletor-skill-author (the script lives in the skill-assessment skill).
+
+2026-09-23 01:20 skill-assessment is an original in this repo (manage-skills list: 'original', link count 1, no other copy under ~/dev or ~/.claude) — edited in place, inode kept. skill-static-check.mjs: classify() returns eval-grader (file in graders/) and eval-prompt (prompt.md in a case dir / under evals/); those get eval checks only (grader needs type:, prompt and llm grader need a body), no skill/description checks. collect() walks evals/, a case dir and graders/ (evals/ used to check 0 items silently). Before: graders dir 2 errors, answer.md 1 error. After: evals/ 5 items 0/0, skills/skilletor 0/0, .claude 7 items 0/0. Negative test (grader without type, empty llm grader, empty prompt) -> 3 errors, exit 1.
+
+2026-09-23 01:20 Checker fixed, uncommitted
