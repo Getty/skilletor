@@ -1,0 +1,42 @@
+---
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T19:00:37Z
+id: 52
+priority: high
+started: 2026-09-24T04:31:16Z
+status: done
+tags:
+- codex
+- briefing
+title: 'Codex agents: emit briefing.skills as a ''# briefing: skills = [...]'' comment
+  (briefing 0.3.1)'
+updated: 2026-09-24T19:31:15Z
+---
+
+briefing 0.3.1 (Getty/briefing 4e139b7, 6fb3d9a; briefing karr #1/#2, both done) settled where Codex agents declare their skills: a comment line in the agent TOML, because Codex 0.153 deserializes agent role files with deny_unknown_fields and drops the whole role over a [briefing] table ("unknown field `briefing`").
+
+    name = "my_agent"
+    description = "..."
+    # briefing: skills = ["getty-perl-core", "superpowers:brainstorming"]
+    developer_instructions = """
+    ...
+    """
+
+Rules from the hook (hooks/briefing-preload, parse_skills_comment):
+- one line, `# briefing: skills = [ ... ]`, items as double- or single-quoted strings;
+- must sit OUTSIDE any multi-line string — a matching line inside developer_instructions is prose and is ignored;
+- first match wins; a leftover [briefing] table is still read (with a migration systemMessage), but must not be emitted.
+
+Verified live on Codex 0.153.4 with a control agent, including a role whose file name differs from its `name`, a spawn from a repo subdirectory, and a role declared via [agents.<name>] config_file. The hook finds agents by the `name` field and honours CODEX_HOME, so skilletor's `agents/<name>.toml` with `name = data.name || itemName` is fine either way.
+
+To do in skilletor:
+- src/convert.ts codexAgentToml: replace the CODEX_BRIEFING_TABLE / opts.briefingTable switch (currently off → briefingDropped=true) with emitting the comment line. stringifyToml has no comment support, so insert the line textually, e.g. right after the top-level keys and before developer_instructions — never inside the """ block.
+- Only string items; quote/escape them so the line stays a single valid TOML comment (no newlines, no `]` breaking the regex `\[([^\]\r\n]*)\]`).
+- Drop or repurpose briefingDropped (and whatever reports it) — nothing is dropped anymore.
+- test/convert.test.ts:51-59: rewrite — comment present, no `briefing` key in the parsed TOML, the file still parses, and the comment is not inside developer_instructions even when the body contains a `# briefing:` line.
+- Spec §14.7 and docs: describe the comment form instead of "dropped until Codex tolerates it".
+
+Review 2026-09-24 adds: (a) refuse/warn on codex: passthrough 'briefing' key (convert.ts:96-111 would emit a [briefing] table; Codex drops the whole role). (b) Once landed, update spec §14.7 (lines ~571-576), README.md:410-412, skills/skilletor/references/codex.md:44.
+
+Done 2026-09-24, 424/424 tests, check-dist ok.
