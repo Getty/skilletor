@@ -1,0 +1,25 @@
+---
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T18:37:55Z
+id: 51
+priority: medium
+started: 2026-09-24T04:09:14Z
+status: done
+tags:
+- engine
+- spec
+- gitignore
+title: 'User scope: managed .gitignore blocks when a user root is inside a git worktree'
+updated: 2026-09-24T19:31:15Z
+---
+
+Today no gitignore is written for user scope (spec §6.4 and §14.3 cover projects only; engine.ts gitignore loop is inside `if (scope === "project")`). With a dotfiles repo at ~ or ~/.claude, every installed user item (~/.claude/skills|agents|rules, ~/.agents/skills, $CODEX_HOME/agents) plus ~/.claude/skilletor.lock.json shows up as untracked. #44 only settles the config/lock double-read for project root == $HOME, not this.
+
+Proposal (spec first):
+- For each user-scope root, write the same managed block (`# >>> skilletor >>>` ... `# <<< skilletor <<<`) in <root>/.gitignore listing the managed paths (and the user lock/local files under ~/.claude), but ONLY when that root is inside a git worktree (`git -C <root> rev-parse --is-inside-work-tree`). Otherwise write nothing.
+- Allow `"gitignore": false` in the user config as opt-out (currently a load error, config.ts:329).
+- Same removal rules as project blocks (empty block removed, empty file deleted).
+- Side note found while checking: project blocks are written even when the project is not a git repo (harmless; decide whether to keep).
+
+Done in fb5e047 (spec) + 5b6cb0c. 394/394 tests, check-dist ok. Project blocks unchanged (still written outside git). User ~/.claude block lists lock + skilletor/ state dir, never skilletor.json.
