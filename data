@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-09-23T01:23:20Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T01:02:18Z
+id: 34
+priority: medium
+started: 2026-09-23T01:16:12Z
+status: done
+tags:
+- engine
+- feature
+- rules
+title: 'Wildcard item specs: install all items of a type from a source (e.g. rule:*@shared)'
+updated: 2026-09-24T19:31:15Z
+---
+
+Today parseItemSpec (src/commands.ts:181) and config install lists accept only name@source / type:name@source. Wanted: a wildcard per type and source, e.g. "rules": ["*@shared"] in config and `skilletor install 'rule:*@shared'`, so a source can ship a rule set that is installed as a whole.
+
+Design points to settle (spec §3/§4 update first):
+- Expansion happens at sync time against the source catalog, so items added upstream arrive automatically and items removed upstream are deleted via the lock (same as today's undeclared-item removal).
+- Explicit entries and wildcard overlap: explicit wins / dedupe; name collisions across two wildcards of the same type and scope stay a config error (§3 duplicate rule).
+- Trust unchanged: wildcard only over trusted sources; project-declared wildcard on an untrusted source reports like today.
+- Scope: all three types or rules only? Proposal: all types, since the catalog is per type anyway.
+- status/available should show which installed items came from a wildcard.
+Target: skilletor-worker (engine, tests, dist) + skilletor-skill-author for SKILL.md/README docs.
+
+2026-09-23 01:22 Implemented (uncommitted): config.ts parses *@src / type:*@src into ScopeConfig.wildcards (dup wildcard per type+source = config error, partial '*' rejected); engine.ts expands at sync against the catalog: explicit same-source dedupe silent, explicit vs other-source wildcard -> explicit wins + warning, two wildcards same name -> name skipped + warning (installed copy kept), unresolvable/untrusted source -> keeps its locked items of that type, invalid upstream names skipped with warning; status gets declared[].via + wildcards[] (text: 'via *@src', '* rules/* @src (n installed)'); CLI install/uninstall require type prefix for wildcards; uninstall removes only that type's wildcard. Spec §2/§3/§4.1/§6.1/§7 updated. 181/181 tests, dist rebuilt, check-dist ok. Pending: SKILL.md/README docs (other agent), commit.
+
+2026-09-23 01:23 Committed as 7d86514 by coordinator; 181/181
