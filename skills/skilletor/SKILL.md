@@ -54,7 +54,7 @@ skilletor trust <source>                  # confirm a project-declared source (s
 sync; `check` writes nothing, exits non-zero when a source changed. `uninstall` edits one
 config; no explicit entry there → exit 1, config untouched, the error names what covers it.
 An option a command does not list (`--project-dir` goes with all) → exit 2, nothing runs;
-`--help` anywhere only prints usage; `--version` only as the first argument.
+`-h`/`--help` anywhere only prints usage; `-v`/`--version` only as the first argument.
 
 Sources use `skills/<name>/`, `agents/<name>.md`, `rules/<name>.md`; Claude plugin repos
 work too (skill paths from `.claude-plugin/plugin.json` `skills`, installed as
