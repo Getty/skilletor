@@ -1,0 +1,50 @@
+---
+claimed_at: 2026-09-23T19:10:20Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T18:37:26Z
+id: 50
+priority: high
+started: 2026-09-23T18:54:51Z
+status: done
+tags:
+- codex
+- engine
+- spec
+title: 'Codex rules: inject via SessionStart hook, AGENTS.md keeps only a pointer'
+updated: 2026-09-24T19:31:15Z
+---
+
+Replace the managed rules block in AGENTS.md (spec §14.8, #41) with hook injection plus a one-line pointer. Goal: no growing block in a committed file, no project_doc_max_bytes truncation, no team-diff noise.
+
+Design (update spec §14.8 first, then implement):
+- skilletor's SessionStart hook (matcher startup|clear, NOT resume) returns all Codex rules of both scopes as hookSpecificOutput.additionalContext, opened by a marker line (e.g. `<!-- skilletor rules -->`).
+- Plugin hooks.json sets "additionalContextLimit": 0 on that handler (default ~2500 tokens truncates middle-out).
+- Full rules text also written to a gitignored file (project: .codex/skilletor-rules.md; user: $CODEX_HOME/skilletor-rules.md or similar) for the post-compaction fallback.
+- AGENTS.md (project and $CODEX_HOME) gets only a small stable managed block: "rules normally arrive at session start as a message beginning with <marker>; if it is not in your context (e.g. after compaction), read <file> before any task".
+- Migration: replace an existing rules block with the pointer block.
+- Detect untrusted hook: Codex skips untrusted plugin hooks silently. status/check should warn when Codex is a target and the hook has not run (e.g. hook timestamp in state) or hooks.state trust is missing.
+
+Measurements, Codex 0.153.4, isolated CODEX_HOME, 2026-09-23 (see ticket notes below).
+
+2026-09-23 Measurements (Codex 0.153.4, isolated CODEX_HOME, test plugin with SessionStart hook; rollouts inspected, model asked):
+- Hook runs in `codex exec` (source=startup); untrusted plugin/user hooks are skipped SILENTLY (no warning).
+- Trust: config.toml `[hooks.state."<plugin>@<mkt>:hooks/hooks.json:<event>:<group>:<idx>"] trusted_hash = "sha256:..."`; hooks/list (app-server) returns key, currentHash, trustStatus. Reinstall with unchanged definition keeps trust; any change to a hook definition or a new event needs re-trust.
+- additionalContext lands as its own developer message after the AGENTS.md user message, before the first prompt. AGENTS.md untouched.
+- Default limit: ~9.8k tokens cut middle-out to ~2.5k, full output spilled to /tmp/hook_outputs/... with a path hint. additionalContextLimit: 0 -> complete, also in a plugin hooks.json. Model read head/tail passphrases and paragraph 80/80.
+- resume: SessionStart fires again (source=resume) and appends a SECOND copy although the first is still in history -> matcher must not include resume.
+- Compaction (thread/compact/start via app-server): hook message dropped from replacement_history; model then knows its content only via the summary. AGENTS.md is re-injected after compaction. SessionStart matcher `compact` did NOT fire; PostCompact fires but its additionalContext is not injected. Auto-compaction mid-turn not reproduced (codex exec ignores model_auto_compact_token_limit) - untested.
+- Pointer test (task: write a bash script; rule demands `# policy: KIWI-7731` + `set -euo pipefail`; first turn unrelated, then compaction, then task): baseline without compaction 1/1 followed, no file read. With AGENTS.md pointer after compaction 5/5 followed, 4/5 ran `cat .codex/skilletor-rules.md` first. Control without pointer after compaction 4/5 followed (the summary carried the single salient rule). Test is weakly discriminating: one salient rule survives summaries; many detailed rules likely do not, not measured.
+
+2026-09-23 19:05 Implemented in dfdacb9 (src + dist + tests, 384/384 green, check-dist clean).
+- Rules file per scope ($CODEX_HOME / <repo>/.codex skilletor-rules.md), lock files key "skilletor-rules.md", project file in .codex/.gitignore. LAYOUTS codex rule root is now <repo>/.codex for projects.
+- AGENTS.md: fixed pointer block only, iff rules file exists; refusals skip only the pointer (warning "... pointer to the Codex rules not written").
+- Migration of #41 entries: silent rename, kept (unreachable) entries take text from the old AGENTS.md block. Hand-tested old dist -> new dist.
+- hooks/codex-hooks.json + .codex-plugin/plugin.json; hook --harness codex is parsed inside the hook command only (not a general CLI flag, hook stays out of usage).
+- Hook-trust warning: SyncReport.warnings / StatusReport.warnings (top level, once per run), shown by reportText/status text, never in hook output.
+Open: (1) spec says rules are "appended" after the report, but the pointer says the message "begins with" the marker; when a sync reports changes the message begins with the report. (2) a pre-existing foreign skilletor-rules.md is overwritten, not treated as a conflict. (3) with Codex a target and an untrusted hook, `sync` on no changes prints the warning instead of "up to date". Docs (README, SKILL.md, spec §10 module note) not touched.
+
+2026-09-23 19:07 Follow-up c1181b3 (spec 2fd59ff), 386/386 green, check-dist clean: rules files now lead additionalContext (user, project), sync report after them; pinned with/without changes, with sync warnings, after a failed sync. sync/add/install/uninstall print "skilletor: up to date" plus the trust warning on a no-change run. Test pins foreign skilletor-rules.md overwritten without conflict. Open questions 1, 3, 4 of the first note are resolved.
+
+2026-09-23 19:09 Docs (0b9e13c, skilletor-skill-author): README Codex rules section rewritten (rules file per scope, hook delivery startup/clear not resume, pointer block + refusals skip only the pointer, gitignored rules file, migration, hook trust + top-level `warnings` in sync/status --json, re-trust after hook change); plugin section now names hooks/codex-hooks.json. Bundled skill + references/codex.md updated (new Hook trust section); skilletor-core invariant updated. Verified by hand run with temp HOME/CODEX_HOME: files, pointer, .codex/.gitignore, hook output per source, symlink/hardlink refusals, migration (reported as ~ updated, no overwritten), trust warning shape. .codex-plugin/plugin.json description already updated in dfdacb9; left to the worker.
