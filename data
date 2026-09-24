@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T01:18:34Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T01:00:28Z
+id: 32
+priority: low
+started: 2026-09-23T01:16:28Z
+status: done
+tags:
+- skills
+title: 'skills/skilletor SKILL.md: say that user-only/project-only keys are a load
+  error, not ignored'
+updated: 2026-09-24T19:31:15Z
+---
+
+Found in the k30 assessment (evals/results/k30.json, with-run 0, judges FAIL x3). SKILL.md:79 says checkInterval is "user only" and SKILL.md:76 says gitignore is "project only", but not what happens when the key is in the wrong file. The agent filled the gap with a false claim: "It is ignored in a project file." In fact src/config.ts:234-235 throws ConfigError `"checkInterval" is user-only` for .claude/skilletor.json and .claude/skilletor.local.json, and src/config.ts:~224 throws `"gitignore" is project-only` for the user file. The whole config then fails to load, so sync stops. It is not a silent no-op. Fix: in the two bullets (SKILL.md:76-81), state that the key in the wrong scope is a config error (skilletor refuses to load the config). One clause each, no new section. Done when both bullets name the consequence and the static check stays at 0/0. Re-measuring needs a billed eval run and the maintainer's go-ahead. Target agent: skilletor-skill-author.
+
+2026-09-23 01:18 SKILL.md: gitignore and checkInterval bullets each gain one clause — key in the wrong file is a config error, config fails to load, nothing syncs (verified src/config.ts:224-236, src/engine.ts:112-116 returns error before any scope). README mirrored in the in-session-check paragraph and the Git section. Static check skills/skilletor 0/0.
+
+2026-09-23 01:18 Wording fix done, uncommitted in working tree
