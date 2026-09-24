@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T03:15:18Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T03:08:32Z
+id: 46
+priority: medium
+started: 2026-09-23T03:09:41Z
+status: done
+tags:
+- codex
+- bug
+title: 'Codex rules: CLAUDE.md symlinked to AGENTS.md is not refused'
+updated: 2026-09-24T19:31:15Z
+---
+
+Spec 14.8 refuses writing the AGENTS.md block when AGENTS.md is a symlink ("commonly CLAUDE.md <-> AGENTS.md: writing through it would show Claude the rules twice"). The other direction is not caught: with CLAUDE.md -> AGENTS.md (AGENTS.md a regular file), sync writes the block and Claude Code reads every rule twice (CLAUDE.md block + .claude/rules/). Reproduced by hand with HOME/CODEX_HOME in a scratch dir (k45). Decide: warn (or refuse) when <base>/CLAUDE.md or <base>/.claude/CLAUDE.md resolves to the AGENTS.md being written; README and skills/skilletor/references/codex.md currently document the gap. Also: src/report.ts comment above CODEX_ACTIVATION still says "only skills are written in phase 1".
+
+2026-09-23 03:15 Decided: refuse. engine: when claude is a target of the scope and a Claude memory file (project: <repo>/CLAUDE.md, <repo>/.claude/CLAUDE.md; user: ~/.claude/CLAUDE.md) is the same file as the AGENTS.md (fsutil.sameFile: realpath incl. dangling-link target, or dev+ino), the block is refused through the existing path: warning '<AGENTS.md> is the same file as <CLAUDE.md> (Claude Code would read the rules twice); rules for Codex not written', entries kept, --force no override. Codex-only target writes. report.ts CODEX_ACTIVATION comment fixed. README + references/codex.md gap passages replaced; spec §14.8 refusal list. Also package.json/.claude-plugin descriptions mention Codex. Tests in codex.test.ts (symlink, .claude/CLAUDE.md, hard link, dangling, codex-only, user scope + recovery). Uncommitted.
+
+2026-09-23 03:15 Implemented, uncommitted; needs review
