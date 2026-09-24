@@ -1,12 +1,17 @@
-// Managed .gitignore block in a project (spec §6.4).
+// Managed .gitignore blocks (spec §6.4, §14.3).
 //
-// Maintains a single marked block in <project>/.claude/.gitignore listing the
-// exact managed paths plus the lock and skilletor.local.json, and the same kind
-// of block (managed paths only) in <project>/.agents/.gitignore for Codex
-// (spec §14.3). A block with no entries is removed. Content outside
-// the block is untouched; the block is rewritten idempotently (no change → no
-// write). With gitignore disabled the block is removed, and the file is deleted
-// if only the block remained. Project scope only.
+// Maintains a single marked block in a target root's `.gitignore` listing the
+// exact managed paths under that root plus fixed entries. Project scope: the
+// block in <project>/.claude/.gitignore also lists the lock and
+// skilletor.local.json; <project>/.agents and <project>/.codex get managed paths
+// only; written whether or not the project is a git repository. User scope
+// (~/.claude, ~/.agents, $CODEX_HOME): a block only while that root lies inside a
+// git work tree (`isGitWorkTree`); the ~/.claude block lists the lock and the
+// state dir, never skilletor.json. A block with no entries is removed. Content
+// outside the block is untouched; the block is rewritten idempotently (no change
+// → no write). With gitignore disabled the block is removed, and the file is
+// deleted if only the block remained.
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "./fsutil.ts";
@@ -15,11 +20,11 @@ const BEGIN = "# >>> skilletor >>>";
 const END = "# <<< skilletor <<<";
 
 export interface GitignoreOptions {
-  /** The directory whose `.gitignore` holds the block (a project's `.claude` or `.agents`). */
+  /** The directory whose `.gitignore` holds the block (a target root of either scope). */
   dir: string;
   /** Managed paths relative to `dir` (from the lock). */
   managedPaths: string[];
-  /** Always-listed entries (default: the lock and skilletor.local.json, which live in `.claude`). */
+  /** Always-listed entries (default: the lock and skilletor.local.json of a project's `.claude`). */
   fixed?: string[];
   /** From config; default true. */
   enabled: boolean;
@@ -68,4 +73,17 @@ function trimTrailingEmpty(lines: string[]): string[] {
   const out = [...lines];
   while (out.length && out[out.length - 1]!.trim() === "") out.pop();
   return out;
+}
+
+/** Does `dir` lie inside a git work tree? Git missing or failing counts as no (spec §6.4). */
+export function isGitWorkTree(dir: string): boolean {
+  try {
+    return execFileSync("git", ["-C", dir, "rev-parse", "--is-inside-work-tree"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5_000,
+    }).trim() === "true";
+  } catch {
+    return false;
+  }
 }

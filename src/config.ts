@@ -71,7 +71,8 @@ export interface ScopeConfig {
   wildcards: WildcardItem[];
   bundles: BundleItem[];
   vars: Record<string, unknown>;
-  /** Project scope only: maintain the managed gitignore block (default true). */
+  /** Maintain the managed gitignore blocks (default true; spec §6.4). User scope: from the
+   *  user config, blocks only inside a git work tree. Project scope: local ?? project value. */
   gitignore?: boolean;
   /** `targets` as written (project: local over committed); unset = not restricted (spec §14.1). */
   targets?: Harness[];
@@ -326,10 +327,6 @@ function mergeVars(...objs: (Json | undefined)[]): Record<string, unknown> {
 export function loadConfig(opts: LoadOptions): LoadedConfig {
   const userPath = join(opts.home, ".claude", "skilletor.json");
   const user = readConfigFile(userPath);
-  if ("gitignore" in user) {
-    throw new ConfigError(`${userPath}: "gitignore" is project-only`);
-  }
-
   const hasProject = opts.projectDir !== undefined;
   const projectPath = hasProject ? join(opts.projectDir!, ".claude", "skilletor.json") : "";
   const localPath = hasProject ? join(opts.projectDir!, ".claude", "skilletor.local.json") : "";
@@ -361,6 +358,7 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
     wildcards: userInstall.wildcards,
     bundles: userInstall.bundles,
     vars: mergeVars(asObject(user.vars, userPath, "vars")),
+    gitignore: boolOr(user.gitignore, true, userPath, "gitignore"),
   };
   const userTargets = targetsOf(user.targets, userPath);
   if (userTargets) userScope.targets = userTargets;

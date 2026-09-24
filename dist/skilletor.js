@@ -4676,11 +4676,11 @@ var require_globals = __commonJS({
         }
       };
     }
-    function _joiner(sep4) {
-      sep4 = sep4 || ",";
+    function _joiner(sep5) {
+      sep5 = sep5 || ",";
       var first = true;
       return function() {
-        var val = first ? "" : sep4;
+        var val = first ? "" : sep5;
         first = false;
         return val;
       };
@@ -4710,8 +4710,8 @@ var require_globals = __commonJS({
         cycler: function cycler() {
           return _cycler(Array.prototype.slice.call(arguments));
         },
-        joiner: function joiner(sep4) {
-          return _joiner(sep4);
+        joiner: function joiner(sep5) {
+          return _joiner(sep5);
         }
       };
     }
@@ -5744,10 +5744,10 @@ import { fileURLToPath } from "node:url";
 import { join as join15 } from "node:path";
 
 // src/engine.ts
-import { execFileSync } from "node:child_process";
+import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
 import { existsSync as existsSync10, readFileSync as readFileSync9, rmSync as rmSync6 } from "node:fs";
-import { basename as basename3, dirname as dirname4, isAbsolute, join as join13, relative as relative2 } from "node:path";
+import { basename as basename3, dirname as dirname4, isAbsolute, join as join13, relative as relative2, sep as sep4 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -6006,9 +6006,6 @@ function mergeVars(...objs) {
 function loadConfig(opts) {
   const userPath = join2(opts.home, ".claude", "skilletor.json");
   const user = readConfigFile(userPath);
-  if ("gitignore" in user) {
-    throw new ConfigError(`${userPath}: "gitignore" is project-only`);
-  }
   const hasProject = opts.projectDir !== void 0;
   const projectPath = hasProject ? join2(opts.projectDir, ".claude", "skilletor.json") : "";
   const localPath = hasProject ? join2(opts.projectDir, ".claude", "skilletor.local.json") : "";
@@ -6033,7 +6030,8 @@ function loadConfig(opts) {
     install: userInstall.install,
     wildcards: userInstall.wildcards,
     bundles: userInstall.bundles,
-    vars: mergeVars(asObject(user.vars, userPath, "vars"))
+    vars: mergeVars(asObject(user.vars, userPath, "vars")),
+    gitignore: boolOr(user.gitignore, true, userPath, "gitignore")
   };
   const userTargets = targetsOf(user.targets, userPath);
   if (userTargets) userScope.targets = userTargets;
@@ -8106,6 +8104,7 @@ var State = class {
 };
 
 // src/gitignore.ts
+import { execFileSync } from "node:child_process";
 import { existsSync as existsSync9, readFileSync as readFileSync8, rmSync as rmSync5 } from "node:fs";
 import { join as join12 } from "node:path";
 var BEGIN2 = "# >>> skilletor >>>";
@@ -8147,6 +8146,17 @@ function trimTrailingEmpty(lines) {
   const out = [...lines];
   while (out.length && out[out.length - 1].trim() === "") out.pop();
   return out;
+}
+function isGitWorkTree(dir) {
+  try {
+    return execFileSync("git", ["-C", dir, "rev-parse", "--is-inside-work-tree"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5e3
+    }).trim() === "true";
+  } catch {
+    return false;
+  }
 }
 
 // src/report.ts
@@ -8301,9 +8311,14 @@ function sourceVersion(lock, sourceName) {
   for (const entry of Object.values(lock)) if (entry.source === sourceName) return entry.version;
   return void 0;
 }
+function userClaudeFixed(claudeDir, stateRoot) {
+  const rel = relative2(claudeDir, stateRoot);
+  const under2 = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+  return under2 ? ["skilletor.lock.json", rel.split(sep4).join("/") + "/"] : ["skilletor.lock.json"];
+}
 function gitRemote(dir) {
   try {
-    return execFileSync("git", ["-C", dir, "remote", "get-url", "origin"], {
+    return execFileSync2("git", ["-C", dir, "remote", "get-url", "origin"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"]
     }).trim();
@@ -8638,19 +8653,27 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
     rootOf: (key) => rootOfKey(rc, key) ?? targetDir
   });
   const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) || existsSync10(join13(rootOf(rc, "codex", "rule"), RULES_FILE)) ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings }) : { overwritten: [], exists: false };
-  if (scope === "project") {
+  {
     const newLock = readLock(lockPath);
     const rulesRoot = rootOf(rc, "codex", "rule");
+    const inWorkTree = (dir) => {
+      try {
+        return (ctx.isGitWorkTree ?? isGitWorkTree)(dir);
+      } catch {
+        return false;
+      }
+    };
     for (const rootDir of allRoots(rc)) {
       const managed = Object.entries(newLock).filter(([key, e]) => !e.block && rootOfKey(rc, key) === rootDir).flatMap(([, e]) => Object.keys(e.files));
       if (rules.exists && rootDir === rulesRoot) managed.push(RULES_FILE);
       const isClaude = rootDir === targetDir;
-      updateGitignore({
-        dir: rootDir,
-        managedPaths: managed,
-        fixed: isClaude ? void 0 : [],
-        enabled: scopeCfg.gitignore !== false
-      });
+      const fixed = !isClaude ? [] : scope === "project" ? void 0 : userClaudeFixed(targetDir, ctx.stateRoot);
+      let enabled = scopeCfg.gitignore !== false;
+      if (enabled && scope === "user") {
+        const relevant = managed.length > 0 || fixed.length > 0 || existsSync10(join13(rootDir, ".gitignore"));
+        enabled = relevant && inWorkTree(rootDir);
+      }
+      updateGitignore({ dir: rootDir, managedPaths: managed, fixed, enabled });
     }
   }
   const toChange = (key) => keyInfo.get(key) ?? { key, ...keyToTypeName(key), source: oldLock[key]?.source ?? "?" };
@@ -8886,11 +8909,11 @@ function status(given, opts = {}) {
 import { dirname as dirname5, join as join14 } from "node:path";
 
 // src/probe.ts
-import { execFileSync as execFileSync2 } from "node:child_process";
+import { execFileSync as execFileSync3 } from "node:child_process";
 function makeProbe(timeoutMs = 5e3) {
   return (baseUrl) => {
     try {
-      execFileSync2("git", ["ls-remote", baseUrl], {
+      execFileSync3("git", ["ls-remote", baseUrl], {
         stdio: "ignore",
         timeout: timeoutMs,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }
@@ -8905,7 +8928,7 @@ function makeProbe(timeoutMs = 5e3) {
 function headOk(url, timeoutMs) {
   const script = `const c=new AbortController();const t=setTimeout(()=>c.abort(),${timeoutMs});fetch(${JSON.stringify(url)},{method:'HEAD',signal:c.signal}).then(r=>{clearTimeout(t);process.exit(r.ok?0:1)}).catch(()=>process.exit(1));`;
   try {
-    execFileSync2(process.execPath, ["-e", script], { stdio: "ignore", timeout: timeoutMs + 1e3 });
+    execFileSync3(process.execPath, ["-e", script], { stdio: "ignore", timeout: timeoutMs + 1e3 });
     return true;
   } catch {
     return false;
@@ -9297,7 +9320,7 @@ function installedSet(ctx, config) {
 }
 
 // src/hooks.ts
-import { execFileSync as execFileSync3, spawn } from "node:child_process";
+import { execFileSync as execFileSync4, spawn } from "node:child_process";
 import { readFileSync as readFileSync10 } from "node:fs";
 var SESSION_START_TIMEOUT_MS = 5e3;
 var DEFAULT_INTERVAL = 600;
@@ -9317,7 +9340,7 @@ function toOutput(report, eventName) {
 }
 function projectRootOf(cwd) {
   try {
-    const top = execFileSync3("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+    const top = execFileSync4("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 2e3

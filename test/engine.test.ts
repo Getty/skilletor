@@ -24,6 +24,7 @@ function env() {
     host: { name: "box", os: "linux" },
     user: { name: "getty", home },
     markers: claudeOnly(home),
+    isGitWorkTree: () => false, // never the real location of the temp dir
   };
   const writeCfg = (which: "user" | "project" | "local", obj: unknown) => {
     const file =
@@ -70,6 +71,91 @@ test("sync installs a project-scope skill and writes a gitignore block", async (
     const gi = readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8");
     assert.match(gi, /skills\/bar\/SKILL\.md/);
     assert.match(gi, /skilletor\.lock\.json/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// ---- k51: user-scope gitignore blocks (spec §6.4) ---------------------------
+
+const BLOCK = (...entries: string[]) => ["# >>> skilletor >>>", ...entries, "# <<< skilletor <<<"].join("\n") + "\n";
+
+test("user scope inside a git work tree: ~/.claude/.gitignore lists lock, state dir and items, never skilletor.json", async () => {
+  const e = env();
+  try {
+    const src = localSource(e.tmp.dir, "srcU", "foo", "FOO");
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    writeFileSync(join(e.home, ".claude/.gitignore"), "own-entry\n");
+    const asked: string[] = [];
+    const ctx: EngineContext = {
+      ...e.ctx,
+      stateRoot: join(e.home, ".claude", "skilletor"),
+      isGitWorkTree: (dir) => (asked.push(dir), true),
+    };
+    await sync(ctx, { scope: "user" });
+    const gi = readFileSync(join(e.home, ".claude/.gitignore"), "utf8");
+    assert.equal(gi, "own-entry\n\n" + BLOCK("skilletor.lock.json", "skilletor/", "skills/foo/SKILL.md"));
+    assert.equal(asked.includes(join(e.home, ".claude")), true);
+    // Claude only: nothing managed under ~/.agents or the Codex home, so no block there.
+    assert.equal(existsSync(join(e.home, ".agents/.gitignore")), false);
+    // A state root outside ~/.claude is not listed.
+    await sync({ ...ctx, stateRoot: e.stateRoot }, { scope: "user" });
+    assert.equal(readFileSync(join(e.home, ".claude/.gitignore"), "utf8"),
+      "own-entry\n\n" + BLOCK("skilletor.lock.json", "skills/foo/SKILL.md"));
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("user scope outside a git work tree: no block; leaving a work tree removes it", async () => {
+  const e = env();
+  try {
+    const src = localSource(e.tmp.dir, "srcV", "foo", "FOO");
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    await sync(e.ctx, { scope: "user" }); // env: isGitWorkTree → false
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo/SKILL.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/.gitignore")), false);
+    await sync({ ...e.ctx, isGitWorkTree: () => true }, { scope: "user" });
+    assert.match(readFileSync(join(e.home, ".claude/.gitignore"), "utf8"), /^skills\/foo\/SKILL\.md$/m);
+    // Out of the work tree again: the block goes, own lines stay.
+    writeFileSync(join(e.home, ".claude/.gitignore"),
+      "mine\n" + readFileSync(join(e.home, ".claude/.gitignore"), "utf8"));
+    await sync(e.ctx, { scope: "user" });
+    assert.equal(readFileSync(join(e.home, ".claude/.gitignore"), "utf8"), "mine\n");
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("user gitignore false removes the user blocks; project blocks follow the project config", async () => {
+  const e = env();
+  try {
+    const src = localSource(e.tmp.dir, "srcW", "foo", "FOO");
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    e.writeCfg("project", { install: { skills: ["foo@mine"] } });
+    const ctx: EngineContext = { ...e.ctx, isGitWorkTree: () => true };
+    await sync(ctx);
+    assert.equal(existsSync(join(e.home, ".claude/.gitignore")), true);
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] }, gitignore: false });
+    const r = await sync(ctx);
+    assert.equal(r.error, undefined);
+    assert.equal(existsSync(join(e.home, ".claude/.gitignore")), false);
+    assert.match(readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8"), /^skills\/foo\/SKILL\.md$/m);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("project blocks do not depend on the work-tree test", async () => {
+  const e = env();
+  try {
+    const src = localSource(e.tmp.dir, "srcX", "foo", "FOO");
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["foo@mine"] } });
+    const asked: string[] = [];
+    await sync({ ...e.ctx, isGitWorkTree: (dir) => (asked.push(dir), false) }, { scope: "project" });
+    assert.match(readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8"), /^skills\/foo\/SKILL\.md$/m);
+    assert.deepEqual(asked, []);
   } finally {
     e.cleanup();
   }

@@ -30,6 +30,7 @@ function env() {
     host: { name: "box", os: "linux" },
     user: { name: "getty", home },
     markers: claudeOnly(home),
+    isGitWorkTree: () => false, // never the real location of the temp dir
     probe: noProbe,
   };
   const userCfgPath = join(home, ".claude", "skilletor.json");

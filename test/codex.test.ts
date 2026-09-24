@@ -29,6 +29,7 @@ function env(harnesses: Harness[]) {
     user: { name: "getty", home },
     markers: { claude: [markerOf("claude")], codex: [markerOf("codex")] },
     codexHome: join(home, ".codex"), // never the real $CODEX_HOME
+    isGitWorkTree: () => false, // never the real location of the temp dir
   };
   const writeCfg = (which: "user" | "project" | "local", obj: unknown) => {
     const file = which === "user"
@@ -366,6 +367,32 @@ test("user agents follow CODEX_HOME, even outside the home directory", async () 
     e.writeCfg("user", { sources: { mine: { local: src } } });
     await sync(ctx, { scope: "user" });
     assert.equal(existsSync(join(codexHome, "agents/helper.toml")), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k51: user Codex roots get their own block only while inside a git work tree", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", {
+      "skills/foo/SKILL.md": SKILL("foo"), "agents/helper.md": AGENT("Helps", "B\n"), "rules/r.md": "R\n",
+    });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"], agents: ["helper@mine"], rules: ["r@mine"] } });
+    const codexHome = join(e.home, ".codex");
+    await sync({ ...e.ctx, isGitWorkTree: () => true }, { scope: "user" });
+    assert.equal(readFileSync(join(e.home, ".agents/.gitignore"), "utf8"), "# >>> skilletor >>>\nskills/foo/SKILL.md\n# <<< skilletor <<<\n");
+    assert.equal(readFileSync(join(codexHome, ".gitignore"), "utf8"),
+      "# >>> skilletor >>>\nagents/helper.toml\nskilletor-rules.md\n# <<< skilletor <<<\n");
+    const claudeGi = readFileSync(join(e.home, ".claude/.gitignore"), "utf8");
+    assert.match(claudeGi, /^skilletor\.lock\.json$/m);
+    assert.match(claudeGi, /^agents\/helper\.md$/m);
+    assert.doesNotMatch(claudeGi, /skilletor\.local\.json|skilletor\.json|skilletor-rules/);
+    // Only the Codex home leaves the work tree: its block goes, the others stay.
+    await sync({ ...e.ctx, isGitWorkTree: (dir) => dir !== codexHome }, { scope: "user" });
+    assert.equal(existsSync(join(codexHome, ".gitignore")), false);
+    assert.equal(existsSync(join(e.home, ".agents/.gitignore")), true);
+    assert.equal(existsSync(join(e.home, ".claude/.gitignore")), true);
   } finally {
     e.cleanup();
   }

@@ -1,10 +1,11 @@
 // Tests for the managed .gitignore block (spec §6.4).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
-import { updateGitignore } from "../src/gitignore.ts";
+import { isGitWorkTree, updateGitignore } from "../src/gitignore.ts";
 
 const BEGIN = "# >>> skilletor >>>";
 const END = "# <<< skilletor <<<";
@@ -101,6 +102,22 @@ test("with no fixed entries, an empty block is removed and no file is created (s
     assert.equal(readFileSync(join(tmp.dir, ".gitignore"), "utf8"), "# >>> skilletor >>>\nskills/x/SKILL.md\n# <<< skilletor <<<\n");
     updateGitignore({ dir: tmp.dir, managedPaths: [], fixed: [], enabled: true });
     assert.equal(existsSync(join(tmp.dir, ".gitignore")), false);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// k51: the default work-tree test behind the user-scope blocks (spec §6.4).
+test("isGitWorkTree: true inside a work tree, false when git fails", () => {
+  const tmp = makeTmpDir();
+  try {
+    const repo = join(tmp.dir, "repo");
+    mkdirSync(join(repo, "sub"), { recursive: true });
+    execFileSync("git", ["init", "-q", "-b", "main", repo]);
+    assert.equal(isGitWorkTree(repo), true);
+    assert.equal(isGitWorkTree(join(repo, "sub")), true);
+    assert.equal(isGitWorkTree(join(repo, ".git")), false); // inside the git dir, not the work tree
+    assert.equal(isGitWorkTree(join(tmp.dir, "missing")), false);
   } finally {
     tmp.cleanup();
   }

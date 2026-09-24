@@ -23,6 +23,7 @@ function env() {
     host: { name: "box", os: "linux" },
     user: { name: "getty", home },
     markers: claudeOnly(home),
+    isGitWorkTree: () => false, // never the real location of the temp dir
     background: () => backgroundCalls.push(Date.now()),
   };
   const writeUserCfg = (obj: unknown) =>
@@ -215,6 +216,23 @@ test("no harness detected: session-start warns in one line, never throws", async
     const out = await runHook("session-start", {}, { ...e.ctx, markers: { claude: [], codex: [] } });
     assert.match(out.systemMessage ?? "", /^skilletor: no agent harness detected/);
     assert.equal(out.systemMessage?.includes("\n"), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k51: session-start writes the user block inside a work tree and stays quiet when the test throws", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    const out = await runHook("session-start", { cwd: e.projectDir }, { ...e.ctx, isGitWorkTree: () => true });
+    assert.match(out.hookSpecificOutput?.additionalContext ?? "", /skill foo@mine/);
+    assert.match(readFileSync(join(e.home, ".claude/.gitignore"), "utf8"), /^skills\/foo\/SKILL\.md$/m);
+    const boom = () => { throw new Error("git exploded"); };
+    const again = await runHook("session-start", { cwd: e.projectDir }, { ...e.ctx, isGitWorkTree: boom });
+    assert.equal(again.systemMessage, undefined);
+    assert.equal(existsSync(join(e.home, ".claude/.gitignore")), false); // a failing test counts as "no"
   } finally {
     e.cleanup();
   }

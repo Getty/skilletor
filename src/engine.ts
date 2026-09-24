@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   loadConfig, WILDCARD, type BundleItem, type Harness, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig,
   type WildcardItem,
@@ -33,7 +33,7 @@ import { build, rendersEmpty, type RenderContext } from "./render.ts";
 import { apply, isValidItemName, type PlanItem } from "./apply.ts";
 import { readLock, writeLock, type Lock, type SkipReason } from "./lock.ts";
 import { State } from "./state.ts";
-import { updateGitignore } from "./gitignore.ts";
+import { isGitWorkTree, updateGitignore } from "./gitignore.ts";
 import {
   emptyScopeReport, keyToTypeName, type ItemChange, type ScopeReport, type SyncReport,
 } from "./report.ts";
@@ -51,6 +51,8 @@ export interface EngineContext {
   markers?: HarnessMarkers;
   /** `$CODEX_HOME` (spec §14.2): root of user-scope Codex agents and markers; default from the env. */
   codexHome?: string;
+  /** Does a user-scope root lie inside a git work tree (spec §6.4)? Default: ask git. */
+  isGitWorkTree?: (dir: string) => boolean;
 }
 
 export interface SyncOptions {
@@ -151,6 +153,14 @@ const TYPE_DIR: Record<ItemType, string> = { skill: "skills", agent: "agents", r
 function sourceVersion(lock: Lock, sourceName: string): string | undefined {
   for (const entry of Object.values(lock)) if (entry.source === sourceName) return entry.version;
   return undefined;
+}
+
+/** Fixed entries of the user `~/.claude` block: the lock, and the state dir when it lies
+ *  under `~/.claude` (spec §6.4). Never `skilletor.json`. */
+function userClaudeFixed(claudeDir: string, stateRoot: string): string[] {
+  const rel = relative(claudeDir, stateRoot);
+  const under = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+  return under ? ["skilletor.lock.json", rel.split(sep).join("/") + "/"] : ["skilletor.lock.json"];
 }
 
 function gitRemote(dir: string): string {
@@ -592,24 +602,34 @@ async function syncScope(
     ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings })
     : { overwritten: [], exists: false };
 
-  if (scope === "project") {
-    // One managed block per target root: `.claude/.gitignore` (with the lock and
-    // local config), `.agents/.gitignore` and `.codex/.gitignore` for Codex paths,
-    // the rules file included (spec §6.4, §14.3, §14.8).
+  {
+    // One managed block per target root: `.claude/.gitignore` (with the lock, and the
+    // local config or state dir), `.agents/.gitignore` and `.codex/.gitignore` (or
+    // `$CODEX_HOME/.gitignore`) for Codex paths, the rules file included (spec §6.4,
+    // §14.3, §14.8). User roots get a block only inside a git work tree.
     const newLock = readLock(lockPath);
     const rulesRoot = rootOf(rc, "codex", "rule")!;
+    const inWorkTree = (dir: string): boolean => {
+      try {
+        return (ctx.isGitWorkTree ?? isGitWorkTree)(dir);
+      } catch {
+        return false;
+      }
+    };
     for (const rootDir of allRoots(rc)) {
       const managed = Object.entries(newLock)
         .filter(([key, e]) => !e.block && rootOfKey(rc, key) === rootDir)
         .flatMap(([, e]) => Object.keys(e.files));
       if (rules.exists && rootDir === rulesRoot) managed.push(RULES_FILE);
       const isClaude = rootDir === targetDir;
-      updateGitignore({
-        dir: rootDir,
-        managedPaths: managed,
-        fixed: isClaude ? undefined : [],
-        enabled: scopeCfg.gitignore !== false,
-      });
+      const fixed = !isClaude ? [] : scope === "project" ? undefined : userClaudeFixed(targetDir, ctx.stateRoot);
+      let enabled = scopeCfg.gitignore !== false;
+      if (enabled && scope === "user") {
+        // Ask git only when there is something to list or clean (the hook path stays fast).
+        const relevant = managed.length > 0 || fixed!.length > 0 || existsSync(join(rootDir, ".gitignore"));
+        enabled = relevant && inWorkTree(rootDir);
+      }
+      updateGitignore({ dir: rootDir, managedPaths: managed, fixed, enabled });
     }
   }
 

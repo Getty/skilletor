@@ -77,10 +77,12 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
 
 - Only `skill`, `agent`, `rule` are installable — never hooks, settings or MCP configs.
 - `ref` (git) pins a branch, tag or commit; omit for the remote's HEAD.
-- `gitignore` (project only, default true): a managed `.gitignore` block lists installed
-  paths, the lock and `skilletor.local.json`. `checkInterval` (user only, seconds, default
-  1800): in-session check throttle, `≤ 0` = sync only at session start. Either key in the
-  wrong file is a config error: the config fails to load, nothing syncs.
+- `gitignore` (default true): a managed `.gitignore` block lists installed paths, the lock
+  and `skilletor.local.json` in the project; in user scope a block per root (`~/.claude`,
+  `~/.agents`, `$CODEX_HOME`) only while it lies in a git work tree, listing the lock and
+  state dir but never `skilletor.json`. The user value switches only the user blocks.
+  `checkInterval` (user only, seconds, default 1800): in-session check throttle, `≤ 0` =
+  sync only at session start; in a project file it is a config error (nothing syncs).
 - `targets` (`["claude"]`, `["codex"]` or both), unset = auto-detected. The user file sets
   the machine's set; a project or local file can only narrow it (`["claude"]` keeps a
   project's `AGENTS.md` and `.codex/` untouched). Details: [references/codex.md](references/codex.md).

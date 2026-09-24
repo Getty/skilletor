@@ -301,14 +301,20 @@ files are build artifacts; there are no hardlinks.
 
 ## Git & your own skills
 
-With `"gitignore": true` (default; project config only — in the user config it is a
-config error that stops skilletor loading its config) skilletor keeps a marked block in
+With `"gitignore": true` (default) skilletor keeps a marked block in
 `<project>/.claude/.gitignore` listing the exact managed paths, the lock and
 `skilletor.local.json` (and the same kind of block in `<project>/.agents/.gitignore` and
 `<project>/.codex/.gitignore` for Codex items). Only `skilletor.json` is committed; your
 own hand-written skills beside the managed ones stay version-controlled and are never touched. Set
-`"gitignore": false` to commit everything instead (useful only for items without
-machine-specific variables).
+`"gitignore": false` in the project config to commit everything instead (useful only for
+items without machine-specific variables).
+
+Keep `~` or `~/.claude` in a dotfiles repository? Each user root – `~/.claude`,
+`~/.agents`, `$CODEX_HOME` – that lies inside a git work tree gets the same kind of block
+in its own `.gitignore`, listing the managed paths there; the `~/.claude` block also lists
+`skilletor.lock.json` and the state directory `skilletor/`, never `skilletor.json`. A root
+outside a work tree gets no block. `"gitignore": false` in `~/.claude/skilletor.json`
+removes the user blocks; it does not affect projects.
 
 A file is skilletor-managed exactly when it appears in
 `<scope>/.claude/skilletor.lock.json`. Managed files are overwritten on the next sync —

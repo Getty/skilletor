@@ -158,7 +158,7 @@ function engineEnv() {
   const projectDir = join(tmp.dir, "proj");
   mkdirSync(join(home, ".claude"), { recursive: true });
   mkdirSync(join(projectDir, ".claude"), { recursive: true });
-  const ectx: EngineContext = { home, projectDir, stateRoot: join(tmp.dir, "state"), host: { name: "h", os: "linux" }, user: { name: "u", home }, markers: claudeOnly(home) };
+  const ectx: EngineContext = { home, projectDir, stateRoot: join(tmp.dir, "state"), host: { name: "h", os: "linux" }, user: { name: "u", home }, markers: claudeOnly(home), isGitWorkTree: () => false };
   return { tmp, ectx, home, projectDir, cleanup: () => tmp.cleanup() };
 }
 

@@ -264,12 +264,31 @@ test("checkInterval is user-only: rejected in project config", () => {
   }
 });
 
-test("gitignore is project-only: rejected in user config", () => {
+// k51: user "gitignore" used to be a load error ("project-only"); it now switches
+// the user-scope blocks off and leaves the project value alone (spec §3, §6.4).
+test("gitignore in user config switches only the user scope", () => {
   const { home, projectDir, cleanup } = setup({ user: { gitignore: false } });
   try {
-    assert.throws(() => loadConfig({ home, projectDir }), /gitignore/);
+    const cfg = loadConfig({ home, projectDir });
+    assert.equal(cfg.user.gitignore, false);
+    assert.equal(cfg.project?.gitignore, true);
   } finally {
     cleanup();
+  }
+});
+
+test("gitignore defaults to true in user config and must be a boolean", () => {
+  const def = setup({});
+  try {
+    assert.equal(loadConfig({ home: def.home }).user.gitignore, true);
+  } finally {
+    def.cleanup();
+  }
+  const bad = setup({ user: { gitignore: "no" } });
+  try {
+    assert.throws(() => loadConfig({ home: bad.home }), /"gitignore" must be a boolean/);
+  } finally {
+    bad.cleanup();
   }
 });
 
