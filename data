@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-22T19:48:22Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-22T19:39:37Z
+id: 22
+priority: low
+started: 2026-09-22T19:46:28Z
+status: done
+tags:
+- docs
+- cleanup
+title: 'Stale comment: config.ts says checkInterval default 600, actual 1800'
+updated: 2026-09-24T19:31:15Z
+---
+
+src/config.ts:53 doc comment reads "default 600" while the code (line 247) and README say 1800. hooks.ts DEFAULT_INTERVAL=600 is only the fallback when the config fails to load — fine, but comment should say so.
+
+2026-09-22 19:48 Fixed stale checkInterval doc comment: src/config.ts:53 (was 600, now 1800, noted hooks.ts DEFAULT_INTERVAL=600 is fallback-only). Also fixed same stale value in skills/skilletor/SKILL.md:70 example JSON. typecheck+test+build+check-dist all green (153/153 tests). Commit 0fa7134f9ef014bdaf20860e5295126d868b357c. Note: docs/superpowers/specs/2026-09-22-skilletor-design.md:59 has the same 600/1800 inconsistency but was left alone as a dated draft spec doc, not in CLAUDE.md's tracked-docs list -- flagging for optional follow-up.
