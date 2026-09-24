@@ -70,6 +70,16 @@ snippets/…                 # includes only, not installable
 skilletor.json             # optional: { "description": "…", "vars": { defaults } }
 ```
 
+Claude plugin repos work too: paths listed in `.claude-plugin/plugin.json` `skills` (a
+skill directory, or a directory of them) are added to those under `skills/<name>/` and install as
+`skills/<name>/` wherever they sit. For example:
+
+```bash
+skilletor add anthropics          # → anthropics/skills
+skilletor add obra/superpowers
+skilletor add mattpocock          # → mattpocock/skills, skills listed in its plugin.json
+```
+
 ## Declaring what you want
 
 `skilletor.json` at three levels; the scope follows from which file declares an item:

@@ -5747,7 +5747,7 @@ import { join as join15 } from "node:path";
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
 import { existsSync as existsSync10, readFileSync as readFileSync9, rmSync as rmSync6 } from "node:fs";
-import { basename as basename3, dirname as dirname4, isAbsolute, join as join13, relative as relative2, sep as sep4 } from "node:path";
+import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join13, relative as relative3, sep as sep4 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -7614,7 +7614,7 @@ function writeEntries(dir, entries) {
 
 // src/catalog.ts
 import { existsSync as existsSync6, lstatSync as lstatSync3, readFileSync as readFileSync3, readdirSync } from "node:fs";
-import { join as join8, relative } from "node:path";
+import { basename as basename3, isAbsolute, join as join8, relative } from "node:path";
 var CatalogError = class extends Error {
   name = "CatalogError";
 };
@@ -7690,7 +7690,7 @@ function scan(dir) {
         if (!st.isDirectory()) continue;
         const file = skillFile(p);
         if (!file) continue;
-        items.push({ type, name: entry, description: descriptionOf(file), files: walkFiles(p, dir) });
+        items.push({ type, name: entry, description: descriptionOf(file), files: walkFiles(p, dir), dir: relative(dir, p) });
       } else {
         if (!st.isFile()) continue;
         const name = itemName(entry);
@@ -7699,7 +7699,85 @@ function scan(dir) {
       }
     }
   }
+  items.push(...pluginSkills(dir, items));
   return { items, bundles: scanBundles(dir), meta: readSourceMeta(dir) };
+}
+function pluginSkills(dir, found) {
+  const pdir = join8(dir, ".claude-plugin");
+  const p = join8(pdir, "plugin.json");
+  if (!existsSync6(p)) return [];
+  noSymlink(pdir);
+  noSymlink(p);
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync3(p, "utf8"));
+  } catch (err) {
+    throw new CatalogError(`${p}: invalid JSON (${err.message})`);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+  const raw = parsed.skills;
+  if (raw === void 0) return [];
+  const paths = typeof raw === "string" ? [raw] : raw;
+  if (!Array.isArray(paths) || !paths.every((x) => typeof x === "string")) {
+    throw new CatalogError(`${p}: "skills" must be a string or an array of strings`);
+  }
+  const dirOf = /* @__PURE__ */ new Map();
+  for (const it of found) if (it.type === "skill") dirOf.set(it.name, it.dir ?? join8("skills", it.name));
+  const out = [];
+  const add = (skillDir, file) => {
+    const rel = relative(dir, skillDir);
+    const name = basename3(skillDir);
+    const known = dirOf.get(name);
+    if (known === rel) return;
+    if (known !== void 0) {
+      throw new CatalogError(`${p}: skill "${name}" found twice: ${known} and ${rel}`);
+    }
+    dirOf.set(name, rel);
+    out.push({ type: "skill", name, description: descriptionOf(file), files: walkFiles(skillDir, dir), dir: rel });
+  };
+  for (const entry of paths) {
+    const target = pluginPath(dir, p, entry);
+    const file = skillFile(target);
+    if (file) {
+      add(target, file);
+      continue;
+    }
+    for (const child of readdirSync(target).sort()) {
+      const c = join8(target, child);
+      if (!noSymlink(c).isDirectory()) continue;
+      const f = skillFile(c);
+      if (f) add(c, f);
+    }
+  }
+  return out;
+}
+function pluginPath(dir, pluginFile, entry) {
+  if (isAbsolute(entry) || entry.startsWith("/") || entry.startsWith("\\")) {
+    throw new CatalogError(`${pluginFile}: skills path must not be absolute: ${entry}`);
+  }
+  const segments = entry.split(/[\\/]/).filter((s) => s !== "" && s !== ".");
+  if (segments.includes("..")) {
+    throw new CatalogError(`${pluginFile}: skills path must not contain "..": ${entry}`);
+  }
+  let cur = dir;
+  for (const seg of segments) {
+    cur = join8(cur, seg);
+    if (!existsSync6(cur) && !isDanglingLink(cur)) {
+      throw new CatalogError(`${pluginFile}: skills path does not exist: ${entry}`);
+    }
+    noSymlink(cur);
+  }
+  if (!lstatSync3(cur).isDirectory()) {
+    throw new CatalogError(`${pluginFile}: skills path is not a directory: ${entry}`);
+  }
+  return cur;
+}
+function isDanglingLink(path) {
+  try {
+    return lstatSync3(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 function scanBundles(dir) {
   const bdir = join8(dir, "bundles");
@@ -7749,7 +7827,7 @@ function readSourceMeta(dir) {
 // src/render.ts
 var import_nunjucks = __toESM(require_nunjucks(), 1);
 import { readFileSync as readFileSync4 } from "node:fs";
-import { join as join9, resolve as resolvePath2, sep as sep2 } from "node:path";
+import { join as join9, relative as relative2, resolve as resolvePath2, sep as sep2 } from "node:path";
 var RenderError = class extends Error {
   name = "RenderError";
 };
@@ -7790,18 +7868,22 @@ function build(item, sourceDir, context) {
         if (err instanceof RenderError) throw err;
         throw new RenderError(`${file}: ${err.message}`);
       }
-      out.set(file.slice(0, -".njk".length), Buffer.from(rendered, "utf8"));
+      out.set(installPath(item, file.slice(0, -".njk".length)), Buffer.from(rendered, "utf8"));
     } else {
-      out.set(file, readFileSync4(join9(sourceDir, file)));
+      out.set(installPath(item, file), readFileSync4(join9(sourceDir, file)));
     }
   }
   return out;
 }
+function installPath(item, file) {
+  if (item.type !== "skill" || item.dir === void 0) return file;
+  return join9("skills", item.name, relative2(item.dir, file));
+}
 var FRONTMATTER = /^\s*---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
 function rendersEmpty(item, output) {
-  const main = item.type === "skill" ? `skills/${item.name}/SKILL.md` : `${item.type}s/${item.name}.md`;
-  if (!item.files.includes(`${main}.njk`) || item.files.includes(main)) return false;
-  const text = output.get(main)?.toString("utf8");
+  const src = item.type === "skill" ? join9(item.dir ?? join9("skills", item.name), "SKILL.md") : `${item.type}s/${item.name}.md`;
+  if (!item.files.includes(`${src}.njk`) || item.files.includes(src)) return false;
+  const text = output.get(installPath(item, src))?.toString("utf8");
   if (text === void 0) return false;
   return text.replace(FRONTMATTER, "").trim() === "";
 }
@@ -8312,8 +8394,8 @@ function sourceVersion(lock, sourceName) {
   return void 0;
 }
 function userClaudeFixed(claudeDir, stateRoot) {
-  const rel = relative2(claudeDir, stateRoot);
-  const under2 = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+  const rel = relative3(claudeDir, stateRoot);
+  const under2 = rel !== "" && !rel.startsWith("..") && !isAbsolute2(rel);
   return under2 ? ["skilletor.lock.json", rel.split(sep4).join("/") + "/"] : ["skilletor.lock.json"];
 }
 function gitRemote(dir) {
@@ -8330,7 +8412,7 @@ function makeContext(ctx, scope, harness, targetDir, item, scopeVars, sourceVars
   return {
     // source defaults < bundle vars (bundle items only) < user < project < local (spec §5, §15.3)
     vars: { ...sourceVars, ...bundleVars, ...scopeVars },
-    project: scope === "project" ? { dir: ctx.projectDir, name: basename3(ctx.projectDir), git_remote: gitRemote(ctx.projectDir) } : void 0,
+    project: scope === "project" ? { dir: ctx.projectDir, name: basename4(ctx.projectDir), git_remote: gitRemote(ctx.projectDir) } : void 0,
     scope,
     harness,
     target: { dir: targetDir },
@@ -8643,8 +8725,8 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, n
     rep.warnings.push(`bundle vars conflict on ${k} set different values; neither applies to ${items.join(", ")}`);
   }
   const labelOf = (abs) => {
-    const rel = relative2(base, abs);
-    return rel.startsWith("..") || isAbsolute(rel) ? abs : rel;
+    const rel = relative3(base, abs);
+    return rel.startsWith("..") || isAbsolute2(rel) ? abs : rel;
   };
   const result = apply(plan, {
     targetDir,

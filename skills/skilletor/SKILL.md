@@ -54,6 +54,12 @@ skilletor trust <source>                  # confirm a project-declared source (s
 sync; `check` writes nothing, exits non-zero when a source changed. `uninstall` edits one
 config; no explicit entry there → exit 1, config untouched, the error names what covers it.
 
+Sources use `skills/<name>/`, `agents/<name>.md`, `rules/<name>.md`; Claude plugin repos
+work too (skill paths from `.claude-plugin/plugin.json` `skills`, installed as
+`skills/<name>/`): `skilletor add anthropics` (→ anthropics/skills), `skilletor add
+obra/superpowers`, `skilletor add mattpocock` (→ mattpocock/skills, skills listed in its
+plugin.json).
+
 ## Config
 
 The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs under `~`),

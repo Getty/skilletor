@@ -6,9 +6,10 @@
 // throwOnUndefined on (a typo must not silently produce an empty skill).
 // Includes/imports/macros resolve against the source root via a custom loader
 // that rejects any path leaving it. `render` knows nothing of the target
-// filesystem — it returns paths relative to the source (with `.njk` stripped).
+// filesystem — it returns paths relative to the source (with `.njk` stripped),
+// except that a skill's files always land under `skills/<name>/` (spec §4.1).
 import { readFileSync } from "node:fs";
-import { join, resolve as resolvePath, sep } from "node:path";
+import { join, relative, resolve as resolvePath, sep } from "node:path";
 import nunjucks from "nunjucks";
 import type { Harness, ItemType } from "./config.ts";
 import type { CatalogItem } from "./catalog.ts";
@@ -76,13 +77,21 @@ export function build(
         if (err instanceof RenderError) throw err;
         throw new RenderError(`${file}: ${(err as Error).message}`);
       }
-      out.set(file.slice(0, -".njk".length), Buffer.from(rendered, "utf8"));
+      out.set(installPath(item, file.slice(0, -".njk".length)), Buffer.from(rendered, "utf8"));
     } else {
-      out.set(file, readFileSync(join(sourceDir, file)));
+      out.set(installPath(item, file), readFileSync(join(sourceDir, file)));
     }
   }
 
   return out;
+}
+
+/** Where a source file of `item` installs: a skill's files go under `skills/<name>/`
+ *  wherever its directory sits in the source (a Claude plugin's nested skills, spec
+ *  §4.1); agents and rules keep their source path. */
+function installPath(item: CatalogItem, file: string): string {
+  if (item.type !== "skill" || item.dir === undefined) return file;
+  return join("skills", item.name, relative(item.dir, file));
 }
 
 /** A leading YAML frontmatter block (after optional whitespace), closed by `---`. */
@@ -94,9 +103,9 @@ const FRONTMATTER = /^\s*---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
  * item does not apply in this scope. A non-template main file is never empty.
  */
 export function rendersEmpty(item: CatalogItem, output: Map<string, Buffer>): boolean {
-  const main = item.type === "skill" ? `skills/${item.name}/SKILL.md` : `${item.type}s/${item.name}.md`;
-  if (!item.files.includes(`${main}.njk`) || item.files.includes(main)) return false;
-  const text = output.get(main)?.toString("utf8");
+  const src = item.type === "skill" ? join(item.dir ?? join("skills", item.name), "SKILL.md") : `${item.type}s/${item.name}.md`;
+  if (!item.files.includes(`${src}.njk`) || item.files.includes(src)) return false;
+  const text = output.get(installPath(item, src))?.toString("utf8");
   if (text === undefined) return false;
   return text.replace(FRONTMATTER, "").trim() === "";
 }

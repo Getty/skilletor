@@ -6,11 +6,19 @@
 //   snippets/…            (not installable)
 //   bundles/<name>.yaml|.yml  (optional: named item sets, spec §15)
 //   skilletor.json        (optional: { description, vars })
+//   .claude-plugin/plugin.json  (optional: a Claude plugin's `skills` paths)
+//
+// A Claude plugin repo lists skill directories in plugin.json `skills` (a path or
+// an array of paths, relative to the source root): a directory holding
+// SKILL.md[.njk] is one skill, any other is scanned one level deep like skills/.
+// They are added to skills/<name>/; the same directory counts once, two
+// directories with one name are an error. A skill's `dir` records where it lives
+// in the source; it always installs as skills/<name>/ (render.ts maps the paths).
 //
 // Names come from the path; descriptions from item frontmatter (read raw for
 // .njk, never rendered). Symlinks anywhere in the tree are rejected (spec §9).
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, isAbsolute, join, relative } from "node:path";
 import type { ItemType } from "./config.ts";
 import { BundleError, parseBundle, type BundleDef } from "./bundles.ts";
 
@@ -24,6 +32,9 @@ export interface CatalogItem {
   description?: string;
   /** Files that make up the item, relative to the source dir, sorted. */
   files: string[];
+  /** Skills only: the skill's directory relative to the source dir (default
+   *  `skills/<name>`); its files install under `skills/<name>/`. */
+  dir?: string;
 }
 
 export interface SourceMeta {
@@ -135,7 +146,7 @@ export function scan(dir: string): Catalog {
         if (!st.isDirectory()) continue;
         const file = skillFile(p);
         if (!file) continue;
-        items.push({ type, name: entry, description: descriptionOf(file), files: walkFiles(p, dir) });
+        items.push({ type, name: entry, description: descriptionOf(file), files: walkFiles(p, dir), dir: relative(dir, p) });
       } else {
         if (!st.isFile()) continue;
         const name = itemName(entry);
@@ -145,7 +156,94 @@ export function scan(dir: string): Catalog {
     }
   }
 
+  items.push(...pluginSkills(dir, items));
   return { items, bundles: scanBundles(dir), meta: readSourceMeta(dir) };
+}
+
+/** Skills listed in `.claude-plugin/plugin.json` `skills` that `found` does not
+ *  already hold (by directory); a second directory for a known name is an error. */
+function pluginSkills(dir: string, found: CatalogItem[]): CatalogItem[] {
+  const pdir = join(dir, ".claude-plugin");
+  const p = join(pdir, "plugin.json");
+  if (!existsSync(p)) return [];
+  noSymlink(pdir);
+  noSymlink(p);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(p, "utf8"));
+  } catch (err) {
+    throw new CatalogError(`${p}: invalid JSON (${(err as Error).message})`);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+  const raw = (parsed as Record<string, unknown>).skills;
+  if (raw === undefined) return [];
+  const paths = typeof raw === "string" ? [raw] : raw;
+  if (!Array.isArray(paths) || !paths.every((x) => typeof x === "string")) {
+    throw new CatalogError(`${p}: "skills" must be a string or an array of strings`);
+  }
+
+  const dirOf = new Map<string, string>(); // skill name -> its dir, relative to the source
+  for (const it of found) if (it.type === "skill") dirOf.set(it.name, it.dir ?? join("skills", it.name));
+  const out: CatalogItem[] = [];
+  const add = (skillDir: string, file: string) => {
+    const rel = relative(dir, skillDir);
+    const name = basename(skillDir);
+    const known = dirOf.get(name);
+    if (known === rel) return;
+    if (known !== undefined) {
+      throw new CatalogError(`${p}: skill "${name}" found twice: ${known} and ${rel}`);
+    }
+    dirOf.set(name, rel);
+    out.push({ type: "skill", name, description: descriptionOf(file), files: walkFiles(skillDir, dir), dir: rel });
+  };
+
+  for (const entry of paths as string[]) {
+    const target = pluginPath(dir, p, entry);
+    const file = skillFile(target);
+    if (file) {
+      add(target, file);
+      continue;
+    }
+    for (const child of readdirSync(target).sort()) {
+      const c = join(target, child);
+      if (!noSymlink(c).isDirectory()) continue;
+      const f = skillFile(c);
+      if (f) add(c, f);
+    }
+  }
+  return out;
+}
+
+/** Resolve one plugin.json skills path to a directory inside the source; every
+ *  segment is checked, so neither `..` nor a symlink can leave the source root. */
+function pluginPath(dir: string, pluginFile: string, entry: string): string {
+  if (isAbsolute(entry) || entry.startsWith("/") || entry.startsWith("\\")) {
+    throw new CatalogError(`${pluginFile}: skills path must not be absolute: ${entry}`);
+  }
+  const segments = entry.split(/[\\/]/).filter((s) => s !== "" && s !== ".");
+  if (segments.includes("..")) {
+    throw new CatalogError(`${pluginFile}: skills path must not contain "..": ${entry}`);
+  }
+  let cur = dir;
+  for (const seg of segments) {
+    cur = join(cur, seg);
+    if (!existsSync(cur) && !isDanglingLink(cur)) {
+      throw new CatalogError(`${pluginFile}: skills path does not exist: ${entry}`);
+    }
+    noSymlink(cur);
+  }
+  if (!lstatSync(cur).isDirectory()) {
+    throw new CatalogError(`${pluginFile}: skills path is not a directory: ${entry}`);
+  }
+  return cur;
+}
+
+function isDanglingLink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 /** `bundles/<name>.yaml|.yml`; both for one name is an error of that bundle. */
