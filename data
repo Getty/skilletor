@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-24T19:31:28Z
+claimed_by: claude
+class: standard
+completed: 2026-09-24T19:31:28Z
+created: 2026-09-24T17:28:33Z
+id: 61
+priority: low
+started: 2026-09-24T18:59:49Z
+status: done
+tags:
+- docs
+title: skills/skilletor/SKILL.md CLI reference omits -h/-v short flags
+updated: 2026-09-24T19:31:28Z
+---
+
+src/cli.ts usage text documents both long and short forms: "-h, --help" and
+"-v, --version". README.md CLI reference mirrors both ("`-h`/`--help` anywhere ...; `-v`/`--version`
+only as the first argument."). skills/skilletor/SKILL.md Commands section only says
+"`--help` anywhere only prints usage; `--version` only as the first argument." - the short
+forms -h/-v are never mentioned anywhere in SKILL.md. Minor, but the release checklist wants
+the SKILL.md command table to list exactly the commands and flags in cli.ts usage text. Add
+"-h/" and "-v/" to that sentence.
