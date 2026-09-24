@@ -49,8 +49,10 @@ Options:
   --force               sync: adopt foreign files on conflict;
                         source remove: remove even if items are installed
   --project-dir <dir>   Project root (default: git top level of cwd, else cwd)
-  -h, --help            Show this help
-  -v, --version         Show the version
+  -h, --help            Show this help (anywhere; nothing else runs)
+  -v, --version         Show the version (first argument only)
+
+An option the command does not accept is an error (exit 2).
 `;
 
 interface Flags {
@@ -59,13 +61,40 @@ interface Flags {
   force: boolean;
   project: boolean;
   projectDir?: string;
+  /** Every option given, by name (`--scope=user` → `--scope`), in order. */
+  options: string[];
   rest: string[];
 }
 
+/** The options each command accepts (spec §7); `--project-dir` goes with every one.
+ *  `hook` is absent: it is internal and must never fail (spec §8). */
+const ACCEPTED: Record<string, string[]> = {
+  sync: ["--scope", "--json", "--force"],
+  check: ["--scope", "--json"],
+  status: ["--scope", "--json"],
+  add: ["--project"],
+  "source list": ["--json"],
+  "source remove": ["--project", "--force"],
+  available: ["--json"],
+  install: ["--project"],
+  uninstall: ["--project"],
+  trust: [],
+};
+
+/** The first option `cmd` does not accept, if any. */
+function unknownOption(cmd: string, flags: Flags): string | undefined {
+  if (cmd !== "source" && !Object.hasOwn(ACCEPTED, cmd)) return undefined; // unknown command: its own error
+  const key = cmd === "source" ? `source ${flags.rest[0]}` : cmd;
+  // `source` without list/remove keeps its own usage error; any known option is fine there.
+  const accepted = (Object.hasOwn(ACCEPTED, key) ? ACCEPTED[key] : undefined) ?? (cmd === "source" ? [...ACCEPTED["source list"]!, ...ACCEPTED["source remove"]!] : []);
+  return flags.options.find((o) => o !== "--project-dir" && !accepted.includes(o));
+}
+
 function parseFlags(args: string[]): Flags {
-  const flags: Flags = { scope: "all", json: false, force: false, project: false, rest: [] };
+  const flags: Flags = { scope: "all", json: false, force: false, project: false, options: [], rest: [] };
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
+    if (a.startsWith("-")) flags.options.push(a.startsWith("--") ? a.replace(/=.*/s, "") : a);
     if (a === "--json") flags.json = true;
     else if (a === "--force") flags.force = true;
     else if (a === "--project") flags.project = true;
@@ -137,17 +166,29 @@ function syncText(r: SyncReport): string {
 }
 
 export async function run(argv: string[]): Promise<number> {
-  if (argv.includes("--version") || argv.includes("-v")) {
+  // Argument hygiene (spec §7): --version only first, --help anywhere and alone.
+  if (argv[0] === "--version" || argv[0] === "-v") {
     process.stdout.write(VERSION + "\n");
     return 0;
   }
-  if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
+  if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
+    // No command has its own help yet; every --help prints the general usage.
     process.stdout.write(USAGE);
     return 0;
   }
 
   const cmd = argv[0]!;
+  if (cmd.startsWith("-")) {
+    process.stderr.write(`skilletor: unknown option: ${cmd} (run skilletor --help)\n`);
+    return 2;
+  }
   const flags = parseFlags(argv.slice(1));
+  const unknown = cmd === "hook" ? undefined : unknownOption(cmd, flags);
+  if (unknown !== undefined) {
+    const name = cmd === "source" && Object.hasOwn(ACCEPTED, `source ${flags.rest[0]}`) ? `source ${flags.rest[0]}` : cmd;
+    process.stderr.write(`skilletor: unknown option for ${name}: ${unknown} (run skilletor --help)\n`);
+    return 2;
+  }
   if (!["user", "project", "all"].includes(flags.scope)) {
     process.stderr.write(`skilletor: invalid --scope: ${flags.scope}\n`);
     return 2;

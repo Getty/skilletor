@@ -61,9 +61,14 @@ test("no arguments prints usage", () => {
 });
 
 test("an unknown command exits non-zero with a message", () => {
-  const r = runCli(["frobnicate"]);
-  assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /unknown command/i);
+  for (const args of [["frobnicate"], ["frobnicate", "--json"], ["constructor", "--json"]]) {
+    const r = runCli(args);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /unknown command/i);
+  }
+  const sub = runCli(["source", "toString", "--json"]);
+  assert.equal(sub.status, 2);
+  assert.match(sub.stderr, /usage: source list \| source remove/);
 });
 
 // k34: wildcard install through the real binary, with HOME in a temp dir.
@@ -349,4 +354,93 @@ test("default project dir: git top level of cwd; a subdir of a git ~ has no proj
   const hs = runCli(["status"], env, undefined, join(home, "notes"));
   assert.equal(hs.status, 0, hs.stderr);
   assert.match(hs.stdout, /^project scope: none/m);
+});
+
+// k55: argument hygiene (spec §7).
+function hygieneHome(name: string) {
+  const home = join(tmp.dir, `${name}-home`);
+  const src = join(tmp.dir, `${name}-src`);
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(src, "skills", "foo"), { recursive: true });
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), "---\nname: foo\ndescription: foo\n---\nF\n");
+  const cfg = JSON.stringify({ sources: { s: { local: src } }, install: { skills: ["foo@s"] } });
+  writeFileSync(join(home, ".claude", "skilletor.json"), cfg);
+  const env = claudeOnlyEnv(home);
+  const untouched = () => {
+    assert.equal(existsSync(join(home, ".claude/skills/foo")), false, "nothing installed");
+    assert.equal(existsSync(join(home, ".claude/skilletor.lock.json")), false, "no lock written");
+    assert.equal(readFileSync(join(home, ".claude", "skilletor.json"), "utf8"), cfg, "config untouched");
+  };
+  return { home, env, untouched };
+}
+
+test("-h/--help anywhere prints the usage and does nothing else: sync --help never syncs", () => {
+  const h = hygieneHome("help");
+  const cases = [
+    ["sync", "--help"], ["sync", "-h"], ["sync", "--scope", "user", "--help"], ["--help", "sync"],
+    ["install", "bar@s", "--help"], ["uninstall", "foo@s", "-h"], ["source", "remove", "s", "--help"],
+    ["add", "x", "/nowhere", "--help"], ["trust", "s", "-h"], ["sync", "--bogus", "--help"],
+  ];
+  for (const args of cases) {
+    const r = runCli([...args, "--project-dir", h.home], h.env);
+    assert.equal(r.status, 0, `${args.join(" ")}: ${r.stderr}`);
+    assert.match(r.stdout, /^Usage:$/m, args.join(" "));
+    assert.equal(r.stderr, "", args.join(" "));
+    h.untouched();
+  }
+});
+
+test("-v/--version counts only as the first argument", () => {
+  const h = hygieneHome("ver");
+  for (const v of ["-v", "--version"]) {
+    const first = runCli([v, "sync"], h.env);
+    assert.equal(first.status, 0);
+    assert.match(first.stdout.trim(), /^\d+\.\d+\.\d+/);
+    const later = runCli(["sync", v, "--project-dir", h.home], h.env);
+    assert.equal(later.status, 2, v);
+    assert.match(later.stderr, new RegExp(`unknown option.*${v}`), v);
+    assert.equal(later.stdout, "");
+    h.untouched();
+  }
+});
+
+test("an option the command does not accept: exit 2, named, nothing touched", () => {
+  const h = hygieneHome("unk");
+  const cases: [string[], string][] = [
+    [["sync", "--bogus"], "--bogus"], [["sync", "--project"], "--project"], [["sync", "-x"], "-x"],
+    [["check", "--force"], "--force"], [["status", "--force"], "--force"],
+    [["install", "foo@s", "--json"], "--json"], [["install", "foo@s", "--scope", "user"], "--scope"],
+    [["uninstall", "foo@s", "--force"], "--force"], [["add", "x", "/nowhere", "--json"], "--json"],
+    [["source", "list", "--force"], "--force"], [["source", "remove", "s", "--json"], "--json"],
+    [["available", "--project"], "--project"], [["trust", "s", "--json"], "--json"],
+    [["--bogus"], "--bogus"], [["sync", "--scope=user", "--jsn"], "--jsn"],
+  ];
+  for (const [args, opt] of cases) {
+    const r = runCli([...args, "--project-dir", h.home], h.env);
+    assert.equal(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
+    assert.match(r.stderr, /^skilletor: unknown option( for [a-z ]+)?: /, args.join(" "));
+    assert.ok(r.stderr.includes(`: ${opt} `), `${args.join(" ")}: ${r.stderr}`);
+    h.untouched();
+  }
+});
+
+test("every documented option still works for its command", () => {
+  const h = hygieneHome("ok");
+  const pd = ["--project-dir", h.home];
+  const cases: string[][] = [
+    ["status", "--json", "--scope", "user"], ["status", "--scope=all"], ["check", "--json", "--scope", "user"],
+    ["available", "s", "--json"], ["source", "list", "--json"],
+    ["sync", "--json", "--force", "--scope", "user"], ["sync", "--project-dir=" + h.home],
+    ["install", "foo@s", "--project"], ["uninstall", "foo@s", "--project"],
+    ["trust", "nope"], ["add", "extra", join(tmp.dir, "ok-src"), "--project"],
+    ["source", "remove", "extra", "--project", "--force"],
+  ];
+  for (const args of cases) {
+    const r = runCli([...args, ...pd], h.env);
+    assert.doesNotMatch(r.stderr, /unknown option/, args.join(" "));
+    assert.notEqual(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
+  }
+  // The internal hook flag stays accepted, and the hook still exits 0 on anything.
+  const hook = runCli(["hook", "session-start", "--harness", "codex", "--whatever"], h.env, "{}");
+  assert.equal(hook.status, 0);
 });

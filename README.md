@@ -564,7 +564,10 @@ skilletor sync --force                    # overwrite and adopt unmanaged files 
 skilletor trust <source>
 ```
 
-`check` writes nothing and exits non-zero when a source has changed.
+`check` writes nothing and exits non-zero when a source has changed. `--project-dir` goes
+with every command; any other option a command does not list is an error (exit 2, nothing
+runs). `-h`/`--help` anywhere prints the usage and runs nothing (`sync --help` does not
+sync); `-v`/`--version` only as the first argument.
 
 ## Requirements
 
