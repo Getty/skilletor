@@ -6,8 +6,9 @@ Build/test: `npm run typecheck && npm test && npm run build && npm run check-dis
 
 ## Delegation
 
-Delegate behavior-relevant code and skill text to the right agent instead of
-touching it yourself — principle and lane are in `.claude/rules/skilletor-rules.md`.
+The main agent delegates behavior-relevant code and skill text to the right agent instead of
+touching it itself (the `skilletor-*` agents work their own lane) — principle and
+lane are in `.claude/rules/skilletor-rules.md`.
 
 | Task | Agent |
 |---|---|
