@@ -1,0 +1,41 @@
+---
+claimed_at: 2026-09-24T19:31:28Z
+claimed_by: claude
+class: standard
+completed: 2026-09-24T19:31:28Z
+created: 2026-09-24T17:28:17Z
+id: 60
+priority: high
+started: 2026-09-24T18:59:39Z
+status: done
+tags:
+- docs
+- release
+- marketplace
+title: Getty/marketplace description for skilletor is stale vs. plugin.json
+updated: 2026-09-24T19:31:28Z
+---
+
+Getty/marketplace .claude-plugin/marketplace.json (local checkout ~/dev/marketplace,
+commit c9521cc "Add skilletor plugin (Claude Code for now)") still has:
+
+  "Remote skills, agents and rules for Claude Code - declared once, synced on every session,
+  templated per project. The preferred successor to manage-skills."
+
+Current .claude-plugin/plugin.json (v0.2.0) description:
+
+  "Remote skills, agents and rules for Claude Code and Codex - declared once in
+  skilletor.json, synced on every session, templated per project. Adds sources like
+  marketplaces and puts the skilletor CLI on PATH."
+
+Mismatches: marketplace text says "Claude Code" only (Codex support has since shipped,
+k39-k52), omits the "in skilletor.json" / "Adds sources like marketplaces and puts the CLI
+on PATH" detail plugin.json now carries, and keeps a "preferred successor to manage-skills"
+line plugin.json does not have. This is the item the release checklist calls "the
+marketplace entrys description matches plugin.json" - it currently does not.
+
+~/dev/marketplace is out of scope for every skilletor agent to edit (house rule: never edit
+Getty/marketplace without the maintainers explicit go-ahead). Also relevant to k21 (Codex
+support: hooks + list skilletor in Getty/marketplace Codex manifest) - that ticket already
+tracks getting skilletor into .agents/plugins/marketplace.json; this ticket is specifically
+about the Claude-side description text going stale.
