@@ -1,0 +1,38 @@
+---
+block_reason: 'Eval-Lauf via claude_with_openai wurde vom Auto-Mode-Permission-Classifier
+  als ''Data Exfiltration'' blockiert (Traffic geht durch lokalen Proxy zum ChatGPT/Codex-Account).
+  Subagent hat bewusst keinen Workaround versucht (kein manuelles ANTHROPIC_BASE_URL-Setzen,
+  kein Fallback auf plain claude). Braucht Freigabe/Ausführung durch getty selbst.
+  Statischer Check (skill-static-check.mjs) war sauber: 0 Fehler/Warnungen. evals/results/
+  ist in .gitignore, nichts committet.'
+blocked: true
+claimed_at: 2026-09-22T20:11:30Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-22T19:39:42Z
+id: 23
+priority: medium
+started: 2026-09-22T19:48:06Z
+status: done
+tags:
+- skills
+- eval
+title: Run the evals/ suite once and record the bundled skill's strength
+updated: 2026-09-24T19:31:15Z
+---
+
+evals/config-question + evals/off-target exist but have never been run (claude plugin eval is billed). Needs the maintainer go-ahead, then: claude plugin eval . --runs 3 --no-publish --json evals/results/first.json. Record delta (S0/S1/S2) per skill-assessment and file fixes for skilletor-skill-author.
+
+2026-09-22 20:11 Eval-Lauf durchgefuehrt 2026-09-22, Claude 2.1.280, Plugin skilletor 0.1.1, Backend GPT-5.6 Sol/Terra/Luna via claude_with_openai-Proxy (NICHT echtes Claude -- Caveat gilt fuer alle Zahlen). 12 Sessions, $4.74, 726s. Blocker unterwegs: Auto-Mode-Classifier stufte den Proxy-Aufruf zunaechst als Data-Exfiltration ein (User hat Bypass aktiviert), danach schlug der Lauf strukturell fehl wegen eines Hardlinks unter .claude/skills/kanban-issues-karr-cli (manage-skills) im Plugin-Root -- fuer den Lauf temporaer ausgelagert und danach zurueckgelegt, kein Dauerzustand geaendert.
+
+Ergebnis:
+- off-target (Skill soll NICHT feuern): 6/6 PASS beide Arme, 0 Fehlaufrufe. Keine S-Stufe noetig, das ist der erwartete Negativtest.
+- config-question (Skill soll helfen): with-Arm 2/3 PASS, Skill hat in 3/3 Runs gefeuert. without-Arm 0/3, alle 3 Runs liefen in den 120s-Timeout (21-22 Turns trotz maxTurns=6) ohne jede Antwort. Delta +0.667. Vorlaeufig S2, aber mit Einschraenkungen: n=3, nur GPT-Backend, ohne-Arm scheitert am Timeout statt an falscher Antwort, und der eine with-Fail war ein Grader-Bug (siehe #24) -- mit korrigiertem Grader vermutlich 3/3 PASS.
+- Der vermeintliche Bug '--scope project erfunden' ist KEIN Bug: das Flag existiert real (src/cli.ts:33/57/108, dokumentiert in skills/skilletor/SKILL.md:38). Der Grader hat falsch geurteilt, siehe #24.
+
+Statischer Check auf skills/skilletor: 0 Fehler/Warnungen.
+
+Folge-Tickets angelegt: #24 (Grader kennt echte CLI-Flags nicht, high, skilletor-skill-author), #25 (Baseline-Arm timeoutet statt zu antworten / maxTurns wird evtl. nicht durchgesetzt, medium, skilletor-skill-author), #26 (Re-Run auf echtem Claude-Backend nach Fix von #24/#25, low, braucht Maintainer-Freigabe wegen Kosten).
+
+evals/results/ bleibt wie gehabt in .gitignore, nichts committet (first.json ist ohnehin nur Kopie von aggregate-result.json, enthaelt fluechtige /tmp-Pfade).
