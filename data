@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T03:00:49Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T02:23:18Z
+id: 40
+priority: medium
+started: 2026-09-23T02:38:47Z
+status: done
+tags:
+- codex
+- engine
+title: 'Codex phase 2: convert agents (.md) to Codex agent TOML'
+updated: 2026-09-24T19:31:15Z
+---
+
+Part of #21, after phase 1. ~/.codex/agents/*.toml and .codex/agents/*.toml: name, description, developer_instructions (body); briefing.skills -> [briefing] skills; tools/model have no direct mapping.
+
+2026-09-23 02:51 Phase 2 implemented, uncommitted. src/toml.ts (own writer), src/frontmatter.ts (YAML subset reader), src/convert.ts (agent md -> Codex role TOML + convertForTarget), targets.ts roots now per-scope functions (codex agents: user $CODEX_HOME/agents, project <repo>/.codex/agents), engine converts between render and apply, .codex/.gitignore block, notes: rules only + briefing-dropped count. smol-toml added as devDependency (round-trip tests only). 287 tests green, dist rebuilt. DEVIATION: briefing.skills NOT written as [briefing] — Codex 0.153.4 rejects unknown fields in agent roles ('unknown field briefing') and ignores the whole role, user and trusted project alike; one-line switch CODEX_BRIEFING_TABLE in convert.ts. Verified via codex app-server configWarning: all generated roles (nasty quotes/backslashes/CRLF/''' /""") load; twin-name trick proves they parse as named roles. Project .codex/agents load only in trusted projects.
+
+2026-09-23 03:00 Codex support phases 1-3 complete (k39 468fa12, k40 2ca9bb1, k41 uncommitted in working tree). Needs review + commit of k41, then doc work (README, skills/skilletor/SKILL.md, usage) by the skill-author.
