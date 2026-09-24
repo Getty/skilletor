@@ -8381,7 +8381,6 @@ function reportText(r) {
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
   for (const w of r.warnings ?? []) lines.push(`skilletor: warning: ${w}`);
-  for (const n of r.notes ?? []) lines.push(`skilletor: note: ${n}`);
   return lines.join("\n");
 }
 function withoutBriefing(r) {

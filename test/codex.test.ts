@@ -112,7 +112,6 @@ test("claude only: output and lock are exactly as before targets", async () => {
     const src = source(e.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo"), "agents/a.md": "---\ndescription: a\n---\nA\n" });
     e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"], agents: ["a@mine"] } });
     const r = await sync(e.ctx, { scope: "user" });
-    assert.equal(r.notes, undefined);
     assert.equal(
       reportText(r),
       "skilletor: user scope\n  + skills/foo (active now)\n  + agents/a (active after /reload-plugins or restart)",
@@ -326,7 +325,7 @@ test("codex only: an agent becomes $CODEX_HOME/agents/<name>.toml, nothing in .c
     assert.deepEqual(Object.keys(lock), ["codex:agents/helper"]);
     assert.deepEqual(Object.keys(lock["codex:agents/helper"]!.files), ["agents/helper.toml"]);
     assert.match(reportText(r), /\+ codex:agents\/helper \(active from the next Codex session\)/);
-    assert.equal(r.notes, undefined); // agents no longer "not installed for Codex"
+    assert.doesNotMatch(reportText(r), /not installed/);
   } finally {
     e.cleanup();
   }
@@ -474,7 +473,6 @@ test("briefing.skills reaches the Codex agent as a comment line; no run note", a
     const text = readFileSync(join(e.home, ".codex/agents/b1.toml"), "utf8");
     assert.match(text, /^# briefing: skills = \["a"\]\ndeveloper_instructions = /m);
     assert.equal("briefing" in (parseToml(text) as Record<string, unknown>), false);
-    assert.equal(r.notes, undefined);
     assert.doesNotMatch(reportHook(r).additionalContext ?? "", /not written/);
   } finally {
     e.cleanup();
@@ -562,7 +560,6 @@ test("codex only: rules become a sorted rules file in $CODEX_HOME, AGENTS.md onl
     e.writeCfg("user", { sources: { mine: { local: src } }, install: { rules: ["zeta@mine", "alpha@mine"] } });
     const r = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r.scopes[0]!.warnings, []);
-    assert.equal(r.notes, undefined);
     const rulesFile = join(e.home, ".codex/skilletor-rules.md");
     assert.equal(readFileSync(rulesFile, "utf8"), RULES("user",
       ["alpha", "mine", "Applies when working with files matching: `k8s/**`.\n\nAlpha rule.\n"],
