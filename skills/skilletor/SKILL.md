@@ -160,6 +160,20 @@ Install the set with `"rules": ["*@shared"]`, switch each with `"vars": { "kuber
 a var printed inside the gate (`k8s_context`) needs a default in the source's `skilletor.json`.
 User-scope items see only user vars. `{% if harness == "claude" %}` gates to one harness.
 
+**Tags inside frontmatter: `{%-`.** Nunjucks runs without trimBlocks, so a tag on its own
+line leaves a blank line — and briefing's parser stops at the first blank line in a
+`briefing:` block, silently dropping every skill after it. Open each tag with `{%-`
+(left side only; `-%}` also eats the next newline and merges the lines):
+
+```njk
+briefing:
+  skills:
+    - code-review
+    {%- if vars.perl %}
+    - perl-style
+    {%- endif %}
+```
+
 ## Trust
 
 `skilletor add` (or your own user config) trusts a source. One declared **only** in a
