@@ -18,5 +18,6 @@ touching it yourself — principle and lane are in `.claude/rules/skilletor-rule
 
 The agents carry their skills via `briefing.skills` (see `.claude/agents/`);
 the main agent delegates rather than loading them. Project skills live under
-`.claude/skills/` (`skilletor-core`, `skill-assessment`); the shared authoring
+`.claude/skills/` (`skilletor-core`, `skill-assessment`,
+`kanban-issues-karr-cli`); the shared authoring
 skills come from `~/.claude/skills/`. Tickets: `karr board`.
