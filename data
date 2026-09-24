@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-23T01:27:50Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T01:02:23Z
+id: 35
+priority: medium
+started: 2026-09-23T01:16:16Z
+status: done
+tags:
+- engine
+- feature
+- rules
+- templating
+title: Do not install items whose template renders empty (e.g. rule fully gated by
+  {% if %})
+updated: 2026-09-24T19:31:15Z
+---
+
+render.ts build() writes whatever a .njk renders, so a rule gated entirely by {% if vars.x %} lands as an empty .claude/rules/<name>.md. Wanted: when an item's main file (rule/agent .md, skill SKILL.md) renders to whitespace only, the item counts as 'not applicable' for this scope: nothing is written, an already-installed copy is removed via the lock, and status/report shows it as skipped (not as error). Enables a rule set where vars switch individual rules on/off per user/project/local.
+
+Settle in the spec (§5/§6.1): exact emptiness test (whitespace only; frontmatter-only counts as empty?), behaviour for skills with extra files when SKILL.md is empty (skip whole item), interaction with --force/conflict handling. Regression tests: gated-off rule not written; toggling var off removes the installed file; toggling back on reinstalls.
+Target: skilletor-worker + skilletor-skill-author for docs. Pairs well with the wildcard ticket.
+
+2026-09-23 01:27 Implemented (uncommitted): render.ts rendersEmpty(item, output) — main .njk (SKILL.md.njk / <name>.md.njk) whitespace-only after stripping a leading frontmatter block. Engine marks such plan items skipped; apply removes an installed copy (reported removed), writes a file-less lock entry {files:{}, skipped:'renders-empty'} (owns no path: foreign file untouched, --force irrelevant), treats it as not-installed when the item applies again (reported added). Report: ScopeReport.skipped (JSON list), text '· key skipped (renders empty)' / '- key (removed: renders empty)'; skips alone are not notable (hook silent). Status reads the lock marker (no render, stays offline; marker survives unresolvable sources via keep): declared[].skipped, installed:false. Spec §5, §6.1, §6.2, §7 updated. 203/203, dist rebuilt, check-dist ok.
