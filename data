@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-24T04:14:38Z
+id: 55
+priority: medium
+started: 2026-09-24T04:31:20Z
+status: done
+tags:
+- cli
+- bug
+title: 'CLI: ''sync --help'' runs a real sync; -v anywhere prints the version'
+updated: 2026-09-24T19:31:15Z
+---
+
+src/cli.ts:144 only honors -h/--help as argv[0]; parseFlags (:76) puts unknown flags into rest, which sync/check/status ignore -> 'skilletor sync --help' writes to ~/.claude. :140 treats -v anywhere as --version. Fix: -h/--help in any position = help; reject unknown --flags; -v/--version only as argv[0]. Regression tests. (review 2026-09-24)
+
+Done 2026-09-24, 424/424 tests, check-dist ok.
