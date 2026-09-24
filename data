@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-23T06:16:02Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T05:57:21Z
+id: 48
+priority: high
+started: 2026-09-24T19:31:15Z
+status: done
+tags:
+- engine
+- feature
+- bundles
+title: Bundles (spec §15) and name patterns in wildcards
+updated: 2026-09-24T19:31:15Z
+---
+
+Implement spec §15 (commits 6c18938, and the §15.6 follow-up) plus §3 patterns (perl-*@source) in config wildcards. Phase A: patterns + own-source bundles + vars merge + status/available/uninstall. Phase B: §15.6 items of other sources by address, interactive add on install. Docs afterwards via skilletor-skill-author.
+
+2026-09-23 06:09 Phase A implemented (uncommitted, awaiting review): patterns in wildcards (config/engine/status/uninstall), same-source overlap fix, bundles/<name>.yaml|yml in catalog (src/bundles.ts: parse, expand, cycles), install.bundles, vars merge §15.3 incl. conflicts, errors §15.4 keep installed items via new optional lock field 'via' (bundle labels), CLI install/uninstall bundle:, bare-name resolution, available members/vars, status via bundle + per-bundle counts. @<spec> entries: parsed+validated (probe-free, not local), skipped with 'not supported yet' warning. 358 tests green, dist rebuilt. Docs (README, SKILL.md, spec §6.2 lock 'via') still to update. Phase B next.
+
+2026-09-23 06:15 Bare * no longer warns when it matches nothing (config wildcards and inside bundles). Phase B implemented (uncommitted): bundle entries name@<spec>/pattern@<spec> served by the configured source with the same git/url identity (sameIdentity: trailing /, .git, host case), visible per scope (user scope: user config's sources; project: all), local author-mode override applies; bundle vars apply, source defaults of the item's source. Missing source: one warning per source+bundle, items skipped, locked copies kept via lock 'via'. Untrusted project source: trust request. check also covers sources of via-items from the lock. install bundle: plans all edits first; TTY asks per missing source (Prompter injectable via CommandContext.prompt; CLI uses readline on stdin/stderr), clash re-asks; non-TTY exits 1 before editing with 'skilletor add <name> <spec> [--project]' (<name>-2 on clash). available lists foreign members as written. 373 tests green, dist rebuilt, check-dist clean. Docs still pending (README, SKILL.md).
+
+2026-09-23 06:16 Phase A committed (5d6b0e8); bare-* fix + phase B ready for review, uncommitted in the work tree. Docs to follow via skilletor-skill-author.
