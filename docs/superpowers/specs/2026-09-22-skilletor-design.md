@@ -126,6 +126,21 @@ bundles/<name>.yaml|.yml   # optional: named item sets with var defaults (§15)
 skilletor.json             # optional: { "description": "…", "vars": { defaults } }
 ```
 
+**Claude plugin repos** (`.claude-plugin/plugin.json` with a `skills` field) are read as
+sources too. `skills` is a path or an array of paths, relative to the source root. A path
+whose directory holds a `SKILL.md[.njk]` is one skill; any other directory is scanned one
+level deep like `skills/`. The skill's name is its directory's basename. These skills are
+added to the ones found under `skills/<name>/`; the same directory reached both ways counts
+once. Everything else in the plugin (`agents`, `commands`, `hooks`, MCP servers) is ignored.
+Errors make the source unresolvable (§6.1): a path that is absolute, contains `..`, is a
+symlink or does not exist; two different directories yielding the same skill name;
+`plugin.json` that is not valid JSON or whose `skills` is neither a string nor an array of
+strings. A `plugin.json` without `skills` is ignored.
+
+Known public sources as examples: `skilletor add anthropics` (→ `anthropics/skills`, flat
+`skills/`), `skilletor add obra/superpowers` (flat `skills/`), `skilletor add mattpocock`
+(→ `mattpocock/skills`, skills nested by category, listed in its `plugin.json`).
+
 The catalog (`skilletor available`) is built by scanning this layout; name and
 description come from the items' frontmatter. The same scan expands a wildcard
 (`*@source`, §3) at sync time: every catalog item of the wildcard's type is declared.
