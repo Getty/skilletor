@@ -71,7 +71,8 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
 ```
 
 - `ref` is optional (default: the remote's HEAD); a tag or commit pins it.
-- `gitignore` (project only, default `true`): see 6.4.
+- `gitignore` (user or project/local, default `true`): see 6.4. In the user config it
+  only switches the user-scope blocks off; a project's blocks follow the project/local value.
 - `checkInterval` (user only, seconds, default 1800 = 30 min): throttle for the
   in-session check. `0` or a negative value disables it (SessionStart still syncs).
 - `targets` (optional, user, project or local): which agent harnesses to install for,
@@ -219,7 +220,7 @@ can therefore switch individual items on and off per user, project or local conf
 4. Compare output against disk and lock; write only differences (atomically:
    temp file + rename); remove files the item no longer contains.
 5. Delete items no longer declared, per the lock.
-6. Write the lock and (in a project) the gitignore block, emit the report.
+6. Write the lock and the gitignore blocks (§6.4), emit the report.
 
 **Unresolvable sources keep their items:** when a source cannot be resolved or scanned
 (offline without cache, untrusted, broken layout), every locked item it provided stays
@@ -258,14 +259,32 @@ other entry while its source cannot be resolved.
   report names the overwritten file.
 - Only what is in the lock is ever deleted.
 
-### 6.4 Git hygiene in a project
+### 6.4 Git hygiene
 
-With `"gitignore": true` (default) skilletor maintains a marked block in
+**Project scope.** With `"gitignore": true` (default) skilletor maintains a marked block in
 `<project>/.claude/.gitignore` with the **exact** managed paths, the lock, and
 `skilletor.local.json`. Only `skilletor.json` is committed; your own skills alongside it
 stay version-controlled as usual. With `"gitignore": false` the block is removed and
 everything is committable (teammates without the plugin get the files via clone) –
-sensible only for items without machine-specific variables.
+sensible only for items without machine-specific variables. Project blocks are written
+whether or not the project is a git repository (harmless, and a later `git init` finds
+them in place).
+
+**User scope.** A dotfiles repository at `~` or `~/.claude` would otherwise show every
+installed user item as untracked. So for each user-scope root – `~/.claude`, `~/.agents`,
+`$CODEX_HOME` (§14.2) – skilletor maintains the same kind of block in `<root>/.gitignore`,
+but **only when that root lies inside a git work tree** (`git -C <root> rev-parse
+--is-inside-work-tree` prints `true`; git missing or failing counts as no). The block lists
+the managed paths under that root; the `~/.claude` block also lists `skilletor.lock.json`
+and the state directory `skilletor/` (§6.5, when the state root lies under `~/.claude`).
+`skilletor.json` itself is never listed – it is what a dotfiles repo wants to track. A
+root outside a work tree gets no block, and an existing block there is removed. With
+`"gitignore": false` in `~/.claude/skilletor.json` all user-scope blocks are removed.
+The work-tree test is injectable (`EngineContext.isGitWorkTree`) so tests never depend on
+where the temp directory lives.
+
+**Both scopes.** A block with no entries is removed; a `.gitignore` that held nothing but
+the block is deleted. Content outside the block is never touched.
 
 ### 6.5 State
 
@@ -507,7 +526,8 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
 - **Git hygiene:** besides the block in `<project>/.claude/.gitignore`, skilletor maintains
   the same kind of block in `<project>/.agents/.gitignore` and `<project>/.codex/.gitignore`
   listing the managed Codex paths under each. Such a block is created only when there are
-  such paths and removed when they are gone.
+  such paths and removed when they are gone. The user scope does the same for
+  `~/.agents` and `$CODEX_HOME`, under the work-tree condition of §6.4.
 
 ### 14.4 Report and status
 
