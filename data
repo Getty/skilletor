@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-23T03:13:26Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T02:37:27Z
+id: 43
+priority: low
+started: 2026-09-23T03:09:30Z
+status: done
+tags:
+- cli
+title: CLI default project dir is cwd, hooks use git top level
+updated: 2026-09-24T19:31:15Z
+---
+
+Since k39 the hook resolves the project root as the git top level of cwd when CLAUDE_PROJECT_DIR is unset (Codex). The CLI still defaults --project-dir to process.cwd(), so 'skilletor sync' run from a repo subdirectory treats the subdir as the project (no config found, or a stray .claude/ created). Decide whether the CLI should use the same resolution (projectRootOf in hooks.ts).
+
+2026-09-23 03:13 Fixed: CLI default project dir = projectRootOf(cwd) (git top level, else cwd); precedence kept: --project-dir flag wins, CLI still ignores CLAUDE_PROJECT_DIR/SKILLETOR_PROJECT_DIR (hook-only, unchanged). k44 rule applies after (git ~ -> no project scope). Usage text updated; README/SKILL.md don't state the default. Spec §7 paragraph. CLI black-box test from repo/sub/deep, plain dir, git ~/notes. Uncommitted.
+
+2026-09-23 03:13 Implemented, uncommitted; needs review
