@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-22T22:19:29Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-22T20:10:54Z
+id: 24
+priority: high
+started: 2026-09-22T22:16:28Z
+status: done
+tags:
+- eval
+- skills
+title: config-question grader rejects real CLI flags (false negative)
+updated: 2026-09-24T19:31:15Z
+---
+
+evals/config-question/graders/answer.md forbids "invents a flag or file that does not exist" but never lists the real flags. In the k23 eval run (2026-09-22, GPT-5.6 via claude_with_openai), judges FAILed a correct with-arm answer (arms.with[1] in evals/results/first.json) for using `skilletor sync --scope project` -- that flag is real (src/cli.ts:33,57,108; documented in skills/skilletor/SKILL.md:38). Fix: list the valid commands/flags in the grader (install ... --project; sync|check|status --scope user|project|all; trust; .claude/skilletor.local.json) so the judge checks against that list instead of guessing. Target agent: skilletor-skill-author.
+
+2026-09-22 22:19 Grader now carries the authoritative command/flag/file/config-key list, verified against src/cli.ts parseFlags+switch and src/config.ts ALLOWED_KEYS/SOURCE_KEYS; 'anything on the list is real' + checkInterval-in-project is rejected as user-only (config.ts:234). Also accepts .claude/skilletor.local.json for (1). Smoke test (haiku judge subagent): the previously failed with[1] answer (sync --scope project) now PASS; a planted answer with --local/backgroundSync FAILs. Caveat: skill-static-check.mjs flags every grader file as 'description missing' (pre-existing, also at HEAD) - checker misclassifies eval graders.
+
+2026-09-22 22:19 Grader fixed, not committed; needs re-run (k26) to confirm
