@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T01:18:42Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T00:05:20Z
+id: 31
+priority: low
+started: 2026-09-23T01:16:24Z
+status: done
+tags:
+- skills
+- docs
+title: 'SKILL.md/README: per-command --json and --force notes to match new --help'
+updated: 2026-09-24T19:31:15Z
+---
+
+After #28 the --help text says --json applies to sync/check/status/source list/available and --force only to sync (adopt foreign files) and source remove (remove with installed items). skills/skilletor/SKILL.md and README CLI blocks still imply --force for check/status and omit --json for source list. Align both. Target: skilletor-skill-author.
+
+2026-09-23 01:18 SKILL.md + README CLI blocks: --json added to source list and available; --force dropped from the sync|check|status line, new line 'sync --force' (overwrite and adopt unmanaged files reported as conflicts, src/apply.ts:74); source remove --force annotated 'even with installed items' (src/commands.ts:77). Verified against cli.ts dispatch, not only USAGE. Static check 0/0.
+
+2026-09-23 01:18 CLI blocks aligned, uncommitted
