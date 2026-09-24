@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T02:12:08Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-23T01:22:08Z
+id: 36
+priority: low
+started: 2026-09-23T02:07:35Z
+status: done
+tags:
+- cli
+- bug
+title: uninstall ignores the type prefix of a normal item spec
+updated: 2026-09-24T19:31:15Z
+---
+
+cmdUninstall (src/commands.ts) passes only name+source to removeInstallEntries, so `skilletor uninstall skill:foo@s` also removes `foo@s` from install.agents and install.rules. Found while doing k34 (wildcards pass the type; normal items were left as-is to keep k34 surgical). Done = type prefix restricts removal to that list, with a test.
+
+2026-09-23 02:11 Done (uncommitted, together with k37): cmdUninstall now passes the parsed type to removeInstallEntries for every spec, so type:name@src only touches that type's list; no prefix keeps all-lists removal. Tests: commands.test.ts 'uninstall type:name@source removes only that type's entry' (red before: install.agents was wiped too), 'without a prefix still removes ... every list', 'declared only under another type is an error naming it'. Full suite 218/218, check-dist green.
+
+2026-09-23 02:12 k36 implemented with k37, tests + dist green, not committed
