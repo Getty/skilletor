@@ -314,6 +314,35 @@ A sync error never aborts a session. Fetch error/offline → continue with the c
 warning line. Template error → that item stays at its old state, error with file and
 line. Config error → nothing is touched, clear message.
 
+### 6.7 Briefing check for agents (#56)
+
+An agent may declare skills for the briefing plugin (`briefing: { skills: [...] }` in its
+frontmatter; for Codex the comment line of §14.7). An agent installed without those skills
+fails at spawn time. After a sync, skilletor checks every agent it has installed, per
+target, and warns about declared skills that would not resolve:
+
+- Names with a plugin namespace (`plugin:skill`) are not checked – they belong to a
+  plugin, not to skilletor.
+- A bare name resolves when `<root>/<name>/SKILL.md` exists in a root the harness's
+  briefing lookup searches from where the agent is used, whether skilletor or someone else
+  put it there. **Claude:** project agent → `<project>/.claude/skills`, `~/.claude/skills`;
+  user agent → `~/.claude/skills` only (a project skill does not follow a user agent into
+  other projects); both also accept Claude plugin caches
+  (`~/.claude/plugins/cache/*/skills/<name>`, `…/cache/*/*/skills/<name>`). **Codex:**
+  project agent → `<project>/.agents/skills`, `<project>/.codex/skills`,
+  `$CODEX_HOME/skills`, `~/.agents/skills`; user agent → `$CODEX_HOME/skills`,
+  `~/.agents/skills`.
+- The warning names the agent (lock key), the target and the missing skills, one line per
+  agent and target: `agent reviewer (codex): briefing skills not installed: perl-core`.
+  The hint says to install them (or ship them together as a bundle, §15).
+- It goes into the sync report's warnings like any other (§8), so `skilletor sync` shows it
+  every time it holds. The `SessionStart` hook surfaces it only in runs that changed
+  something, to avoid repeating it every session; `status` shows it too (per agent,
+  `briefingMissing` in `--json`), read-only from disk.
+- The check reads the installed files (frontmatter of the Claude agent, the comment line
+  of the Codex TOML); it never renders. A file it cannot parse is skipped silently – the
+  conversion or render warning already covers it.
+
 ## 7. CLI
 
 ```
