@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-09-24T19:31:15Z
+created: 2026-09-24T04:14:42Z
+id: 56
+priority: medium
+started: 2026-09-24T04:31:25Z
+status: done
+tags:
+- engine
+- briefing
+title: Warn on agents whose briefing.skills are not installed for the same target
+updated: 2026-09-24T19:31:15Z
+---
+
+Nothing ties an agent's briefing.skills to installed skills. Installing agent:x@src alone -> denied spawn (Claude) or 'not briefed' (Codex) at runtime. After sync, check each bare name against the harness's skill roots (Claude: project then user .claude/skills; Codex: .agents/skills then $CODEX_HOME/skills) and add a report warning. Traps: user-scope agent needing a project-only skill; skill installed only for claude while the agent goes to codex. Spec first. Docs: recommend shipping agent + its skills as a bundle. (review 2026-09-24)
+
+Done 2026-09-24, 424/424 tests, check-dist ok.
