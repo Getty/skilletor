@@ -333,12 +333,15 @@ target, and warns about declared skills that would not resolve:
   project agent → `<project>/.agents/skills`, `<project>/.codex/skills`,
   `$CODEX_HOME/skills`, `~/.agents/skills`; user agent → `$CODEX_HOME/skills`,
   `~/.agents/skills`.
-- The warning names the agent (lock key), the target and the missing skills, one line per
-  agent and target: `agent reviewer (codex): briefing skills not installed: perl-core`.
-  The hint says to install them (or ship them together as a bundle, §15).
+- The warning names the agent, the target and the missing skills, one line per agent and
+  target, with the hint on the same line: `agent reviewer (codex): briefing skills not
+  installed: perl-core — install them, or ship the agent and its skills together as a
+  bundle`. A name that is not a single path segment (contains `/` or `\`, or is `.`/`..`)
+  is never looked up and counts as missing.
 - It goes into the sync report's warnings like any other (§8), so `skilletor sync` shows it
-  every time it holds. The `SessionStart` hook surfaces it only in runs that changed
-  something, to avoid repeating it every session; `status` shows it too (per agent,
+  every time it holds (`briefingMissing` per scope in `sync --json`). Hook output (both
+  hooks) carries it only in runs that changed something, to avoid repeating it every
+  session; `status` shows it too (per agent,
   `briefingMissing` in `--json`), read-only from disk.
 - The check reads the installed files (frontmatter of the Claude agent, the comment line
   of the Codex TOML); it never renders. A file it cannot parse is skipped silently – the
@@ -426,14 +429,21 @@ bin/skilletor                   # shim → node dist/skilletor.js, checks Node �
 dist/skilletor.js               # esbuild bundle incl. Nunjucks, committed
 skills/skilletor/SKILL.md
 src/cli.ts                      # arguments, dispatch
-src/config.ts                   # load/merge/validate + edit operations
-src/spec.ts                     # shorthand resolution (4.2), injectable probe
+src/commands.ts                 # config edit commands (add/install/uninstall/trust/source)
+src/config.ts                   # load/merge/validate
+src/spec.ts  src/probe.ts       # shorthand resolution (4.2), injectable probe
 src/sources/{git,url,local}.ts  # resolve(), check()
-src/catalog.ts                  # scan source → items
+src/catalog.ts  src/bundles.ts  # scan source → items (plugin.json incl.); bundles, patterns
 src/render.ts                   # build item in memory
-src/apply.ts                    # diff, write atomically, clean up, gitignore block
+src/targets.ts                  # harness detection and per-target layout (§14)
+src/convert.ts  src/toml.ts  src/frontmatter.ts  # agent Markdown → Codex TOML (§14.7)
+src/agentsmd.ts                 # Codex rules file and AGENTS.md pointer (§14.8)
+src/engine.ts                   # the pipeline (§6.1), wiring everything
+src/apply.ts                    # diff, write atomically, clean up
+src/gitignore.ts                # managed .gitignore blocks (§6.4)
+src/briefing.ts                 # briefing check for installed agents (§6.7)
 src/lock.ts  src/state.ts       # lock; trust, last-check, pending-report, mutex
-src/hooks.ts  src/report.ts
+src/hooks.ts  src/report.ts  src/fsutil.ts
 test/
 ```
 
@@ -645,7 +655,8 @@ Markdown (`agents/<name>.md[.njk]`) **for the `codex` harness** – so a templat
   `# briefing: skills = ["a", "b"]`, placed among the top-level keys directly before
   `developer_instructions`, never inside a multi-line string. Items are written as
   double-quoted TOML strings. A skill name that is not a non-empty string, or that
-  contains `"`, `\`, `]` or a line break, is a conversion error (see below). An empty
+  contains `"`, `\`, `]` or a control character (TOML forbids them in comments), is a
+  conversion error (see below), and so is a `skills` that is not a list. An empty
   `skills` list or a `briefing` without `skills` writes no line. A `briefing` key under
   `codex:` is a conversion error too – passed through it would become the very table that
   makes Codex drop the role.
