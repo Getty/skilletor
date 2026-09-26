@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-09-26T22:55:15Z
+created: 2026-09-26T22:51:08Z
+id: 105
+priority: high
+started: 2026-09-26T22:55:15Z
+status: done
+tags:
+- release
+title: 'release: bump to 0.4.1'
+updated: 2026-09-26T22:55:15Z
+---
+
+Bump package.json, package-lock.json (root and packages[""]), .claude-plugin/plugin.json and .codex-plugin/plugin.json from 0.4.0 to 0.4.1 (k101: add never replaces a source; a non-default repo names the source). npm run build injects the version. docs/release.md steps 1-3. The maintainer asked to delete the GitHub releases v0.1.0-v0.4.0 (done by the coordinator, tags kept): v0.4.1 is the first published release.
+
+2026-09-26 22:51 Bumped 0.4.0 -> 0.4.1 in package.json, package-lock.json (root + packages[""]), .claude-plugin/plugin.json, .codex-plugin/plugin.json. Next: build + verify.
+
+2026-09-26 22:52 Also found (flaky test, not fixed, out of scope): test/git.test.ts:481 k87 'a git failure's message ends in git's last word' failed once in a full npm test run (702/703). Its last assertion uses timeoutMs: 1 expecting Node's single-line 'Command failed' kill message; under suite load git exits first with its real multi-line stderr ('does not appear to be a git repository\nfatal: ...'), and /^git ls-remote .*\S$/ (no s flag) cannot span the newlines. The code under test is fine (message still ends in a word); the regex or the race is the problem - suggest [^]* instead of .* or accepting either outcome. Isolated reruns: 6/6 pass. Candidate card for this board.
+
+2026-09-26 22:53 Done (docs/release.md steps 1-2; step 3 audit is skilletor-release-manager's): 0.4.0 -> 0.4.1 in package.json, package-lock.json (root + packages[""]), .claude-plugin/plugin.json, .codex-plugin/plugin.json - one version line each, nothing else. npm run build rebuilt dist/skilletor.js (only change: VERSION "0.4.0" -> "0.4.1"). Verified: typecheck + npm test 703/703 pass (after one flaky k87 run, see earlier note) + build + check-dist 'dist/skilletor.js is up to date.'; HOME=$(mktemp -d) bin/skilletor --version -> 0.4.1. Commit set: package.json package-lock.json .claude-plugin/plugin.json .codex-plugin/plugin.json dist/skilletor.js. Not mine, left untouched: .claude/skills/kanban-issues-karr-* edits and a README.md prose edit (intro + 30-second start) that appeared during this card. Proposed subject: 'release: bump to 0.4.1 (k105)'.
+
+2026-09-26 22:55 Committed 89fe03d61584f3050e03d920abbff40f86d7ca64: release: bump to 0.4.1 (k105) — package.json, package-lock.json, .claude-plugin/plugin.json, .codex-plugin/plugin.json, dist/skilletor.js.
