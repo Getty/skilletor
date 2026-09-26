@@ -10,7 +10,7 @@
 // reuses it and warns; without a cache it errors. Production is https-only;
 // `allowHttp` (tests only) permits http://127.0.0.1.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve as resolvePath, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 import type { Source, SourceLocation } from "./types.ts";
@@ -78,8 +78,8 @@ export class UrlSource implements Source {
       const version = resEtag ? `etag:${resEtag}` : `sha256:${createHash("sha256").update(body).digest("hex")}`;
 
       const entries = stripTopLevel(parseTar(gunzipSync(body)));
-      writeEntries(dir, entries);
-      return { dir, version };
+      const warning = publishEntries(dir, entries);
+      return { dir, version, ...(warning ? { warning } : {}) };
     } catch (err) {
       if (err instanceof TarError) {
         throw new Error(`url source ${this.opts.url} failed: ${err.message}`);
@@ -200,9 +200,54 @@ function stripTopLevel(entries: TarEntry[]): TarEntry[] {
     .filter((e) => e.name.length > 0);
 }
 
+/** Extract completely before replacing the cache; never expose a partial tree. */
+function publishEntries(dir: string, entries: TarEntry[]): string | undefined {
+  mkdirSync(dirname(dir), { recursive: true });
+  const staging = mkdtempSync(`${dir}.stage-`);
+  let backup: string | undefined;
+  let oldMoved = false;
+  let published = false;
+  const cleanupWarnings: string[] = [];
+  try {
+    writeEntries(staging, entries);
+    if (existsSync(dir)) {
+      // A rename cannot replace a nonempty directory on supported filesystems.
+      backup = mkdtempSync(`${dir}.backup-`);
+      renameSync(dir, join(backup, "tree"));
+      oldMoved = true;
+    }
+    try {
+      renameSync(staging, dir);
+    } catch (err) {
+      if (oldMoved) {
+        try {
+          renameSync(join(backup!, "tree"), dir);
+          oldMoved = false;
+        } catch (restoreError) {
+          throw new Error(`cache publication failed (${(err as Error).message}); ` +
+            `restoration failed (${(restoreError as Error).message}); last good cache remains at ${join(backup!, "tree")}`);
+        }
+      }
+      throw err;
+    }
+    // Commit point: cleanup must not turn new bytes into an old-version fallback.
+    published = true;
+  } finally {
+    // Keep the backup if restoration failed. This is not crash-atomic: a process
+    // killed between the two renames can leave the old tree only in the backup.
+    const obsolete = [staging, ...(backup && (!oldMoved || published) ? [backup] : [])];
+    for (const path of obsolete) {
+      try {
+        rmSync(path, { recursive: true, force: true });
+      } catch (err) {
+        cleanupWarnings.push(`cache cleanup failed for ${path} (${(err as Error).message})`);
+      }
+    }
+  }
+  return cleanupWarnings.length ? cleanupWarnings.join("; ") : undefined;
+}
+
 function writeEntries(dir: string, entries: TarEntry[]): void {
-  rmSync(dir, { recursive: true, force: true });
-  mkdirSync(dir, { recursive: true });
   const root = resolvePath(dir);
   for (const e of entries) {
     const dest = resolvePath(join(dir, e.name));

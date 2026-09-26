@@ -7487,7 +7487,7 @@ function isCommitish(ref) {
 
 // src/sources/url.ts
 import { createHash as createHash3 } from "node:crypto";
-import { existsSync as existsSync5, mkdirSync as mkdirSync3, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { existsSync as existsSync5, mkdirSync as mkdirSync3, mkdtempSync, renameSync as renameSync2, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { dirname as dirname2, join as join7, resolve as resolvePath, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 var TarError = class extends Error {
@@ -7535,8 +7535,8 @@ var UrlSource = class {
       const resEtag = res.headers.get("etag");
       const version = resEtag ? `etag:${resEtag}` : `sha256:${createHash3("sha256").update(body).digest("hex")}`;
       const entries = stripTopLevel(parseTar(gunzipSync(body)));
-      writeEntries(dir, entries);
-      return { dir, version };
+      const warning = publishEntries(dir, entries);
+      return { dir, version, ...warning ? { warning } : {} };
     } catch (err) {
       if (err instanceof TarError) {
         throw new Error(`url source ${this.opts.url} failed: ${err.message}`);
@@ -7630,9 +7630,47 @@ function stripTopLevel(entries) {
   const prefix = `${top}/`;
   return entries.map((e) => ({ ...e, name: e.name === top ? "" : e.name.startsWith(prefix) ? e.name.slice(prefix.length) : e.name })).filter((e) => e.name.length > 0);
 }
+function publishEntries(dir, entries) {
+  mkdirSync3(dirname2(dir), { recursive: true });
+  const staging = mkdtempSync(`${dir}.stage-`);
+  let backup;
+  let oldMoved = false;
+  let published = false;
+  const cleanupWarnings = [];
+  try {
+    writeEntries(staging, entries);
+    if (existsSync5(dir)) {
+      backup = mkdtempSync(`${dir}.backup-`);
+      renameSync2(dir, join7(backup, "tree"));
+      oldMoved = true;
+    }
+    try {
+      renameSync2(staging, dir);
+    } catch (err) {
+      if (oldMoved) {
+        try {
+          renameSync2(join7(backup, "tree"), dir);
+          oldMoved = false;
+        } catch (restoreError) {
+          throw new Error(`cache publication failed (${err.message}); restoration failed (${restoreError.message}); last good cache remains at ${join7(backup, "tree")}`);
+        }
+      }
+      throw err;
+    }
+    published = true;
+  } finally {
+    const obsolete = [staging, ...backup && (!oldMoved || published) ? [backup] : []];
+    for (const path of obsolete) {
+      try {
+        rmSync2(path, { recursive: true, force: true });
+      } catch (err) {
+        cleanupWarnings.push(`cache cleanup failed for ${path} (${err.message})`);
+      }
+    }
+  }
+  return cleanupWarnings.length ? cleanupWarnings.join("; ") : void 0;
+}
 function writeEntries(dir, entries) {
-  rmSync2(dir, { recursive: true, force: true });
-  mkdirSync3(dir, { recursive: true });
   const root = resolvePath(dir);
   for (const e of entries) {
     const dest = resolvePath(join7(dir, e.name));

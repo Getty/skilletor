@@ -218,6 +218,11 @@ name is `skills` everywhere.
 | `url` | HTTPS-only, `.tar.gz`, conditional GET with ETag | `HEAD` + ETag comparison |
 | `local` | read directly | not applicable – always re-rendered |
 
+A `url` update is extracted into a staging tree and replaces the cache only after a complete
+extraction; a failed download, decompression or extraction keeps the last good cache and
+its version, with one warning (k68). An unsafe archive is rejected; the source then counts
+as unresolvable and keeps its items (§6.1).
+
 ## 5. Templating
 
 - **Opt-in by extension:** `X.njk` is rendered by Nunjucks and installed as `X`.
