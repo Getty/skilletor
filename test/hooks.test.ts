@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
@@ -249,6 +249,31 @@ test("k62: session-start asks once to commit a new .gitignore block, in the mess
     assert.match(out.hookSpecificOutput?.additionalContext ?? "", /^- \.claude\/\.gitignore updated — commit it$/m);
     // Nothing changed since: no second hint, the hook stays silent.
     assert.deepEqual(await runHook("session-start", { source: "startup", cwd: e.projectDir }, e.ctx), {});
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k65 (spec §6.4): a user-scope change syncs the project scope too; unused, it writes nothing there.
+test("k65: session-start in a project that never used skilletor writes nothing there and asks for no commit", async () => {
+  const e = env();
+  try {
+    rmSync(join(e.projectDir, ".claude"), { recursive: true });
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    const out = await runHook("session-start", { source: "startup", cwd: e.projectDir }, e.ctx);
+    assert.equal(out.systemMessage, "skilletor: 1 item(s) updated");
+    assert.doesNotMatch(out.hookSpecificOutput?.additionalContext ?? "", /gitignore/);
+    assert.deepEqual(readdirSync(e.projectDir), []);
+
+    // A block an earlier version left there goes on the next sync, just as silently.
+    mkdirSync(join(e.projectDir, ".claude"));
+    writeFileSync(join(e.projectDir, ".claude/.gitignore"), "# >>> skilletor >>>\nskilletor.local.json\nskilletor.lock.json\n# <<< skilletor <<<\n");
+    writeFileSync(join(src, "skills/foo/SKILL.md"), "---\nname: foo\ndescription: foo\n---\nCHANGED\n");
+    const again = await runHook("session-start", { source: "startup", cwd: e.projectDir }, e.ctx);
+    assert.equal(again.systemMessage, "skilletor: 1 item(s) updated");
+    assert.doesNotMatch(again.hookSpecificOutput?.additionalContext ?? "", /gitignore/);
+    assert.equal(existsSync(join(e.projectDir, ".claude/.gitignore")), false);
   } finally {
     e.cleanup();
   }

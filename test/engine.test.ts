@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
@@ -605,6 +605,143 @@ test("k63: against a real repo the printed command untracks the skill; outside a
   } finally {
     if (ceiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
     else process.env.GIT_CEILING_DIRECTORIES = ceiling;
+    e.cleanup();
+  }
+});
+
+// ---- k65: project blocks only while the project scope is in use (spec §6.4) ----
+
+const projectOf = (r: Awaited<ReturnType<typeof sync>>) => r.scopes.find((s) => s.scope === "project")!;
+
+test("k65: a project without config or lock gets nothing written and no commit hint", async () => {
+  const e = env();
+  try {
+    rmSync(join(e.projectDir, ".claude"), { recursive: true }); // a repository that never used skilletor
+    const src = localSource(e.tmp.dir, "srcK1", "foo", "FOO");
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    const r = await sync(e.ctx);
+    assert.equal(r.error, undefined);
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo/SKILL.md")), true);
+    assert.deepEqual(readdirSync(e.projectDir), []);
+    assert.equal(projectOf(r).gitignoreUpdated, undefined);
+    assert.doesNotMatch(reportText(r), /project scope|commit it/);
+    assert.doesNotMatch(reportHook(r).systemMessage ?? "", /commit it/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k65: a block an earlier version left in an unused project is removed without a hint; own lines stay", async () => {
+  const e = env();
+  try {
+    e.writeCfg("user", {});
+    const p = e.projectDir;
+    // What versions up to 0.2.0 wrote into every project a sync started in.
+    writeFileSync(join(p, ".claude/.gitignore"), BLOCK("skilletor.local.json", "skilletor.lock.json"));
+    mkdirSync(join(p, ".codex"));
+    writeFileSync(join(p, ".codex/.gitignore"), "own-line\n\n" + BLOCK("agents/**/.local.*", "skilletor-rules.md"));
+    const r = await sync(e.ctx);
+    assert.equal(existsSync(join(p, ".claude/.gitignore")), false); // only the block: the file goes
+    assert.equal(readFileSync(join(p, ".codex/.gitignore"), "utf8"), "own-line\n");
+    assert.equal(projectOf(r).gitignoreUpdated, undefined);
+    assert.equal(reportText(r), "");
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k65: a project skilletor.json, even empty, or skilletor.local.json alone puts the project in use", async () => {
+  const e = env();
+  try {
+    e.writeCfg("user", {});
+    const gi = join(e.projectDir, ".claude/.gitignore");
+    e.writeCfg("project", {});
+    const first = await sync(e.ctx);
+    assert.equal(readFileSync(gi, "utf8"), PROJECT_BLOCK);
+    assert.deepEqual(projectOf(first).gitignoreUpdated, [".claude/.gitignore"]);
+    rmSync(join(e.projectDir, ".claude/skilletor.json"));
+    e.writeCfg("local", {});
+    const local = await sync(e.ctx);
+    assert.equal(readFileSync(gi, "utf8"), PROJECT_BLOCK);
+    assert.equal(projectOf(local).gitignoreUpdated, undefined);
+    rmSync(join(e.projectDir, ".claude/skilletor.local.json"));
+    const none = await sync(e.ctx);
+    assert.equal(existsSync(gi), false);
+    assert.equal(projectOf(none).gitignoreUpdated, undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k65: a project in use with nothing installed has a block but no lock, stable across syncs", async () => {
+  const e = env();
+  try {
+    e.writeCfg("user", {});
+    e.writeCfg("project", {});
+    const gi = join(e.projectDir, ".claude/.gitignore");
+    const lockPath = join(e.projectDir, ".claude/skilletor.lock.json");
+    await sync(e.ctx);
+    assert.equal(readFileSync(gi, "utf8"), PROJECT_BLOCK);
+    assert.equal(existsSync(lockPath), false);
+    assert.equal(existsSync(join(e.home, ".claude/skilletor.lock.json")), false); // user scope: nothing either
+    const mtime = statSync(gi).mtimeMs;
+    const again = await sync(e.ctx);
+    assert.equal(statSync(gi).mtimeMs, mtime);
+    assert.equal(existsSync(lockPath), false);
+    assert.equal(projectOf(again).gitignoreUpdated, undefined);
+    assert.equal(reportText(again), "");
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k65: config removed: the sync that removes the last item removes the block too, without a hint", async () => {
+  const e = env();
+  try {
+    const src = localSource(e.tmp.dir, "srcK2", "foo", "FOO");
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["foo@mine"] } });
+    const gi = join(e.projectDir, ".claude/.gitignore");
+    await sync(e.ctx);
+    assert.equal(readFileSync(gi, "utf8"), PROJECT_BLOCK);
+    rmSync(join(e.projectDir, ".claude/skilletor.json"));
+    const r = await sync(e.ctx);
+    assert.deepEqual(projectOf(r).removed.map((i) => i.key), ["skills/foo"]);
+    assert.equal(existsSync(join(e.projectDir, ".claude/skills")), false);
+    assert.equal(existsSync(gi), false);
+    assert.equal(existsSync(join(e.projectDir, ".claude/skilletor.lock.json")), false); // never left as {}
+    assert.deepEqual(readdirSync(join(e.projectDir, ".claude")), []);
+    assert.equal(projectOf(r).gitignoreUpdated, undefined);
+    assert.doesNotMatch(reportText(r), /commit it/);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k65: while the lock still holds entries the block stays; an emptied lock no longer counts", async () => {
+  const e = env();
+  try {
+    const src = localSource(e.tmp.dir, "srcK3", "foo", "FOO");
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["foo@mine"] } });
+    const gi = join(e.projectDir, ".claude/.gitignore");
+    const lockPath = join(e.projectDir, ".claude/skilletor.lock.json");
+    writeFileSync(gi, "own\n");
+    await sync(e.ctx);
+    // An entry of a harness a later version knows: kept untouched, so the lock stays non-empty.
+    writeFileSync(lockPath, JSON.stringify({ ...readLock(lockPath), "later:skills/x": { source: "mine", version: "v1", files: {} } }));
+    rmSync(join(e.projectDir, ".claude/skilletor.json"));
+    const r = await sync(e.ctx);
+    assert.deepEqual(projectOf(r).removed.map((i) => i.key), ["skills/foo"]);
+    assert.deepEqual(Object.keys(readLock(lockPath)), ["later:skills/x"]);
+    assert.equal(readFileSync(gi, "utf8"), "own\n\n" + PROJECT_BLOCK);
+    assert.equal(projectOf(r).gitignoreUpdated, undefined);
+    writeFileSync(lockPath, "{}\n"); // what earlier versions left when the last entry went
+    const empty = await sync(e.ctx);
+    assert.equal(readFileSync(gi, "utf8"), "own\n");
+    assert.equal(existsSync(lockPath), false); // a lock without entries is deleted
+    assert.equal(projectOf(empty).gitignoreUpdated, undefined);
+  } finally {
     e.cleanup();
   }
 });

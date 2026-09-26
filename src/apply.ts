@@ -215,8 +215,10 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
 
   for (const [root, dirs] of dirsTouched) pruneEmptyDirs(dirs, root);
 
-  // Only rewrite the lock when it actually changed (keep no-op runs write-free).
-  if (serializeLock(newLock) !== serializeLock(oldLock)) {
+  // Only rewrite the lock when it actually changed (keep no-op runs write-free). Without
+  // entries it goes, a `{}` an earlier version left included (spec §6.4).
+  const emptyLeft = Object.keys(newLock).length === 0 && existsSync(lockPath);
+  if (emptyLeft || serializeLock(newLock) !== serializeLock(oldLock)) {
     writeLock(lockPath, newLock);
   }
 

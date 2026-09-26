@@ -348,7 +348,8 @@ rules keeps them out of commits:
   ```
 
   `<project>/.codex/.gitignore` gets the same kind of block for Codex agents and the rules
-  file.
+  file. Only projects that use skilletor (a `skilletor.json` or `skilletor.local.json`, or
+  items still installed) get a block; a repository you merely open stays untouched.
 
 Commit `skilletor.json` and the `.gitignore` files; the report asks you to once, when sync
 creates or changes a block. Your own hand-written skills, agents and rules stay

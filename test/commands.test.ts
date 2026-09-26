@@ -12,6 +12,7 @@ import {
 } from "../src/commands.ts";
 import { resolveSpec, type Probe } from "../src/spec.ts";
 import { State } from "../src/state.ts";
+import { check, status, sync } from "../src/engine.ts";
 
 const noProbe: Probe = () => {
   throw new Error("probe must not run");
@@ -137,6 +138,35 @@ test("uninstall removes the entry and the installed files", async () => {
     await cmdUninstall(e.ctx, { items: ["foo@mine"] });
     assert.equal(existsSync(join(e.home, ".claude/skills/foo")), false);
     assert.equal(e.readUserCfg().install, undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k65 (spec §6.4): a lock without entries is deleted; its readers take the missing file as empty.
+test("uninstalling the last user item deletes the lock; status, check, available, source remove read it as empty", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => skill(d, "foo"));
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    const lockFile = join(e.home, ".claude/skilletor.lock.json");
+    await cmdInstall(e.ctx, { items: [] });
+    assert.equal(existsSync(lockFile), true);
+    await cmdUninstall(e.ctx, { items: ["foo@mine"] });
+    assert.equal(existsSync(lockFile), false);
+
+    const st = status(e.ctx);
+    assert.equal(st.error, undefined);
+    assert.deepEqual(st.scopes.map((s) => [s.scope, s.declared, s.orphans, s.sourceVersions]),
+      [["user", [], [], {}], ["project", [], [], {}]]);
+    const chk = await check(e.ctx);
+    assert.deepEqual([chk.error, chk.changed, chk.targetsChanged], [undefined, false, undefined]);
+    assert.deepEqual((await cmdAvailable(e.ctx, { source: "mine" })).map((i) => [i.name, i.installed]), [["foo", false]]);
+    const again = await sync(e.ctx);
+    assert.deepEqual(again.scopes.map((s) => [s.added, s.removed, s.unchanged]), [[[], [], []], [[], [], []]]);
+    await cmdSourceRemove(e.ctx, { name: "mine" }); // nothing installed: no --force needed
+    assert.equal(e.readUserCfg().sources, undefined);
+    assert.equal(existsSync(lockFile), false);
   } finally {
     e.cleanup();
   }

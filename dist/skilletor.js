@@ -5746,7 +5746,7 @@ import { join as join16 } from "node:path";
 // src/engine.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
-import { existsSync as existsSync11, readFileSync as readFileSync10, rmSync as rmSync6 } from "node:fs";
+import { existsSync as existsSync11, readFileSync as readFileSync10, rmSync as rmSync7 } from "node:fs";
 import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative3, sep as sep4 } from "node:path";
 
 // src/config.ts
@@ -7916,11 +7916,11 @@ function rendersEmpty(item, output) {
 }
 
 // src/apply.ts
-import { existsSync as existsSync7, readFileSync as readFileSync6, readdirSync as readdirSync2, rmdirSync, rmSync as rmSync3 } from "node:fs";
+import { existsSync as existsSync7, readFileSync as readFileSync6, readdirSync as readdirSync2, rmdirSync, rmSync as rmSync4 } from "node:fs";
 import { dirname as dirname3, join as join10, resolve as resolvePath3, sep as sep3 } from "node:path";
 
 // src/lock.ts
-import { readFileSync as readFileSync5 } from "node:fs";
+import { readFileSync as readFileSync5, rmSync as rmSync3 } from "node:fs";
 var LockError = class extends Error {
   name = "LockError";
 };
@@ -7956,7 +7956,8 @@ function serializeLock(lock) {
   return JSON.stringify(out, null, 2) + "\n";
 }
 function writeLock(path, lock) {
-  atomicWrite(path, serializeLock(lock));
+  if (Object.keys(lock).length === 0) rmSync3(path, { force: true });
+  else atomicWrite(path, serializeLock(lock));
 }
 
 // src/apply.ts
@@ -8090,7 +8091,8 @@ function apply(plan, opts) {
     if (!oldLock[key].skipped) res.removed.push(key);
   }
   for (const [root, dirs] of dirsTouched) pruneEmptyDirs(dirs, root);
-  if (serializeLock(newLock) !== serializeLock(oldLock)) {
+  const emptyLeft = Object.keys(newLock).length === 0 && existsSync7(lockPath);
+  if (emptyLeft || serializeLock(newLock) !== serializeLock(oldLock)) {
     writeLock(lockPath, newLock);
   }
   return res;
@@ -8123,7 +8125,7 @@ function safeJoin(root, rel) {
 }
 function removeFile(abs, dirsTouched) {
   if (existsSync7(abs)) {
-    rmSync3(abs, { force: true });
+    rmSync4(abs, { force: true });
     dirsTouched.add(dirname3(abs));
   }
 }
@@ -8139,7 +8141,7 @@ function pruneEmptyDirs(dirs, root) {
 }
 
 // src/state.ts
-import { existsSync as existsSync8, mkdirSync as mkdirSync4, readFileSync as readFileSync7, rmSync as rmSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import { existsSync as existsSync8, mkdirSync as mkdirSync4, readFileSync as readFileSync7, rmSync as rmSync5, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join11 } from "node:path";
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
 var State = class {
@@ -8213,7 +8215,7 @@ var State = class {
       } catch (err) {
         if (err.code !== "EEXIST") throw err;
         if (this.isStale(ownerFile, staleMs)) {
-          rmSync4(lockDir, { recursive: true, force: true });
+          rmSync5(lockDir, { recursive: true, force: true });
           continue;
         }
         if (Date.now() >= deadline) {
@@ -8225,7 +8227,7 @@ var State = class {
     try {
       return await fn();
     } finally {
-      rmSync4(lockDir, { recursive: true, force: true });
+      rmSync5(lockDir, { recursive: true, force: true });
     }
   }
   isStale(ownerFile, staleMs) {
@@ -8241,7 +8243,7 @@ var State = class {
 
 // src/gitignore.ts
 import { execFileSync } from "node:child_process";
-import { existsSync as existsSync9, readFileSync as readFileSync8, rmSync as rmSync5 } from "node:fs";
+import { existsSync as existsSync9, readFileSync as readFileSync8, rmSync as rmSync6 } from "node:fs";
 import { join as join12 } from "node:path";
 var BEGIN2 = "# >>> skilletor >>>";
 var END2 = "# <<< skilletor <<<";
@@ -8278,7 +8280,7 @@ function updateGitignore(opts) {
   }
   const result = out.length && out.some((l) => l.trim() !== "") ? out.join("\n").replace(/\n*$/, "") + "\n" : "";
   if (result === "") {
-    if (existed) rmSync5(path, { force: true });
+    if (existed) rmSync6(path, { force: true });
     return change;
   }
   if (result !== existing) atomicWrite(path, result);
@@ -8908,6 +8910,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) || existsSync11(join14(rootOf(rc, "codex", "rule"), RULES_FILE)) ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings }) : { overwritten: [], exists: false, written: false };
   {
     const newLock = readLock(lockPath);
+    const inUse = scope === "user" || Object.keys(newLock).length > 0 || existsSync11(join14(targetDir, "skilletor.json")) || existsSync11(join14(targetDir, "skilletor.local.json"));
     const codexRoot = rootOf(rc, "codex", "rule");
     const inWorkTree = (dir) => {
       try {
@@ -8921,9 +8924,9 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
     );
     for (const rootDir of allRoots(rc)) {
       let entries = [];
-      if (rootDir === targetDir) {
+      if (inUse && rootDir === targetDir) {
         entries = scope === "project" ? PROJECT_CLAUDE_ENTRIES : userClaudeEntries(targetDir, ctx.stateRoot);
-      } else if (rootDir === codexRoot && (rules.exists || holdsManaged(rootDir))) {
+      } else if (inUse && rootDir === codexRoot && (rules.exists || holdsManaged(rootDir))) {
         entries = CODEX_ENTRIES;
       }
       const enabled = gitignoreOn && entries.length > 0 && (scope === "project" || inWorkTree(rootDir));
@@ -9063,7 +9066,7 @@ function syncCodexRules(a) {
   let written = false;
   try {
     if (next !== fileText) {
-      if (next === null) rmSync6(rulesFile, { force: true });
+      if (next === null) rmSync7(rulesFile, { force: true });
       else atomicWrite(rulesFile, next);
       written = next !== null;
     }
@@ -9085,7 +9088,7 @@ function syncCodexRules(a) {
   const shownRules = scope === "user" ? rulesFile : `.codex/${RULES_FILE}`;
   const agentsNext = withBlock(state.text, want ? pointerLines(scope, shownRules) : null);
   if (agentsNext !== state.text) {
-    if (agentsNext === null) rmSync6(agentsFile, { force: true });
+    if (agentsNext === null) rmSync7(agentsFile, { force: true });
     else atomicWrite(agentsFile, agentsNext);
   }
   if (want) {

@@ -1,7 +1,7 @@
 // Tests for the per-scope lock file (spec §6.2).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { readLock, writeLock, type Lock } from "../src/lock.ts";
@@ -24,6 +24,22 @@ test("write then read round-trips", () => {
     };
     writeLock(p, lock);
     assert.deepEqual(readLock(p), lock);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// k65 (spec §6.4): a lock without entries is deleted, never written as `{}`.
+test("a lock without entries is never created and an existing one is deleted", () => {
+  const tmp = makeTmpDir();
+  try {
+    const p = join(tmp.dir, "skilletor.lock.json");
+    writeLock(p, {});
+    assert.equal(existsSync(p), false);
+    writeLock(p, { a: { source: "s", version: "v", files: {} } });
+    assert.equal(existsSync(p), true);
+    writeLock(p, {});
+    assert.equal(existsSync(p), false);
   } finally {
     tmp.cleanup();
   }

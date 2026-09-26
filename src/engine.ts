@@ -600,8 +600,12 @@ async function syncScope(
     // One block of fixed entries per target root (spec §6.4, §14.3): `.claude/.gitignore`
     // always, a Codex root's while it holds managed agents or the rules file, none in
     // `.agents` (skills carry their own; an earlier version's block there goes). User
-    // roots get a block only inside a git work tree.
+    // roots get a block only inside a git work tree; project roots only while the project
+    // scope is in use – a project config file, or lock entries left – else a block found
+    // there goes (every sync runs the project scope of whatever directory it starts in).
     const newLock = readLock(lockPath);
+    const inUse = scope === "user" || Object.keys(newLock).length > 0 ||
+      existsSync(join(targetDir, "skilletor.json")) || existsSync(join(targetDir, "skilletor.local.json"));
     const codexRoot = rootOf(rc, "codex", "rule")!;
     const inWorkTree = (dir: string): boolean => {
       try {
@@ -614,10 +618,10 @@ async function syncScope(
       ([key, e]) => !e.block && Object.keys(e.files).length > 0 && rootOfKey(rc, key) === rootDir,
     );
     for (const rootDir of allRoots(rc)) {
-      let entries: string[] = [];
-      if (rootDir === targetDir) {
+      let entries: string[] = []; // none: a block found there is removed
+      if (inUse && rootDir === targetDir) {
         entries = scope === "project" ? PROJECT_CLAUDE_ENTRIES : userClaudeEntries(targetDir, ctx.stateRoot);
-      } else if (rootDir === codexRoot && (rules.exists || holdsManaged(rootDir))) {
+      } else if (inUse && rootDir === codexRoot && (rules.exists || holdsManaged(rootDir))) {
         entries = CODEX_ENTRIES;
       }
       // Ask git only when there is a block to write (the hook path stays fast).

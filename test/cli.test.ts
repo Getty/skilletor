@@ -2,7 +2,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildToString } from "../scripts/esbuild.config.mjs";
 import { claudeOnlyEnv } from "./helpers/harness.ts";
@@ -357,6 +357,76 @@ test("default project dir: git top level of cwd; a subdir of a git ~ has no proj
   const hs = runCli(["status"], env, undefined, join(home, "notes"));
   assert.equal(hs.status, 0, hs.stderr);
   assert.match(hs.stdout, /^project scope: none/m);
+});
+
+// k65 (spec §6.4): every sync runs the project scope of the directory it starts in; where
+// skilletor is not used it writes nothing and asks for no commit.
+test("sync in a git repo or a plain dir that never used skilletor: nothing written there, no commit hint", () => {
+  const home = join(tmp.dir, "unused-home");
+  const src = join(tmp.dir, "unused-src");
+  const repo = join(tmp.dir, "unused-repo");
+  const plain = join(tmp.dir, "unused-plain");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(src, "skills", "foo"), { recursive: true });
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), "---\nname: foo\ndescription: foo\n---\nF\n");
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } }, install: { skills: ["foo@s"] } }));
+  mkdirSync(repo, { recursive: true });
+  mkdirSync(plain, { recursive: true });
+  execFileSync("git", ["init", "-q", "-b", "main", repo]);
+  const env = claudeOnlyEnv(home);
+  delete env.CLAUDE_PROJECT_DIR;
+  delete env.SKILLETOR_PROJECT_DIR;
+
+  const r = runCli(["sync"], env, undefined, repo);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^ {2}\+ skills\/foo \(active now\)$/m);
+  assert.doesNotMatch(r.stdout, /project scope|commit it/);
+  assert.equal(execFileSync("git", ["-C", repo, "status", "--porcelain"], { encoding: "utf8" }), "");
+  assert.equal(existsSync(join(repo, ".claude")), false);
+
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), "---\nname: foo\ndescription: foo\n---\nG\n");
+  const p = runCli(["sync"], env, undefined, plain);
+  assert.equal(p.status, 0, p.stderr);
+  assert.match(p.stdout, /^ {2}~ skills\/foo \(active now\)$/m);
+  assert.doesNotMatch(p.stdout, /project scope|commit it/);
+  assert.deepEqual(readdirSync(plain), []);
+});
+
+// k65 (spec §6.4): a project that drops skilletor keeps nothing behind — the lock without
+// entries is deleted, not left as an unignored `{}`.
+test("a committed project drops skilletor: sync leaves only deletions of tracked files, status --json reads no lock", () => {
+  const home = join(tmp.dir, "drop-home");
+  const src = join(tmp.dir, "drop-src");
+  const repo = join(tmp.dir, "drop-repo");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(src, "skills", "foo"), { recursive: true });
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), "---\nname: foo\ndescription: foo\n---\nF\n");
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } } }));
+  mkdirSync(join(repo, ".claude"), { recursive: true });
+  writeFileSync(join(repo, ".claude", "skilletor.json"), JSON.stringify({ install: { skills: ["foo@s"] } }));
+  const G = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
+  const git = (...args: string[]) => execFileSync("git", ["-C", repo, "-c", "commit.gpgsign=false", ...args], { env: G, encoding: "utf8" });
+  git("init", "-q", "-b", "main");
+  const env = claudeOnlyEnv(home);
+
+  const first = runCli(["sync", "--project-dir", repo], env);
+  assert.equal(first.status, 0, first.stderr);
+  git("add", "-A");
+  git("commit", "-qm", "use skilletor");
+  assert.deepEqual(git("ls-files").split("\n").filter(Boolean), [".claude/.gitignore", ".claude/skilletor.json"]);
+
+  rmSync(join(repo, ".claude", "skilletor.json"));
+  const drop = runCli(["sync", "--project-dir", repo], env);
+  assert.equal(drop.status, 0, drop.stderr);
+  assert.match(drop.stdout, /^ {2}- skills\/foo \(removed\)$/m);
+  assert.doesNotMatch(drop.stdout, /commit it/);
+  assert.equal(git("status", "--porcelain"), " D .claude/.gitignore\n D .claude/skilletor.json\n"); // no ?? lock
+  assert.deepEqual(readdirSync(join(repo, ".claude")), []);
+
+  const st = runCli(["status", "--json", "--project-dir", repo], env);
+  assert.equal(st.status, 0, st.stderr);
+  const project = JSON.parse(st.stdout).scopes.find((s: { scope: string }) => s.scope === "project");
+  assert.deepEqual([project.declared, project.orphans, project.sourceVersions], [[], [], {}]);
 });
 
 // k55: argument hygiene (spec §7).

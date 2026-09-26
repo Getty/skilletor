@@ -552,6 +552,37 @@ test("a dropped codex: key is a warning naming the item; the rest is written", a
 
 // ---- k62: fixed ignore rules for Codex (spec §6.4, §14.3) ----------------------------
 
+// k65 (spec §6.4): the project's Codex root gets a block only while the project scope is in use.
+test("k65: the project .codex block goes with the config and the last managed agent and rule; litter goes too", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "agents/helper.md": AGENT("Helps", "B\n"), "rules/r.md": "R.\n" });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { agents: ["helper@mine"], rules: ["r@mine"] } });
+    const p = e.projectDir;
+    await sync(e.ctx);
+    assert.equal(readFileSync(join(p, ".codex/.gitignore"), "utf8"), BLOCK("agents/**/.local.*", "skilletor-rules.md"));
+    rmSync(join(p, ".claude/skilletor.json"));
+    const r = await sync(e.ctx);
+    const proj = r.scopes.find((s) => s.scope === "project")!;
+    assert.deepEqual(proj.removed.map((i) => i.key).sort(), ["agents/helper", "codex:agents/helper", "codex:rules/r", "rules/r"]);
+    assert.equal(existsSync(join(p, ".codex/agents")), false);
+    assert.equal(existsSync(join(p, ".codex/skilletor-rules.md")), false);
+    assert.equal(existsSync(join(p, ".codex/.gitignore")), false);
+    assert.equal(existsSync(join(p, ".claude/.gitignore")), false);
+    assert.equal(existsSync(join(p, ".claude/skilletor.lock.json")), false); // block entries gone too: no {} lock
+    assert.equal(proj.gitignoreUpdated, undefined);
+    // Unused now: a block found in the .codex root is removed, own lines stay.
+    mkdirSync(join(p, ".codex"), { recursive: true });
+    writeFileSync(join(p, ".codex/.gitignore"), "own-line\n\n" + BLOCK("agents/**/.local.*", "skilletor-rules.md"));
+    const again = await sync(e.ctx);
+    assert.equal(readFileSync(join(p, ".codex/.gitignore"), "utf8"), "own-line\n");
+    assert.equal(again.scopes.find((s) => s.scope === "project")!.gitignoreUpdated, undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("k62: the first sync after the upgrade migrates both harnesses; the .agents block goes, .codex gets the fixed one", async () => {
   const e = env(["claude", "codex"]);
   try {

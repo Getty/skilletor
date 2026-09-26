@@ -92,6 +92,30 @@ test("an item no longer declared is removed, its dir cleaned up", () => {
   }
 });
 
+// k65 (spec §6.4): a lock without entries is deleted, never written as `{}`.
+test("removing the last item deletes the lock; an empty plan creates none and deletes an old {} lock", () => {
+  const tmp = makeTmpDir();
+  try {
+    const lockFile = join(tmp.dir, "skilletor.lock.json");
+    apply([], { targetDir: tmp.dir });
+    assert.equal(existsSync(lockFile), false, "no lock where there was none");
+    apply([item("skill", "moo", { "skills/moo/SKILL.md": "S" })], { targetDir: tmp.dir });
+    const res = apply([], { targetDir: tmp.dir });
+    assert.deepEqual(res.removed, ["skills/moo"]);
+    assert.equal(existsSync(lockFile), false, "the last item takes the lock with it");
+    writeFileSync(lockFile, "{}\n"); // what earlier versions left
+    apply([], { targetDir: tmp.dir });
+    assert.equal(existsSync(lockFile), false, "an old {} lock goes");
+    // A skip entry is an entry: the lock stays while it is declared, and goes with it.
+    apply([skipped("rule", "r")], { targetDir: tmp.dir });
+    assert.deepEqual(Object.keys(readLock(lockFile)), ["rules/r"]);
+    apply([], { targetDir: tmp.dir });
+    assert.equal(existsSync(lockFile), false);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
 test("a foreign (unmanaged) target path is a conflict, left untouched without --force", () => {
   const tmp = makeTmpDir();
   try {

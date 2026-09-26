@@ -6,8 +6,9 @@
 //     "rules/k8s": { …, "files": {}, "skipped": "renders-empty" } }
 //
 // Serialized deterministically (sorted keys) so a no-op run produces identical
-// bytes and never rewrites the file.
-import { readFileSync } from "node:fs";
+// bytes and never rewrites the file. A lock without entries is not written: the
+// file is deleted, so a scope with nothing installed leaves none behind (spec §6.4).
+import { readFileSync, rmSync } from "node:fs";
 import { atomicWrite } from "./fsutil.ts";
 
 export interface LockEntry {
@@ -69,6 +70,8 @@ export function serializeLock(lock: Lock): string {
   return JSON.stringify(out, null, 2) + "\n";
 }
 
+/** Write the lock; one without entries deletes the file instead, never `{}` (spec §6.4). */
 export function writeLock(path: string, lock: Lock): void {
-  atomicWrite(path, serializeLock(lock));
+  if (Object.keys(lock).length === 0) rmSync(path, { force: true });
+  else atomicWrite(path, serializeLock(lock));
 }

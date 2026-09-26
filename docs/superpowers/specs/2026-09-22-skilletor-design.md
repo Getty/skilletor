@@ -325,7 +325,16 @@ sync. (The first design listed every managed path; the block then followed machi
 Committed are `skilletor.json` and the `.gitignore` files; your own skills, agents and rules
 alongside stay version-controlled as usual. A block written by an earlier version (exact
 paths) is replaced on the first sync. Project blocks are written whether or not the
-project is a git repository (harmless, and a later `git init` finds them in place).
+project is a git repository (harmless, and a later `git init` finds them in place) – but
+only while the project scope is **in use**: a project `skilletor.json` or
+`skilletor.local.json` exists, or the project lock still holds entries after the sync
+(items left to clean up). A lock without entries is deleted, never written as `{}` (both
+scopes), so a project that drops skilletor keeps nothing behind. Every
+sync also runs the project scope of whatever directory it starts in, so without this a
+repository that never used skilletor would get a `.claude/.gitignore` (k65; versions up
+to 0.2.0 wrote one there). Outside use nothing is written, and a skilletor block found
+in a project root is removed – the file deleted when only the block remained – without
+a commit hint.
 
 **Commit hint.** When sync creates a block or changes its content, the report says so and
 asks for the file to be committed (`.claude/.gitignore updated — commit it`). With fixed
