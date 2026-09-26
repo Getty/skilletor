@@ -1,0 +1,35 @@
+---
+class: standard
+completed: 2026-09-26T22:24:00Z
+created: 2026-09-26T22:10:34Z
+id: 96
+priority: high
+started: 2026-09-26T22:24:00Z
+status: done
+tags:
+- catalog
+- feature
+title: 'catalog: offer a source''s .claude/skills, .claude/agents and .claude/rules
+  as items'
+updated: 2026-09-26T22:24:00Z
+---
+
+Maintainer request (2026-09-27): adding Getty/karr as a source should offer its .claude/skills/* for install. Getty/karr publishes nothing under skills/ – its skills, agents and rules sit in the Claude project layout: .claude/skills/<name>/SKILL.md (+ references/, scripts/), .claude/agents/<name>.md, .claude/rules/<name>.md, all committed.
+
+Design (decided by the coordinator):
+- catalog.scan also reads .claude/skills/<name>/SKILL.md[.njk], .claude/agents/<name>.md[.njk], .claude/rules/<name>.md[.njk]. Install target is unchanged (skills/<name>/, agents/<name>.md, rules/<name>.md), whatever the source path.
+- Precedence: skills/ agents/ rules/, then plugin.json skills, then .claude/. A .claude/ item whose name the published layout already holds is skipped silently – never an error (a repo often keeps an installed copy of its own skill there).
+- .claude/ is best effort: what the published layout would reject there (a symlinked .claude, .claude/skills, item or file inside an item) skips that item or directory, never fails the scan. A source that scans today must scan the same way with its .claude/ tree added. Symlinks are still never followed.
+- Not in scope: bundles under .claude/, .agents/skills (Codex layout), share/.
+
+Done when: scan offers the three .claude/ kinds with the precedence and skip rules above; install, render, includes, check and source list/available work for an agent or rule that lives under .claude/ (not only skills); tests red first; spec §4.1, README Sources layout and skills/skilletor/SKILL.md say it; dist rebuilt; typecheck, npm test, build, check-dist green.
+
+2026-09-26 22:14 Read catalog/render/convert/engine/commands. Only render.ts assumes agents/<name>.md / rules/<name>.md for agents and rules (installPath returns the source path; rendersEmpty builds `${type}s/<name>.md`); convert.ts, apply, placeOutput, engine/commands TYPE_DIR work on install-relative output paths or lock keys and follow once render maps .claude/agents/x.md -> agents/x.md. Plan: CatalogItem.dir generalized (agents/rules: the dir holding the file, set only for .claude items), render maps by it; catalog scans .claude/ last, best effort (any error or symlink skips that dir/item). Writing tests first.
+
+2026-09-26 22:21 Decision (.gitignore question): a source's own skill .gitignore is a file of the item as in skills/ (replaced by skilletor's while gitignore is on, installed as shipped when off) - no collision. The real collision is skilletor's OWN installed copies in a local source's .claude/ (a project whose project scope uses skilletor): a skill dir carrying skilletor's .gitignore (exact SKILL_GITIGNORE bytes) and .local.<name>.md agents/rules. A clone never holds them (git ignores them), a local checkout would re-offer other sources' rendered copies (agents as '.local.x'), and with gitignore:false the consumer would get a '*' .gitignore anyway. Chosen: such items are not offered from .claude/ (catalog imports SKILL_GITIGNORE from gitignore.ts), so local and git offer the same. Verified on a scratch karr copy with a real project-scope sync: 20 items before and after, none of the installed copies listed. Drop the .local. half if the coordinator disagrees - it is one condition in claudeItem.
+
+2026-09-26 22:21 Also found (not fixed, for the board): (1) file modes are not preserved on install for any skill - karr's .claude/skills/karr-single-binary/scripts/benchmark.sh (0775) installs as 0664; pre-existing, applies to skills/ too. (2) .claude/skills/skilletor-core/SKILL.md line 43 ('A catalog item may carry dir (a skill found via a nested plugin.json path); render maps its files to skills/<name>/...') is now incomplete: .claude agents and rules carry dir too and render maps them to agents/, rules/ - skilletor-skill-author lane. (3) Pre-existing: the published agents/ or rules/ with both x.md and x.md.njk yields two catalog items named x; the .claude scan dedupes (sorted, x.md wins).
+
+2026-09-26 22:21 Done: src/catalog.ts scans .claude/{skills,agents,rules} after skills/ agents/ rules/ and plugin.json (claudeItems/claudeItem): a name its type already has is skipped silently; best effort (symlink at .claude, a type dir, an item or any file in a skill, or any read error skips that dir/item, never throws, never follows); skilletor's installed copies skipped. CatalogItem.dir now also marks where an agent/rule file lives (.claude/agents, .claude/rules). src/render.ts installPath maps agents/rules by dir to agents/<file>, rules/<file>; rendersEmpty finds the main file by dir. That was the only path assumption: convert.ts, placeOutput, apply, briefing, check drift and commands work on install paths or lock keys and needed no change. New test/claude-layout.test.ts (11 tests): catalog (karr shape, .njk, precedence incl. plugin.json listing .claude/skills, scan-identical regression over 11 .claude variants incl. symlinked .claude/skills/x, sibling survival, installed copies), engine (claude+codex sync with .njk include, empty render, TOML, rules file, lock keys, check drift clean, idempotent resync; wildcards; item moving from .claude to agents/), commands (available + install), .gitignore behavior. 9 red first on missing .claude scan, then engine tests red on '.claude/agents/.local.x.md' / codex 'agents/x.md missing from the build' until render fixed; guard tests mutation-checked. Docs: spec 4.1, README Sources, skills/skilletor/SKILL.md (+ k88 git/local clause). Verified: typecheck, npm test 676/676, build, check-dist green; hand test on a scratch copy of ~/dev/karr with temp HOME/CODEX_HOME: available lists 12 skills, 7 agents, 1 rule; install karr-single-binary, karr-worker, karr-rules wrote the right Claude and Codex paths, byte-identical to the source; status and check show no drift; a file:// git clone offers the same 20.
+
+2026-09-26 22:23 Committed a078138 (catalog: a source's .claude/skills, agents and rules are items, installed like published ones).
