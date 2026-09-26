@@ -456,9 +456,10 @@ test("k85: an address shaped like an option never runs as one, in check or resol
 
 // k87: git ends its stderr with a newline, and a failure's message carried it – every git
 // warning then ended in a visible "\n" once report text escaped it. Asserts: the fallback
-// warning, the error without a cache, and a check's error (ls-remote failing, and killed by
-// its timeout – Node's "Command failed: …\n" when git wrote nothing) each carry git's words
-// and end in a word, never in whitespace.
+// warning, the error without a cache, and a check's error (ls-remote failing, and racing a 1 ms
+// timeout – git's own multi-line error when it exits first, Node's "Command failed: …\n" when
+// killed before writing anything; k106) each carry git's words and end in a word, never in
+// whitespace.
 test("k87: a git failure's message ends in git's last word, not its trailing newline", async (t) => {
   const tmp = makeTmpDir();
   t.after(tmp.cleanup);
@@ -479,7 +480,7 @@ test("k87: a git failure's message ends in git's last word, not its trailing new
     return true;
   });
   await assert.rejects(new GitSource({ url: repo.url, cacheRoot, timeoutMs: 1 }).check("git:abc"), (err: Error) => {
-    assert.match(err.message, /^git ls-remote .*\S$/);
+    assert.match(err.message, /^git ls-remote .*: (?:fatal: |Command failed: )[^]*\S$/);
     return true;
   });
 });
