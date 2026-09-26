@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-09-26T04:34:56Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-26T04:34:56Z
+created: 2026-09-26T03:51:09Z
+id: 67
+priority: high
+started: 2026-09-26T04:17:21Z
+status: done
+tags:
+- security
+- apply
+title: 'apply: writes through a linked skill dir despite a conflict'
+updated: 2026-09-26T04:34:56Z
+---
+
+`~/.claude/skills/foo` is a symlink to a foreign dir holding SKILL.md. Sync reports the SKILL.md conflict but still writes the new `reference.md` through the link, outside the target root, without --force (probe 03). k62 guarded only the per-skill .gitignore. Code: src/apply.ts:139-172, 250-255. Fix: check physical path components before any mutation; a conflicted or linked item is blocked as a whole (nothing of it written).
+
+Repro: probe file by the skilletor-71 audit session, copied to docs-free scratch; reproduced by the orchestrator against exports of e371b13 AND v0.2.0 (pre-existing, not introduced by k62/k63/k65).
+
+2026-09-26 04:21 Started (skilletor-worker): plan = per-item pre-check in apply.ts (lstat every component from the item path down, before the first write), whole-item block on any conflict (generalises k62 claims; subsumes attached), links at/below the item path never written/deleted through, pruneEmptyDirs stops at links.
+
+2026-09-26 04:24 Red tests in test/apply.test.ts (11 new k67 tests, all failing on HEAD for the intended reason). Asserts: linked skill dir -> one conflict at the link (replace), nothing written through, --force unlinks + installs a real dir, target snapshot unchanged; dir that became a link blocks even with lock-owned files, lock text unchanged; inner linked dir blocks writes and removals; partial conflict in a plain dir writes/removes nothing (installed copy + lock kept); linked lock-owned file replaced as a file (also same-bytes and dangling), target unchanged, reported overwritten; foreign link (also dangling, which existsSync missed) = conflict; claimed plain path as dangling link = conflict; type dir / root linked = written through and pruned inside; undeclared or skipped item behind a linked dir: nothing deleted, reported, lock lets go; directory at a file path = conflict with --force too; Codex roots via rootOf. Also found (pre-existing, fixed here as part of the link rules): pruneEmptyDirs throws ENOTDIR (rmdir on the link) when a linked type dir (skills -> dotfiles) becomes empty.
+
+2026-09-26 04:31 Decisions: (1) item's own path = lock key without prefix; paths under it (a skill dir) are lstat-checked per component, other paths (agents, rules) only the file itself; links above are followed. (2) A linked skill dir reports ONE conflict at the link (skills/foo, replace:true), not the files behind it (k62 engine test expectation updated from skills/bar/SKILL.md). (3) attached (k62) removed from PlanItem/engine: whole-item blocking subsumes it. (4) A directory where the item has a file is a conflict even with --force (never rm -r); previously EISDIR crash. (5) Removing an undeclared/skipped item behind a linked dir: nothing deleted, ApplyResult.leftInPlace -> one warning per item+link, the lock lets go of the entry (warn once, not every session). (6) The item's own file where it now has a directory is removed first (was an ENOTDIR crash). (7) A dangling link at a foreign path is now a conflict (existsSync missed it).
+
+2026-09-26 04:31 Also found (not in scope, for this board): (a) audit probe 07 partly fixed as a side effect: a foreign dir at a file path is now a conflict, no EISDIR abort; but any other throw inside apply after writes (EACCES, ENOTDIR above the item root) still leaves written files without a lock entry - worth its own card. (b) The hook's systemMessage counts conflicts as 'N warning(s)' but additionalContext never lists them (only warnings) - the session sees no conflict path; report.ts, pre-existing. (c) README security list could state 'never writes or deletes through a linked item directory' - README is the orchestrator's.
+
+2026-09-26 04:31 Done: src/apply.ts checks every path of an item before its first write (lstat per component from the item path down); any conflict blocks the whole item (nothing written/removed, lock entry kept); no write or delete through a link at/below the item path (--force unlinks the link, target untouched, real dir installed); a lock-owned linked file is replaced as a file; links above (skills -> dotfiles, root) written through; pruneEmptyDirs stops at links (fixed ENOTDIR crash). Removal behind a linked dir -> leftInPlace warning. engine.ts: attached dropped, leftInPlace -> warning. dist rebuilt. Verified: typecheck ok, npm test 507/507, check-dist up to date; 13 new apply tests + engine/codex/hook tests red on HEAD, green now; hand test of bin/skilletor sync/hook/--force in temp HOME/CODEX_HOME; audit probe 03 now fails at line 114 (reference.md no longer written through the link), probe 07 fails at 179 (no EISDIR abort). Not committed.
+
+2026-09-26 04:34 Committed as 490516e: apply: a conflict blocks the whole item; never write or delete through a linked item path (k67)
