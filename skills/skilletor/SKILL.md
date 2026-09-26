@@ -28,13 +28,16 @@ Where items land, under `~` (user scope) or the project root (project scope):
 | Type | Claude Code | Codex |
 |---|---|---|
 | skill | `.claude/skills/<name>/` | `.agents/skills/<name>/` |
-| agent | `.claude/agents/<name>.md` | `.codex/agents/<name>.toml` (user: `$CODEX_HOME/agents/`) |
-| rule | `.claude/rules/<name>.md` | a section of `.codex/skilletor-rules.md` (user: `$CODEX_HOME/skilletor-rules.md`) |
+| agent | `.claude/agents/.local.<name>.md` | `.codex/agents/.local.<name>.toml` (user: `$CODEX_HOME/agents/`) |
+| rule | `.claude/rules/.local.<name>.md` | a section of `.codex/skilletor-rules.md` (user: `$CODEX_HOME/skilletor-rules.md`) |
 
 `$CODEX_HOME` defaults to `~/.codex`. A file is managed when its path is in
 `<scope>/.claude/skilletor.lock.json` (Codex keys `codex:skills/<name>` etc.) — check the
-lock before editing; files not in it are yours. In `AGENTS.md` only the pointer block
-between `<!-- skilletor:begin -->` and `<!-- skilletor:end -->` is managed.
+lock before editing; files not in it are yours. An agent or rule still claims its plain
+name: your own `agents/<name>.md` / `rules/<name>.md` (Codex: `agents/<name>.toml`) for a
+declared item is a conflict, the item is not installed, and `sync --force` deletes your
+file. In `AGENTS.md` only the pointer block between `<!-- skilletor:begin -->` and
+`<!-- skilletor:end -->` is managed.
 
 ## Commands
 
@@ -85,10 +88,14 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
 
 - Only `skill`, `agent`, `rule` are installable — never hooks, settings or MCP configs.
 - `ref` (git) pins a branch, tag or commit; omit for the remote's HEAD.
-- `gitignore` (default true): a managed `.gitignore` block lists installed paths, the lock
-  and `skilletor.local.json` in the project; in user scope a block per root (`~/.claude`,
-  `~/.agents`, `$CODEX_HOME`) only while it lies in a git work tree, listing the lock and
-  state dir but never `skilletor.json`. The user value switches only the user blocks.
+- `gitignore` (default true): fixed ignore rules that never change with the items. Every
+  installed skill dir gets its own `.gitignore` (`*`); a marked block in `.claude/.gitignore`
+  lists the lock, `skilletor.local.json`, `agents/**/.local.*`, `rules/**/.local.*`, one in
+  `.codex/.gitignore` the Codex agents and rules file. Commit `skilletor.json` and the
+  `.gitignore` files — the report says `.claude/.gitignore updated — commit it` when a block
+  is created or changed. User scope: blocks in `~/.claude` (lock, state dir, never
+  `skilletor.json`) and `$CODEX_HOME` only inside a git work tree. `false` drops blocks and
+  skill `.gitignore`s, file names stay; the user value switches only the user scope.
   `checkInterval` (user only, seconds, default 1800): in-session check throttle, `≤ 0` =
   sync only at session start; in a project file it is a config error (nothing syncs).
 - `targets` (`["claude"]`, `["codex"]` or both), unset = auto-detected. The user file sets

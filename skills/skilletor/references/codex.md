@@ -72,8 +72,10 @@ rule; a section edited or deleted by hand is restored and reported as overwritte
   (`CLAUDE.md`/`.claude/CLAUDE.md` in the project, `~/.claude/CLAUDE.md` for the user file).
 - Pointer warnings: an `AGENTS.override.md` beside it (Codex reads that instead); a project
   `AGENTS.md` over Codex's `project_doc_max_bytes` (default 32768 — the pointer is cut).
-- Git: the project rules file is in the managed `.codex/.gitignore` block (unless
-  `"gitignore": false`); only the pointer shows in the diff. An older skilletor's rule
+- Git: `.codex/.gitignore` holds the fixed block `agents/**/.local.*`, `skilletor-rules.md`
+  while `.codex` has managed agents or the rules file (unless `"gitignore": false`); only
+  the pointer shows in the diff. Codex skills carry their own `.gitignore`, so `.agents`
+  gets no block (an older one is removed). An older skilletor's rule
   sections in `AGENTS.md` are replaced by the pointer on the next sync (rules reported as
   updated, not overwritten).
 

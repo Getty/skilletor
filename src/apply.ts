@@ -3,8 +3,10 @@
 // Compares each item's built output against disk and the lock, writes only
 // differences (atomically), removes files an item no longer contains, and
 // deletes items no longer declared. Foreign paths (present but not in the lock)
-// are never overwritten without --force; managed files that drifted from their
-// lock hash are overwritten and reported. `apply` knows nothing about sources.
+// are never overwritten without --force; a foreign file at a path an item only
+// claims blocks the whole item (--force deletes it). Managed files that drifted
+// from their lock hash are overwritten and reported. `apply` knows nothing about
+// sources.
 import { existsSync, readFileSync, readdirSync, rmdirSync, rmSync } from "node:fs";
 import { dirname, join, resolve as resolvePath, sep } from "node:path";
 import type { ItemType } from "./config.ts";
@@ -29,6 +31,15 @@ export interface PlanItem {
   inBlock?: boolean;
   /** Recorded in the lock entry as is (the bundles that declared the item). */
   via?: string[];
+  /** Paths the item claims without writing them (an agent's plain file name next to
+   *  its `.local.` file, spec §6.3). A file there that the item's lock entry does not
+   *  own is a conflict: nothing of the item is written and its lock entry stays as it
+   *  was. With `force` that file is deleted instead. */
+  claims?: string[];
+  /** Output paths written only into a directory that is the item's: when another path
+   *  of the item conflicts, one the lock does not own yet is left out (a skill's own
+   *  `.gitignore` must not land in a hand-written or linked skill, spec §6.4). */
+  attached?: string[];
 }
 
 export interface ApplyOptions {
@@ -52,7 +63,8 @@ export interface ApplyResult {
   unchanged: string[];
   /** Plan items marked skipped (also in `removed` if files were deleted). */
   skipped: string[];
-  conflicts: { key: string; path: string }[];
+  /** `replace`: a claimed path, which `force` deletes rather than adopts. */
+  conflicts: { key: string; path: string; replace?: true }[];
   overwritten: { key: string; path: string }[];
 }
 
@@ -101,14 +113,29 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
     }
     // A previous skip entry owns nothing: treat the item as not yet installed.
     const existing = oldLock[it.key]?.skipped ? undefined : oldLock[it.key];
+    // Claimed paths: one the lock entry owns (an earlier layout) goes with the diff below.
+    const foreign = (it.claims ?? []).filter(
+      (rel) => existing?.files[rel] === undefined && existsSync(safeJoin(root, rel)),
+    );
+    if (foreign.length > 0 && !opts.force) {
+      for (const rel of foreign) res.conflicts.push({ key: it.key, path: rel, replace: true });
+      if (oldLock[it.key]) newLock[it.key] = oldLock[it.key]!; // left as it was
+      res.unchanged.push(it.key);
+      continue;
+    }
+    for (const rel of foreign) removeFile(safeJoin(root, rel), touched(root));
     const entryFiles: Record<string, string> = {};
     let wrote = false;
     let removedFile = false;
+    let conflicted = false;
+    const attached = new Set(it.attached ?? []);
+    const ordered = [...it.output].sort(([a], [b]) => Number(attached.has(a)) - Number(attached.has(b)));
 
-    for (const [rel, buf] of it.output) {
+    for (const [rel, buf] of ordered) {
       const abs = safeJoin(root, rel);
       const desired = hashBuffer(buf);
       const locked = existing?.files[rel];
+      if (conflicted && locked === undefined && attached.has(rel)) continue;
       const onDisk = existsSync(abs);
 
       if (onDisk) {
@@ -116,6 +143,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
         if (locked === undefined && !opts.force) {
           // Foreign, unmanaged path: never clobbered.
           res.conflicts.push({ key: it.key, path: rel });
+          conflicted = true;
           continue;
         }
         if (diskHash === desired) {

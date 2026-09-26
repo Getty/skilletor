@@ -257,7 +257,7 @@ test("install --project writes the wildcard to the project config", async () => 
     await cmdInstall(e.ctx, { items: ["rule:*@mine"], project: true });
     const proj = JSON.parse(readFileSync(join(e.projectDir, ".claude", "skilletor.json"), "utf8"));
     assert.deepEqual(proj.install, { rules: ["*@mine"] });
-    assert.equal(existsSync(join(e.projectDir, ".claude/rules/r1.md")), true);
+    assert.equal(existsSync(join(e.projectDir, ".claude/rules/.local.r1.md")), true);
   } finally {
     e.cleanup();
   }
@@ -272,10 +272,10 @@ test("uninstall type:*@source removes only that type's wildcard and its items", 
     });
     e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["*@mine"], rules: ["rule:*@mine"] } });
     await cmdInstall(e.ctx, { items: [] });
-    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.r1.md")), true);
     await cmdUninstall(e.ctx, { items: ["rule:*@mine"] });
     assert.deepEqual(e.readUserCfg().install, { skills: ["*@mine"] });
-    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), false);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.r1.md")), false);
     assert.equal(existsSync(join(e.home, ".claude/skills/foo/SKILL.md")), true);
   } finally {
     e.cleanup();
@@ -306,7 +306,7 @@ test("uninstall type:name@source removes only that type's entry", async () => {
     await cmdUninstall(e.ctx, { items: ["skill:dup@mine"] });
     assert.deepEqual(e.readUserCfg().install, { agents: ["dup@mine"] });
     assert.equal(existsSync(join(e.home, ".claude/skills/dup")), false);
-    assert.equal(existsSync(join(e.home, ".claude/agents/dup.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/agents/.local.dup.md")), true);
   } finally {
     e.cleanup();
   }
@@ -360,7 +360,7 @@ for (const spec of ["r1@mine", "rule:r1@mine"]) {
         return true;
       });
       assert.deepEqual(e.readUserCfg().install, { rules: ["*@mine"] });
-      assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), true);
+      assert.equal(existsSync(join(e.home, ".claude/rules/.local.r1.md")), true);
     } finally {
       e.cleanup();
     }
@@ -417,7 +417,7 @@ test("uninstall of an explicit item a wildcard also covers removes it and return
     assert.match(res.hints[0]!, /wildcard rule:\*@mine/);
     assert.match(res.hints[0]!, /next sync|still installs/);
     // The wildcard keeps it installed.
-    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.r1.md")), true);
   } finally {
     e.cleanup();
   }
@@ -647,10 +647,10 @@ test("uninstall bundle:name@source removes the entry and its items; bare name wo
     await cmdInstall(e.ctx, { items: [] });
     await cmdUninstall(e.ctx, { items: ["bundle:perl@mine"] });
     assert.deepEqual(e.readUserCfg().install, { bundles: ["bundle:go@mine"] });
-    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), true); // go still yields it
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.r1.md")), true); // go still yields it
     await cmdUninstall(e.ctx, { items: ["go@mine"] });
     assert.equal(e.readUserCfg().install, undefined);
-    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), false);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.r1.md")), false);
     await assert.rejects(() => cmdUninstall(e.ctx, { items: ["bundle:perl@mine"] }), /bundle:perl@mine is not declared/);
   } finally {
     e.cleanup();
@@ -853,7 +853,7 @@ test("install bundle: a source already configured under any name is not asked fo
     const a = answers();
     await cmdInstall({ ...e.ctx, prompt: a.prompt }, { items: ["bundle:perl@mine"] });
     assert.deepEqual(a.questions, []);
-    assert.equal(existsSync(join(e.home, ".claude/rules/p-one.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.p-one.md")), true);
   } finally {
     e.cleanup();
   }

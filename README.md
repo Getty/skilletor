@@ -327,20 +327,43 @@ files are build artifacts; there are no hardlinks.
 
 ## Git & your own skills
 
-With `"gitignore": true` (default) skilletor keeps a marked block in
-`<project>/.claude/.gitignore` listing the exact managed paths, the lock and
-`skilletor.local.json` (and the same kind of block in `<project>/.agents/.gitignore` and
-`<project>/.codex/.gitignore` for Codex items). Only `skilletor.json` is committed; your
-own hand-written skills beside the managed ones stay version-controlled and are never touched. Set
-`"gitignore": false` in the project config to commit everything instead (useful only for
-items without machine-specific variables).
+Installed items sit next to your own skills, agents and rules, and a fixed set of ignore
+rules keeps them out of commits:
 
-Keep `~` or `~/.claude` in a dotfiles repository? Each user root – `~/.claude`,
-`~/.agents`, `$CODEX_HOME` – that lies inside a git work tree gets the same kind of block
-in its own `.gitignore`, listing the managed paths there; the `~/.claude` block also lists
-`skilletor.lock.json` and the state directory `skilletor/`, never `skilletor.json`. A root
-outside a work tree gets no block. `"gitignore": false` in `~/.claude/skilletor.json`
-removes the user blocks; it does not affect projects.
+- **Skills** keep their name (`.claude/skills/perl-moo/`); each installed skill directory
+  gets its own `.gitignore` containing `*`.
+- **Agents and rules** are installed as `.claude/agents/.local.<name>.md` and
+  `.claude/rules/.local.<name>.md` (Codex agents: `.codex/agents/.local.<name>.toml`). The
+  agent keeps the name from its frontmatter; the prefix follows Claude Code's convention
+  for files that are not committed (`CLAUDE.local.md`, `settings.local.json`).
+- **`<project>/.claude/.gitignore`** holds a marked block that never changes:
+
+  ```gitignore
+  # >>> skilletor >>>
+  agents/**/.local.*
+  rules/**/.local.*
+  skilletor.local.json
+  skilletor.lock.json
+  # <<< skilletor <<<
+  ```
+
+  `<project>/.codex/.gitignore` gets the same kind of block for Codex agents and the rules
+  file.
+
+Commit `skilletor.json` and the `.gitignore` files; the report asks you to once, when sync
+creates or changes a block. Your own hand-written skills, agents and rules stay
+version-controlled and are never touched — only don't name your own files `.local.*` in
+`agents/` or `rules/`, that prefix is skilletor's. A hand-written `agents/foo.md` next to an
+installed agent `foo` is reported as a conflict (two agents would share the name);
+`--force` replaces it with the installed one. Set `"gitignore": false` in the project
+config to commit everything instead (useful only for items without machine-specific
+variables); the file names stay the same.
+
+Keep `~` or `~/.claude` in a dotfiles repository? `~/.claude` and `$CODEX_HOME` get the
+same fixed block when they lie inside a git work tree; the `~/.claude` block also lists
+the state directory `skilletor/`, never `skilletor.json`. A root outside a work tree gets
+no block. `"gitignore": false` in `~/.claude/skilletor.json` removes the user blocks; it
+does not affect projects.
 
 A file is skilletor-managed exactly when it appears in
 `<scope>/.claude/skilletor.lock.json`. Managed files are overwritten on the next sync —
@@ -384,8 +407,8 @@ a harness that is switched off are removed the same way.
 | Type | Claude Code | Codex |
 |---|---|---|
 | skill | `<base>/.claude/skills/<name>/` | `<base>/.agents/skills/<name>/` |
-| agent | `<base>/.claude/agents/<name>.md` | user: `$CODEX_HOME/agents/<name>.toml`; project: `<project>/.codex/agents/<name>.toml` |
-| rule | `<base>/.claude/rules/<name>.md` | a section of `$CODEX_HOME/skilletor-rules.md` (user) or `<project>/.codex/skilletor-rules.md` (project), delivered by the `SessionStart` hook |
+| agent | `<base>/.claude/agents/.local.<name>.md` | user: `$CODEX_HOME/agents/.local.<name>.toml`; project: `<project>/.codex/agents/.local.<name>.toml` |
+| rule | `<base>/.claude/rules/.local.<name>.md` | a section of `$CODEX_HOME/skilletor-rules.md` (user) or `<project>/.codex/skilletor-rules.md` (project), delivered by the `SessionStart` hook |
 
 Every item is rendered once per target, with `harness` (`claude` or `codex`) in the
 template context, so a source can branch on it. Gating a whole item works like any other

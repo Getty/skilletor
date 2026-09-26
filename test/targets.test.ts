@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import {
-  defaultMarkers, detectHarnesses, lockKey, parseLockKey, rootOfKey, selectTargets, targetDrift, TargetError,
+  defaultMarkers, detectHarnesses, lockKey, parseLockKey, placeOutput, rootOfKey, selectTargets, targetDrift, TargetError,
 } from "../src/targets.ts";
 
 test("default markers: Claude by its own files, never by ~/.claude alone", () => {
@@ -96,4 +96,21 @@ test("targetDrift: the lock must cover every active target that takes the type, 
   assert.equal(targetDrift(["rules/y", "codex:rules/y"], ["claude", "codex"]), false);
   assert.equal(targetDrift(["agents/x"], ["claude", "codex"]), true); // codex takes agents (phase 2)
   assert.equal(targetDrift(["future:skills/a"], ["claude"]), false); // unknown prefix: kept, no drift
+});
+
+// k62: agents and rules install as `.local.<name>`, claiming their plain path (spec §6.3).
+test("placeOutput prefixes Claude agents and rules and Codex agents; skills and Codex rules keep their paths", () => {
+  const out = (...paths: string[]) => new Map(paths.map((p) => [p, Buffer.from(p)]));
+  const placed = (h: "claude" | "codex", t: "skill" | "agent" | "rule", ...paths: string[]) => {
+    const r = placeOutput(h, t, out(...paths));
+    return { paths: [...r.output.keys()], claims: r.claims };
+  };
+  assert.deepEqual(placed("claude", "agent", "agents/a.md"), { paths: ["agents/.local.a.md"], claims: ["agents/a.md"] });
+  assert.deepEqual(placed("claude", "rule", "rules/lang/perl.md"), { paths: ["rules/lang/.local.perl.md"], claims: ["rules/lang/perl.md"] });
+  assert.deepEqual(placed("codex", "agent", "agents/a.toml"), { paths: ["agents/.local.a.toml"], claims: ["agents/a.toml"] });
+  assert.deepEqual(placed("codex", "rule", "skilletor-rules.md"), { paths: ["skilletor-rules.md"], claims: [] });
+  assert.deepEqual(placed("claude", "skill", "skills/s/SKILL.md"), { paths: ["skills/s/SKILL.md"], claims: [] });
+  assert.deepEqual(placed("codex", "skill", "skills/s/SKILL.md"), { paths: ["skills/s/SKILL.md"], claims: [] });
+  // The bytes travel with the renamed path.
+  assert.equal(placeOutput("claude", "agent", out("agents/a.md")).output.get("agents/.local.a.md")!.toString(), "agents/a.md");
 });

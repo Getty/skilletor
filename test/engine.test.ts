@@ -2,13 +2,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join, resolve as resolvePath } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { basename, join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
 import { sync, check, status, type EngineContext } from "../src/engine.ts";
 import { reportHook, reportText } from "../src/report.ts";
 import { readLock } from "../src/lock.ts";
+import { SKILL_GITIGNORE } from "../src/gitignore.ts";
+import { hashBuffer } from "../src/fsutil.ts";
 
 function env() {
   const tmp = makeTmpDir();
@@ -59,7 +61,11 @@ test("sync installs a user-scope skill from a local source", async () => {
   }
 });
 
-test("sync installs a project-scope skill and writes a gitignore block", async () => {
+const BLOCK = (...entries: string[]) => ["# >>> skilletor >>>", ...entries, "# <<< skilletor <<<"].join("\n") + "\n";
+/** The fixed block of a project's `.claude/.gitignore` (spec §6.4). */
+const PROJECT_BLOCK = BLOCK("agents/**/.local.*", "rules/**/.local.*", "skilletor.local.json", "skilletor.lock.json");
+
+test("sync installs a project-scope skill with its own .gitignore and writes the fixed block", async () => {
   const e = env();
   try {
     const src = localSource(e.tmp.dir, "srcB", "bar", "BAR");
@@ -68,9 +74,10 @@ test("sync installs a project-scope skill and writes a gitignore block", async (
     e.writeCfg("project", { install: { skills: ["bar@mine"] } });
     await sync(e.ctx, { scope: "project" });
     assert.equal(existsSync(join(e.projectDir, ".claude/skills/bar/SKILL.md")), true);
-    const gi = readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8");
-    assert.match(gi, /skills\/bar\/SKILL\.md/);
-    assert.match(gi, /skilletor\.lock\.json/);
+    assert.equal(readFileSync(join(e.projectDir, ".claude/skills/bar/.gitignore"), "utf8"), SKILL_GITIGNORE);
+    assert.equal(readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8"), PROJECT_BLOCK);
+    const lock = readLock(join(e.projectDir, ".claude/skilletor.lock.json"));
+    assert.deepEqual(Object.keys(lock["skills/bar"]!.files), ["skills/bar/.gitignore", "skills/bar/SKILL.md"]);
   } finally {
     e.cleanup();
   }
@@ -78,9 +85,7 @@ test("sync installs a project-scope skill and writes a gitignore block", async (
 
 // ---- k51: user-scope gitignore blocks (spec §6.4) ---------------------------
 
-const BLOCK = (...entries: string[]) => ["# >>> skilletor >>>", ...entries, "# <<< skilletor <<<"].join("\n") + "\n";
-
-test("user scope inside a git work tree: ~/.claude/.gitignore lists lock, state dir and items, never skilletor.json", async () => {
+test("user scope inside a git work tree: ~/.claude/.gitignore lists lock, state dir and patterns, never skilletor.json", async () => {
   const e = env();
   try {
     const src = localSource(e.tmp.dir, "srcU", "foo", "FOO");
@@ -94,14 +99,14 @@ test("user scope inside a git work tree: ~/.claude/.gitignore lists lock, state 
     };
     await sync(ctx, { scope: "user" });
     const gi = readFileSync(join(e.home, ".claude/.gitignore"), "utf8");
-    assert.equal(gi, "own-entry\n\n" + BLOCK("skilletor.lock.json", "skilletor/", "skills/foo/SKILL.md"));
+    assert.equal(gi, "own-entry\n\n" + BLOCK("agents/**/.local.*", "rules/**/.local.*", "skilletor.lock.json", "skilletor/"));
     assert.equal(asked.includes(join(e.home, ".claude")), true);
     // Claude only: nothing managed under ~/.agents or the Codex home, so no block there.
     assert.equal(existsSync(join(e.home, ".agents/.gitignore")), false);
     // A state root outside ~/.claude is not listed.
     await sync({ ...ctx, stateRoot: e.stateRoot }, { scope: "user" });
     assert.equal(readFileSync(join(e.home, ".claude/.gitignore"), "utf8"),
-      "own-entry\n\n" + BLOCK("skilletor.lock.json", "skills/foo/SKILL.md"));
+      "own-entry\n\n" + BLOCK("agents/**/.local.*", "rules/**/.local.*", "skilletor.lock.json"));
   } finally {
     e.cleanup();
   }
@@ -115,8 +120,9 @@ test("user scope outside a git work tree: no block; leaving a work tree removes 
     await sync(e.ctx, { scope: "user" }); // env: isGitWorkTree → false
     assert.equal(existsSync(join(e.home, ".claude/skills/foo/SKILL.md")), true);
     assert.equal(existsSync(join(e.home, ".claude/.gitignore")), false);
+    assert.equal(readFileSync(join(e.home, ".claude/skills/foo/.gitignore"), "utf8"), SKILL_GITIGNORE); // no git state
     await sync({ ...e.ctx, isGitWorkTree: () => true }, { scope: "user" });
-    assert.match(readFileSync(join(e.home, ".claude/.gitignore"), "utf8"), /^skills\/foo\/SKILL\.md$/m);
+    assert.match(readFileSync(join(e.home, ".claude/.gitignore"), "utf8"), /^skilletor\.lock\.json$/m);
     // Out of the work tree again: the block goes, own lines stay.
     writeFileSync(join(e.home, ".claude/.gitignore"),
       "mine\n" + readFileSync(join(e.home, ".claude/.gitignore"), "utf8"));
@@ -140,7 +146,9 @@ test("user gitignore false removes the user blocks; project blocks follow the pr
     const r = await sync(ctx);
     assert.equal(r.error, undefined);
     assert.equal(existsSync(join(e.home, ".claude/.gitignore")), false);
-    assert.match(readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8"), /^skills\/foo\/SKILL\.md$/m);
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo/.gitignore")), false);
+    assert.equal(readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8"), PROJECT_BLOCK);
+    assert.equal(readFileSync(join(e.projectDir, ".claude/skills/foo/.gitignore"), "utf8"), SKILL_GITIGNORE);
   } finally {
     e.cleanup();
   }
@@ -154,8 +162,257 @@ test("project blocks do not depend on the work-tree test", async () => {
     e.writeCfg("project", { install: { skills: ["foo@mine"] } });
     const asked: string[] = [];
     await sync({ ...e.ctx, isGitWorkTree: (dir) => (asked.push(dir), false) }, { scope: "project" });
-    assert.match(readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8"), /^skills\/foo\/SKILL\.md$/m);
+    assert.equal(readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8"), PROJECT_BLOCK);
     assert.deepEqual(asked, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// ---- k62: fixed ignore rules, `.local.` agents and rules (spec §6.3, §6.4) -----
+
+/** A local source with the given files (relative path -> content). */
+function filesSource(root: string, name: string, files: Record<string, string>): string {
+  const dir = join(root, name);
+  for (const [rel, content] of Object.entries(files)) {
+    mkdirSync(join(dir, rel, ".."), { recursive: true });
+    writeFileSync(join(dir, rel), content);
+  }
+  return resolvePath(dir);
+}
+
+const SKILL_MD = "---\nname: foo\ndescription: foo\n---\nFOO\n";
+const AGENT_MD = "---\nname: a\ndescription: A\n---\nAGENT\n";
+const RULE_MD = "RULE\n";
+const K62_FILES = { "skills/foo/SKILL.md": SKILL_MD, "agents/a.md": AGENT_MD, "rules/r.md": RULE_MD };
+const K62_INSTALL = { skills: ["foo@mine"], agents: ["a@mine"], rules: ["r@mine"] };
+
+test("k62: agents and rules install as .local.<name>.md under their old lock keys; skills keep their name", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k62a", K62_FILES);
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: K62_INSTALL });
+    const r = await sync(e.ctx, { scope: "project" });
+    const claude = join(e.projectDir, ".claude");
+    assert.equal(readFileSync(join(claude, "agents/.local.a.md"), "utf8"), AGENT_MD);
+    assert.equal(readFileSync(join(claude, "rules/.local.r.md"), "utf8"), RULE_MD);
+    assert.equal(existsSync(join(claude, "agents/a.md")), false);
+    assert.equal(existsSync(join(claude, "rules/r.md")), false);
+    assert.equal(readFileSync(join(claude, "skills/foo/SKILL.md"), "utf8"), SKILL_MD);
+    const lock = readLock(join(claude, "skilletor.lock.json"));
+    assert.deepEqual(Object.keys(lock).sort(), ["agents/a", "rules/r", "skills/foo"]);
+    assert.deepEqual(Object.keys(lock["agents/a"]!.files), ["agents/.local.a.md"]);
+    assert.deepEqual(Object.keys(lock["rules/r"]!.files), ["rules/.local.r.md"]);
+    assert.deepEqual(r.scopes[0]!.conflicts, []);
+    assert.match(reportText(r), /^ {2}\+ agents\/a \(active after/m);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k62: the first sync after the upgrade moves old-layout files and replaces the per-path block", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k62b", K62_FILES);
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: K62_INSTALL });
+    // What an earlier version left: plain agent and rule files, no skill .gitignore, a per-path block.
+    const claude = join(e.projectDir, ".claude");
+    const old: Record<string, string> = { "skills/foo/SKILL.md": SKILL_MD, "agents/a.md": AGENT_MD, "rules/r.md": RULE_MD };
+    for (const [rel, text] of Object.entries(old)) {
+      mkdirSync(join(claude, rel, ".."), { recursive: true });
+      writeFileSync(join(claude, rel), text);
+    }
+    const entry = (rel: string) => ({ source: "mine", version: "local", files: { [rel]: hashBuffer(Buffer.from(old[rel]!)) } });
+    writeFileSync(join(claude, "skilletor.lock.json"), JSON.stringify({
+      "agents/a": entry("agents/a.md"), "rules/r": entry("rules/r.md"), "skills/foo": entry("skills/foo/SKILL.md"),
+    }));
+    writeFileSync(join(claude, ".gitignore"),
+      "own\n\n" + BLOCK("agents/a.md", "rules/r.md", "skills/foo/SKILL.md", "skilletor.local.json", "skilletor.lock.json"));
+
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(r.scopes[0]!.conflicts, []); // the old plain paths are lock-owned
+    assert.deepEqual(r.scopes[0]!.updated.map((i) => i.key).sort(), ["agents/a", "rules/r", "skills/foo"]);
+    assert.equal(existsSync(join(claude, "agents/a.md")), false);
+    assert.equal(existsSync(join(claude, "rules/r.md")), false);
+    assert.equal(readFileSync(join(claude, "agents/.local.a.md"), "utf8"), AGENT_MD);
+    assert.equal(readFileSync(join(claude, "rules/.local.r.md"), "utf8"), RULE_MD);
+    assert.equal(readFileSync(join(claude, "skills/foo/.gitignore"), "utf8"), SKILL_GITIGNORE);
+    const lock = readLock(join(claude, "skilletor.lock.json"));
+    assert.deepEqual(Object.keys(lock["agents/a"]!.files), ["agents/.local.a.md"]);
+    assert.deepEqual(Object.keys(lock["rules/r"]!.files), ["rules/.local.r.md"]);
+    assert.equal(readFileSync(join(claude, ".gitignore"), "utf8"), "own\n\n" + PROJECT_BLOCK);
+    assert.deepEqual(r.scopes[0]!.gitignoreUpdated, [".claude/.gitignore"]);
+
+    const again = await sync(e.ctx, { scope: "project" });
+    assert.equal(reportText(again), "");
+    assert.equal(again.scopes[0]!.gitignoreUpdated, undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k62: a foreign file at an agent's or rule's plain path is a conflict; --force replaces it", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k62c", K62_FILES);
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: K62_INSTALL });
+    const claude = join(e.projectDir, ".claude");
+    mkdirSync(join(claude, "agents"), { recursive: true });
+    mkdirSync(join(claude, "rules"), { recursive: true });
+    writeFileSync(join(claude, "agents/a.md"), "MINE-A\n");
+    writeFileSync(join(claude, "rules/r.md"), "MINE-R\n");
+
+    const r = await sync(e.ctx, { scope: "project" });
+    const byPath = (c: { path: string }[]) => [...c].sort((x, y) => x.path.localeCompare(y.path));
+    assert.deepEqual(byPath(r.scopes[0]!.conflicts), [{ path: "agents/a.md", replace: true }, { path: "rules/r.md", replace: true }]);
+    assert.match(reportText(r), /^ {2}conflict: agents\/a\.md already exists \(use --force to replace it\)$/m);
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["skills/foo"]);
+    assert.equal(existsSync(join(claude, "agents/.local.a.md")), false);
+    assert.equal(existsSync(join(claude, "rules/.local.r.md")), false);
+    assert.equal(readFileSync(join(claude, "agents/a.md"), "utf8"), "MINE-A\n");
+    assert.deepEqual(Object.keys(readLock(join(claude, "skilletor.lock.json"))), ["skills/foo"]);
+
+    const forced = await sync(e.ctx, { scope: "project", force: true });
+    assert.deepEqual(forced.scopes[0]!.conflicts, []);
+    assert.deepEqual(forced.scopes[0]!.added.map((i) => i.key).sort(), ["agents/a", "rules/r"]);
+    assert.equal(existsSync(join(claude, "agents/a.md")), false);
+    assert.equal(existsSync(join(claude, "rules/r.md")), false);
+    assert.equal(readFileSync(join(claude, "agents/.local.a.md"), "utf8"), AGENT_MD);
+    assert.equal(readFileSync(join(claude, "rules/.local.r.md"), "utf8"), RULE_MD);
+    assert.deepEqual(Object.keys(readLock(join(claude, "skilletor.lock.json"))["agents/a"]!.files), ["agents/.local.a.md"]);
+
+    // A foreign plain file appearing later: a conflict again, the installed agent is left as it was.
+    writeFileSync(join(claude, "agents/a.md"), "MINE-AGAIN\n");
+    const lockBefore = readFileSync(join(claude, "skilletor.lock.json"), "utf8");
+    const later = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(later.scopes[0]!.conflicts, [{ path: "agents/a.md", replace: true }]);
+    assert.deepEqual(later.scopes[0]!.removed, []);
+    assert.equal(readFileSync(join(claude, "agents/.local.a.md"), "utf8"), AGENT_MD);
+    assert.equal(readFileSync(join(claude, "agents/a.md"), "utf8"), "MINE-AGAIN\n");
+    assert.equal(readFileSync(join(claude, "skilletor.lock.json"), "utf8"), lockBefore);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k62: a hand-written or linked skill of the same name gets no .gitignore; --force adopts it with one", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k62g", { "skills/foo/SKILL.md": SKILL_MD, "skills/bar/SKILL.md": SKILL_MD });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["foo@mine", "bar@mine"] } });
+    const skills = join(e.projectDir, ".claude/skills");
+    mkdirSync(join(skills, "foo"), { recursive: true });
+    writeFileSync(join(skills, "foo/SKILL.md"), "MY OWN FOO\n");
+    const elsewhere = join(e.tmp.dir, "my-skills/bar"); // a manage-skills link
+    mkdirSync(elsewhere, { recursive: true });
+    writeFileSync(join(elsewhere, "SKILL.md"), "MY OWN BAR\n");
+    symlinkSync(elsewhere, join(skills, "bar"));
+
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(r.scopes[0]!.conflicts.map((c) => c.path).sort(), ["skills/bar/SKILL.md", "skills/foo/SKILL.md"]);
+    assert.deepEqual(r.scopes[0]!.added, []);
+    assert.equal(existsSync(join(skills, "foo/.gitignore")), false);
+    assert.equal(existsSync(join(elsewhere, ".gitignore")), false); // never written through the link
+    assert.deepEqual(readLock(join(e.projectDir, ".claude/skilletor.lock.json")), {});
+
+    await sync(e.ctx, { scope: "project", force: true });
+    assert.equal(readFileSync(join(skills, "foo/SKILL.md"), "utf8"), SKILL_MD);
+    assert.equal(readFileSync(join(skills, "foo/.gitignore"), "utf8"), SKILL_GITIGNORE);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k62: gitignore false writes no block and no skill .gitignore; the .local. names stay", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k62d", K62_FILES);
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    const claude = join(e.projectDir, ".claude");
+    e.writeCfg("project", { install: K62_INSTALL, gitignore: false });
+    const off = await sync(e.ctx, { scope: "project" });
+    const gitignores = () => (readdirSync(claude, { recursive: true }) as string[]).filter((f) => basename(f) === ".gitignore");
+    assert.deepEqual(gitignores(), []);
+    assert.equal(off.scopes[0]!.gitignoreUpdated, undefined);
+    assert.equal(existsSync(join(claude, "agents/.local.a.md")), true);
+    assert.equal(existsSync(join(claude, "rules/.local.r.md")), true);
+
+    // Switched on: the block and the skill's .gitignore appear; agents and rules keep their files.
+    e.writeCfg("project", { install: K62_INSTALL });
+    const on = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(gitignores().sort(), [".gitignore", join("skills", "foo", ".gitignore")]);
+    assert.deepEqual(on.scopes[0]!.updated.map((i) => i.key), ["skills/foo"]);
+    assert.deepEqual(on.scopes[0]!.gitignoreUpdated, [".claude/.gitignore"]);
+
+    // Off again: both go (no commit hint for a removal), nothing is renamed.
+    e.writeCfg("project", { install: K62_INSTALL, gitignore: false });
+    const again = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(gitignores(), []);
+    assert.deepEqual(again.scopes[0]!.updated.map((i) => i.key), ["skills/foo"]);
+    assert.equal(again.scopes[0]!.gitignoreUpdated, undefined);
+    assert.equal(readFileSync(join(claude, "agents/.local.a.md"), "utf8"), AGENT_MD);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k62: a .gitignore the source ships at the skill root is replaced; with gitignore false it installs as shipped", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k62e", {
+      "skills/foo/SKILL.md": SKILL_MD, "skills/foo/.gitignore": "node_modules/\n", "skills/foo/sub/.gitignore": "tmp/\n",
+    });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["foo@mine"] } });
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+    const skill = join(e.projectDir, ".claude/skills/foo");
+    assert.equal(readFileSync(join(skill, ".gitignore"), "utf8"), SKILL_GITIGNORE);
+    assert.equal(readFileSync(join(skill, "sub/.gitignore"), "utf8"), "tmp/\n"); // not at the skill root: the source's
+    e.writeCfg("project", { install: { skills: ["foo@mine"] }, gitignore: false });
+    await sync(e.ctx, { scope: "project" });
+    assert.equal(readFileSync(join(skill, ".gitignore"), "utf8"), "node_modules/\n");
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k62: the commit hint appears when a block is created or changed, never when items change", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k62f", {
+      ...K62_FILES, "skills/bar/SKILL.md": "---\nname: bar\ndescription: bar\n---\nBAR\n", "agents/b.md": AGENT_MD,
+    });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["foo@mine"] } });
+    const gi = join(e.projectDir, ".claude/.gitignore");
+
+    const first = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(first.scopes[0]!.gitignoreUpdated, [".claude/.gitignore"]);
+    assert.match(reportText(first), /^ {2}\.claude\/\.gitignore updated — commit it$/m);
+    const hook = reportHook(first);
+    assert.match(hook.systemMessage ?? "", /^skilletor: 1 item\(s\) updated, \.claude\/\.gitignore updated — commit it$/);
+    assert.match(hook.additionalContext ?? "", /^- \.claude\/\.gitignore updated — commit it$/m);
+
+    // Items, files and vars change: the committed .gitignore does not.
+    const committed = readFileSync(gi, "utf8");
+    e.writeCfg("project", { install: { skills: ["foo@mine", "bar@mine"], agents: ["a@mine", "b@mine"], rules: ["r@mine"] } });
+    const more = await sync(e.ctx, { scope: "project" });
+    assert.equal(more.scopes[0]!.added.length, 4);
+    assert.equal(readFileSync(gi, "utf8"), committed);
+    assert.equal(more.scopes[0]!.gitignoreUpdated, undefined);
+    assert.doesNotMatch(reportText(more), /commit it/);
+    assert.doesNotMatch(reportHook(more).systemMessage ?? "", /commit it/);
+
+    // A block edited by hand is restored, and that is a change to commit.
+    writeFileSync(gi, committed.replace("skilletor.lock.json\n", ""));
+    const restored = await sync(e.ctx, { scope: "project" });
+    assert.equal(readFileSync(gi, "utf8"), committed);
+    assert.deepEqual(restored.scopes[0]!.gitignoreUpdated, [".claude/.gitignore"]);
   } finally {
     e.cleanup();
   }
@@ -302,8 +559,8 @@ test("wildcard installs every rule of a source, picks up additions and drops rem
     const r2 = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r2.scopes[0]!.added.map((i) => i.key), ["rules/gamma"]);
     assert.deepEqual(r2.scopes[0]!.removed.map((i) => i.key), ["rules/alpha"]);
-    assert.equal(existsSync(join(e.home, ".claude/rules/alpha.md")), false);
-    assert.equal(existsSync(join(e.home, ".claude/rules/gamma.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.alpha.md")), false);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.gamma.md")), true);
     assert.deepEqual(r2.scopes[0]!.warnings, []);
   } finally {
     e.cleanup();
@@ -340,8 +597,8 @@ test("an unresolvable wildcard source keeps everything it installed", async () =
     rmSync(src, { recursive: true, force: true }); // source can no longer be resolved
     const r = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r.scopes[0]!.removed, []);
-    assert.equal(existsSync(join(e.home, ".claude/rules/alpha.md")), true);
-    assert.equal(existsSync(join(e.home, ".claude/rules/beta.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.alpha.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.beta.md")), true);
     assert.deepEqual(Object.keys(readLock(join(e.home, ".claude/skilletor.lock.json"))).sort(), ["rules/alpha", "rules/beta"]);
     assert.equal(r.scopes[0]!.warnings.some((w) => /shared/.test(w)), true);
   } finally {
@@ -365,7 +622,7 @@ test("an unresolvable wildcard source only keeps items of the wildcard's type an
     e.writeCfg("user", { sources: { shared: { local: gone }, other: { local: other } }, install: { rules: ["*@shared"] } });
     const r = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r.scopes[0]!.removed.map((i) => i.key), ["rules/solo"]); // undeclared, other source: removed
-    assert.equal(existsSync(join(e.home, ".claude/rules/alpha.md")), true); // kept
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.alpha.md")), true); // kept
   } finally {
     e.cleanup();
   }
@@ -397,7 +654,7 @@ test("explicit entry beats a wildcard of another source, with a warning", async 
     e.writeCfg("user", { sources: { a: { local: a }, b: { local: b } }, install: { rules: ["alpha@a", "*@b"] } });
     const r = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`).sort(), ["rules/alpha@a", "rules/beta@b"]);
-    assert.match(readFileSync(join(e.home, ".claude/rules/alpha.md"), "utf8"), /FROM-A/);
+    assert.match(readFileSync(join(e.home, ".claude/rules/.local.alpha.md"), "utf8"), /FROM-A/);
     assert.equal(r.scopes[0]!.warnings.length, 1);
     assert.match(r.scopes[0]!.warnings[0]!, /alpha/);
     assert.match(r.scopes[0]!.warnings[0]!, /\*@b/);
@@ -422,7 +679,7 @@ test("two wildcards yielding the same name skip only that name, with a warning",
     putItem(b, "rule", "fresh");
     const r2 = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r2.scopes[0]!.added.map((i) => i.key), ["rules/fresh"]); // the rest proceeds
-    assert.equal(existsSync(join(e.home, ".claude/rules/clash.md")), false);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.clash.md")), false);
     assert.equal(r2.scopes[0]!.warnings.length, 1);
     assert.match(r2.scopes[0]!.warnings[0]!, /clash/);
     assert.match(r2.scopes[0]!.warnings[0]!, /\*@a/);
@@ -444,7 +701,7 @@ test("a wildcard collision keeps an already installed copy", async () => {
     putItem(b, "rule", "clash", "FROM-B");
     const r = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r.scopes[0]!.removed, []);
-    assert.match(readFileSync(join(e.home, ".claude/rules/clash.md"), "utf8"), /FROM-A/);
+    assert.match(readFileSync(join(e.home, ".claude/rules/.local.clash.md"), "utf8"), /FROM-A/);
   } finally {
     e.cleanup();
   }
@@ -532,7 +789,7 @@ test("a rule gated off by a var is not written and is reported as skipped", asyn
     putRaw(src, "rules/k8s.md.njk", GATED);
     e.writeCfg("user", { sources: { s: { local: src } }, install: { rules: ["k8s@s"] }, vars: { k8s: false } });
     const r = await sync(e.ctx, { scope: "user" });
-    assert.equal(existsSync(join(e.home, ".claude/rules/k8s.md")), false);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.k8s.md")), false);
     assert.deepEqual(r.scopes[0]!.skipped.map((i) => i.key), ["rules/k8s"]);
     assert.deepEqual([r.scopes[0]!.added, r.scopes[0]!.warnings], [[], []]);
     assert.match(reportText(r), /rules\/k8s skipped \(renders empty\)/);
@@ -548,7 +805,7 @@ test("toggling the var off removes the installed rule; toggling it on reinstalls
     const src = join(e.tmp.dir, "g2");
     putRaw(src, "rules/k8s.md.njk", GATED);
     const cfg = (on: boolean) => ({ sources: { s: { local: src } }, install: { rules: ["k8s@s"] }, vars: { k8s: on } });
-    const target = join(e.home, ".claude/rules/k8s.md");
+    const target = join(e.home, ".claude/rules/.local.k8s.md");
 
     e.writeCfg("user", cfg(true));
     await sync(e.ctx, { scope: "user" });
@@ -579,7 +836,7 @@ test("a project var can switch off a rule the user scope would install", async (
     e.writeCfg("project", { install: { rules: ["k8s@s"] } });
     e.writeCfg("local", { vars: { k8s: false } });
     const r = await sync(e.ctx, { scope: "project" });
-    assert.equal(existsSync(join(e.projectDir, ".claude/rules/k8s.md")), false);
+    assert.equal(existsSync(join(e.projectDir, ".claude/rules/.local.k8s.md")), false);
     assert.deepEqual(r.scopes[0]!.skipped.map((i) => i.key), ["rules/k8s"]);
     assert.doesNotMatch(readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8"), /k8s/);
   } finally {
@@ -594,7 +851,7 @@ test("a non-template empty rule is still installed", async () => {
     putRaw(src, "rules/blank.md", "");
     e.writeCfg("user", { sources: { s: { local: src } }, install: { rules: ["blank@s"] } });
     const r = await sync(e.ctx, { scope: "user" });
-    assert.equal(existsSync(join(e.home, ".claude/rules/blank.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.blank.md")), true);
     assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["rules/blank"]);
     assert.deepEqual(r.scopes[0]!.skipped, []);
   } finally {
@@ -629,7 +886,7 @@ test("a wildcard item that renders empty is skipped without affecting its siblin
     const r = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r.scopes[0]!.added.map((i) => i.key).sort(), ["rules/plain", "rules/templ"]);
     assert.deepEqual(r.scopes[0]!.skipped.map((i) => i.key), ["rules/k8s"]);
-    assert.equal(existsSync(join(e.home, ".claude/rules/k8s.md")), false);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.k8s.md")), false);
     const st = status(e.ctx, { scope: "user" }).scopes[0]!;
     assert.deepEqual(st.wildcards[0]!.installed, 2);
   } finally {
@@ -646,7 +903,7 @@ test("a render error is still an error: the installed copy stays, with a warning
     await sync(e.ctx, { scope: "user" });
     putRaw(src, "rules/k8s.md.njk", "{{ vars.typo }}");
     const r = await sync(e.ctx, { scope: "user" });
-    assert.match(readFileSync(join(e.home, ".claude/rules/k8s.md"), "utf8"), /kubectl/);
+    assert.match(readFileSync(join(e.home, ".claude/rules/.local.k8s.md"), "utf8"), /kubectl/);
     assert.equal(r.scopes[0]!.warnings.some((w) => /template error/.test(w)), true);
     assert.deepEqual(r.scopes[0]!.skipped, []);
   } finally {
@@ -804,11 +1061,11 @@ test("bundle vars: source defaults < bundle vars < user vars; the outer bundle w
     }, { vars: { v: "default", w: "default" } });
     e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["outer@shared"] } });
     await sync(e.ctx, { scope: "user" });
-    assert.match(readFileSync(join(e.home, ".claude/rules/t.md"), "utf8"), /v=from-outer w=from-inner/);
+    assert.match(readFileSync(join(e.home, ".claude/rules/.local.t.md"), "utf8"), /v=from-outer w=from-inner/);
 
     e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["outer@shared"] }, vars: { w: "user" } });
     await sync(e.ctx, { scope: "user" });
-    assert.match(readFileSync(join(e.home, ".claude/rules/t.md"), "utf8"), /v=from-outer w=user/);
+    assert.match(readFileSync(join(e.home, ".claude/rules/.local.t.md"), "utf8"), /v=from-outer w=user/);
   } finally {
     e.cleanup();
   }
@@ -823,7 +1080,7 @@ test("bundle vars conflict: neither value applies and one warning names both bun
     }, { vars: { v: "default", w: "default" } });
     e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["a@shared", "b@shared"] } });
     const r = await sync(e.ctx, { scope: "user" });
-    assert.match(readFileSync(join(e.home, ".claude/rules/t.md"), "utf8"), /v=default w=same/);
+    assert.match(readFileSync(join(e.home, ".claude/rules/.local.t.md"), "utf8"), /v=default w=same/);
     assert.equal(r.scopes[0]!.warnings.length, 1);
     assert.match(r.scopes[0]!.warnings[0]!, /"v"/);
     assert.match(r.scopes[0]!.warnings[0]!, /bundle:a@shared/);
@@ -844,7 +1101,7 @@ test("an explicit item gets no bundle vars; same source silent, another source's
       install: { rules: ["t@shared", "r1@shared"], bundles: ["a@shared", "o@other"] },
     });
     const r = await sync(e.ctx, { scope: "user" });
-    assert.match(readFileSync(join(e.home, ".claude/rules/t.md"), "utf8"), /v=default/);
+    assert.match(readFileSync(join(e.home, ".claude/rules/.local.t.md"), "utf8"), /v=default/);
     assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`).sort(), ["rules/r1@shared", "rules/r2@other", "rules/t@shared"]);
     assert.equal(r.scopes[0]!.warnings.length, 1);
     assert.match(r.scopes[0]!.warnings[0]!, /r1.*bundle:o@other.*explicitly declared as r1@shared/);
@@ -908,7 +1165,7 @@ test("a bundle error affects only that bundle and keeps what it installed", asyn
     const r = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["rules/r3"]);
     assert.deepEqual(r.scopes[0]!.removed, []);
-    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.r1.md")), true);
     assert.equal(r.scopes[0]!.warnings.length, 1);
     assert.match(r.scopes[0]!.warnings[0]!, /bundle:a@shared.*cycle a → a/);
     // Still kept, with its via, on the next run.
@@ -932,7 +1189,7 @@ test("a missing bundle warns; an unresolvable source keeps what its bundle insta
     rmSync(src, { recursive: true, force: true });
     const r2 = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r2.scopes[0]!.removed, []);
-    assert.equal(existsSync(join(e.home, ".claude/rules/r1.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.r1.md")), true);
   } finally {
     e.cleanup();
   }
@@ -992,9 +1249,9 @@ test("a foreign entry is served by the source with the same identity, whatever i
     assert.deepEqual(r.scopes[0]!.warnings, []);
     assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`).sort(),
       ["rules/ft@pm", "rules/p-one@pm", "rules/p-two@pm", "rules/r1@shared"]);
-    assert.match(readFileSync(join(e.home, ".claude/rules/p-one.md"), "utf8"), /P-ONE-FROM-fpeter/);
+    assert.match(readFileSync(join(e.home, ".claude/rules/.local.p-one.md"), "utf8"), /P-ONE-FROM-fpeter/);
     // Bundle vars apply; source defaults are the item's own source's (spec §15.3).
-    assert.match(readFileSync(join(e.home, ".claude/rules/ft.md"), "utf8"), /v=bundle d=peter-default/);
+    assert.match(readFileSync(join(e.home, ".claude/rules/.local.ft.md"), "utf8"), /v=bundle d=peter-default/);
     const lock = readLock(join(e.home, ".claude/skilletor.lock.json"));
     assert.deepEqual(lock["rules/p-one"]!.via, ["bundle:perl@shared"]);
     const st = status(e.ctx, { scope: "user" }).scopes[0]!;
@@ -1025,7 +1282,7 @@ test("a foreign entry served by a file:// git source", async () => {
     e.writeCfg("user", { sources: { shared: { local: own }, whatever: { git: url } }, install: { bundles: ["b@shared"] } });
     const r = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r.scopes[0]!.warnings, []);
-    assert.match(readFileSync(join(e.home, ".claude/rules/g1.md"), "utf8"), /G1-FROM-GIT/);
+    assert.match(readFileSync(join(e.home, ".claude/rules/.local.g1.md"), "utf8"), /G1-FROM-GIT/);
   } finally {
     e.cleanup();
   }
@@ -1061,7 +1318,7 @@ test("a foreign source removed from the config keeps what the bundle installed f
     e.writeCfg("user", { sources: { shared: { local: own } }, install: { bundles: ["a@shared"] } });
     const r = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r.scopes[0]!.removed, []);
-    assert.equal(existsSync(join(e.home, ".claude/rules/p-one.md")), true);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.p-one.md")), true);
     assert.equal(r.scopes[0]!.warnings.length, 1);
     // Dropping the bundle removes it.
     e.writeCfg("user", { sources: { shared: { local: own } } });

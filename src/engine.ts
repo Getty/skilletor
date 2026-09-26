@@ -15,8 +15,8 @@ import {
   BundleError, entryMiss, expandBundle, matchEntry, matchesPattern, sameIdentity, type Chain,
 } from "./bundles.ts";
 import {
-  defaultMarkers, detectHarnesses, lockKey, parseLockKey, rootOf, rootOfKey, selectTargets, supports, targetDrift,
-  allRoots, isBlockType, type HarnessMarkers, type RootContext, type TargetSelection,
+  defaultMarkers, detectHarnesses, lockKey, parseLockKey, placeOutput, rootOf, rootOfKey, selectTargets, supports,
+  targetDrift, allRoots, isBlockType, type HarnessMarkers, type RootContext, type TargetSelection,
 } from "./targets.ts";
 import {
   codexHookTrusted, inspectAgentsMd, parseRulesFile, pointerLines, projectDocLimit, rulesFileText, RULES_FILE, withBlock,
@@ -33,7 +33,10 @@ import { build, rendersEmpty, type RenderContext } from "./render.ts";
 import { apply, isValidItemName, type PlanItem } from "./apply.ts";
 import { readLock, writeLock, type Lock, type SkipReason } from "./lock.ts";
 import { State } from "./state.ts";
-import { isGitWorkTree, updateGitignore } from "./gitignore.ts";
+import {
+  CODEX_ENTRIES, isGitWorkTree, LOCAL_ENTRIES, PROJECT_CLAUDE_ENTRIES, skillGitignorePath, updateGitignore,
+  withSkillGitignore,
+} from "./gitignore.ts";
 import { briefingWarning, missingSkills, skillRoots, type BriefingMissing } from "./briefing.ts";
 import {
   emptyScopeReport, keyToTypeName, type ItemChange, type ScopeReport, type SyncReport,
@@ -156,12 +159,12 @@ function sourceVersion(lock: Lock, sourceName: string): string | undefined {
   return undefined;
 }
 
-/** Fixed entries of the user `~/.claude` block: the lock, and the state dir when it lies
- *  under `~/.claude` (spec §6.4). Never `skilletor.json`. */
-function userClaudeFixed(claudeDir: string, stateRoot: string): string[] {
+/** Entries of the user `~/.claude` block: the lock, the state dir when it lies under
+ *  `~/.claude`, and the agent and rule patterns (spec §6.4). Never `skilletor.json`. */
+function userClaudeEntries(claudeDir: string, stateRoot: string): string[] {
   const rel = relative(claudeDir, stateRoot);
   const under = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-  return under ? ["skilletor.lock.json", rel.split(sep).join("/") + "/"] : ["skilletor.lock.json"];
+  return ["skilletor.lock.json", ...(under ? [rel.split(sep).join("/") + "/"] : []), ...LOCAL_ENTRIES];
 }
 
 function gitRemote(dir: string): string {
@@ -297,6 +300,7 @@ async function syncScope(
   const cacheRoot = cacheRootOf(ctx);
   const lockPath = join(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
+  const gitignoreOn = scopeCfg.gitignore !== false;
 
   // Resolve every needed source in parallel (skip untrusted, warn on failure).
   const needed = scopeSources(scopeCfg);
@@ -414,6 +418,17 @@ async function syncScope(
           rep.warnings.push(`${item.type} ${item.name} (${h}): ${(err as Error).message}`);
           if (key in oldLock) keep.push(key);
           continue;
+        }
+      }
+      if (!planItem.skipped) {
+        // Layout names (spec §6.3, §6.4): `.local.` agents and rules claiming their plain
+        // path; a skill carries its own `.gitignore` while the scope's switch is on.
+        const placed = placeOutput(h, item.type, planItem.output);
+        planItem.output = placed.output;
+        if (placed.claims.length) planItem.claims = placed.claims;
+        if (item.type === "skill" && gitignoreOn) {
+          planItem.output = withSkillGitignore(planItem.output, item.name);
+          planItem.attached = [skillGitignorePath(item.name)];
         }
       }
       plan.push(planItem);
@@ -579,12 +594,12 @@ async function syncScope(
     : { overwritten: [], exists: false };
 
   {
-    // One managed block per target root: `.claude/.gitignore` (with the lock, and the
-    // local config or state dir), `.agents/.gitignore` and `.codex/.gitignore` (or
-    // `$CODEX_HOME/.gitignore`) for Codex paths, the rules file included (spec §6.4,
-    // §14.3, §14.8). User roots get a block only inside a git work tree.
+    // One block of fixed entries per target root (spec §6.4, §14.3): `.claude/.gitignore`
+    // always, a Codex root's while it holds managed agents or the rules file, none in
+    // `.agents` (skills carry their own; an earlier version's block there goes). User
+    // roots get a block only inside a git work tree.
     const newLock = readLock(lockPath);
-    const rulesRoot = rootOf(rc, "codex", "rule")!;
+    const codexRoot = rootOf(rc, "codex", "rule")!;
     const inWorkTree = (dir: string): boolean => {
       try {
         return (ctx.isGitWorkTree ?? isGitWorkTree)(dir);
@@ -592,20 +607,22 @@ async function syncScope(
         return false;
       }
     };
+    const holdsManaged = (rootDir: string): boolean => Object.entries(newLock).some(
+      ([key, e]) => !e.block && Object.keys(e.files).length > 0 && rootOfKey(rc, key) === rootDir,
+    );
     for (const rootDir of allRoots(rc)) {
-      const managed = Object.entries(newLock)
-        .filter(([key, e]) => !e.block && rootOfKey(rc, key) === rootDir)
-        .flatMap(([, e]) => Object.keys(e.files));
-      if (rules.exists && rootDir === rulesRoot) managed.push(RULES_FILE);
-      const isClaude = rootDir === targetDir;
-      const fixed = !isClaude ? [] : scope === "project" ? undefined : userClaudeFixed(targetDir, ctx.stateRoot);
-      let enabled = scopeCfg.gitignore !== false;
-      if (enabled && scope === "user") {
-        // Ask git only when there is something to list or clean (the hook path stays fast).
-        const relevant = managed.length > 0 || fixed!.length > 0 || existsSync(join(rootDir, ".gitignore"));
-        enabled = relevant && inWorkTree(rootDir);
+      let entries: string[] = [];
+      if (rootDir === targetDir) {
+        entries = scope === "project" ? PROJECT_CLAUDE_ENTRIES : userClaudeEntries(targetDir, ctx.stateRoot);
+      } else if (rootDir === codexRoot && (rules.exists || holdsManaged(rootDir))) {
+        entries = CODEX_ENTRIES;
       }
-      updateGitignore({ dir: rootDir, managedPaths: managed, fixed, enabled });
+      // Ask git only when there is a block to write (the hook path stays fast).
+      const enabled = gitignoreOn && entries.length > 0 && (scope === "project" || inWorkTree(rootDir));
+      const change = updateGitignore({ dir: rootDir, entries, enabled });
+      if (change === "created" || change === "changed") {
+        (rep.gitignoreUpdated ??= []).push(gitignoreLabel(scope, base, join(rootDir, ".gitignore")));
+      }
     }
   }
 
@@ -622,7 +639,7 @@ async function syncScope(
     const root = rootOfKey(rc, c.key) ?? targetDir;
     return { path: root === targetDir ? c.path : labelOf(join(root, c.path)) };
   };
-  rep.conflicts = result.conflicts.map(shown);
+  rep.conflicts = result.conflicts.map((c) => (c.replace ? { ...shown(c), replace: c.replace } : shown(c)));
   rep.overwritten = [...result.overwritten.map(shown), ...rules.overwritten.map((path) => ({ path }))];
 
   // Briefing check (spec §6.7): every agent the lock holds now, from its installed file.
@@ -630,6 +647,15 @@ async function syncScope(
   for (const b of briefing) rep.warnings.push(briefingWarning(parseLockKey(b.key).name, b.harness, b.missing));
   if (briefing.length) rep.briefingMissing = briefing;
   return rep;
+}
+
+/** A `.gitignore` for the commit hint (spec §6.4): relative to the project, `~/…` in the
+ *  user scope (the hook context names no scope), absolute outside the scope's base. */
+function gitignoreLabel(scope: ScopeName, base: string, abs: string): string {
+  const rel = relative(base, abs);
+  if (rel.startsWith("..") || isAbsolute(rel)) return abs;
+  const shown = rel.split(sep).join("/");
+  return scope === "user" ? `~/${shown}` : shown;
 }
 
 /** Installed agents of a scope's lock whose declared briefing skills do not resolve

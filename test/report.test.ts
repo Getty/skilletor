@@ -70,3 +70,31 @@ test("a skipped item that was removed shows as one removal line", () => {
   assert.match(text, /- rules\/k8s \(removed: renders empty\)/);
   assert.equal(text.split("\n").filter((l) => l.includes("rules/k8s")).length, 1);
 });
+
+// ---- k62: commit hint, plain-path conflicts --------------------------------------
+
+test("a created or changed .gitignore block is notable and asks for a commit in text and hook", () => {
+  const user = emptyScopeReport("user");
+  user.gitignoreUpdated = ["~/.claude/.gitignore"];
+  const project = emptyScopeReport("project");
+  project.gitignoreUpdated = [".claude/.gitignore"];
+  const one: SyncReport = { scopes: [project] };
+  assert.equal(hasNotable(one), true);
+  assert.equal(hasChanges(one), false);
+  assert.equal(reportText(one), "skilletor: project scope\n  .claude/.gitignore updated — commit it");
+  assert.deepEqual(reportHook(one), {
+    systemMessage: "skilletor: .claude/.gitignore updated — commit it",
+    additionalContext: "- .claude/.gitignore updated — commit it",
+  });
+  const both = reportHook({ scopes: [user, project] });
+  assert.equal(both.systemMessage, "skilletor: ~/.claude/.gitignore, .claude/.gitignore updated — commit them");
+  assert.equal(both.additionalContext, "- ~/.claude/.gitignore updated — commit it\n- .claude/.gitignore updated — commit it");
+});
+
+test("a plain-path conflict says --force replaces the file; an ordinary one says it adopts", () => {
+  const s = emptyScopeReport("project");
+  s.conflicts = [{ path: "agents/a.md", replace: true }, { path: "skills/x/SKILL.md" }];
+  const text = reportText({ scopes: [s] });
+  assert.match(text, /^ {2}conflict: agents\/a\.md already exists \(use --force to replace it\)$/m);
+  assert.match(text, /^ {2}conflict: skills\/x\/SKILL\.md already exists \(use --force to adopt\)$/m);
+});

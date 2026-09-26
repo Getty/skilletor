@@ -243,3 +243,72 @@ test("an undeclared skipped entry is dropped from the lock without a removal", (
     tmp.cleanup();
   }
 });
+
+// k62: a claimed path (an agent's plain name next to its `.local.` file, spec §6.3).
+test("claims: a foreign file there blocks the item; one its lock entry owns goes with the diff; force deletes it", () => {
+  const tmp = makeTmpDir();
+  try {
+    const plan = () => [{ ...item("agent", "a", { "agents/.local.a.md": "NEW" }), claims: ["agents/a.md"] }];
+    // Lock-owned (an earlier layout): moved, no conflict.
+    apply([item("agent", "a", { "agents/a.md": "OLD" })], { targetDir: tmp.dir });
+    const moved = apply(plan(), { targetDir: tmp.dir });
+    assert.deepEqual(moved.conflicts, []);
+    assert.deepEqual(moved.updated, ["agents/a"]);
+    assert.equal(existsSync(join(tmp.dir, "agents/a.md")), false);
+    assert.equal(read(tmp.dir, "agents/.local.a.md"), "NEW");
+    // Foreign: conflict, nothing written, the lock entry left as it was.
+    writeFileSync(join(tmp.dir, "agents/a.md"), "MINE");
+    writeFileSync(join(tmp.dir, "agents/.local.a.md"), "NEW-EDITED");
+    const lockBefore = read(tmp.dir, "skilletor.lock.json");
+    const blocked = apply([{ ...plan()[0]!, output: new Map([["agents/.local.a.md", Buffer.from("NEWER")]]) }], { targetDir: tmp.dir });
+    assert.deepEqual(blocked.conflicts, [{ key: "agents/a", path: "agents/a.md", replace: true }]);
+    assert.deepEqual(blocked.unchanged, ["agents/a"]);
+    assert.equal(read(tmp.dir, "agents/.local.a.md"), "NEW-EDITED");
+    assert.equal(read(tmp.dir, "skilletor.lock.json"), lockBefore);
+    // Force: the foreign file goes, the item is written.
+    const forced = apply(plan(), { targetDir: tmp.dir, force: true });
+    assert.deepEqual(forced.conflicts, []);
+    assert.equal(existsSync(join(tmp.dir, "agents/a.md")), false);
+    assert.equal(read(tmp.dir, "agents/.local.a.md"), "NEW");
+    assert.deepEqual(Object.keys(readLock(join(tmp.dir, "skilletor.lock.json"))["agents/a"]!.files), ["agents/.local.a.md"]);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("claims of a skipped item are not checked: it owns no path", () => {
+  const tmp = makeTmpDir();
+  try {
+    mkdirSync(join(tmp.dir, "agents"), { recursive: true });
+    writeFileSync(join(tmp.dir, "agents/a.md"), "MINE");
+    const res = apply([{ ...item("agent", "a", {}), claims: ["agents/a.md"], skipped: "renders-empty" }], { targetDir: tmp.dir });
+    assert.deepEqual(res.conflicts, []);
+    assert.equal(read(tmp.dir, "agents/a.md"), "MINE");
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("attached paths stay out of a directory that is not the item's; once owned they are kept", () => {
+  const tmp = makeTmpDir();
+  try {
+    const skill = (files: Record<string, string>) => ({ ...item("skill", "moo", files), attached: ["skills/moo/.gitignore"] });
+    mkdirSync(join(tmp.dir, "skills/moo"), { recursive: true });
+    writeFileSync(join(tmp.dir, "skills/moo/SKILL.md"), "MINE");
+    const blocked = apply([skill({ "skills/moo/.gitignore": "*", "skills/moo/SKILL.md": "S" })], { targetDir: tmp.dir });
+    assert.deepEqual(blocked.conflicts, [{ key: "skills/moo", path: "skills/moo/SKILL.md" }]);
+    assert.deepEqual(blocked.unchanged, ["skills/moo"]);
+    assert.equal(existsSync(join(tmp.dir, "skills/moo/.gitignore")), false);
+    // Adopted: written. A later conflict on a new file keeps the owned attached path.
+    apply([skill({ "skills/moo/.gitignore": "*", "skills/moo/SKILL.md": "S" })], { targetDir: tmp.dir, force: true });
+    writeFileSync(join(tmp.dir, "skills/moo/ref.md"), "MINE");
+    const later = apply([skill({ "skills/moo/.gitignore": "*", "skills/moo/SKILL.md": "S", "skills/moo/ref.md": "R" })],
+      { targetDir: tmp.dir });
+    assert.deepEqual(later.conflicts, [{ key: "skills/moo", path: "skills/moo/ref.md" }]);
+    assert.equal(read(tmp.dir, "skills/moo/.gitignore"), "*");
+    assert.deepEqual(Object.keys(readLock(join(tmp.dir, "skilletor.lock.json"))["skills/moo"]!.files),
+      ["skills/moo/.gitignore", "skills/moo/SKILL.md"]);
+  } finally {
+    tmp.cleanup();
+  }
+});

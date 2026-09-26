@@ -32,13 +32,21 @@ export interface TargetLayout {
   /** Types whose items are sections of one skilletor-owned file,
    *  `<root>/skilletor-rules.md`, rather than files of their own (spec §14.8). */
   blockTypes?: readonly ItemType[];
+  /** Types whose files install as `.local.<file>` (spec §6.3, §6.4): the fixed ignore
+   *  pattern `agents/**\/.local.*` covers them, and the plain name stays claimed. */
+  localTypes?: readonly ItemType[];
 }
 
 const under = (dir: string) => (r: RootContext) => join(r.base, dir);
 const codexHomeDir = (r: RootContext) => r.codexHome || join(r.base, ".codex");
 
 export const LAYOUTS: Record<Harness, TargetLayout> = {
-  claude: { harness: "claude", keyPrefix: "", roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") } },
+  claude: {
+    harness: "claude",
+    keyPrefix: "",
+    roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") },
+    localTypes: ["agent", "rule"],
+  },
   // Skills (phase 1), agents as TOML (phase 2, convert.ts), rules as sections of
   // the rules file next to the agents (phase 3, agentsmd.ts).
   codex: {
@@ -50,8 +58,32 @@ export const LAYOUTS: Record<Harness, TargetLayout> = {
       rule: (r) => (r.scope === "user" ? codexHomeDir(r) : join(r.base, ".codex")),
     },
     blockTypes: ["rule"],
+    localTypes: ["agent"],
   },
 };
+
+/** The file-name prefix of installed agents and rules (spec §6.4). */
+const LOCAL_PREFIX = ".local.";
+
+/**
+ * An item's built output as the harness installs it (spec §6.3): for a `localTypes`
+ * type every file name gets the `.local.` prefix (`agents/foo.md` → `agents/.local.foo.md`,
+ * `rules/lang/perl.md` → `rules/lang/.local.perl.md`), and `claims` lists the plain
+ * paths the item still owns against foreign files. Other types pass through unchanged.
+ */
+export function placeOutput(
+  harness: Harness, type: ItemType, output: Map<string, Buffer>,
+): { output: Map<string, Buffer>; claims: string[] } {
+  if (!LAYOUTS[harness].localTypes?.includes(type)) return { output, claims: [] };
+  const placed = new Map<string, Buffer>();
+  const claims: string[] = [];
+  for (const [rel, buf] of output) {
+    const cut = Math.max(rel.lastIndexOf("/"), rel.lastIndexOf("\\")) + 1;
+    placed.set(rel.slice(0, cut) + LOCAL_PREFIX + rel.slice(cut), buf);
+    claims.push(rel);
+  }
+  return { output: placed, claims };
+}
 
 /** Per harness: absolute paths whose existence means the harness is in use. */
 export type HarnessMarkers = Record<Harness, string[]>;

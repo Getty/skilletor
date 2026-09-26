@@ -254,11 +254,14 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
   const rules = readFileSync(join(codexHome, "skilletor-rules.md"), "utf8");
   assert.match(rules, /^<!-- skilletor:rules scope=user -->\n[\s\S]*<!-- skilletor:rule style source=s -->\nUse tabs\.\n$/);
   assert.ok(out.hookSpecificOutput.additionalContext.startsWith(rules + "\nskilletor synced items:\n"));
+  // k62: the new project block asks for a commit, to the user and to the model.
+  assert.match(out.systemMessage, /\.claude\/\.gitignore updated — commit it/);
+  assert.match(out.hookSpecificOutput.additionalContext, /^- \.claude\/\.gitignore updated — commit it$/m);
   assert.equal(existsSync(join(realpathSync(repo), ".agents/skills/bar/SKILL.md")), true);
   assert.equal(existsSync(join(repo, ".claude/skills")), false); // Claude not in use here
   // The user agent became a Codex agent role under CODEX_HOME.
   assert.equal(
-    readFileSync(join(codexHome, "agents", "helper.toml"), "utf8"),
+    readFileSync(join(codexHome, "agents", ".local.helper.toml"), "utf8"),
     "name = \"helper\"\ndescription = \"helps\"\ndeveloper_instructions = '''\nYou help.\n'''\n",
   );
 

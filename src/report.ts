@@ -36,13 +36,17 @@ export interface ScopeReport {
   /** Declared items that render empty (spec §5): not applicable, not an error.
    *  An item also in `removed` had an installed copy deleted this run. */
   skipped: ItemChange[];
-  conflicts: { path: string }[];
+  /** `replace`: an agent's or rule's plain path (spec §6.3); `--force` deletes the file there. */
+  conflicts: { path: string; replace?: true }[];
   overwritten: { path: string }[];
   warnings: string[];
   trustRequests: { name: string; url: string }[];
   /** Installed agents whose briefing skills do not resolve (spec §6.7); each also has
    *  its line in `warnings`. Absent when empty. */
   briefingMissing?: BriefingMissing[];
+  /** `.gitignore` files whose skilletor block this sync created or changed, to be
+   *  committed (spec §6.4): `.claude/.gitignore`, `~/.claude/.gitignore`. Absent when empty. */
+  gitignoreUpdated?: string[];
 }
 
 export interface SyncReport {
@@ -74,7 +78,8 @@ export function hasChanges(r: SyncReport): boolean {
 function isNotable(s: ScopeReport): boolean {
   return Boolean(
     s.added.length || s.updated.length || s.removed.length ||
-    s.conflicts.length || s.overwritten.length || s.warnings.length || s.trustRequests.length,
+    s.conflicts.length || s.overwritten.length || s.warnings.length || s.trustRequests.length ||
+    s.gitignoreUpdated?.length,
   );
 }
 
@@ -101,12 +106,20 @@ export function reportText(r: SyncReport): string {
     const removed = new Set(s.removed.map((it) => it.key));
     for (const it of s.skipped) if (!removed.has(it.key)) lines.push(`  · ${it.key} skipped (renders empty)`);
     for (const c of s.overwritten) lines.push(`  overwrote local change: ${c.path}`);
-    for (const c of s.conflicts) lines.push(`  conflict: ${c.path} already exists (use --force to adopt)`);
+    for (const c of s.conflicts) {
+      lines.push(`  conflict: ${c.path} already exists (use --force to ${c.replace ? "replace it" : "adopt"})`);
+    }
     for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${t.url}) — run: skilletor trust ${t.name}`);
+    for (const g of s.gitignoreUpdated ?? []) lines.push(`  ${commitHint(g)}`);
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
   for (const w of r.warnings ?? []) lines.push(`skilletor: warning: ${w}`);
   return lines.join("\n");
+}
+
+/** The commit hint for a `.gitignore` whose block sync created or changed (spec §6.4). */
+function commitHint(file: string): string {
+  return `${file} updated — commit it`;
 }
 
 /** `r` without its briefing warnings (spec §6.7): the hooks show them only in a run
@@ -134,11 +147,13 @@ export function reportHook(report: SyncReport): { systemMessage?: string; additi
     warnings += s.warnings.length + s.conflicts.length + s.trustRequests.length + s.overwritten.length;
   }
   const removed = r.scopes.reduce((n, s) => n + s.removed.length, 0);
+  const gitignores = r.scopes.flatMap((s) => s.gitignoreUpdated ?? []);
 
   const parts: string[] = [];
   if (changed.length) parts.push(`${changed.length} item(s) updated`);
   if (removed) parts.push(`${removed} removed`);
   if (warnings) parts.push(`${warnings} warning(s)`);
+  if (gitignores.length) parts.push(`${gitignores.join(", ")} updated — commit ${gitignores.length > 1 ? "them" : "it"}`);
   const systemMessage = `skilletor: ${parts.join(", ") || "changes applied"}`;
 
   const ctx: string[] = [];
@@ -151,6 +166,7 @@ export function reportHook(report: SyncReport): { systemMessage?: string; additi
   }
   for (const s of r.scopes) {
     for (const t of s.trustRequests) ctx.push(`- untrusted source ${t.name} (${t.url}); run: skilletor trust ${t.name}`);
+    for (const g of s.gitignoreUpdated ?? []) ctx.push(`- ${commitHint(g)}`);
     for (const w of s.warnings) ctx.push(`- warning: ${w}`);
   }
   return { systemMessage, additionalContext: ctx.length ? ctx.join("\n") : undefined };

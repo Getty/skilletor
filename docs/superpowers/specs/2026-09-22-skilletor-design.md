@@ -270,34 +270,89 @@ other entry while its source cannot be resolved.
 - If a target path exists that is **not** in the lock (a hand-written skill, a
   manage-skills link), it is never overwritten → conflict in the report; `--force`
   adopts it.
+- Installed agent and rule files carry the prefix `.local.` (§6.4):
+  `agents/.local.<name>.md`, `rules/.local.<name>.md`; a nested rule prefixes its file
+  name (`rules/lang/.local.perl.md`). Such an item still claims its **plain** path: a
+  foreign file at `agents/<name>.md` / `rules/<name>.md` is a conflict (two agents would
+  carry the same name otherwise); `--force` removes that file and installs the prefixed
+  one. When the foreign file turns up after the item was installed, the conflict is
+  reported and the installed item stays as it was (files and lock entry). Skills keep
+  their directory name – it is the skill's name.
 - The user's own skills/agents/rules sit untouched next to the managed ones.
 - If a managed file diverges from the lock hash (edited locally), the source wins; the
   report names the overwritten file.
-- Only what is in the lock is ever deleted.
+- Only what is in the lock – or a plain-path file `--force` adopts – is ever deleted.
 
 ### 6.4 Git hygiene
 
-**Project scope.** With `"gitignore": true` (default) skilletor maintains a marked block in
-`<project>/.claude/.gitignore` with the **exact** managed paths, the lock, and
-`skilletor.local.json`. Only `skilletor.json` is committed; your own skills alongside it
-stay version-controlled as usual. With `"gitignore": false` the block is removed and
-everything is committable (teammates without the plugin get the files via clone) –
-sensible only for items without machine-specific variables. Project blocks are written
-whether or not the project is a git repository (harmless, and a later `git init` finds
-them in place).
+Managed files are kept out of commits by a **fixed** set of ignore rules (k62): the
+`.gitignore` files skilletor maintains do not change when items, their files, variables,
+local config or targets do, so a committed `.gitignore` never shows up modified after a
+sync. (The first design listed every managed path; the block then followed machine state.)
+
+**Names.** Measured 2026-09-26 on Claude Code 2.1.283 and Codex 0.153.4:
+
+- **Skills** keep their directory name: Claude Code names a skill after its directory and
+  ignores the frontmatter `name` (`skills/.local.foo/` becomes `/.local.foo`), and Codex
+  skips a skill directory whose name starts with a dot. Instead every installed skill
+  directory holds its own `.gitignore` containing `*`, which ignores the directory
+  including itself; both harnesses load such a skill normally. It is an ordinary managed
+  file of the item (in the lock, removed with it); a `.gitignore` the source ships at the
+  skill's root is replaced. It follows the `gitignore` switch alone – written in both
+  scopes, work tree or not – so an item's output never depends on git state. It is only
+  written into a directory that is the item's: while another file of the skill is a
+  conflict, a `.gitignore` the lock does not own yet is left out – otherwise a
+  hand-written skill of the same name, or the target of a linked skill directory, would
+  be ignored.
+- **Agents and rules** are installed as `.local.<name>.md` (Codex agents:
+  `.local.<name>.toml`, §14.2); both harnesses load them and take the name from the
+  frontmatter / the `name` key. `.local.` follows Claude Code's own convention for files
+  that are not committed (`CLAUDE.local.md`, `settings.local.json`). The prefix is part of
+  the layout, not of the `gitignore` switch, so toggling `gitignore` never renames a file.
+  Lock keys stay as they are (`agents/foo`); the first sync after the layout change moves
+  installed files through the normal diff (new path written, old lock-owned path deleted).
+
+**Blocks.** With `"gitignore": true` (default) skilletor maintains a marked block in
+`<root>/.gitignore`, holding fixed entries only:
+
+| Root | Block entries | Written |
+|---|---|---|
+| `<project>/.claude` | `skilletor.lock.json`, `skilletor.local.json`, `agents/**/.local.*`, `rules/**/.local.*` | always |
+| `~/.claude` | `skilletor.lock.json`, `skilletor/` (state dir, §6.5, when it lies under `~/.claude`), `agents/**/.local.*`, `rules/**/.local.*` | inside a work tree |
+| `<project>/.codex`, `$CODEX_HOME` | `agents/**/.local.*`, `skilletor-rules.md` | while the root holds managed Codex agents or the rules file (user: inside a work tree) |
+| `<project>/.agents`, `~/.agents` | – (skills carry their own) | never; a block left there is removed |
+
+Committed are `skilletor.json` and the `.gitignore` files; your own skills, agents and rules
+alongside stay version-controlled as usual. A block written by an earlier version (exact
+paths) is replaced on the first sync. Project blocks are written whether or not the
+project is a git repository (harmless, and a later `git init` finds them in place).
+
+**Commit hint.** When sync creates a block or changes its content, the report says so and
+asks for the file to be committed (`.claude/.gitignore updated — commit it`). With fixed
+entries this happens once per root: on the first sync, or on the switch from the per-path
+block.
+
+**Tracked managed files** (k63). `.gitignore` does not untrack what git already tracks – a
+skill committed by hand and then adopted with `--force`, or files committed while
+`"gitignore"` was `false`. When sync writes or adopts a managed path inside a git work tree
+and git tracks it, the report warns once per item, e.g. `skills/foo is tracked by git
+although skilletor manages it — untrack it: git rm -r --cached .claude/skills/foo`.
+skilletor never touches the index itself. The check is one `git ls-files` over the written
+and adopted paths, skipped when nothing was written or adopted, only with `gitignore`
+enabled, and injectable through `EngineContext` like the work-tree test.
+
+**`"gitignore": false`** removes the blocks and the per-skill `.gitignore` files and drops
+the tracked warning: everything is committable (teammates without the plugin get the files
+via clone) – sensible only for items without machine-specific variables. In the user config
+it switches off the user-scope blocks only; a project follows its project/local value.
 
 **User scope.** A dotfiles repository at `~` or `~/.claude` would otherwise show every
-installed user item as untracked. So for each user-scope root – `~/.claude`, `~/.agents`,
-`$CODEX_HOME` (§14.2) – skilletor maintains the same kind of block in `<root>/.gitignore`,
-but **only when that root lies inside a git work tree** (`git -C <root> rev-parse
---is-inside-work-tree` prints `true`; git missing or failing counts as no). The block lists
-the managed paths under that root; the `~/.claude` block also lists `skilletor.lock.json`
-and the state directory `skilletor/` (§6.5, when the state root lies under `~/.claude`).
-`skilletor.json` itself is never listed – it is what a dotfiles repo wants to track. A
-root outside a work tree gets no block, and an existing block there is removed. With
-`"gitignore": false` in `~/.claude/skilletor.json` all user-scope blocks are removed.
-The work-tree test is injectable (`EngineContext.isGitWorkTree`) so tests never depend on
-where the temp directory lives.
+installed user item as untracked, hence the user-scope blocks above – but **only when that
+root lies inside a git work tree** (`git -C <root> rev-parse --is-inside-work-tree` prints
+`true`; git missing or failing counts as no). A root outside a work tree gets no block, and
+an existing block there is removed. `skilletor.json` itself is never listed – it is what a
+dotfiles repo wants to track. The work-tree test is injectable
+(`EngineContext.isGitWorkTree`) so tests never depend on where the temp directory lives.
 
 **Both scopes.** A block with no entries is removed; a `.gitignore` that held nothing but
 the block is deleted. Content outside the block is never touched.
@@ -549,9 +604,9 @@ one:
 
 | Type | `claude` | `codex` |
 |---|---|---|
-| skill | `<base>/.claude/skills/<name>/` | `<base>/.agents/skills/<name>/` |
-| agent | `<base>/.claude/agents/<name>.md` | user: `$CODEX_HOME/agents/<name>.toml` (default `~/.codex`); project: `<repo>/.codex/agents/<name>.toml` (§14.7) |
-| rule | `<base>/.claude/rules/<name>.md` | a section of `$CODEX_HOME/skilletor-rules.md` (user) or `<repo>/.codex/skilletor-rules.md` (project), injected by the hook, pointed to from `AGENTS.md` (§14.8) |
+| skill | `<base>/.claude/skills/<name>/` (+ its own `.gitignore`, §6.4) | `<base>/.agents/skills/<name>/` (+ its own `.gitignore`) |
+| agent | `<base>/.claude/agents/.local.<name>.md` | user: `$CODEX_HOME/agents/.local.<name>.toml` (default `~/.codex`); project: `<repo>/.codex/agents/.local.<name>.toml` (§14.7) |
+| rule | `<base>/.claude/rules/.local.<name>.md` | a section of `$CODEX_HOME/skilletor-rules.md` (user) or `<repo>/.codex/skilletor-rules.md` (project), injected by the hook, pointed to from `AGENTS.md` (§14.8) |
 
 `<base>` is `~` (user scope) or the project root (project scope). The user-scope Codex agent
 root is the one root that need not lie under `<base>`: it follows `$CODEX_HOME`
@@ -584,11 +639,11 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
   match the active targets (an item locked for one active target but not another, or an
   entry for an inactive target), so SessionStart syncs a newly enabled harness without
   waiting for a source change.
-- **Git hygiene:** besides the block in `<project>/.claude/.gitignore`, skilletor maintains
-  the same kind of block in `<project>/.agents/.gitignore` and `<project>/.codex/.gitignore`
-  listing the managed Codex paths under each. Such a block is created only when there are
-  such paths and removed when they are gone. The user scope does the same for
-  `~/.agents` and `$CODEX_HOME`, under the work-tree condition of §6.4.
+- **Git hygiene** (§6.4): Codex skills carry their own `.gitignore` like Claude skills, so
+  `<project>/.agents` and `~/.agents` get no block (one left by an earlier version is
+  removed). `<project>/.codex/.gitignore` and `$CODEX_HOME/.gitignore` hold the fixed block
+  `agents/**/.local.*`, `skilletor-rules.md` while that root holds managed Codex agents or
+  the rules file; `$CODEX_HOME` only under the work-tree condition of §6.4.
 
 ### 14.4 Report and status
 

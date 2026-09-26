@@ -228,11 +228,27 @@ test("k51: session-start writes the user block inside a work tree and stays quie
     e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
     const out = await runHook("session-start", { cwd: e.projectDir }, { ...e.ctx, isGitWorkTree: () => true });
     assert.match(out.hookSpecificOutput?.additionalContext ?? "", /skill foo@mine/);
-    assert.match(readFileSync(join(e.home, ".claude/.gitignore"), "utf8"), /^skills\/foo\/SKILL\.md$/m);
+    assert.match(readFileSync(join(e.home, ".claude/.gitignore"), "utf8"), /^skilletor\.lock\.json$/m);
     const boom = () => { throw new Error("git exploded"); };
     const again = await runHook("session-start", { cwd: e.projectDir }, { ...e.ctx, isGitWorkTree: boom });
     assert.equal(again.systemMessage, undefined);
     assert.equal(existsSync(join(e.home, ".claude/.gitignore")), false); // a failing test counts as "no"
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k62: session-start asks once to commit a new .gitignore block, in the message and the context", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    writeFileSync(join(e.projectDir, ".claude/skilletor.json"), JSON.stringify({ install: { skills: ["foo@mine"] } }));
+    const out = await runHook("session-start", { source: "startup", cwd: e.projectDir }, e.ctx);
+    assert.equal(out.systemMessage, "skilletor: 1 item(s) updated, .claude/.gitignore updated — commit it");
+    assert.match(out.hookSpecificOutput?.additionalContext ?? "", /^- \.claude\/\.gitignore updated — commit it$/m);
+    // Nothing changed since: no second hint, the hook stays silent.
+    assert.deepEqual(await runHook("session-start", { source: "startup", cwd: e.projectDir }, e.ctx), {});
   } finally {
     e.cleanup();
   }

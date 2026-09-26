@@ -73,11 +73,15 @@ test("full lifecycle: add, install, update, re-render, author mode, uninstall", 
 
     const greetPath = join(project, ".claude/skills/greet/SKILL.md");
     assert.match(readFileSync(greetPath, "utf8"), /Hello project foo=bar TAG/);
-    assert.equal(existsSync(join(project, ".claude/agents/helper.md")), true);
-    assert.equal(existsSync(join(project, ".claude/rules/style.md")), true);
+    assert.equal(existsSync(join(project, ".claude/agents/.local.helper.md")), true);
+    assert.equal(existsSync(join(project, ".claude/rules/.local.style.md")), true);
     const lock = JSON.parse(readFileSync(join(project, ".claude/skilletor.lock.json"), "utf8"));
     assert.deepEqual(Object.keys(lock).sort(), ["agents/helper", "rules/style", "skills/greet"]);
-    assert.match(readFileSync(join(project, ".claude/.gitignore"), "utf8"), /skills\/greet\/SKILL\.md/);
+    // Fixed ignore rules (k62): the skill carries its own .gitignore, the block never lists items.
+    const gitignore = readFileSync(join(project, ".claude/.gitignore"), "utf8");
+    assert.match(gitignore, /^agents\/\*\*\/\.local\.\*$/m);
+    assert.doesNotMatch(gitignore, /greet|helper|style/);
+    assert.match(readFileSync(join(project, ".claude/skills/greet/.gitignore"), "utf8"), /^\*$/m);
 
     // 2. new commit in the source -> session-start hook reports an update.
     put("skills/greet/SKILL.md.njk", "Hello {{ project.name }} v2 foo={{ vars.foo }} {% include \"snippets/tag.md\" %}\n");
@@ -109,13 +113,13 @@ test("full lifecycle: add, install, update, re-render, author mode, uninstall", 
     assert.equal(r.status, 0, r.stderr);
     assert.match(readFileSync(greetPath, "utf8"), /LOCAL EDIT/);
 
-    // 5. uninstall greet -> files, lock entry and gitignore line gone; own skill untouched.
+    // 5. uninstall greet -> files and lock entry gone, the block unchanged; own skill untouched.
     r = run(["uninstall", "greet@shared", "--project", "--project-dir", project]);
     assert.equal(r.status, 0, r.stderr);
     assert.equal(existsSync(join(project, ".claude/skills/greet")), false);
     const lock2 = JSON.parse(readFileSync(join(project, ".claude/skilletor.lock.json"), "utf8"));
     assert.equal("skills/greet" in lock2, false);
-    assert.equal(readFileSync(join(project, ".claude/.gitignore"), "utf8").includes("skills/greet/SKILL.md"), false);
+    assert.equal(readFileSync(join(project, ".claude/.gitignore"), "utf8"), gitignore);
     assert.equal(readFileSync(join(project, ".claude/skills/mine/SKILL.md"), "utf8"), "MY OWN");
   } finally {
     tmp.cleanup();

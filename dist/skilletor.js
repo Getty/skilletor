@@ -6864,7 +6864,12 @@ var TargetError = class extends Error {
 var under = (dir) => (r) => join3(r.base, dir);
 var codexHomeDir = (r) => r.codexHome || join3(r.base, ".codex");
 var LAYOUTS = {
-  claude: { harness: "claude", keyPrefix: "", roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") } },
+  claude: {
+    harness: "claude",
+    keyPrefix: "",
+    roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") },
+    localTypes: ["agent", "rule"]
+  },
   // Skills (phase 1), agents as TOML (phase 2, convert.ts), rules as sections of
   // the rules file next to the agents (phase 3, agentsmd.ts).
   codex: {
@@ -6875,9 +6880,22 @@ var LAYOUTS = {
       agent: (r) => r.scope === "user" ? codexHomeDir(r) : join3(r.base, ".codex"),
       rule: (r) => r.scope === "user" ? codexHomeDir(r) : join3(r.base, ".codex")
     },
-    blockTypes: ["rule"]
+    blockTypes: ["rule"],
+    localTypes: ["agent"]
   }
 };
+var LOCAL_PREFIX = ".local.";
+function placeOutput(harness, type, output) {
+  if (!LAYOUTS[harness].localTypes?.includes(type)) return { output, claims: [] };
+  const placed = /* @__PURE__ */ new Map();
+  const claims = [];
+  for (const [rel, buf] of output) {
+    const cut = Math.max(rel.lastIndexOf("/"), rel.lastIndexOf("\\")) + 1;
+    placed.set(rel.slice(0, cut) + LOCAL_PREFIX + rel.slice(cut), buf);
+    claims.push(rel);
+  }
+  return { output: placed, claims };
+}
 function defaultMarkers(home, codexHome) {
   const cx = codexHome || join3(home, ".codex");
   return {
@@ -7979,18 +7997,33 @@ function apply(plan, opts) {
       continue;
     }
     const existing = oldLock[it.key]?.skipped ? void 0 : oldLock[it.key];
+    const foreign = (it.claims ?? []).filter(
+      (rel) => existing?.files[rel] === void 0 && existsSync7(safeJoin(root, rel))
+    );
+    if (foreign.length > 0 && !opts.force) {
+      for (const rel of foreign) res.conflicts.push({ key: it.key, path: rel, replace: true });
+      if (oldLock[it.key]) newLock[it.key] = oldLock[it.key];
+      res.unchanged.push(it.key);
+      continue;
+    }
+    for (const rel of foreign) removeFile(safeJoin(root, rel), touched(root));
     const entryFiles = {};
     let wrote = false;
     let removedFile = false;
-    for (const [rel, buf] of it.output) {
+    let conflicted = false;
+    const attached = new Set(it.attached ?? []);
+    const ordered = [...it.output].sort(([a], [b]) => Number(attached.has(a)) - Number(attached.has(b)));
+    for (const [rel, buf] of ordered) {
       const abs = safeJoin(root, rel);
       const desired = hashBuffer(buf);
       const locked = existing?.files[rel];
+      if (conflicted && locked === void 0 && attached.has(rel)) continue;
       const onDisk = existsSync7(abs);
       if (onDisk) {
         const diskHash = hashBuffer(readFileSync6(abs));
         if (locked === void 0 && !opts.force) {
           res.conflicts.push({ key: it.key, path: rel });
+          conflicted = true;
           continue;
         }
         if (diskHash === desired) {
@@ -8200,6 +8233,10 @@ import { existsSync as existsSync9, readFileSync as readFileSync8, rmSync as rmS
 import { join as join12 } from "node:path";
 var BEGIN2 = "# >>> skilletor >>>";
 var END2 = "# <<< skilletor <<<";
+var SKILL_GITIGNORE = '# installed by skilletor, not committed ("gitignore": false in skilletor.json to commit)\n*\n';
+var PROJECT_CLAUDE_ENTRIES = ["skilletor.lock.json", "skilletor.local.json", "agents/**/.local.*", "rules/**/.local.*"];
+var LOCAL_ENTRIES = ["agents/**/.local.*", "rules/**/.local.*"];
+var CODEX_ENTRIES = ["agents/**/.local.*", "skilletor-rules.md"];
 function updateGitignore(opts) {
   const path = join12(opts.dir, ".gitignore");
   const existed = existsSync9(path);
@@ -8209,29 +8246,39 @@ function updateGitignore(opts) {
   const end = lines.indexOf(END2);
   const hasBlock = begin !== -1 && end !== -1 && end > begin;
   const outside = hasBlock ? [...lines.slice(0, begin), ...lines.slice(end + 1)] : lines;
-  const entries = blockEntries(opts.managedPaths, opts.fixed ?? ["skilletor.lock.json", "skilletor.local.json"]);
+  const entries = [...new Set(opts.entries)].sort();
+  const write = opts.enabled && entries.length > 0;
   let out;
-  if (opts.enabled && entries.length > 0) {
+  let change;
+  if (write) {
     const block = [BEGIN2, ...entries, END2];
     if (hasBlock) {
       out = [...lines.slice(0, begin), ...block, ...lines.slice(end + 1)];
+      change = lines.slice(begin + 1, end).join("\n") === entries.join("\n") ? "unchanged" : "changed";
     } else {
       const trimmed = trimTrailingEmpty(outside);
       out = trimmed.length ? [...trimmed, "", ...block] : [...block];
+      change = "created";
     }
   } else {
     out = trimTrailingEmpty(outside);
+    change = hasBlock ? "removed" : "unchanged";
   }
   const result = out.length && out.some((l) => l.trim() !== "") ? out.join("\n").replace(/\n*$/, "") + "\n" : "";
   if (result === "") {
     if (existed) rmSync5(path, { force: true });
-    return;
+    return change;
   }
   if (result !== existing) atomicWrite(path, result);
+  return change;
 }
-function blockEntries(managedPaths, fixed) {
-  const set = /* @__PURE__ */ new Set([...managedPaths, ...fixed]);
-  return [...set].sort();
+function skillGitignorePath(name) {
+  return join12("skills", name, ".gitignore");
+}
+function withSkillGitignore(output, name) {
+  const out = new Map(output);
+  out.set(skillGitignorePath(name), Buffer.from(SKILL_GITIGNORE, "utf8"));
+  return out;
 }
 function trimTrailingEmpty(lines) {
   const out = [...lines];
@@ -8354,7 +8401,7 @@ function hasChanges(r) {
 }
 function isNotable(s) {
   return Boolean(
-    s.added.length || s.updated.length || s.removed.length || s.conflicts.length || s.overwritten.length || s.warnings.length || s.trustRequests.length
+    s.added.length || s.updated.length || s.removed.length || s.conflicts.length || s.overwritten.length || s.warnings.length || s.trustRequests.length || s.gitignoreUpdated?.length
   );
 }
 function hasNotable(r) {
@@ -8376,12 +8423,18 @@ function reportText(r) {
     const removed = new Set(s.removed.map((it) => it.key));
     for (const it of s.skipped) if (!removed.has(it.key)) lines.push(`  \xB7 ${it.key} skipped (renders empty)`);
     for (const c of s.overwritten) lines.push(`  overwrote local change: ${c.path}`);
-    for (const c of s.conflicts) lines.push(`  conflict: ${c.path} already exists (use --force to adopt)`);
+    for (const c of s.conflicts) {
+      lines.push(`  conflict: ${c.path} already exists (use --force to ${c.replace ? "replace it" : "adopt"})`);
+    }
     for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${t.url}) \u2014 run: skilletor trust ${t.name}`);
+    for (const g of s.gitignoreUpdated ?? []) lines.push(`  ${commitHint(g)}`);
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
   for (const w of r.warnings ?? []) lines.push(`skilletor: warning: ${w}`);
   return lines.join("\n");
+}
+function commitHint(file) {
+  return `${file} updated \u2014 commit it`;
 }
 function withoutBriefing(r) {
   return {
@@ -8404,10 +8457,12 @@ function reportHook(report) {
     warnings += s.warnings.length + s.conflicts.length + s.trustRequests.length + s.overwritten.length;
   }
   const removed = r.scopes.reduce((n, s) => n + s.removed.length, 0);
+  const gitignores = r.scopes.flatMap((s) => s.gitignoreUpdated ?? []);
   const parts = [];
   if (changed.length) parts.push(`${changed.length} item(s) updated`);
   if (removed) parts.push(`${removed} removed`);
   if (warnings) parts.push(`${warnings} warning(s)`);
+  if (gitignores.length) parts.push(`${gitignores.join(", ")} updated \u2014 commit ${gitignores.length > 1 ? "them" : "it"}`);
   const systemMessage = `skilletor: ${parts.join(", ") || "changes applied"}`;
   const ctx = [];
   if (changed.length) {
@@ -8419,6 +8474,7 @@ function reportHook(report) {
   }
   for (const s of r.scopes) {
     for (const t of s.trustRequests) ctx.push(`- untrusted source ${t.name} (${t.url}); run: skilletor trust ${t.name}`);
+    for (const g of s.gitignoreUpdated ?? []) ctx.push(`- ${commitHint(g)}`);
     for (const w of s.warnings) ctx.push(`- warning: ${w}`);
   }
   return { systemMessage, additionalContext: ctx.length ? ctx.join("\n") : void 0 };
@@ -8487,10 +8543,10 @@ function sourceVersion(lock, sourceName) {
   for (const entry of Object.values(lock)) if (entry.source === sourceName) return entry.version;
   return void 0;
 }
-function userClaudeFixed(claudeDir, stateRoot) {
+function userClaudeEntries(claudeDir, stateRoot) {
   const rel = relative3(claudeDir, stateRoot);
   const under2 = rel !== "" && !rel.startsWith("..") && !isAbsolute2(rel);
-  return under2 ? ["skilletor.lock.json", rel.split(sep4).join("/") + "/"] : ["skilletor.lock.json"];
+  return ["skilletor.lock.json", ...under2 ? [rel.split(sep4).join("/") + "/"] : [], ...LOCAL_ENTRIES];
 }
 function gitRemote(dir) {
   try {
@@ -8577,6 +8633,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   const cacheRoot = cacheRootOf(ctx);
   const lockPath = join14(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
+  const gitignoreOn = scopeCfg.gitignore !== false;
   const needed = scopeSources(scopeCfg);
   const resolved = /* @__PURE__ */ new Map();
   const resolveAll = (names) => Promise.all(
@@ -8679,6 +8736,15 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
           rep.warnings.push(`${item.type} ${item.name} (${h}): ${err.message}`);
           if (key in oldLock) keep.push(key);
           continue;
+        }
+      }
+      if (!planItem.skipped) {
+        const placed = placeOutput(h, item.type, planItem.output);
+        planItem.output = placed.output;
+        if (placed.claims.length) planItem.claims = placed.claims;
+        if (item.type === "skill" && gitignoreOn) {
+          planItem.output = withSkillGitignore(planItem.output, item.name);
+          planItem.attached = [skillGitignorePath(item.name)];
         }
       }
       plan.push(planItem);
@@ -8813,7 +8879,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) || existsSync11(join14(rootOf(rc, "codex", "rule"), RULES_FILE)) ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings }) : { overwritten: [], exists: false };
   {
     const newLock = readLock(lockPath);
-    const rulesRoot = rootOf(rc, "codex", "rule");
+    const codexRoot = rootOf(rc, "codex", "rule");
     const inWorkTree = (dir) => {
       try {
         return (ctx.isGitWorkTree ?? isGitWorkTree)(dir);
@@ -8821,17 +8887,21 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
         return false;
       }
     };
+    const holdsManaged = (rootDir) => Object.entries(newLock).some(
+      ([key, e]) => !e.block && Object.keys(e.files).length > 0 && rootOfKey(rc, key) === rootDir
+    );
     for (const rootDir of allRoots(rc)) {
-      const managed = Object.entries(newLock).filter(([key, e]) => !e.block && rootOfKey(rc, key) === rootDir).flatMap(([, e]) => Object.keys(e.files));
-      if (rules.exists && rootDir === rulesRoot) managed.push(RULES_FILE);
-      const isClaude = rootDir === targetDir;
-      const fixed = !isClaude ? [] : scope === "project" ? void 0 : userClaudeFixed(targetDir, ctx.stateRoot);
-      let enabled = scopeCfg.gitignore !== false;
-      if (enabled && scope === "user") {
-        const relevant = managed.length > 0 || fixed.length > 0 || existsSync11(join14(rootDir, ".gitignore"));
-        enabled = relevant && inWorkTree(rootDir);
+      let entries = [];
+      if (rootDir === targetDir) {
+        entries = scope === "project" ? PROJECT_CLAUDE_ENTRIES : userClaudeEntries(targetDir, ctx.stateRoot);
+      } else if (rootDir === codexRoot && (rules.exists || holdsManaged(rootDir))) {
+        entries = CODEX_ENTRIES;
       }
-      updateGitignore({ dir: rootDir, managedPaths: managed, fixed, enabled });
+      const enabled = gitignoreOn && entries.length > 0 && (scope === "project" || inWorkTree(rootDir));
+      const change = updateGitignore({ dir: rootDir, entries, enabled });
+      if (change === "created" || change === "changed") {
+        (rep.gitignoreUpdated ??= []).push(gitignoreLabel(scope, base, join14(rootDir, ".gitignore")));
+      }
     }
   }
   const toChange = (key) => keyInfo.get(key) ?? { key, ...keyToTypeName(key), source: oldLock[key]?.source ?? "?" };
@@ -8844,12 +8914,18 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
     const root = rootOfKey(rc, c.key) ?? targetDir;
     return { path: root === targetDir ? c.path : labelOf(join14(root, c.path)) };
   };
-  rep.conflicts = result.conflicts.map(shown);
+  rep.conflicts = result.conflicts.map((c) => c.replace ? { ...shown(c), replace: c.replace } : shown(c));
   rep.overwritten = [...result.overwritten.map(shown), ...rules.overwritten.map((path) => ({ path }))];
   const briefing = briefingOf(ctx, scope, readLock(lockPath));
   for (const b of briefing) rep.warnings.push(briefingWarning(parseLockKey(b.key).name, b.harness, b.missing));
   if (briefing.length) rep.briefingMissing = briefing;
   return rep;
+}
+function gitignoreLabel(scope, base, abs) {
+  const rel = relative3(base, abs);
+  if (rel.startsWith("..") || isAbsolute2(rel)) return abs;
+  const shown = rel.split(sep4).join("/");
+  return scope === "user" ? `~/${shown}` : shown;
 }
 function briefingOf(ctx, scope, lock, only) {
   const rc = { base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) };

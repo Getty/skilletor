@@ -187,7 +187,7 @@ test("status shows briefingMissing per agent, read-only; an unparseable file is 
     assert.deepEqual(byKey["codex:agents/rev"]!.briefingMissing, ["gone"]);
     assert.deepEqual(readdirSync(join(e.home, ".claude"), { recursive: true }).sort(), before);
     // Break the installed Claude file's frontmatter: skipped, no crash, no entry.
-    writeFileSync(join(e.home, ".claude/agents/rev.md"), "---\ndescription: &anchor x\nbriefing:\n  skills: [gone]\n---\nB\n");
+    writeFileSync(join(e.home, ".claude/agents/.local.rev.md"), "---\ndescription: &anchor x\nbriefing:\n  skills: [gone]\n---\nB\n");
     const broken = status(e.ctx, { scope: "user" });
     const rev = broken.scopes[0]!.declared.find((d) => d.key === "agents/rev")!;
     assert.equal(rev.briefingMissing, undefined);

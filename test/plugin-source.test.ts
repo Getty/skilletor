@@ -233,8 +233,9 @@ test("sync installs a nested plugin skill to skills/<name>/ for claude and codex
     assert.equal(existsSync(join(e.home, ".agents/skills/engineering")), false);
     const lock = readLock(join(e.home, ".claude/skilletor.lock.json"));
     assert.deepEqual(Object.keys(lock).sort(), ["codex:skills/tdd", "skills/tdd"]);
-    assert.deepEqual(Object.keys(lock["skills/tdd"]!.files).sort(), ["skills/tdd/SKILL.md", "skills/tdd/tests.md"]);
-    assert.deepEqual(Object.keys(lock["codex:skills/tdd"]!.files).sort(), ["skills/tdd/SKILL.md", "skills/tdd/tests.md"]);
+    const files = ["skills/tdd/.gitignore", "skills/tdd/SKILL.md", "skills/tdd/tests.md"];
+    assert.deepEqual(Object.keys(lock["skills/tdd"]!.files).sort(), files);
+    assert.deepEqual(Object.keys(lock["codex:skills/tdd"]!.files).sort(), files);
   } finally {
     s.cleanup();
     e.cleanup();
