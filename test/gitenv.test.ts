@@ -3,12 +3,14 @@
 // steer the git skilletor runs: not in a source's cache, not `ls-remote`, not a question about
 // the project. Real git, local repos, temp dirs. process.env is set only around the call under
 // test and restored in `finally`; fixtures run git with the environment this file started with.
+// k93: `npm test` itself drops those variables before any test file runs (test/setup.ts).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
 import { gitEnv } from "../src/gitenv.ts";
@@ -82,6 +84,7 @@ function makeVictim(tmp: TmpDir) {
 // config GIT_CONFIG_PARAMETERS and GIT_CONFIG_COUNT (with KEY_n/VALUE_n), kept as git keeps them
 // for a submodule; auth, ssh, proxy, HOME and user-level config pass through; GIT_TERMINAL_PROMPT
 // is 0; `extra` is added last. A git that lists a new variable fails here: add it to the list.
+// Red on purpose after a git upgrade (a CI runner's too) that grows the list – not a flake.
 test("k91: gitEnv drops what git lists as repository-local, but the command-line config", async () => {
   const listed = git(tmpdir(), "rev-parse", "--local-env-vars").split("\n").filter(Boolean);
   assert.ok(listed.includes("GIT_DIR") && listed.includes("GIT_WORK_TREE"), listed.join(" "));
@@ -273,4 +276,45 @@ test("k91: with GIT_DIR exported, project.git_remote is the project's origin", a
   const skill = join(project, ".claude/skills/foo/SKILL.md");
   assert.equal(existsSync(skill), true);
   assert.match(readFileSync(skill, "utf8"), /^remote=https:\/\/example\.com\/proj\.git$/m);
+});
+
+// k93: `npm test` run from a git hook inherits the hook's GIT_DIR, and a fixture's `git init`,
+// `add` and `commit` in its temp dir acted on the repository GIT_DIR names – the developer's
+// checkout. Asserts, running a one-test file that builds such a fixture with the flags of
+// package.json's test script and GIT_DIR naming the victim: the victim's remotes, HEAD, index,
+// files and config stay as they were, the file passes, and the commit is in the fixture's own repo.
+test("k93: npm test with GIT_DIR exported builds a fixture in its temp dir, not in the repository GIT_DIR names", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const victim = makeVictim(tmp);
+  const before = victim.snapshot();
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const script: string = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts.test;
+  const [node, ...flags] = script.split(/\s+/);
+  const glob = flags.pop();
+  assert.deepEqual([node, glob], ["node", '"test/**/*.test.ts"'], `unexpected test script: ${script}`);
+  const work = join(tmp.dir, "work");
+  const fixture = join(tmp.dir, "fixture.test.mjs");
+  writeFileSync(fixture, [
+    'import { test } from "node:test";',
+    'import { execFileSync } from "node:child_process";',
+    'import { mkdirSync, writeFileSync } from "node:fs";',
+    `const work = ${JSON.stringify(work)};`,
+    'const git = (...args) => execFileSync("git", args, { cwd: work, stdio: "pipe" });',
+    'test("a repository fixture", () => {',
+    '  mkdirSync(work);',
+    '  git("init", "-q", "-b", "main");',
+    '  writeFileSync(`${work}/fixture.txt`, "fixture\\n");',
+    '  git("add", ".");',
+    '  git("commit", "-qm", "fixture");',
+    '});',
+    '',
+  ].join("\n"));
+  const env: NodeJS.ProcessEnv = { ...G, GIT_DIR: victim.gitDir };
+  delete env.NODE_TEST_CONTEXT; // set for this file's own run; the nested runner must not see it
+
+  const r = spawnSync(process.execPath, [...flags, fixture], { cwd: root, env, encoding: "utf8" });
+  assert.deepEqual(victim.snapshot(), before, "the repository GIT_DIR names changed");
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(git(work, "log", "--format=%s"), "fixture", "the fixture's commit is not in its own repository");
 });
