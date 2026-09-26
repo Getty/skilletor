@@ -337,9 +337,14 @@ skill committed by hand and then adopted with `--force`, or files committed whil
 `"gitignore"` was `false`. When sync writes or adopts a managed path inside a git work tree
 and git tracks it, the report warns once per item, e.g. `skills/foo is tracked by git
 although skilletor manages it — untrack it: git rm -r --cached .claude/skills/foo`.
-skilletor never touches the index itself. The check is one `git ls-files` over the written
-and adopted paths, skipped when nothing was written or adopted, only with `gitignore`
-enabled, and injectable through `EngineContext` like the work-tree test.
+A skill is untracked as its directory, an agent or rule by its file (`git rm --cached
+.claude/agents/.local.a.md`), the Codex rules file once for the file. The project command
+runs from the project root; the user command names the root so it works from any
+directory (`git -C ~/.claude rm -r --cached skills/foo`, absolute for a `$CODEX_HOME`
+outside `~`). skilletor never touches the index itself. The check is one `git ls-files`
+per target root over the written and adopted paths (`EngineContext.gitTracked`), skipped
+when nothing was written or adopted, only with `gitignore` enabled; outside a work tree,
+or when git is missing or fails, nothing counts as tracked.
 
 **`"gitignore": false`** removes the blocks and the per-skill `.gitignore` files and drops
 the tracked warning: everything is committable (teammates without the plugin get the files

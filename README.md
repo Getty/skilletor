@@ -359,6 +359,11 @@ installed agent `foo` is reported as a conflict (two agents would share the name
 config to commit everything instead (useful only for items without machine-specific
 variables); the file names stay the same.
 
+Took over a file git already tracks (a skill you committed, then adopted with `--force`,
+or files committed while `"gitignore"` was `false`)? `.gitignore` does not untrack it:
+when sync writes such a file, the report names the item and the command that fixes it,
+e.g. `git rm -r --cached .claude/skills/foo`. skilletor never touches the git index itself.
+
 Keep `~` or `~/.claude` in a dotfiles repository? `~/.claude` and `$CODEX_HOME` get the
 same fixed block when they lie inside a git work tree; the `~/.claude` block also lists
 the state directory `skilletor/`, never `skilletor.json`. A root outside a work tree gets

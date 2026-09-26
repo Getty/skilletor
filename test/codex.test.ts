@@ -406,6 +406,40 @@ test("k51: user Codex roots get their own block only while inside a git work tre
   }
 });
 
+// k63: tracked managed files on the Codex roots (spec §6.4).
+test("k63: tracked Codex paths warn with their root: .agents skills, .codex agents, the rules file", async () => {
+  const e = env(["codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", {
+      "skills/foo/SKILL.md": SKILL("foo"), "agents/helper.md": AGENT("Helps", "B\n"), "rules/r.md": "R\n",
+    });
+    const install = { skills: ["foo@mine"], agents: ["helper@mine"], rules: ["r@mine"] };
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install });
+    const asked: string[] = [];
+    const everything = (dir: string, paths: string[]) => (asked.push(dir), paths);
+    const tracked = (item: string, cmd: string) => `${item} is tracked by git although skilletor manages it — untrack it: ${cmd}`;
+
+    const r = await sync({ ...e.ctx, gitTracked: everything }, { scope: "project" });
+    assert.deepEqual([...r.scopes[0]!.warnings].sort(), [
+      tracked(".codex/skilletor-rules.md", "git rm --cached .codex/skilletor-rules.md"),
+      tracked("codex:agents/helper", "git rm --cached .codex/agents/.local.helper.toml"),
+      tracked("codex:skills/foo", "git rm -r --cached .agents/skills/foo"),
+    ]);
+    assert.deepEqual(asked.sort(), [join(e.projectDir, ".agents"), join(e.projectDir, ".codex")]); // one ask per root
+
+    // User scope: the root in the ~/ form, or absolute (quoted) outside the home.
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["helper@mine"] } });
+    const home = await sync({ ...e.ctx, gitTracked: everything }, { scope: "user" });
+    assert.deepEqual(home.scopes[0]!.warnings, [tracked("codex:agents/helper", "git -C ~/.codex rm --cached agents/.local.helper.toml")]);
+    const away = join(e.tmp.dir, "codex home");
+    const out = await sync({ ...e.ctx, codexHome: away, gitTracked: everything }, { scope: "user" });
+    assert.deepEqual(out.scopes[0]!.warnings, [tracked("codex:agents/helper", `git -C '${away}' rm --cached agents/.local.helper.toml`)]);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("project agents go to <repo>/.codex/agents with a gitignore block there", async () => {
   const e = env(["claude", "codex"]);
   try {

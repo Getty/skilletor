@@ -66,6 +66,9 @@ export interface ApplyResult {
   /** `replace`: a claimed path, which `force` deletes rather than adopts. */
   conflicts: { key: string; path: string; replace?: true }[];
   overwritten: { key: string; path: string }[];
+  /** Paths written this run, or adopted into the lock with `force` (spec §6.4: the
+   *  tracked-file check looks at these only). */
+  written: { key: string; path: string }[];
 }
 
 export class ApplyError extends Error {
@@ -84,7 +87,9 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
   const lockPath = join(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const newLock: Lock = {};
-  const res: ApplyResult = { added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [] };
+  const res: ApplyResult = {
+    added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [], written: [],
+  };
   const dirsTouched = new Map<string, Set<string>>(); // root -> dirs deleted from
   const rootFor = (key: string): string => resolvePath(opts.rootOf ? opts.rootOf(key) : targetDir);
   const touched = (root: string): Set<string> => {
@@ -149,11 +154,13 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
         if (diskHash === desired) {
           // Already correct; adopt into the lock (updates a stale hash silently).
           entryFiles[rel] = desired;
+          if (locked === undefined) res.written.push({ key: it.key, path: rel }); // adopted (force)
           continue;
         }
         atomicWrite(abs, buf);
         wrote = true;
         entryFiles[rel] = desired;
+        res.written.push({ key: it.key, path: rel });
         if (locked !== undefined && diskHash !== locked) {
           res.overwritten.push({ key: it.key, path: rel }); // local drift
         }
@@ -161,6 +168,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
         atomicWrite(abs, buf);
         wrote = true;
         entryFiles[rel] = desired;
+        res.written.push({ key: it.key, path: rel });
       }
     }
 

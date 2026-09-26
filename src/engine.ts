@@ -34,7 +34,7 @@ import { apply, isValidItemName, type PlanItem } from "./apply.ts";
 import { readLock, writeLock, type Lock, type SkipReason } from "./lock.ts";
 import { State } from "./state.ts";
 import {
-  CODEX_ENTRIES, isGitWorkTree, LOCAL_ENTRIES, PROJECT_CLAUDE_ENTRIES, skillGitignorePath, updateGitignore,
+  CODEX_ENTRIES, gitTracked, isGitWorkTree, LOCAL_ENTRIES, PROJECT_CLAUDE_ENTRIES, skillGitignorePath, updateGitignore,
   withSkillGitignore,
 } from "./gitignore.ts";
 import { briefingWarning, missingSkills, skillRoots, type BriefingMissing } from "./briefing.ts";
@@ -57,6 +57,9 @@ export interface EngineContext {
   codexHome?: string;
   /** Does a user-scope root lie inside a git work tree (spec §6.4)? Default: ask git. */
   isGitWorkTree?: (dir: string) => boolean;
+  /** Which of `paths` (relative to the target root `dir`) does git track (spec §6.4)?
+   *  Default: one `git ls-files`; outside a work tree, or when git fails, none. */
+  gitTracked?: (dir: string, paths: string[]) => string[];
 }
 
 export interface SyncOptions {
@@ -591,7 +594,7 @@ async function syncScope(
   const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) ||
       existsSync(join(rootOf(rc, "codex", "rule")!, RULES_FILE))
     ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings })
-    : { overwritten: [], exists: false };
+    : { overwritten: [], exists: false, written: false };
 
   {
     // One block of fixed entries per target root (spec §6.4, §14.3): `.claude/.gitignore`
@@ -621,9 +624,19 @@ async function syncScope(
       const enabled = gitignoreOn && entries.length > 0 && (scope === "project" || inWorkTree(rootDir));
       const change = updateGitignore({ dir: rootDir, entries, enabled });
       if (change === "created" || change === "changed") {
-        (rep.gitignoreUpdated ??= []).push(gitignoreLabel(scope, base, join(rootDir, ".gitignore")));
+        (rep.gitignoreUpdated ??= []).push(scopeLabel(scope, base, join(rootDir, ".gitignore")));
       }
     }
+  }
+
+  // Managed paths git still tracks (spec §6.4): only what this run wrote or adopted, and
+  // git is asked only when there is some (the hook path stays fast).
+  if (gitignoreOn) {
+    const written: Written[] = result.written.map((w) => ({
+      root: rootOfKey(rc, w.key) ?? targetDir, key: w.key, path: w.path,
+    }));
+    if (rules.written) written.push({ root: rootOf(rc, "codex", "rule")!, path: RULES_FILE });
+    rep.warnings.push(...trackedWarnings(ctx, scope, base, written));
   }
 
   const toChange = (key: string): ItemChange =>
@@ -649,13 +662,72 @@ async function syncScope(
   return rep;
 }
 
-/** A `.gitignore` for the commit hint (spec §6.4): relative to the project, `~/…` in the
- *  user scope (the hook context names no scope), absolute outside the scope's base. */
-function gitignoreLabel(scope: ScopeName, base: string, abs: string): string {
+/** A path for the commit hint and the tracked warning (spec §6.4): relative to the
+ *  project, `~/…` in the user scope (the hook context names no scope), absolute outside
+ *  the scope's base. */
+function scopeLabel(scope: ScopeName, base: string, abs: string): string {
   const rel = relative(base, abs);
   if (rel.startsWith("..") || isAbsolute(rel)) return abs;
   const shown = rel.split(sep).join("/");
   return scope === "user" ? `~/${shown}` : shown;
+}
+
+/** A path this sync wrote or adopted, under its target root; `key` is the item's, absent
+ *  for the Codex rules file (one file shared by every Codex rule). */
+interface Written {
+  root: string;
+  key?: string;
+  path: string;
+}
+
+/**
+ * The tracked-file warnings (spec §6.4): of the written and adopted paths, the ones git
+ * tracks – one warning per item (the rules file: one for the file) with the command that
+ * untracks it. One tracked test per root, none without written paths; a failing test
+ * counts as nothing tracked. The command runs from the project root in the project scope;
+ * in the user scope it names the root (`git -C ~/.claude …`), so it works from anywhere.
+ */
+function trackedWarnings(ctx: EngineContext, scope: ScopeName, base: string, written: Written[]): string[] {
+  const byRoot = new Map<string, Written[]>();
+  for (const w of written) byRoot.set(w.root, [...(byRoot.get(w.root) ?? []), w]);
+  const test = ctx.gitTracked ?? gitTracked;
+  const out: string[] = [];
+  for (const [root, list] of byRoot) {
+    let tracked: Set<string>;
+    try {
+      tracked = new Set(test(root, [...new Set(list.map((w) => w.path))]));
+    } catch {
+      continue;
+    }
+    const items = new Map<string, { key?: string; paths: string[] }>(); // item (or file) -> its tracked paths
+    for (const w of list) {
+      if (!tracked.has(w.path)) continue;
+      const id = w.key ?? w.path;
+      const item = items.get(id) ?? { key: w.key, paths: [] };
+      item.paths.push(w.path);
+      items.set(id, item);
+    }
+    for (const { key, paths } of items.values()) {
+      // A skill is untracked as its directory; an agent or rule (or the rules file) by its file.
+      const k = key === undefined ? undefined : parseLockKey(key);
+      const skill = k?.type === "skill";
+      const targets = skill ? [k!.target] : paths;
+      const r = skill ? " -r" : "";
+      const cmd = scope === "project"
+        ? `git rm${r} --cached ${targets.map((p) => shellWord(scopeLabel(scope, base, join(root, p)))).join(" ")}`
+        : `git -C ${shellWord(scopeLabel(scope, base, root))} rm${r} --cached ${targets.map(shellWord).join(" ")}`;
+      const label = key ?? scopeLabel(scope, base, join(root, paths[0]!));
+      out.push(`${label} is tracked by git although skilletor manages it — untrack it: ${cmd}`);
+    }
+  }
+  return out;
+}
+
+/** `s` as one shell word: as is when plain, else single-quoted; a leading `~/` stays
+ *  unquoted so the shell still expands it. */
+function shellWord(s: string): string {
+  if (s.startsWith("~/")) return "~/" + shellWord(s.slice(2));
+  return /^[\w./@%+=:,-]+$/.test(s) ? s : `'${s.replace(/'/g, "'\\''")}'`;
 }
 
 /** Installed agents of a scope's lock whose declared briefing skills do not resolve
@@ -685,7 +757,8 @@ function briefingOf(ctx: EngineContext, scope: ScopeName, lock: Lock, only?: Set
  * (#41, keyed `AGENTS.md`), from the old rules block in AGENTS.md, and the entry is
  * rewritten under the new file name. A pointer refusal is a warning and touches
  * neither the rules file nor the lock. Returns the overwritten local changes
- * (`<file>#rules/<name>`) and whether the rules file exists now.
+ * (`<file>#rules/<name>`), whether the rules file exists now, and whether this run
+ * wrote it.
  */
 function syncCodexRules(a: {
   ctx: EngineContext;
@@ -697,7 +770,7 @@ function syncCodexRules(a: {
   lockPath: string;
   labelOf: (abs: string) => string;
   warnings: string[];
-}): { overwritten: string[]; exists: boolean } {
+}): { overwritten: string[]; exists: boolean; written: boolean } {
   const { ctx, scope, rc, oldLock, labelOf, warnings } = a;
   const rulesFile = join(rootOf(rc, "codex", "rule")!, RULES_FILE);
   const rulesLabel = labelOf(rulesFile);
@@ -744,10 +817,12 @@ function syncCodexRules(a: {
 
   const next = rulesFileText(scope, sections);
   let exists = fileText !== null;
+  let written = false;
   try {
     if (next !== fileText) {
       if (next === null) rmSync(rulesFile, { force: true });
       else atomicWrite(rulesFile, next);
+      written = next !== null;
     }
     exists = next !== null;
   } catch (err) {
@@ -767,7 +842,7 @@ function syncCodexRules(a: {
     if (want || state.reason.startsWith("malformed")) {
       warnings.push(`${agentsLabel}${why.startsWith("is ") ? " " : ": "}${why}; pointer to the Codex rules not written`);
     }
-    return { overwritten, exists };
+    return { overwritten, exists, written };
   }
   const shownRules = scope === "user" ? rulesFile : `.codex/${RULES_FILE}`;
   const agentsNext = withBlock(state.text, want ? pointerLines(scope, shownRules) : null);
@@ -791,7 +866,7 @@ function syncCodexRules(a: {
       }
     }
   }
-  return { overwritten, exists };
+  return { overwritten, exists, written };
 }
 
 /**

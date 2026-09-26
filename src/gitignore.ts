@@ -8,6 +8,7 @@
 // which root gets which entries. Content outside the block is untouched; the block is
 // rewritten idempotently (no change → no write). A block with no entries, or with
 // gitignore disabled, is removed, and the file is deleted if only the block remained.
+// `gitTracked` answers which managed paths git still tracks, for the report's warning.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -97,6 +98,30 @@ export function withSkillGitignore(output: Map<string, Buffer>, name: string): M
 function trimTrailingEmpty(lines: string[]): string[] {
   const out = [...lines];
   while (out.length && out[out.length - 1]!.trim() === "") out.pop();
+  return out;
+}
+
+/** Paths per `git ls-files` call: keeps the command line short however much one sync wrote. */
+const LS_FILES_BATCH = 500;
+
+/**
+ * The ones among `paths` (relative to `dir`) that git tracks (spec §6.4, "Tracked managed
+ * files"): one `git ls-files` (per 500 paths), pathspecs taken literally. Outside a work
+ * tree, or when git is missing or fails, none.
+ */
+export function gitTracked(dir: string, paths: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < paths.length; i += LS_FILES_BATCH) {
+    try {
+      const listed = execFileSync(
+        "git", ["-C", dir, "--literal-pathspecs", "ls-files", "-z", "--", ...paths.slice(i, i + LS_FILES_BATCH)],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 },
+      );
+      out.push(...listed.split("\0").filter(Boolean));
+    } catch {
+      return [];
+    }
+  }
   return out;
 }
 

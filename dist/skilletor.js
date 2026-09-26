@@ -7972,7 +7972,16 @@ function apply(plan, opts) {
   const lockPath = join10(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const newLock = {};
-  const res = { added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [] };
+  const res = {
+    added: [],
+    updated: [],
+    removed: [],
+    unchanged: [],
+    skipped: [],
+    conflicts: [],
+    overwritten: [],
+    written: []
+  };
   const dirsTouched = /* @__PURE__ */ new Map();
   const rootFor = (key) => resolvePath3(opts.rootOf ? opts.rootOf(key) : targetDir);
   const touched = (root) => {
@@ -8028,11 +8037,13 @@ function apply(plan, opts) {
         }
         if (diskHash === desired) {
           entryFiles[rel] = desired;
+          if (locked === void 0) res.written.push({ key: it.key, path: rel });
           continue;
         }
         atomicWrite(abs, buf);
         wrote = true;
         entryFiles[rel] = desired;
+        res.written.push({ key: it.key, path: rel });
         if (locked !== void 0 && diskHash !== locked) {
           res.overwritten.push({ key: it.key, path: rel });
         }
@@ -8040,6 +8051,7 @@ function apply(plan, opts) {
         atomicWrite(abs, buf);
         wrote = true;
         entryFiles[rel] = desired;
+        res.written.push({ key: it.key, path: rel });
       }
     }
     if (existing) {
@@ -8283,6 +8295,23 @@ function withSkillGitignore(output, name) {
 function trimTrailingEmpty(lines) {
   const out = [...lines];
   while (out.length && out[out.length - 1].trim() === "") out.pop();
+  return out;
+}
+var LS_FILES_BATCH = 500;
+function gitTracked(dir, paths) {
+  const out = [];
+  for (let i = 0; i < paths.length; i += LS_FILES_BATCH) {
+    try {
+      const listed = execFileSync(
+        "git",
+        ["-C", dir, "--literal-pathspecs", "ls-files", "-z", "--", ...paths.slice(i, i + LS_FILES_BATCH)],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5e3 }
+      );
+      out.push(...listed.split("\0").filter(Boolean));
+    } catch {
+      return [];
+    }
+  }
   return out;
 }
 function isGitWorkTree(dir) {
@@ -8876,7 +8905,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
     keep,
     rootOf: (key) => rootOfKey(rc, key) ?? targetDir
   });
-  const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) || existsSync11(join14(rootOf(rc, "codex", "rule"), RULES_FILE)) ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings }) : { overwritten: [], exists: false };
+  const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) || existsSync11(join14(rootOf(rc, "codex", "rule"), RULES_FILE)) ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings }) : { overwritten: [], exists: false, written: false };
   {
     const newLock = readLock(lockPath);
     const codexRoot = rootOf(rc, "codex", "rule");
@@ -8900,9 +8929,18 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
       const enabled = gitignoreOn && entries.length > 0 && (scope === "project" || inWorkTree(rootDir));
       const change = updateGitignore({ dir: rootDir, entries, enabled });
       if (change === "created" || change === "changed") {
-        (rep.gitignoreUpdated ??= []).push(gitignoreLabel(scope, base, join14(rootDir, ".gitignore")));
+        (rep.gitignoreUpdated ??= []).push(scopeLabel(scope, base, join14(rootDir, ".gitignore")));
       }
     }
+  }
+  if (gitignoreOn) {
+    const written = result.written.map((w) => ({
+      root: rootOfKey(rc, w.key) ?? targetDir,
+      key: w.key,
+      path: w.path
+    }));
+    if (rules.written) written.push({ root: rootOf(rc, "codex", "rule"), path: RULES_FILE });
+    rep.warnings.push(...trackedWarnings(ctx, scope, base, written));
   }
   const toChange = (key) => keyInfo.get(key) ?? { key, ...keyToTypeName(key), source: oldLock[key]?.source ?? "?" };
   rep.added = result.added.map(toChange);
@@ -8921,11 +8959,47 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   if (briefing.length) rep.briefingMissing = briefing;
   return rep;
 }
-function gitignoreLabel(scope, base, abs) {
+function scopeLabel(scope, base, abs) {
   const rel = relative3(base, abs);
   if (rel.startsWith("..") || isAbsolute2(rel)) return abs;
   const shown = rel.split(sep4).join("/");
   return scope === "user" ? `~/${shown}` : shown;
+}
+function trackedWarnings(ctx, scope, base, written) {
+  const byRoot = /* @__PURE__ */ new Map();
+  for (const w of written) byRoot.set(w.root, [...byRoot.get(w.root) ?? [], w]);
+  const test = ctx.gitTracked ?? gitTracked;
+  const out = [];
+  for (const [root, list] of byRoot) {
+    let tracked;
+    try {
+      tracked = new Set(test(root, [...new Set(list.map((w) => w.path))]));
+    } catch {
+      continue;
+    }
+    const items = /* @__PURE__ */ new Map();
+    for (const w of list) {
+      if (!tracked.has(w.path)) continue;
+      const id = w.key ?? w.path;
+      const item = items.get(id) ?? { key: w.key, paths: [] };
+      item.paths.push(w.path);
+      items.set(id, item);
+    }
+    for (const { key, paths } of items.values()) {
+      const k = key === void 0 ? void 0 : parseLockKey(key);
+      const skill = k?.type === "skill";
+      const targets = skill ? [k.target] : paths;
+      const r = skill ? " -r" : "";
+      const cmd = scope === "project" ? `git rm${r} --cached ${targets.map((p) => shellWord(scopeLabel(scope, base, join14(root, p)))).join(" ")}` : `git -C ${shellWord(scopeLabel(scope, base, root))} rm${r} --cached ${targets.map(shellWord).join(" ")}`;
+      const label = key ?? scopeLabel(scope, base, join14(root, paths[0]));
+      out.push(`${label} is tracked by git although skilletor manages it \u2014 untrack it: ${cmd}`);
+    }
+  }
+  return out;
+}
+function shellWord(s) {
+  if (s.startsWith("~/")) return "~/" + shellWord(s.slice(2));
+  return /^[\w./@%+=:,-]+$/.test(s) ? s : `'${s.replace(/'/g, "'\\''")}'`;
 }
 function briefingOf(ctx, scope, lock, only) {
   const rc = { base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) };
@@ -8986,10 +9060,12 @@ function syncCodexRules(a) {
   sections.sort((x, y) => x.name < y.name ? -1 : x.name > y.name ? 1 : 0);
   const next = rulesFileText(scope, sections);
   let exists = fileText !== null;
+  let written = false;
   try {
     if (next !== fileText) {
       if (next === null) rmSync6(rulesFile, { force: true });
       else atomicWrite(rulesFile, next);
+      written = next !== null;
     }
     exists = next !== null;
   } catch (err) {
@@ -9004,7 +9080,7 @@ function syncCodexRules(a) {
     if (want || state.reason.startsWith("malformed")) {
       warnings.push(`${agentsLabel}${why.startsWith("is ") ? " " : ": "}${why}; pointer to the Codex rules not written`);
     }
-    return { overwritten, exists };
+    return { overwritten, exists, written };
   }
   const shownRules = scope === "user" ? rulesFile : `.codex/${RULES_FILE}`;
   const agentsNext = withBlock(state.text, want ? pointerLines(scope, shownRules) : null);
@@ -9027,7 +9103,7 @@ function syncCodexRules(a) {
       }
     }
   }
-  return { overwritten, exists };
+  return { overwritten, exists, written };
 }
 function codexRulesFiles(given) {
   const ctx = scoped(given);

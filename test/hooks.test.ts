@@ -254,6 +254,30 @@ test("k62: session-start asks once to commit a new .gitignore block, in the mess
   }
 });
 
+test("k63: session-start puts the tracked-file warning into the context; a failing tracked test stays silent", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    writeFileSync(join(e.projectDir, ".claude/skilletor.json"), JSON.stringify({ install: { skills: ["foo@mine"] } }));
+    const tracked = (_dir: string, paths: string[]) => paths.filter((p) => p === "skills/foo/SKILL.md");
+    const out = await runHook("session-start", { source: "startup", cwd: e.projectDir }, { ...e.ctx, gitTracked: tracked });
+    assert.match(out.systemMessage ?? "", /1 warning\(s\)/);
+    const lines = (out.hookSpecificOutput?.additionalContext ?? "").split("\n");
+    assert.equal(lines.includes(
+      "- warning: skills/foo is tracked by git although skilletor manages it — untrack it: git rm -r --cached .claude/skills/foo",
+    ), true);
+
+    writeFileSync(join(src, "skills/foo/SKILL.md"), "---\nname: foo\ndescription: foo\n---\nCHANGED\n");
+    const boom = () => { throw new Error("git exploded"); };
+    const again = await runHook("session-start", { source: "startup", cwd: e.projectDir }, { ...e.ctx, gitTracked: boom });
+    assert.equal(again.systemMessage, "skilletor: 1 item(s) updated");
+    assert.doesNotMatch(JSON.stringify(again), /tracked by git|exploded/);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("k44: session-start started in ~ syncs the user scope only, once", async () => {
   const e = env();
   try {

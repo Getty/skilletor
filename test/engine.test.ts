@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
@@ -414,6 +414,197 @@ test("k62: the commit hint appears when a block is created or changed, never whe
     assert.equal(readFileSync(gi, "utf8"), committed);
     assert.deepEqual(restored.scopes[0]!.gitignoreUpdated, [".claude/.gitignore"]);
   } finally {
+    e.cleanup();
+  }
+});
+
+// ---- k63: tracked managed files (spec §6.4) -----------------------------------
+
+/** A fake `gitTracked`: in `root`, the given paths are tracked; records every call. */
+function fakeTracked(root: string, tracked: string[]) {
+  const calls: { dir: string; paths: string[] }[] = [];
+  const fn = (dir: string, paths: string[]): string[] => {
+    calls.push({ dir, paths: [...paths].sort() });
+    return dir === root ? paths.filter((p) => tracked.includes(p)) : [];
+  };
+  return { fn, calls };
+}
+
+const TRACKED = (item: string, cmd: string) =>
+  `${item} is tracked by git although skilletor manages it — untrack it: ${cmd}`;
+const K63_FILES = { ...K62_FILES, "skills/foo/ref.md": "REF\n" };
+
+test("k63: files committed under gitignore false warn once per item when sync rewrites them", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k63a", K63_FILES);
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: K62_INSTALL, gitignore: false });
+    const claude = join(e.projectDir, ".claude");
+    const t = fakeTracked(claude, ["skills/foo/SKILL.md", "skills/foo/ref.md", "agents/.local.a.md", "rules/.local.r.md"]);
+    const ctx: EngineContext = { ...e.ctx, gitTracked: t.fn };
+
+    // gitignore false: committable by design, git is never asked.
+    const off = await sync(ctx, { scope: "project" });
+    assert.deepEqual(off.scopes[0]!.warnings, []);
+    assert.deepEqual(t.calls, []);
+
+    // Switched on: only the skill's new .gitignore is written, and it is not tracked.
+    e.writeCfg("project", { install: K62_INSTALL });
+    const on = await sync(ctx, { scope: "project" });
+    assert.deepEqual(on.scopes[0]!.warnings, []);
+    assert.deepEqual(t.calls, [{ dir: claude, paths: ["skills/foo/.gitignore"] }]);
+
+    // Upstream rewrites both skill files and the agent: one warning per item, one ask for all
+    // written paths; the tracked but unchanged rule says nothing.
+    t.calls.length = 0;
+    writeFileSync(join(src, "skills/foo/SKILL.md"), SKILL_MD + "MORE\n");
+    writeFileSync(join(src, "skills/foo/ref.md"), "REF2\n");
+    writeFileSync(join(src, "agents/a.md"), AGENT_MD + "MORE\n");
+    const r = await sync(ctx, { scope: "project" });
+    const skillWarning = TRACKED("skills/foo", "git rm -r --cached .claude/skills/foo");
+    const agentWarning = TRACKED("agents/a", "git rm --cached .claude/agents/.local.a.md");
+    assert.deepEqual([...r.scopes[0]!.warnings].sort(), [agentWarning, skillWarning]);
+    assert.deepEqual(t.calls, [{ dir: claude, paths: ["agents/.local.a.md", "skills/foo/SKILL.md", "skills/foo/ref.md"] }]);
+    assert.equal(reportText(r).split("\n").includes(`  warning: ${skillWarning}`), true);
+    assert.equal((reportHook(r).additionalContext ?? "").split("\n").includes(`- warning: ${agentWarning}`), true);
+
+    // Nothing written: git is not asked, nothing is said.
+    t.calls.length = 0;
+    const again = await sync(ctx, { scope: "project" });
+    assert.deepEqual(again.scopes[0]!.warnings, []);
+    assert.deepEqual(t.calls, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k63: a committed skill adopted with --force warns; the conflicting run asks nothing", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k63b", { "skills/foo/SKILL.md": SKILL_MD, "skills/bar/SKILL.md": SKILL_MD });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["foo@mine", "bar@mine"] } });
+    const claude = join(e.projectDir, ".claude");
+    mkdirSync(join(claude, "skills/foo"), { recursive: true });
+    mkdirSync(join(claude, "skills/bar"), { recursive: true });
+    writeFileSync(join(claude, "skills/foo/SKILL.md"), SKILL_MD); // same as the source: adopted, not written
+    writeFileSync(join(claude, "skills/bar/SKILL.md"), "MY OWN BAR\n"); // differs: overwritten
+    const t = fakeTracked(claude, ["skills/foo/SKILL.md", "skills/bar/SKILL.md"]);
+    const ctx: EngineContext = { ...e.ctx, gitTracked: t.fn };
+
+    const r = await sync(ctx, { scope: "project" });
+    assert.equal(r.scopes[0]!.conflicts.length, 2);
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+    assert.deepEqual(t.calls, []);
+
+    const forced = await sync(ctx, { scope: "project", force: true });
+    assert.deepEqual([...forced.scopes[0]!.warnings].sort(), [
+      TRACKED("skills/bar", "git rm -r --cached .claude/skills/bar"),
+      TRACKED("skills/foo", "git rm -r --cached .claude/skills/foo"),
+    ]);
+    assert.deepEqual(t.calls, [{
+      dir: claude, paths: ["skills/bar/.gitignore", "skills/bar/SKILL.md", "skills/foo/.gitignore", "skills/foo/SKILL.md"],
+    }]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k63: nothing tracked, or a failing tracked test, says nothing and never fails the sync", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k63c", K62_FILES);
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: K62_INSTALL });
+    const t = fakeTracked(join(e.projectDir, ".claude"), []);
+    const r = await sync({ ...e.ctx, gitTracked: t.fn }, { scope: "project" });
+    assert.equal(r.scopes[0]!.added.length, 3);
+    assert.deepEqual(r.scopes[0]!.warnings, []);
+    assert.equal(t.calls.length, 1);
+
+    writeFileSync(join(src, "skills/foo/SKILL.md"), SKILL_MD + "MORE\n");
+    const boom = () => { throw new Error("git exploded"); };
+    const failed = await sync({ ...e.ctx, gitTracked: boom }, { scope: "project" });
+    assert.equal(failed.error, undefined);
+    assert.deepEqual(failed.scopes[0]!.updated.map((i) => i.key), ["skills/foo"]);
+    assert.deepEqual(failed.scopes[0]!.warnings, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k63: user scope names the root with git -C in the ~/ form; the user switch turns it off", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k63d", K62_FILES);
+    const install = { skills: ["foo@mine"], agents: ["a@mine"] };
+    e.writeCfg("user", { sources: { mine: { local: src } }, install });
+    const claude = join(e.home, ".claude");
+    const t = fakeTracked(claude, ["skills/foo/SKILL.md", "agents/.local.a.md"]);
+    const r = await sync({ ...e.ctx, gitTracked: t.fn }, { scope: "user" });
+    assert.deepEqual([...r.scopes[0]!.warnings].sort(), [
+      TRACKED("agents/a", "git -C ~/.claude rm --cached agents/.local.a.md"),
+      TRACKED("skills/foo", "git -C ~/.claude rm -r --cached skills/foo"),
+    ]);
+
+    // gitignore false in the user file: rewritten tracked files, and not a word.
+    t.calls.length = 0;
+    e.writeCfg("user", { sources: { mine: { local: src } }, install, gitignore: false });
+    writeFileSync(join(src, "skills/foo/SKILL.md"), SKILL_MD + "MORE\n");
+    writeFileSync(join(src, "agents/a.md"), AGENT_MD + "MORE\n");
+    const off = await sync({ ...e.ctx, gitTracked: t.fn }, { scope: "user" });
+    assert.deepEqual(off.scopes[0]!.updated.map((i) => i.key).sort(), ["agents/a", "skills/foo"]);
+    assert.deepEqual(off.scopes[0]!.warnings, []);
+    assert.deepEqual(t.calls, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k63: against a real repo the printed command untracks the skill; outside a work tree nothing is said", async () => {
+  const e = env();
+  const ceiling = process.env.GIT_CEILING_DIRECTORIES;
+  try {
+    const G = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: e.projectDir, env: G, encoding: "utf8" });
+    const src = filesSource(e.tmp.dir, "k63e", { "skills/foo/SKILL.md": SKILL_MD });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["foo@mine"] }, gitignore: false });
+    git("init", "-q", "-b", "main");
+    await sync(e.ctx, { scope: "project" }); // the default tracked test: git ls-files
+    git("add", "-A");
+    git("commit", "-qm", "committed while gitignore was false");
+    assert.match(git("ls-files"), /^\.claude\/skills\/foo\/SKILL\.md$/m);
+
+    e.writeCfg("project", { install: { skills: ["foo@mine"] } });
+    const on = await sync(e.ctx, { scope: "project" }); // writes only the skill's untracked .gitignore
+    assert.deepEqual(on.scopes[0]!.warnings, []);
+
+    // Not a work tree (the ceiling keeps a repo around the temp dir out): nothing to say.
+    renameSync(join(e.projectDir, ".git"), join(e.projectDir, ".git-off"));
+    process.env.GIT_CEILING_DIRECTORIES = e.tmp.dir;
+    writeFileSync(join(src, "skills/foo/SKILL.md"), SKILL_MD + "1\n");
+    const outside = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(outside.scopes[0]!.updated.map((i) => i.key), ["skills/foo"]);
+    assert.deepEqual(outside.scopes[0]!.warnings, []);
+    renameSync(join(e.projectDir, ".git-off"), join(e.projectDir, ".git"));
+
+    writeFileSync(join(src, "skills/foo/SKILL.md"), SKILL_MD + "2\n");
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(r.scopes[0]!.warnings, [TRACKED("skills/foo", "git rm -r --cached .claude/skills/foo")]);
+
+    // The command works as printed, from the project root; afterwards the skill is quiet.
+    const [cmd, ...args] = r.scopes[0]!.warnings[0]!.split("untrack it: ")[1]!.split(" ");
+    execFileSync(cmd!, args, { cwd: e.projectDir, env: G, stdio: "ignore" });
+    assert.doesNotMatch(git("ls-files"), /skills\/foo/);
+    writeFileSync(join(src, "skills/foo/SKILL.md"), SKILL_MD + "3\n");
+    const after = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(after.scopes[0]!.updated.map((i) => i.key), ["skills/foo"]);
+    assert.deepEqual(after.scopes[0]!.warnings, []);
+  } finally {
+    if (ceiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+    else process.env.GIT_CEILING_DIRECTORIES = ceiling;
     e.cleanup();
   }
 });

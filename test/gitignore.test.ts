@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import {
-  CODEX_ENTRIES, isGitWorkTree, PROJECT_CLAUDE_ENTRIES, SKILL_GITIGNORE, updateGitignore, withSkillGitignore,
+  CODEX_ENTRIES, gitTracked, isGitWorkTree, PROJECT_CLAUDE_ENTRIES, SKILL_GITIGNORE, updateGitignore, withSkillGitignore,
 } from "../src/gitignore.ts";
 
 const BEGIN = "# >>> skilletor >>>";
@@ -114,6 +114,36 @@ test("isGitWorkTree: true inside a work tree, false when git fails", () => {
     assert.equal(isGitWorkTree(join(repo, ".git")), false); // inside the git dir, not the work tree
     assert.equal(isGitWorkTree(join(tmp.dir, "missing")), false);
   } finally {
+    tmp.cleanup();
+  }
+});
+
+// k63: the default tracked test behind the "tracked managed files" warning (spec §6.4).
+test("gitTracked: the tracked ones of the given paths, literal, relative to dir; none outside a work tree", () => {
+  const tmp = makeTmpDir();
+  const ceiling = process.env.GIT_CEILING_DIRECTORIES;
+  try {
+    const repo = join(tmp.dir, "repo");
+    mkdirSync(join(repo, "sub"), { recursive: true });
+    execFileSync("git", ["init", "-q", "-b", "main", repo]);
+    for (const f of ["a.txt", "sub/b.txt", "starX.md", "sp ace.md"]) writeFileSync(join(repo, f), f);
+    execFileSync("git", ["add", "."], { cwd: repo });
+    for (const f of ["c.txt", "star*.md"]) writeFileSync(join(repo, f), f); // untracked
+    const asked = ["a.txt", "c.txt", "sub/b.txt", "star*.md", "sp ace.md", "missing.txt"];
+    assert.deepEqual(gitTracked(repo, asked).sort(), ["a.txt", "sp ace.md", "sub/b.txt"]); // `star*.md` is no glob
+    assert.deepEqual(gitTracked(join(repo, "sub"), ["b.txt"]), ["b.txt"]); // relative to dir, not the top level
+    assert.deepEqual(gitTracked(join(repo, ".git"), ["HEAD"]), []); // the git dir is no work tree
+    assert.deepEqual(gitTracked(repo, []), []);
+    // A directory outside any work tree (the ceiling keeps a repo around the temp dir out).
+    const plain = join(tmp.dir, "plain");
+    mkdirSync(plain);
+    writeFileSync(join(plain, "a.txt"), "a");
+    process.env.GIT_CEILING_DIRECTORIES = tmp.dir;
+    assert.deepEqual(gitTracked(plain, ["a.txt"]), []);
+    assert.deepEqual(gitTracked(join(tmp.dir, "missing"), ["a.txt"]), []);
+  } finally {
+    if (ceiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+    else process.env.GIT_CEILING_DIRECTORIES = ceiling;
     tmp.cleanup();
   }
 });

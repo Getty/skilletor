@@ -312,3 +312,31 @@ test("attached paths stay out of a directory that is not the item's; once owned 
     tmp.cleanup();
   }
 });
+
+// k63: the paths a run wrote or adopted, for the tracked check (spec §6.4).
+test("written lists the paths written or adopted with force, never unchanged ones", () => {
+  const tmp = makeTmpDir();
+  try {
+    const moo = (files: Record<string, string>) => item("skill", "moo", files);
+    const first = apply([moo({ "skills/moo/SKILL.md": "S", "skills/moo/ref.md": "R" })], { targetDir: tmp.dir });
+    assert.deepEqual(first.written, [
+      { key: "skills/moo", path: "skills/moo/SKILL.md" }, { key: "skills/moo", path: "skills/moo/ref.md" },
+    ]);
+    const same = apply([moo({ "skills/moo/SKILL.md": "S", "skills/moo/ref.md": "R" })], { targetDir: tmp.dir });
+    assert.deepEqual(same.written, []);
+    const upd = apply([moo({ "skills/moo/SKILL.md": "S2", "skills/moo/ref.md": "R" })], { targetDir: tmp.dir });
+    assert.deepEqual(upd.written, [{ key: "skills/moo", path: "skills/moo/SKILL.md" }]);
+
+    // A foreign file: a conflict writes nothing; --force adopts the identical one and writes the other.
+    mkdirSync(join(tmp.dir, "agents"), { recursive: true });
+    writeFileSync(join(tmp.dir, "agents/a.md"), "A");
+    writeFileSync(join(tmp.dir, "agents/b.md"), "MINE");
+    const plan = () => [item("agent", "a", { "agents/a.md": "A" }), item("agent", "b", { "agents/b.md": "B" })];
+    assert.deepEqual(apply(plan(), { targetDir: tmp.dir }).written, []);
+    assert.deepEqual(apply(plan(), { targetDir: tmp.dir, force: true }).written, [
+      { key: "agents/a", path: "agents/a.md" }, { key: "agents/b", path: "agents/b.md" },
+    ]);
+  } finally {
+    tmp.cleanup();
+  }
+});

@@ -93,9 +93,12 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
   lists the lock, `skilletor.local.json`, `agents/**/.local.*`, `rules/**/.local.*`, one in
   `.codex/.gitignore` the Codex agents and rules file. Commit `skilletor.json` and the
   `.gitignore` files — the report says `.claude/.gitignore updated — commit it` when a block
-  is created or changed. User scope: blocks in `~/.claude` (lock, state dir, never
-  `skilletor.json`) and `$CODEX_HOME` only inside a git work tree. `false` drops blocks and
-  skill `.gitignore`s, file names stay; the user value switches only the user scope.
+  is created or changed. Ignoring never untracks: when sync writes or adopts a file git
+  already tracks (committed by hand or while `false`), a warning per item gives the
+  `git rm --cached` that untracks it. User scope: blocks in `~/.claude` (lock, state dir,
+  never `skilletor.json`) and `$CODEX_HOME` only inside a git work tree. `false` drops
+  blocks, skill `.gitignore`s and this warning, file names stay; the user value switches
+  only the user scope.
   `checkInterval` (user only, seconds, default 1800): in-session check throttle, `≤ 0` =
   sync only at session start; in a project file it is a config error (nothing syncs).
 - `targets` (`["claude"]`, `["codex"]` or both), unset = auto-detected. The user file sets
