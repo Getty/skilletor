@@ -209,6 +209,10 @@ name is `skills` everywhere.
   if the project changes the address – or the backend in use switches to another one of
   project origin – it lapses. Entries written before k66 (name + URL) keep counting for a
   `git` or `url` backend with exactly that URL, never for a `local` one.
+- Trust binds no `ref`, so a `git` address or `ref` starting with `-`, and a `ref` with what
+  `git check-ref-format` forbids per character (whitespace, control characters,
+  `~ ^ : ? * [ \`, `..`, `@{`), is a config error naming file, source and key; `add`
+  refuses a spec starting with `-` (k85).
 - Trust means code execution: Nunjucks is not a sandbox. This is the same trust level as
   installing a plugin, and the README says so.
 
@@ -232,7 +236,8 @@ of one URL never share a checkout, and caches written before 0.3.1 are not reuse
 explicit ref (the first resolve fetches again; offline, that source counts as unresolvable
 and keeps its items, §6.1). Offline, a SHA pin is served from cache only if the cached
 commit is the pin; a ref shorter than a full SHA that names no other commit there (a tag or
-branch named like a date) is taken as a name (k69).
+branch named like a date) is taken as a name (k69). Git gets the address and the ref after
+`--`, never as an option (k85).
 
 ## 5. Templating
 

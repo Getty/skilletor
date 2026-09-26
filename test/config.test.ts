@@ -265,6 +265,63 @@ test("url source without https is rejected", () => {
   }
 });
 
+// k85: git still parses options after the remote name, so a ref (or address) starting with
+// "-" – `--upload-pack=<cmd>` – would run <cmd>, and trust binds no ref. Asserts: in each of
+// the three files either field is a ConfigError naming the file, the source and the key,
+// with the value quoted.
+test('k85: a git ref or git address starting with "-" is refused, naming file, source and key', () => {
+  const cases: [keyof Parameters<typeof setup>[0], Record<string, string>, string, string][] = [
+    ["user", { git: "https://example.com/s", ref: "--upload-pack=touch x" }, "ref", '"--upload-pack=touch x"'],
+    ["project", { git: "https://example.com/s", ref: "-b" }, "ref", '"-b"'],
+    ["local", { git: "https://example.com/s", ref: "--end-of-options" }, "ref", '"--end-of-options"'],
+    ["project", { git: "--upload-pack=touch x" }, "git", '"--upload-pack=touch x"'],
+    ["local", { git: "-oProxyCommand=x@host:repo" }, "git", '"-oProxyCommand=x@host:repo"'],
+  ];
+  for (const [file, def, key, quoted] of cases) {
+    const { home, projectDir, cleanup } = setup({ [file]: { sources: { team: def } } });
+    const path = file === "user" ? join(home, ".claude", "skilletor.json")
+      : join(projectDir, ".claude", file === "local" ? "skilletor.local.json" : "skilletor.json");
+    try {
+      assert.throws(() => loadConfig({ home, projectDir }), (e: unknown) => {
+        assert.ok(e instanceof ConfigError);
+        assert.equal((e as Error).message, `${path}: sources.team.${key} ${quoted} must not start with "-" (git would read it as an option)`);
+        return true;
+      });
+    } finally {
+      cleanup();
+    }
+  }
+});
+
+// k85: what `git check-ref-format` forbids character by character turns a name into refspec
+// or revision syntax (`a:b` writes a ref, `^a` negates, `*` globs) or is never a ref at all.
+// Asserts: each such ref is a ConfigError naming source and key; ordinary names still load.
+test("k85: a ref with whitespace, control characters or refspec syntax is refused; ordinary names load", () => {
+  const bad = ["main branch", "main\t", "a\nb", "a\u007fb", "main:refs/heads/x", "^main", "v1~1", "v1^{}",
+    "refs/heads/*", "a?b", "a[b", "a\\b", "a..b", "main@{1}"];
+  for (const ref of bad) {
+    const { home, projectDir, cleanup } = setup({ project: { sources: { team: { git: "https://example.com/s", ref } } } });
+    try {
+      assert.throws(() => loadConfig({ home, projectDir }), (e: unknown) => {
+        assert.ok(e instanceof ConfigError);
+        assert.match((e as Error).message, /: sources\.team\.ref ".*" is not a git ref name \(no whitespace, control characters, ~ \^ : \? \* \[ \\, "\.\." or "@\{"\)$/s);
+        assert.ok((e as Error).message.includes(JSON.stringify(ref)), (e as Error).message);
+        return true;
+      });
+    } finally {
+      cleanup();
+    }
+  }
+  for (const ref of ["main", "v1.2.0", "refs/pull/12/head", "feature/x-y", "0123abc", "release_2026-09", "ümlaut", "a-", "@"]) {
+    const { home, projectDir, cleanup } = setup({ project: { sources: { team: { git: "https://example.com/s", ref } } } });
+    try {
+      assert.equal(loadConfig({ home, projectDir }).sources.get("team")?.ref, ref);
+    } finally {
+      cleanup();
+    }
+  }
+});
+
 test("source with no kind is rejected", () => {
   const { home, projectDir, cleanup } = setup({
     user: { sources: { empty: {} } },

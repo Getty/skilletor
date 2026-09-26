@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 import { GitSource } from "../src/sources/git.ts";
@@ -418,4 +418,38 @@ test("no cache and an unreachable remote is an error", async () => {
   } finally {
     tmp.cleanup();
   }
+});
+
+// k85, layer 2 on its own: GitSource built directly, no config validation in between. A ref
+// is a positional of `git fetch`, which still parses options after the remote name, so
+// `--upload-pack=<cmd>` ran <cmd> (here: touch a marker in the temp dir). Asserts: resolve
+// fails with the fetch error (no cache), check reports a change, and <cmd> never ran.
+test("k85: a ref shaped like an option never runs as one, in resolve or check", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const repo = makeRepo(tmp);
+  const sha = repo.commit("v1", "first");
+  const marker = join(tmp.dir, "pwned");
+  const src = new GitSource({ url: repo.url, ref: `--upload-pack=touch '${marker}'`, cacheRoot: join(tmp.dir, "cache") });
+  await assert.rejects(() => src.resolve(), (err: Error) => /^git source .* failed: git fetch/.test(err.message));
+  assert.equal(existsSync(marker), false, "the ref ran as --upload-pack in git fetch");
+  assert.equal(await src.check(`git:${sha.slice(0, 7)}`), true);
+  assert.equal(existsSync(marker), false, "the ref ran as --upload-pack in git ls-remote");
+});
+
+// k85, layer 2: the address is a positional too. `git ls-remote <address> <patterns>` read an
+// address shaped like an option as one and took the next argument – the ref, here a path to a
+// real repository – as the remote, running <cmd> against it. Asserts: check and resolve both
+// fail, and <cmd> never ran.
+test("k85: an address shaped like an option never runs as one, in check or resolve", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const repo = makeRepo(tmp);
+  repo.commit("v1", "first");
+  const marker = join(tmp.dir, "pwned");
+  const src = new GitSource({ url: `--upload-pack=touch '${marker}'`, ref: repo.url, cacheRoot: join(tmp.dir, "cache") });
+  await assert.rejects(() => src.check("git:0123456"));
+  assert.equal(existsSync(marker), false, "the address ran as --upload-pack in git ls-remote");
+  await assert.rejects(() => src.resolve());
+  assert.equal(existsSync(marker), false, "the address ran as --upload-pack in git fetch");
 });

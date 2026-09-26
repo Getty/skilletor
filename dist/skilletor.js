@@ -5867,8 +5867,8 @@ function parseSources(obj, path, origin) {
       }
     }
     const src = { name, origins: {} };
-    if (typeof d.git === "string") src.git = d.git;
-    if (typeof d.ref === "string") src.ref = d.ref;
+    if (typeof d.git === "string") src.git = gitField(d.git, "git", path, name);
+    if (typeof d.ref === "string") src.ref = gitField(d.ref, "ref", path, name);
     if (typeof d.local === "string") src.local = d.local;
     if (d.url !== void 0) {
       if (typeof d.url !== "string" || !d.url.startsWith("https://")) {
@@ -5883,6 +5883,15 @@ function parseSources(obj, path, origin) {
     sources.set(name, src);
   }
   return sources;
+}
+var NOT_IN_REF = /[\x00-\x20\x7f~^:?*[\\]|\.\.|@\{/;
+function gitField(value2, key, path, name) {
+  const where = `${path}: sources.${name}.${key} ${JSON.stringify(value2)}`;
+  if (value2.startsWith("-")) throw new ConfigError(`${where} must not start with "-" (git would read it as an option)`);
+  if (key === "ref" && NOT_IN_REF.test(value2)) {
+    throw new ConfigError(`${where} is not a git ref name (no whitespace, control characters, ~ ^ : ? * [ \\, ".." or "@{")`);
+  }
+  return value2;
 }
 function mergeSource(base, incoming) {
   const merged = { ...base ?? incoming, origins: { ...base?.origins } };
@@ -6644,6 +6653,7 @@ function nameFromUrl(spec, kind) {
 }
 function resolveSpec(spec, probe) {
   const s = spec.trim();
+  if (s.startsWith("-")) throw new SpecError(`cannot resolve "${spec}": a source must not start with "-"`);
   if (isLocal(s)) {
     return { kind: "local", value: s, derivedName: normalizeName(basename2(s)) };
   }
@@ -7445,21 +7455,21 @@ var GitSource = class {
       if (!this.isRepo(dir)) {
         mkdirSync2(dir, { recursive: true });
         await this.run(dir, ["init", "-q"]);
-        await this.run(dir, ["remote", "add", "origin", this.opts.url]);
+        await this.run(dir, ["remote", "add", "--", "origin", this.opts.url]);
       } else {
-        await this.run(dir, ["remote", "set-url", "origin", this.opts.url]).catch(() => {
+        await this.run(dir, ["remote", "set-url", "--", "origin", this.opts.url]).catch(() => {
         });
       }
       let resetTarget = "FETCH_HEAD";
       if (ref && isCommitish(ref)) {
         try {
-          await this.run(dir, ["fetch", "--depth", "1", "origin", ref]);
+          await this.run(dir, ["fetch", "--depth", "1", "--", "origin", ref]);
         } catch {
           await this.run(dir, ["fetch", "origin"]);
           resetTarget = ref;
         }
       } else {
-        await this.run(dir, ["fetch", "--depth", "1", "origin", ref ?? "HEAD"]);
+        await this.run(dir, ["fetch", "--depth", "1", "--", "origin", ref ?? "HEAD"]);
       }
       await this.run(dir, ["reset", "--hard", resetTarget]);
       return { dir, version: await this.version(dir) };
@@ -7499,7 +7509,7 @@ var GitSource = class {
     if (ref && isCommitish(ref) && samePrefix(cached, ref.toLowerCase())) return false;
     const name = ref ?? "HEAD";
     const patterns = [name, `${name}/HEAD`].flatMap((p) => [p, `${p}^{}`]);
-    const out = await this.run("", ["ls-remote", this.opts.url, ...patterns], this.opts.timeoutMs);
+    const out = await this.run("", ["ls-remote", "--", this.opts.url, ...patterns], this.opts.timeoutMs);
     const remote = remoteCommit(out, name);
     return !(cached.length > 0 && remote.startsWith(cached));
   }
@@ -9684,7 +9694,8 @@ import { execFileSync as execFileSync3 } from "node:child_process";
 function makeProbe(timeoutMs = 5e3) {
   return (baseUrl) => {
     try {
-      execFileSync3("git", ["ls-remote", baseUrl], {
+      execFileSync3("git", ["ls-remote", "--", baseUrl], {
+        // `--`: never an option (k85)
         stdio: "ignore",
         timeout: timeoutMs,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }

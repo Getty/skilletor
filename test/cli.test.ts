@@ -562,3 +562,32 @@ test("status shows an agent's briefing skills that are not installed", () => {
   const js = JSON.parse(runCli(["status", "--json", "--project-dir", home], env).stdout);
   assert.deepEqual(js.scopes[0].declared[0].briefingMissing, ["gone"]);
 });
+
+// k85: a ref that would reach git as an option is a config error. Asserts: through the built
+// bundle, `sync` exits 2 naming the file, the source and the key on stderr; the SessionStart
+// hook on the same project exits 0 with one JSON line whose systemMessage says the same.
+test("k85: a project ref starting with \"-\": sync fails naming it, the hook exits 0 with one warning", () => {
+  const home = join(tmp.dir, "dash-home");
+  const proj = join(tmp.dir, "dash-proj");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(proj, ".claude"), { recursive: true });
+  const cfg = join(proj, ".claude", "skilletor.json");
+  const ref = `--upload-pack=touch '${join(tmp.dir, "dash-pwned")}'`; // never run: a marker in the temp dir
+  writeFileSync(cfg, JSON.stringify({
+    sources: { team: { git: "https://example.invalid/skills", ref } },
+    install: { skills: ["foo@team"] },
+  }));
+  const env = claudeOnlyEnv(home);
+  delete env.CLAUDE_PROJECT_DIR;
+  delete env.SKILLETOR_PROJECT_DIR;
+  const problem = `${cfg}: sources.team.ref ${JSON.stringify(ref)} must not start with "-" (git would read it as an option)`;
+
+  const sy = runCli(["sync", "--project-dir", proj], env);
+  assert.equal(sy.status, 2);
+  assert.equal(sy.stderr, `skilletor: config error, nothing changed — ${problem}\n`);
+
+  const hook = runCli(["hook", "session-start"], env, JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: proj }));
+  assert.equal(hook.status, 0, hook.stderr);
+  assert.equal(hook.stdout, JSON.stringify({ systemMessage: `skilletor: ${problem}` }) + "\n");
+  assert.equal(existsSync(join(tmp.dir, "dash-pwned")), false);
+});

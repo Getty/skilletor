@@ -98,3 +98,16 @@ test("known forges are never probed", () => {
   assert.doesNotThrow(() => resolveSpec("github.com/user", noProbe));
   assert.doesNotThrow(() => resolveSpec("gitlab.com/user/repo", noProbe));
 });
+
+// k85: an explicit or scp-like address is stored verbatim, so `-oProxyCommand=…@host:repo`
+// would become a git address that reaches git as an option. Asserts: every spec starting with
+// "-" (after trimming) is a SpecError before anything else, the probe never called.
+test('k85: a spec starting with "-" is refused, never probed', () => {
+  for (const spec of ["-oProxyCommand=touch x@host:repo", "--upload-pack=touch x", " -x.tld", "-owner/repo"]) {
+    assert.throws(() => resolveSpec(spec, noProbe), (e: unknown) => {
+      assert.ok(e instanceof SpecError);
+      assert.equal((e as Error).message, `cannot resolve "${spec}": a source must not start with "-"`);
+      return true;
+    });
+  }
+});

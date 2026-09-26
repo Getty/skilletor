@@ -8,7 +8,7 @@ import type { Probe } from "./spec.ts";
 export function makeProbe(timeoutMs = 5_000): Probe {
   return (baseUrl) => {
     try {
-      execFileSync("git", ["ls-remote", baseUrl], {
+      execFileSync("git", ["ls-remote", "--", baseUrl], { // `--`: never an option (k85)
         stdio: "ignore",
         timeout: timeoutMs,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },

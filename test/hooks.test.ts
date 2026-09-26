@@ -636,3 +636,44 @@ test("k74: session-start's sync sweeps cache leftovers silently; an unreadable c
     }
   }
 });
+
+// k85: trust binds a source's kind and address, not its ref, so a project config (a cloned
+// repo) could turn a trusted source's ref into `--upload-pack=<cmd>` and run <cmd> at the next
+// SessionStart. Asserts: that session-start returns exactly one warning line naming the file,
+// the source and the key; <cmd> never runs (no marker), nothing is fetched and the installed
+// skill stays as it was; the in-session background sync never throws and runs nothing either.
+test("k85: a trusted project source whose ref turns into an option: one warning naming it, no command run", async () => {
+  const e = env();
+  try {
+    const url = gitSource(e.tmp.dir, { "skills/foo/SKILL.md": "---\nname: foo\ndescription: foo\n---\nFOO\n" });
+    const projectCfg = join(e.projectDir, ".claude/skilletor.json");
+    const writeProjectCfg = (ref?: string) => writeFileSync(projectCfg, JSON.stringify({
+      sources: { team: ref === undefined ? { git: url } : { git: url, ref } },
+      install: { skills: ["foo@team"] },
+    }));
+    new State(e.ctx.stateRoot).trust("team", { kind: "git", address: url });
+    writeProjectCfg();
+    const input = { source: "startup", cwd: e.projectDir };
+    assert.match((await runHook("session-start", input, e.ctx)).systemMessage ?? "", /1 item\(s\) updated/);
+    const skill = join(e.projectDir, ".claude/skills/foo/SKILL.md");
+    assert.equal(readFileSync(skill, "utf8"), "---\nname: foo\ndescription: foo\n---\nFOO\n");
+    const cache = readdirSync(join(e.ctx.stateRoot, "cache")).sort();
+
+    const marker = join(e.tmp.dir, "pwned");
+    const ref = `--upload-pack=touch '${marker}'`;
+    writeProjectCfg(ref);
+    const out = await runHook("session-start", input, e.ctx);
+    assert.deepEqual(out, {
+      systemMessage: `skilletor: ${projectCfg}: sources.team.ref ${JSON.stringify(ref)} must not start with "-" (git would read it as an option)`,
+    });
+    assert.equal(existsSync(marker), false);
+    assert.deepEqual(readdirSync(join(e.ctx.stateRoot, "cache")).sort(), cache); // nothing fetched
+    assert.equal(readFileSync(skill, "utf8"), "---\nname: foo\ndescription: foo\n---\nFOO\n");
+
+    await runHook("__sync-background", {}, e.ctx);
+    await runHook("user-prompt-submit", {}, e.ctx);
+    assert.equal(existsSync(marker), false);
+  } finally {
+    e.cleanup();
+  }
+});

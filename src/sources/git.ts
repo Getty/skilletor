@@ -6,9 +6,11 @@
 //            otherwise the commit the ref names per `git ls-remote` – the ref `git fetch`
 //            would take, an annotated tag peeled – vs the locked commit.
 // Git runs via execFile (no shell), with GIT_TERMINAL_PROMPT=0 so a hook never
-// blocks on a credential prompt. When the remote is unreachable but a cache
-// exists, resolve reuses it and reports a warning; without a cache, or with one
-// that holds another commit than a SHA pin, it errors.
+// blocks on a credential prompt. The address and the ref follow `--` wherever git takes
+// them, so it never reads one as an option (k85; `--`, unlike `--end-of-options`, predates
+// git 2.24); only a SHA pin – hex, never an option – also reaches rev-parse and reset.
+// When the remote is unreachable but a cache exists, resolve reuses it and reports a
+// warning; without a cache, or with one that holds another commit than a SHA pin, it errors.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
@@ -70,21 +72,21 @@ export class GitSource implements Source {
       if (!this.isRepo(dir)) {
         mkdirSync(dir, { recursive: true });
         await this.run(dir, ["init", "-q"]);
-        await this.run(dir, ["remote", "add", "origin", this.opts.url]);
+        await this.run(dir, ["remote", "add", "--", "origin", this.opts.url]);
       } else {
-        await this.run(dir, ["remote", "set-url", "origin", this.opts.url]).catch(() => {});
+        await this.run(dir, ["remote", "set-url", "--", "origin", this.opts.url]).catch(() => {});
       }
 
       let resetTarget = "FETCH_HEAD";
       if (ref && isCommitish(ref)) {
         try {
-          await this.run(dir, ["fetch", "--depth", "1", "origin", ref]);
+          await this.run(dir, ["fetch", "--depth", "1", "--", "origin", ref]);
         } catch {
           await this.run(dir, ["fetch", "origin"]);
           resetTarget = ref;
         }
       } else {
-        await this.run(dir, ["fetch", "--depth", "1", "origin", ref ?? "HEAD"]);
+        await this.run(dir, ["fetch", "--depth", "1", "--", "origin", ref ?? "HEAD"]);
       }
       await this.run(dir, ["reset", "--hard", resetTarget]);
 
@@ -142,7 +144,7 @@ export class GitSource implements Source {
     // for; these patterns cover each name in REF_RULES, and remoteCommit picks among them.
     const name = ref ?? "HEAD";
     const patterns = [name, `${name}/HEAD`].flatMap((p) => [p, `${p}^{}`]);
-    const out = await this.run("", ["ls-remote", this.opts.url, ...patterns], this.opts.timeoutMs);
+    const out = await this.run("", ["ls-remote", "--", this.opts.url, ...patterns], this.opts.timeoutMs);
     const remote = remoteCommit(out, name);
     return !(cached.length > 0 && remote.startsWith(cached));
   }

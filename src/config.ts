@@ -167,8 +167,8 @@ function parseSources(obj: Json, path: string, origin: Origin): Map<string, Reso
       }
     }
     const src: ResolvedSource = { name, origins: {} };
-    if (typeof d.git === "string") src.git = d.git;
-    if (typeof d.ref === "string") src.ref = d.ref;
+    if (typeof d.git === "string") src.git = gitField(d.git, "git", path, name);
+    if (typeof d.ref === "string") src.ref = gitField(d.ref, "ref", path, name);
     if (typeof d.local === "string") src.local = d.local;
     if (d.url !== undefined) {
       if (typeof d.url !== "string" || !d.url.startsWith("https://")) {
@@ -183,6 +183,23 @@ function parseSources(obj: Json, path: string, origin: Origin): Map<string, Reso
     sources.set(name, src);
   }
   return sources;
+}
+
+/** What `git check-ref-format` forbids character by character: whitespace and control
+ *  characters, and what makes a name refspec or revision syntax (`a:b`, `^a`, `a*`, `a~1`,
+ *  `a..b`, `a@{1}`). The structural rules (`.lock`, slashes, dots) are left to git. */
+const NOT_IN_REF = /[\x00-\x20\x7f~^:?*[\\]|\.\.|@\{/;
+
+/** A `git` or `ref` value as written; refused when git could read it as an option, or – a
+ *  ref – when it cannot be a ref name (k85). Trust binds no ref (spec §4.3), so a project's
+ *  ref must never be able to reach git as anything but a ref. */
+function gitField(value: string, key: "git" | "ref", path: string, name: string): string {
+  const where = `${path}: sources.${name}.${key} ${JSON.stringify(value)}`;
+  if (value.startsWith("-")) throw new ConfigError(`${where} must not start with "-" (git would read it as an option)`);
+  if (key === "ref" && NOT_IN_REF.test(value)) {
+    throw new ConfigError(`${where} is not a git ref name (no whitespace, control characters, ~ ^ : ? * [ \\, ".." or "@{")`);
+  }
+  return value;
 }
 
 /** Merge `incoming` source fields over `base`, field by field: each backend field keeps

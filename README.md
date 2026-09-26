@@ -589,6 +589,9 @@ rendered. This is the same trust level as installing a plugin.
   is stored for the backend actually used — kind and address, a `local` path as its real
   path — so it lapses when the project changes the address or the backend in use switches
   (say, a project adds a `local` directory to a source you trusted by its git URL).
+- Trust does not cover a git `ref`, so a `git` address or `ref` that starts with `-`, and a
+  `ref` with whitespace, control characters or `~ ^ : ? * [ \`, `..` or `@{`, is a config
+  error: nothing syncs, and the session start names the file and the source.
 - A project cannot change what your user-scope items are built from: those resolve
   against your user config's sources alone. A project field merged into one of your
   sources (a `local` path, say) counts as the project's and needs its own trust; your

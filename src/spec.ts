@@ -78,6 +78,9 @@ function nameFromUrl(spec: string, kind: SourceKind): string {
 export function resolveSpec(spec: string, probe: Probe): ResolvedSpec {
   const s = spec.trim();
 
+  // 0. An address kept verbatim below would reach git as an option (k85).
+  if (s.startsWith("-")) throw new SpecError(`cannot resolve "${spec}": a source must not start with "-"`);
+
   // 1. Local paths.
   if (isLocal(s)) {
     return { kind: "local", value: s, derivedName: normalizeName(basename(s)) };
