@@ -1,0 +1,28 @@
+---
+class: standard
+completed: 2026-09-26T17:32:46Z
+created: 2026-09-26T15:31:29Z
+id: 89
+priority: low
+started: 2026-09-26T17:22:54Z
+status: done
+tags:
+- hooks
+- report
+title: 'hooks: a background sync that throws leaves no pending report'
+updated: 2026-09-26T17:32:53Z
+---
+
+Found during k86 (worker). If the detached UserPromptSubmit background sync throws instead of returning a SyncReport (a write error in apply – since k71 it leaves partial entries –, a sync-lock timeout, anything unexpected), no pending report is stored and the error never reaches a prompt. The next SessionStart does resume a partial sync (k71), so nothing is lost on disk, only the message. Design call: report a thrown write error as a pending warning line, but keep a sync-lock timeout silent (another run holds the lock and will report itself). Test: black-box __sync-background with an injected write failure → the next user-prompt-submit names it; with the lock held → silent.
+
+2026-09-26 17:25 Cause confirmed: syncBackground (src/hooks.ts) awaits sync() with no catch; a throw lands in runHook's catch, whose warn() goes to the detached child's ignored stdout – nothing is put in pending-report.json. SessionStart: sessionStart() already catches checkAndSync and warns 'skilletor: <message>' (k71 test in check.test.ts); a lock timeout there warns too, as spec §6.5 (k81) states ('SessionStart turns that into its one warning line, a background sync leaves no report'). Plan: typed SyncLockTimeoutError from State.withLock; syncBackground stores warn(message) for any other throw, nothing for the timeout; SessionStart unchanged (spec'd). Test seam: EngineContext.lockTimeoutMs so the lock-held tests don't wait 5 s.
+
+2026-09-26 17:27 Also found (outside this card, for the dispatcher): the 'another run holds the lock and reports itself' reasoning covers the user scope, but when the holder is another project's sync it does not sync THIS project's scope. Both hook paths mark the project checked before they sync (checkAndSync before sync(), userPromptSubmit before spawning), so after a lock timeout this project's drift waits a full checkInterval (default 30 min) for the next due check. Nothing is lost, only delayed. A possible follow-up: do not mark checked when a sync times out on the lock.
+
+2026-09-26 17:28 Done. src/state.ts: SyncLockTimeoutError (house style 'override name'), thrown by withLock on timeout (message unchanged). src/engine.ts: EngineContext.lockTimeoutMs (optional; withSyncLock passes it to withLock; default 5 s unchanged) as a test seam. src/hooks.ts syncBackground: catches a throw from sync(); SyncLockTimeoutError -> returns and stores nothing; any other throw -> stores warn(message) = {systemMessage: 'skilletor: <message>'}, the k86 shape and the same line sessionStart's catch gives. SessionStart unchanged: it already warns on any throw, lock timeout included, as spec 6.5 (k81) says. Spec 8: one sentence on background errors. Tests (test/hooks.test.ts): k89 write error (~/.claude/rules is a file) -> __sync-background returns {} and the next prompt delivers exactly SessionStart's line naming the path, then silence; k89 lock held -> session-start warns with exactly the timeout, __sync-background returns {} and stores nothing, next prompt {}, foo not installed. Both red before the fix; a mutation without the timeout exemption turns the lock test red. Verify: typecheck ok, npm test 641/641, build + check-dist up to date; built binary end-to-end in a temp HOME: background exit 0, silent; next user-prompt-submit delivers the EEXIST line.
+
+2026-09-26 17:29 Coordinator follow-up (folded in): a sync that ends in SyncLockTimeoutError, whether background or SessionStart, must not leave the project marked as checked, so the next prompt retries. Plan: keep every markChecked where it is and drop the mark in the timeout branch. Marking before the spawn is the UserPromptSubmit throttle: while a background sync lives, no prompt spawns another. If the mark moved to after the sync, every prompt during a slow sync would spawn one more child.
+
+2026-09-26 17:31 Follow-up done, card stays in review. State.clearChecked(key) is new. hooks.ts dueAgain(state, key) drops the mark (best effort, never throws) in the SyncLockTimeoutError branch of both syncBackground and checkAndSync; checkAndSync rethrows, so SessionStart still warns once. Every markChecked stays where it was. Why clear rather than mark later: userPromptSubmit's mark before the spawn is the throttle. While a background sync lives, no prompt spawns another, so each project has at most one child waiting on the lock and at most one spawn per due prompt. The prompt path stays instant because the retry runs in the detached child, and SessionStart calls sync() once, waiting at most the lock timeout. Other errors keep the mark, as before. Tests: background timeout -> next prompt due, its background sync installs, the prompt after that delivers the report and is not due; SessionStart timeout -> first prompt due; a SessionStart that synced -> not due. Red first (1 vs 2, 0 vs 1). A mutant that drops the mark after every sync fails 'checked: not due'. Spec §8 sentence extended. Verify: typecheck ok, npm test 643/643, build + check-dist up to date.
+
+2026-09-26 17:32 Committed as 6894629 (main): SyncLockTimeoutError, State.clearChecked, EngineContext.lockTimeoutMs, syncBackground/checkAndSync retry-on-timeout and error-report handling, spec §8, hooks.test.ts coverage.
