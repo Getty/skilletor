@@ -10,15 +10,16 @@ every session, templated per project.
 skilletor is a Claude Code and Codex plugin plus a standalone CLI. It installs **skills,
 agents and rules** from configured sources and keeps them up to date: it reconciles at session
 start, re-checks (throttled) during the session, pulls anything new, and tells the model
-what changed. It is the preferred successor to
-[manage-skills](https://github.com/Getty/manage-skills) (which stays around).
+what changed. Want shared skills? This is most likely the tool.
+[manage-skills](https://github.com/Getty/manage-skills) keeps its own niche: many projects on
+the same machine sharing one hardlinked copy of each skill.
 
 ## 30-second start
 
 ```bash
 /plugin marketplace add Getty/marketplace
 /plugin install skilletor@getty
-skilletor add shared Getty && skilletor install perl-moo@shared
+skilletor add Getty && skilletor install getty-perl-moo@getty
 ```
 
 `add` registers (and trusts) a source; `install` declares an item and syncs it onto disk.
