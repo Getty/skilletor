@@ -70,16 +70,24 @@ rules/<name>.md[.njk]
 bundles/<name>.yaml        # optional: named sets of items (see Bundles)
 snippets/…                 # includes only, not installable
 skilletor.json             # optional: { "description": "…", "vars": { defaults } }
+.claude/skills/<name>/     # a project's own Claude layout: read last, best effort
+.claude/agents/<name>.md[.njk]
+.claude/rules/<name>.md[.njk]
 ```
 
 Claude plugin repos work too: paths listed in `.claude-plugin/plugin.json` `skills` (a
 skill directory, or a directory of them) are added to those under `skills/<name>/` and install as
-`skills/<name>/` wherever they sit. For example:
+`skills/<name>/` wherever they sit. So does a project that keeps its skills, agents and rules
+in its own `.claude/`: they install as `skills/<name>/`, `agents/<name>.md` and
+`rules/<name>.md` like published ones; a name the layout above already offers wins, and a
+symlink there, or a copy skilletor itself installed there, is skipped, never an error. For
+example:
 
 ```bash
 skilletor add anthropics          # → anthropics/skills
 skilletor add obra/superpowers
 skilletor add mattpocock          # → mattpocock/skills, skills listed in its plugin.json
+skilletor add Getty/karr          # a project: its .claude/ skills, agents and rules
 ```
 
 ## Declaring what you want

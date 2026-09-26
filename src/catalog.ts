@@ -7,6 +7,8 @@
 //   bundles/<name>.yaml|.yml  (optional: named item sets, spec §15)
 //   skilletor.json        (optional: { description, vars })
 //   .claude-plugin/plugin.json  (optional: a Claude plugin's `skills` paths)
+//   .claude/skills/<name>/, .claude/agents/<name>.md[.njk], .claude/rules/<name>.md[.njk]
+//                         (the Claude project layout, best effort)
 //
 // A Claude plugin repo lists skill directories in plugin.json `skills` (a path or
 // an array of paths, relative to the source root): a directory holding
@@ -15,12 +17,22 @@
 // directories with one name are an error. A skill's `dir` records where it lives
 // in the source; it always installs as skills/<name>/ (render.ts maps the paths).
 //
+// The Claude project layout is read last (k96): a `.claude/` item whose name the
+// published layout or plugin.json already gave its type is skipped silently. It is
+// best effort – what the published layout rejects there (a symlink at `.claude`, a
+// type dir, an item or any file of a skill) skips that directory or item, never the
+// scan – and skilletor's own installed copies there are not offered. Agents and rules
+// found there carry `dir` too; every item installs as skills/<name>/, agents/<name>.md,
+// rules/<name>.md, whatever its source path.
+//
 // Names come from the path; descriptions from item frontmatter (read raw for
-// .njk, never rendered). Symlinks anywhere in the tree are rejected (spec §9).
+// .njk, never rendered). Symlinks anywhere in the tree are rejected (spec §9); in
+// `.claude/` they are skipped, never followed.
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { basename, isAbsolute, join, relative } from "node:path";
 import type { ItemType } from "./config.ts";
 import { BundleError, parseBundle, type BundleDef } from "./bundles.ts";
+import { SKILL_GITIGNORE } from "./gitignore.ts";
 
 export class CatalogError extends Error {
   override name = "CatalogError";
@@ -32,8 +44,9 @@ export interface CatalogItem {
   description?: string;
   /** Files that make up the item, relative to the source dir, sorted. */
   files: string[];
-  /** Skills only: the skill's directory relative to the source dir (default
-   *  `skills/<name>`); its files install under `skills/<name>/`. */
+  /** Where the item lives, relative to the source dir: a skill's directory (default
+   *  `skills/<name>`), the directory holding an agent's or rule's file (default `agents`,
+   *  `rules`). Its files install under `skills/<name>/`, `agents/`, `rules/` (render.ts). */
   dir?: string;
 }
 
@@ -157,7 +170,78 @@ export function scan(dir: string): Catalog {
   }
 
   items.push(...pluginSkills(dir, items));
+  items.push(...claudeItems(dir, items));
   return { items, bundles: scanBundles(dir), meta: readSourceMeta(dir) };
+}
+
+/** Is `path` a directory, not a symlink? False when it cannot be read. */
+function isPlainDir(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** The name prefix of installed agents and rules (spec §6.4). */
+const LOCAL_PREFIX = ".local.";
+
+/**
+ * Items of the Claude project layout, `.claude/{skills,agents,rules}` (spec §4.1, k96), whose
+ * name `found` does not hold for their type yet. Best effort: a symlink, an unreadable
+ * entry or anything else the published layout would reject skips that directory or item,
+ * and nothing is followed. skilletor's own installed copies are skipped as well (spec
+ * §6.4) – a skill whose `.gitignore` is skilletor's, a `.local.` agent or rule: a sync in
+ * that project wrote them from other sources, and git ignores them, so a `local` checkout
+ * offers what its clone does.
+ */
+function claudeItems(dir: string, found: CatalogItem[]): CatalogItem[] {
+  const out: CatalogItem[] = [];
+  const base = join(dir, ".claude");
+  if (!isPlainDir(base)) return out;
+  const known = new Set(found.map((i) => `${i.type}:${i.name}`));
+  for (const { dir: sub, type } of TYPE_DIRS) {
+    const typeDir = join(base, sub);
+    if (!isPlainDir(typeDir)) continue;
+    let entries: string[];
+    try {
+      entries = readdirSync(typeDir).sort();
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      let item: CatalogItem | undefined;
+      try {
+        item = claudeItem(dir, typeDir, entry, type);
+      } catch {
+        continue; // a symlink or an unreadable file: this item only
+      }
+      if (!item || known.has(`${type}:${item.name}`)) continue;
+      known.add(`${type}:${item.name}`);
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+/** One entry of a `.claude/<type>` dir as an item; undefined when it is none. Throws
+ *  where the published layout would (a symlink), and on a file it cannot read. */
+function claudeItem(dir: string, typeDir: string, entry: string, type: ItemType): CatalogItem | undefined {
+  const p = join(typeDir, entry);
+  const st = noSymlink(p);
+  if (type === "skill") {
+    if (!st.isDirectory()) return undefined;
+    const file = skillFile(p);
+    if (!file) return undefined;
+    const files = walkFiles(p, dir);
+    const gitignore = join(p, ".gitignore");
+    if (files.includes(relative(dir, gitignore)) && readFileSync(gitignore, "utf8") === SKILL_GITIGNORE) return undefined;
+    return { type, name: entry, description: descriptionOf(file), files, dir: relative(dir, p) };
+  }
+  if (!st.isFile()) return undefined;
+  const name = itemName(entry);
+  if (name === undefined || name.startsWith(LOCAL_PREFIX)) return undefined;
+  return { type, name, description: descriptionOf(p), files: [relative(dir, p)], dir: relative(dir, typeDir) };
 }
 
 /** Skills listed in `.claude-plugin/plugin.json` `skills` that `found` does not

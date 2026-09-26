@@ -7913,8 +7913,108 @@ function writeEntries(dir, entries) {
 }
 
 // src/catalog.ts
-import { existsSync as existsSync6, lstatSync as lstatSync5, readFileSync as readFileSync4, readdirSync as readdirSync3 } from "node:fs";
-import { basename as basename3, isAbsolute, join as join8, relative } from "node:path";
+import { existsSync as existsSync7, lstatSync as lstatSync5, readFileSync as readFileSync5, readdirSync as readdirSync3 } from "node:fs";
+import { basename as basename3, isAbsolute, join as join9, relative } from "node:path";
+
+// src/gitignore.ts
+import { execFileSync } from "node:child_process";
+import { existsSync as existsSync6, readFileSync as readFileSync4, rmSync as rmSync4 } from "node:fs";
+import { join as join8 } from "node:path";
+var BEGIN2 = "# >>> skilletor >>>";
+var END2 = "# <<< skilletor <<<";
+var SKILL_GITIGNORE = '# installed by skilletor, not committed ("gitignore": false in skilletor.json to commit)\n*\n';
+var PROJECT_CLAUDE_ENTRIES = ["skilletor.lock.json", "skilletor.local.json", "agents/**/.local.*", "rules/**/.local.*"];
+var LOCAL_ENTRIES = ["agents/**/.local.*", "rules/**/.local.*"];
+var CODEX_ENTRIES = ["agents/**/.local.*", "skilletor-rules.md"];
+function updateGitignore(opts) {
+  const path = join8(opts.dir, ".gitignore");
+  const existed = existsSync6(path);
+  const existing = existed ? readFileSync4(path, "utf8") : "";
+  const lines = existing.length ? existing.split("\n") : [];
+  const { begin, end, hasBlock: hasBlock2 } = blockOf(lines);
+  const outside = hasBlock2 ? [...lines.slice(0, begin), ...lines.slice(end + 1)] : lines;
+  const entries = [...new Set(opts.entries)].sort();
+  const write = opts.enabled && entries.length > 0;
+  let out;
+  let change;
+  if (write) {
+    const block = [BEGIN2, ...entries, END2];
+    if (hasBlock2) {
+      out = [...lines.slice(0, begin), ...block, ...lines.slice(end + 1)];
+      change = lines.slice(begin + 1, end).join("\n") === entries.join("\n") ? "unchanged" : "changed";
+    } else {
+      const trimmed = trimTrailingEmpty(outside);
+      out = trimmed.length ? [...trimmed, "", ...block] : [...block];
+      change = "created";
+    }
+  } else {
+    out = trimTrailingEmpty(outside);
+    change = hasBlock2 ? "removed" : "unchanged";
+  }
+  const result = out.length && out.some((l) => l.trim() !== "") ? out.join("\n").replace(/\n*$/, "") + "\n" : "";
+  if (result === "") {
+    if (existed) rmSync4(path, { force: true });
+    return change;
+  }
+  if (result !== existing) atomicWrite(path, result);
+  return change;
+}
+function blockOf(lines) {
+  const begin = lines.indexOf(BEGIN2);
+  const end = lines.indexOf(END2);
+  return { begin, end, hasBlock: begin !== -1 && end !== -1 && end > begin };
+}
+function hasBlock(dir) {
+  try {
+    return blockOf(readFileSync4(join8(dir, ".gitignore"), "utf8").split("\n")).hasBlock;
+  } catch {
+    return false;
+  }
+}
+function skillGitignorePath(name) {
+  return join8("skills", name, ".gitignore");
+}
+function withSkillGitignore(output, name) {
+  const out = new Map(output);
+  out.set(skillGitignorePath(name), Buffer.from(SKILL_GITIGNORE, "utf8"));
+  return out;
+}
+function trimTrailingEmpty(lines) {
+  const out = [...lines];
+  while (out.length && out[out.length - 1].trim() === "") out.pop();
+  return out;
+}
+var LS_FILES_BATCH = 500;
+function gitTracked(dir, paths) {
+  const out = [];
+  for (let i = 0; i < paths.length; i += LS_FILES_BATCH) {
+    try {
+      const listed = execFileSync(
+        "git",
+        ["-C", dir, "--literal-pathspecs", "ls-files", "-z", "--", ...paths.slice(i, i + LS_FILES_BATCH)],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5e3, env: gitEnv() }
+      );
+      out.push(...listed.split("\0").filter(Boolean));
+    } catch {
+      return [];
+    }
+  }
+  return out;
+}
+function isGitWorkTree(dir) {
+  try {
+    return execFileSync("git", ["-C", dir, "rev-parse", "--is-inside-work-tree"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5e3,
+      env: gitEnv()
+    }).trim() === "true";
+  } catch {
+    return false;
+  }
+}
+
+// src/catalog.ts
 var CatalogError = class extends Error {
   name = "CatalogError";
 };
@@ -7933,7 +8033,7 @@ function noSymlink(path) {
 function walkFiles(dir, sourceDir) {
   const out = [];
   for (const entry of readdirSync3(dir)) {
-    const p = join8(dir, entry);
+    const p = join9(dir, entry);
     const st = noSymlink(p);
     if (st.isDirectory()) out.push(...walkFiles(p, sourceDir));
     else if (st.isFile()) out.push(relative(sourceDir, p));
@@ -7961,12 +8061,12 @@ function unquote(v) {
   return v;
 }
 function descriptionOf(filePath) {
-  return frontmatter(readFileSync4(filePath, "utf8")).description;
+  return frontmatter(readFileSync5(filePath, "utf8")).description;
 }
 function skillFile(dir) {
   for (const candidate of ["SKILL.md", "SKILL.md.njk"]) {
-    const p = join8(dir, candidate);
-    if (existsSync6(p)) {
+    const p = join9(dir, candidate);
+    if (existsSync7(p)) {
       noSymlink(p);
       return p;
     }
@@ -7980,11 +8080,11 @@ function itemName(fileName) {
 function scan(dir) {
   const items = [];
   for (const { dir: sub, type } of TYPE_DIRS) {
-    const typeDir = join8(dir, sub);
-    if (!existsSync6(typeDir)) continue;
+    const typeDir = join9(dir, sub);
+    if (!existsSync7(typeDir)) continue;
     noSymlink(typeDir);
     for (const entry of readdirSync3(typeDir)) {
-      const p = join8(typeDir, entry);
+      const p = join9(typeDir, entry);
       const st = noSymlink(p);
       if (type === "skill") {
         if (!st.isDirectory()) continue;
@@ -8000,17 +8100,71 @@ function scan(dir) {
     }
   }
   items.push(...pluginSkills(dir, items));
+  items.push(...claudeItems(dir, items));
   return { items, bundles: scanBundles(dir), meta: readSourceMeta(dir) };
 }
+function isPlainDir(path) {
+  try {
+    return lstatSync5(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+var LOCAL_PREFIX2 = ".local.";
+function claudeItems(dir, found) {
+  const out = [];
+  const base = join9(dir, ".claude");
+  if (!isPlainDir(base)) return out;
+  const known = new Set(found.map((i) => `${i.type}:${i.name}`));
+  for (const { dir: sub, type } of TYPE_DIRS) {
+    const typeDir = join9(base, sub);
+    if (!isPlainDir(typeDir)) continue;
+    let entries;
+    try {
+      entries = readdirSync3(typeDir).sort();
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      let item;
+      try {
+        item = claudeItem(dir, typeDir, entry, type);
+      } catch {
+        continue;
+      }
+      if (!item || known.has(`${type}:${item.name}`)) continue;
+      known.add(`${type}:${item.name}`);
+      out.push(item);
+    }
+  }
+  return out;
+}
+function claudeItem(dir, typeDir, entry, type) {
+  const p = join9(typeDir, entry);
+  const st = noSymlink(p);
+  if (type === "skill") {
+    if (!st.isDirectory()) return void 0;
+    const file = skillFile(p);
+    if (!file) return void 0;
+    const files = walkFiles(p, dir);
+    const gitignore = join9(p, ".gitignore");
+    if (files.includes(relative(dir, gitignore)) && readFileSync5(gitignore, "utf8") === SKILL_GITIGNORE) return void 0;
+    return { type, name: entry, description: descriptionOf(file), files, dir: relative(dir, p) };
+  }
+  if (!st.isFile()) return void 0;
+  const name = itemName(entry);
+  if (name === void 0 || name.startsWith(LOCAL_PREFIX2)) return void 0;
+  return { type, name, description: descriptionOf(p), files: [relative(dir, p)], dir: relative(dir, typeDir) };
+}
 function pluginSkills(dir, found) {
-  const pdir = join8(dir, ".claude-plugin");
-  const p = join8(pdir, "plugin.json");
-  if (!existsSync6(p)) return [];
+  const pdir = join9(dir, ".claude-plugin");
+  const p = join9(pdir, "plugin.json");
+  if (!existsSync7(p)) return [];
   noSymlink(pdir);
   noSymlink(p);
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync4(p, "utf8"));
+    parsed = JSON.parse(readFileSync5(p, "utf8"));
   } catch (err) {
     throw new CatalogError(`${p}: invalid JSON (${err.message})`);
   }
@@ -8022,7 +8176,7 @@ function pluginSkills(dir, found) {
     throw new CatalogError(`${p}: "skills" must be a string or an array of strings`);
   }
   const dirOf = /* @__PURE__ */ new Map();
-  for (const it of found) if (it.type === "skill") dirOf.set(it.name, it.dir ?? join8("skills", it.name));
+  for (const it of found) if (it.type === "skill") dirOf.set(it.name, it.dir ?? join9("skills", it.name));
   const out = [];
   const add = (skillDir, file) => {
     const rel = relative(dir, skillDir);
@@ -8043,7 +8197,7 @@ function pluginSkills(dir, found) {
       continue;
     }
     for (const child of readdirSync3(target).sort()) {
-      const c = join8(target, child);
+      const c = join9(target, child);
       if (!noSymlink(c).isDirectory()) continue;
       const f = skillFile(c);
       if (f) add(c, f);
@@ -8064,8 +8218,8 @@ function pluginPath(dir, pluginFile, entry) {
   }
   let cur = dir;
   for (const seg of segments) {
-    cur = join8(cur, seg);
-    if (!existsSync6(cur) && !isDanglingLink(cur)) {
+    cur = join9(cur, seg);
+    if (!existsSync7(cur) && !isDanglingLink(cur)) {
       throw new CatalogError(`${pluginFile}: skills path does not exist: ${entry}`);
     }
     noSymlink(cur);
@@ -8083,14 +8237,14 @@ function isDanglingLink(path) {
   }
 }
 function scanBundles(dir) {
-  const bdir = join8(dir, "bundles");
-  if (!existsSync6(bdir)) return [];
+  const bdir = join9(dir, "bundles");
+  if (!existsSync7(bdir)) return [];
   noSymlink(bdir);
   const byName = /* @__PURE__ */ new Map();
   for (const entry of readdirSync3(bdir).sort()) {
     const m = /^(.+)\.ya?ml$/.exec(entry);
     if (!m) continue;
-    const p = join8(bdir, entry);
+    const p = join9(bdir, entry);
     if (!noSymlink(p).isFile()) continue;
     byName.set(m[1], [...byName.get(m[1]) ?? [], relative(dir, p)]);
   }
@@ -8101,7 +8255,7 @@ function scanBundles(dir) {
       continue;
     }
     try {
-      out.push({ name, files, def: parseBundle(readFileSync4(join8(dir, files[0]), "utf8")) });
+      out.push({ name, files, def: parseBundle(readFileSync5(join9(dir, files[0]), "utf8")) });
     } catch (err) {
       if (!(err instanceof BundleError)) throw err;
       out.push({ name, files, error: `${files[0]}: ${err.message}` });
@@ -8110,12 +8264,12 @@ function scanBundles(dir) {
   return out;
 }
 function readSourceMeta(dir) {
-  const p = join8(dir, "skilletor.json");
-  if (!existsSync6(p)) return {};
+  const p = join9(dir, "skilletor.json");
+  if (!existsSync7(p)) return {};
   noSymlink(p);
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync4(p, "utf8"));
+    parsed = JSON.parse(readFileSync5(p, "utf8"));
   } catch (err) {
     throw new CatalogError(`${p}: invalid JSON (${err.message})`);
   }
@@ -8129,8 +8283,8 @@ function readSourceMeta(dir) {
 
 // src/render.ts
 var import_nunjucks = __toESM(require_nunjucks(), 1);
-import { readFileSync as readFileSync5 } from "node:fs";
-import { join as join9, relative as relative2, resolve as resolvePath3, sep as sep2 } from "node:path";
+import { readFileSync as readFileSync6 } from "node:fs";
+import { join as join10, relative as relative2, resolve as resolvePath3, sep as sep2 } from "node:path";
 var RenderError = class extends Error {
   name = "RenderError";
 };
@@ -8145,7 +8299,7 @@ function makeLoader(root) {
       }
       let src;
       try {
-        src = readFileSync5(path, "utf8");
+        src = readFileSync6(path, "utf8");
       } catch {
         return null;
       }
@@ -8173,18 +8327,19 @@ function build(item, sourceDir, context) {
       }
       out.set(installPath(item, file.slice(0, -".njk".length)), Buffer.from(rendered, "utf8"));
     } else {
-      out.set(installPath(item, file), readFileSync5(join9(sourceDir, file)));
+      out.set(installPath(item, file), readFileSync6(join10(sourceDir, file)));
     }
   }
   return out;
 }
 function installPath(item, file) {
-  if (item.type !== "skill" || item.dir === void 0) return file;
-  return join9("skills", item.name, relative2(item.dir, file));
+  if (item.dir === void 0) return file;
+  const into = item.type === "skill" ? join10("skills", item.name) : `${item.type}s`;
+  return join10(into, relative2(item.dir, file));
 }
 var FRONTMATTER = /^\s*---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
 function rendersEmpty(item, output) {
-  const src = item.type === "skill" ? join9(item.dir ?? join9("skills", item.name), "SKILL.md") : `${item.type}s/${item.name}.md`;
+  const src = item.type === "skill" ? join10(item.dir ?? join10("skills", item.name), "SKILL.md") : join10(item.dir ?? `${item.type}s`, `${item.name}.md`);
   if (!item.files.includes(`${src}.njk`) || item.files.includes(src)) return false;
   const text = output.get(installPath(item, src))?.toString("utf8");
   if (text === void 0) return false;
@@ -8192,18 +8347,18 @@ function rendersEmpty(item, output) {
 }
 
 // src/apply.ts
-import { existsSync as existsSync7, lstatSync as lstatSync6, readFileSync as readFileSync7, readdirSync as readdirSync4, rmdirSync, rmSync as rmSync5 } from "node:fs";
-import { dirname as dirname3, join as join10, relative as relative3, resolve as resolvePath4, sep as sep3 } from "node:path";
+import { existsSync as existsSync8, lstatSync as lstatSync6, readFileSync as readFileSync8, readdirSync as readdirSync4, rmdirSync, rmSync as rmSync6 } from "node:fs";
+import { dirname as dirname3, join as join11, relative as relative3, resolve as resolvePath4, sep as sep3 } from "node:path";
 
 // src/lock.ts
-import { readFileSync as readFileSync6, rmSync as rmSync4 } from "node:fs";
+import { readFileSync as readFileSync7, rmSync as rmSync5 } from "node:fs";
 var LockError = class extends Error {
   name = "LockError";
 };
 function readLock(path) {
   let text;
   try {
-    text = readFileSync6(path, "utf8");
+    text = readFileSync7(path, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") return {};
     throw new LockError(`${path}: cannot read lock (${err.message})`);
@@ -8233,7 +8388,7 @@ function serializeLock(lock) {
   return JSON.stringify(out, null, 2) + "\n";
 }
 function writeLock(path, lock) {
-  if (Object.keys(lock).length === 0) rmSync4(path, { force: true });
+  if (Object.keys(lock).length === 0) rmSync5(path, { force: true });
   else atomicWrite(path, serializeLock(lock));
 }
 
@@ -8246,7 +8401,7 @@ function isValidItemName(name) {
   return NAME_RE.test(name);
 }
 function apply(plan, opts) {
-  const lockPath = join10(resolvePath4(opts.targetDir), "skilletor.lock.json");
+  const lockPath = join11(resolvePath4(opts.targetDir), "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const landed = /* @__PURE__ */ new Map();
   try {
@@ -8345,7 +8500,7 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
       const locked = existing?.files[rel];
       const st = lstatOrUndefined(abs);
       if (st?.isFile()) {
-        const diskHash = hashBuffer(readFileSync7(abs));
+        const diskHash = hashBuffer(readFileSync8(abs));
         if (diskHash === desired) {
           entryFiles[rel] = desired;
           if (locked === void 0) land(rel, desired);
@@ -8390,7 +8545,7 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
     if (!oldLock[key].skipped) res.removed.push(key);
   }
   for (const [root, dirs] of dirsTouched) pruneEmptyDirs(dirs, root);
-  const emptyLeft = Object.keys(newLock).length === 0 && existsSync7(lockPath);
+  const emptyLeft = Object.keys(newLock).length === 0 && existsSync8(lockPath);
   if (emptyLeft || serializeLock(newLock) !== serializeLock(oldLock)) {
     writeLock(lockPath, newLock);
   }
@@ -8427,7 +8582,7 @@ function withVia(entry, it) {
   return entry;
 }
 function safeJoin(root, rel) {
-  const abs = resolvePath4(join10(root, rel));
+  const abs = resolvePath4(join11(root, rel));
   if (abs !== root && !abs.startsWith(root + sep3)) {
     throw new ApplyError(`path escapes target: ${rel}`);
   }
@@ -8452,7 +8607,7 @@ function inspect(root, rel, own) {
   const under2 = parts.length > ownParts.length && ownParts.every((p, i) => p === parts[i]);
   const first = under2 ? ownParts.length - 1 : parts.length - 1;
   for (let i = first; i < parts.length; i++) {
-    const st = lstatOrUndefined(join10(root, ...parts.slice(0, i + 1)));
+    const st = lstatOrUndefined(join11(root, ...parts.slice(0, i + 1)));
     if (!st) return { kind: "absent" };
     if (i < parts.length - 1) {
       if (!st.isDirectory()) return { kind: "blocked", path: parts.slice(0, i + 1).join("/"), link: st.isSymbolicLink() };
@@ -8483,7 +8638,7 @@ function removeItemFiles(key, root, files, dirsTouched, res) {
 function removeFile(abs, dirsTouched) {
   const st = lstatOrUndefined(abs);
   if (st && !st.isDirectory()) {
-    rmSync5(abs, { force: true });
+    rmSync6(abs, { force: true });
     dirsTouched.add(dirname3(abs));
   }
 }
@@ -8502,20 +8657,20 @@ function pruneEmptyDirs(dirs, root) {
 // src/state.ts
 import { randomBytes } from "node:crypto";
 import {
-  existsSync as existsSync8,
+  existsSync as existsSync9,
   lstatSync as lstatSync7,
   mkdirSync as mkdirSync4,
   readdirSync as readdirSync5,
-  readFileSync as readFileSync8,
+  readFileSync as readFileSync9,
   renameSync as renameSync3,
   rmdirSync as rmdirSync2,
-  rmSync as rmSync6,
+  rmSync as rmSync7,
   statSync as statSync3,
   utimesSync,
   writeFileSync as writeFileSync3
 } from "node:fs";
 import { hostname } from "node:os";
-import { join as join11 } from "node:path";
+import { join as join12 } from "node:path";
 var SyncLockTimeoutError = class extends Error {
   name = "SyncLockTimeoutError";
 };
@@ -8530,11 +8685,11 @@ var State = class {
     mkdirSync4(root, { recursive: true });
   }
   path(name) {
-    return join11(this.root, name);
+    return join12(this.root, name);
   }
   readJson(name) {
     try {
-      const value2 = JSON.parse(readFileSync8(this.path(name), "utf8"));
+      const value2 = JSON.parse(readFileSync9(this.path(name), "utf8"));
       return value2 && typeof value2 === "object" && !Array.isArray(value2) ? value2 : {};
     } catch {
       return {};
@@ -8673,7 +8828,7 @@ var State = class {
     const graceMs = opts.graceMs ?? 2e3;
     const pollMs = opts.pollMs ?? 25;
     const lockDir = this.path(LOCK);
-    const ownerFile = join11(lockDir, "owner.json");
+    const ownerFile = join12(lockDir, "owner.json");
     const token = randomBytes(8).toString("hex");
     const deadline = Date.now() + timeoutMs;
     for (; ; ) {
@@ -8706,7 +8861,7 @@ var State = class {
         return true;
       } catch (err) {
         if (errCode(err) === "ENOENT") return true;
-        if (existsSync8(ownerFile)) return false;
+        if (existsSync9(ownerFile)) return false;
       }
     }
     const tomb = this.path(`${LEFTOVER2}broken-${stale.ino}-${Math.floor(stale.mtimeMs)}`);
@@ -8725,7 +8880,7 @@ var State = class {
    *  age is another run's by now. Renamed away first, so no waiter sees it half removed. */
   release(lockDir, ownerFile, token) {
     try {
-      if (JSON.parse(readFileSync8(ownerFile, "utf8")).token !== token) return;
+      if (JSON.parse(readFileSync9(ownerFile, "utf8")).token !== token) return;
     } catch {
       return;
     }
@@ -8736,7 +8891,7 @@ var State = class {
       return;
     }
     try {
-      rmSync6(gone, { recursive: true, force: true });
+      rmSync7(gone, { recursive: true, force: true });
     } catch {
     }
   }
@@ -8753,7 +8908,7 @@ var State = class {
       if (!name.startsWith(LEFTOVER2)) continue;
       const p = this.path(name);
       try {
-        if (Date.now() - lstatSync7(p).mtimeMs > staleMs) rmSync6(p, { recursive: true, force: true });
+        if (Date.now() - lstatSync7(p).mtimeMs > staleMs) rmSync7(p, { recursive: true, force: true });
       } catch {
       }
     }
@@ -8774,7 +8929,7 @@ function acquire(lockDir, ownerFile, token, refreshMs, afterMkdir) {
     const code = errCode(err);
     if (code === "EEXIST" || code === "ENOENT") return false;
     try {
-      rmSync6(ownerFile, { force: true });
+      rmSync7(ownerFile, { force: true });
       rmdirSync2(lockDir);
     } catch {
     }
@@ -8804,7 +8959,7 @@ function judge(lockDir, ownerFile, staleMs, graceMs) {
 function deadOwner(ownerFile, age) {
   let record;
   try {
-    record = JSON.parse(readFileSync8(ownerFile, "utf8"));
+    record = JSON.parse(readFileSync9(ownerFile, "utf8"));
   } catch {
     return false;
   }
@@ -8824,104 +8979,6 @@ function touch(path) {
     const now = /* @__PURE__ */ new Date();
     utimesSync(path, now, now);
   } catch {
-  }
-}
-
-// src/gitignore.ts
-import { execFileSync } from "node:child_process";
-import { existsSync as existsSync9, readFileSync as readFileSync9, rmSync as rmSync7 } from "node:fs";
-import { join as join12 } from "node:path";
-var BEGIN2 = "# >>> skilletor >>>";
-var END2 = "# <<< skilletor <<<";
-var SKILL_GITIGNORE = '# installed by skilletor, not committed ("gitignore": false in skilletor.json to commit)\n*\n';
-var PROJECT_CLAUDE_ENTRIES = ["skilletor.lock.json", "skilletor.local.json", "agents/**/.local.*", "rules/**/.local.*"];
-var LOCAL_ENTRIES = ["agents/**/.local.*", "rules/**/.local.*"];
-var CODEX_ENTRIES = ["agents/**/.local.*", "skilletor-rules.md"];
-function updateGitignore(opts) {
-  const path = join12(opts.dir, ".gitignore");
-  const existed = existsSync9(path);
-  const existing = existed ? readFileSync9(path, "utf8") : "";
-  const lines = existing.length ? existing.split("\n") : [];
-  const { begin, end, hasBlock: hasBlock2 } = blockOf(lines);
-  const outside = hasBlock2 ? [...lines.slice(0, begin), ...lines.slice(end + 1)] : lines;
-  const entries = [...new Set(opts.entries)].sort();
-  const write = opts.enabled && entries.length > 0;
-  let out;
-  let change;
-  if (write) {
-    const block = [BEGIN2, ...entries, END2];
-    if (hasBlock2) {
-      out = [...lines.slice(0, begin), ...block, ...lines.slice(end + 1)];
-      change = lines.slice(begin + 1, end).join("\n") === entries.join("\n") ? "unchanged" : "changed";
-    } else {
-      const trimmed = trimTrailingEmpty(outside);
-      out = trimmed.length ? [...trimmed, "", ...block] : [...block];
-      change = "created";
-    }
-  } else {
-    out = trimTrailingEmpty(outside);
-    change = hasBlock2 ? "removed" : "unchanged";
-  }
-  const result = out.length && out.some((l) => l.trim() !== "") ? out.join("\n").replace(/\n*$/, "") + "\n" : "";
-  if (result === "") {
-    if (existed) rmSync7(path, { force: true });
-    return change;
-  }
-  if (result !== existing) atomicWrite(path, result);
-  return change;
-}
-function blockOf(lines) {
-  const begin = lines.indexOf(BEGIN2);
-  const end = lines.indexOf(END2);
-  return { begin, end, hasBlock: begin !== -1 && end !== -1 && end > begin };
-}
-function hasBlock(dir) {
-  try {
-    return blockOf(readFileSync9(join12(dir, ".gitignore"), "utf8").split("\n")).hasBlock;
-  } catch {
-    return false;
-  }
-}
-function skillGitignorePath(name) {
-  return join12("skills", name, ".gitignore");
-}
-function withSkillGitignore(output, name) {
-  const out = new Map(output);
-  out.set(skillGitignorePath(name), Buffer.from(SKILL_GITIGNORE, "utf8"));
-  return out;
-}
-function trimTrailingEmpty(lines) {
-  const out = [...lines];
-  while (out.length && out[out.length - 1].trim() === "") out.pop();
-  return out;
-}
-var LS_FILES_BATCH = 500;
-function gitTracked(dir, paths) {
-  const out = [];
-  for (let i = 0; i < paths.length; i += LS_FILES_BATCH) {
-    try {
-      const listed = execFileSync(
-        "git",
-        ["-C", dir, "--literal-pathspecs", "ls-files", "-z", "--", ...paths.slice(i, i + LS_FILES_BATCH)],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5e3, env: gitEnv() }
-      );
-      out.push(...listed.split("\0").filter(Boolean));
-    } catch {
-      return [];
-    }
-  }
-  return out;
-}
-function isGitWorkTree(dir) {
-  try {
-    return execFileSync("git", ["-C", dir, "rev-parse", "--is-inside-work-tree"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5e3,
-      env: gitEnv()
-    }).trim() === "true";
-  } catch {
-    return false;
   }
 }
 

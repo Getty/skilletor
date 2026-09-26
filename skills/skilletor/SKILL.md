@@ -70,7 +70,11 @@ Sources use `skills/<name>/`, `agents/<name>.md`, `rules/<name>.md`; Claude plug
 work too (skill paths from `.claude-plugin/plugin.json` `skills`, installed as
 `skills/<name>/`): `skilletor add anthropics` (→ anthropics/skills), `skilletor add
 obra/superpowers`, `skilletor add mattpocock` (→ mattpocock/skills, skills listed in its
-plugin.json).
+plugin.json). A project's own `.claude/skills/<name>/`, `.claude/agents/<name>.md[.njk]`,
+`.claude/rules/<name>.md[.njk]` are offered too and install like published ones
+(`skilletor add Getty/karr`); read last, best effort: a name found above wins, a symlink
+there skips that item, skilletor's installed copies (`.local.` files, a skill carrying
+skilletor's `.gitignore`) are not offered.
 
 ## Config
 
@@ -94,8 +98,9 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
 ```
 
 - Only `skill`, `agent`, `rule` are installable — never hooks, settings or MCP configs.
-- `ref` (git) pins a branch, tag or commit – a plain ref name (no leading `-`, no whitespace,
-  `~ ^ : ? * [ \`, `..` or `@{`); omit it (never `""`) for the remote's HEAD.
+- `git` and `local`, when present, are non-empty strings; `ref` (git) pins a branch, tag or
+  commit – a plain ref name (no leading `-`, no whitespace, `~ ^ : ? * [ \`, `..` or `@{`);
+  omit it (never `""`) for the remote's HEAD.
 - `gitignore` (default true): fixed ignore rules that never change with the items. Every
   installed skill dir gets its own `.gitignore` (`*`); a marked block in `.claude/.gitignore`
   lists the lock, `skilletor.local.json`, `agents/**/.local.*`, `rules/**/.local.*`, one in

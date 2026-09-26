@@ -151,6 +151,9 @@ rules/<name>.md[.njk]
 snippets/…                 # for includes only, not installable
 bundles/<name>.yaml|.yml   # optional: named item sets with var defaults (§15)
 skilletor.json             # optional: { "description": "…", "vars": { defaults } }
+.claude/skills/<name>/SKILL.md[.njk] + any accompanying files   # the Claude project layout,
+.claude/agents/<name>.md[.njk]                                  # read last, best effort (below)
+.claude/rules/<name>.md[.njk]
 ```
 
 **Claude plugin repos** (`.claude-plugin/plugin.json` with a `skills` field) are read as
@@ -164,6 +167,25 @@ symlink (dangling included), does not exist, is not a directory, or is the sourc
 itself (`""`, `.` – its name would be the cache directory's); two different directories yielding the same skill name;
 `plugin.json` that is not valid JSON or whose `skills` is neither a string nor an array of
 strings. A `plugin.json` without `skills`, or whose top level is not an object, is ignored.
+
+**Claude project layouts** (k96). A project that keeps its skills, agents and rules where
+Claude Code reads them – `.claude/skills/<name>/`, `.claude/agents/<name>.md[.njk]`,
+`.claude/rules/<name>.md[.njk]`, committed – is a source too (`skilletor add Getty/karr`).
+Names come from the path as above; every item installs as `skills/<name>/`,
+`agents/<name>.md`, `rules/<name>.md`, whatever its source path, and renders, converts
+(§14.7, §14.8) and includes (§5, against the source root) like a published one. Precedence:
+`skills/`, `agents/`, `rules/`, then the `plugin.json` skills, then `.claude/`; a `.claude/`
+item whose name its type already has is skipped silently (a repository often keeps an
+installed copy of its own skill there). `.claude/` is **best effort**: what the published
+layout rejects there – a symlink at `.claude`, at `.claude/<type>`, at an item or at any
+file inside a skill, an unreadable entry – skips that directory or item and never fails the
+scan; nothing is followed. A source that scans today scans the same with a `.claude/` tree
+added. skilletor's own installed copies there are not offered: a skill directory whose
+`.gitignore` is skilletor's (§6.4) and a `.local.` agent or rule are what a sync in that
+project wrote from other sources, not the project's own items; git ignores them there, so a
+`local` checkout offers what its `git` clone does. A skill's own, different `.gitignore` is
+a file of the item like any other (replaced by skilletor's while `gitignore` is on, §6.4).
+Bundles under `.claude/`, `.agents/skills` (the Codex layout) and `share/` are not read.
 
 Known public sources as examples: `skilletor add anthropics` (→ `anthropics/skills`, flat
 `skills/`), `skilletor add obra/superpowers` (flat `skills/`), `skilletor add mattpocock`

@@ -6,8 +6,9 @@
 // throwOnUndefined on (a typo must not silently produce an empty skill).
 // Includes/imports/macros resolve against the source root via a custom loader
 // that rejects any path leaving it. `render` knows nothing of the target
-// filesystem — it returns paths relative to the source (with `.njk` stripped),
-// except that a skill's files always land under `skills/<name>/` (spec §4.1).
+// filesystem — it returns install paths (with `.njk` stripped): a skill's files land
+// under `skills/<name>/`, an agent's or rule's file under `agents/` or `rules/`,
+// wherever the item sits in the source (spec §4.1).
 import { readFileSync } from "node:fs";
 import { join, relative, resolve as resolvePath, sep } from "node:path";
 import nunjucks from "nunjucks";
@@ -86,12 +87,14 @@ export function build(
   return out;
 }
 
-/** Where a source file of `item` installs: a skill's files go under `skills/<name>/`
- *  wherever its directory sits in the source (a Claude plugin's nested skills, spec
- *  §4.1); agents and rules keep their source path. */
+/** Where a source file of `item` installs: a skill's files go under `skills/<name>/`, an
+ *  agent's or rule's under `agents/` or `rules/`, wherever the item's `dir` sits in the
+ *  source (a Claude plugin's nested skills, the `.claude/` layout, spec §4.1). Without a
+ *  `dir` the item lives where it installs. */
 function installPath(item: CatalogItem, file: string): string {
-  if (item.type !== "skill" || item.dir === undefined) return file;
-  return join("skills", item.name, relative(item.dir, file));
+  if (item.dir === undefined) return file;
+  const into = item.type === "skill" ? join("skills", item.name) : `${item.type}s`;
+  return join(into, relative(item.dir, file));
 }
 
 /** A leading YAML frontmatter block (after optional whitespace), closed by `---`. */
@@ -103,7 +106,9 @@ const FRONTMATTER = /^\s*---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
  * item does not apply in this scope. A non-template main file is never empty.
  */
 export function rendersEmpty(item: CatalogItem, output: Map<string, Buffer>): boolean {
-  const src = item.type === "skill" ? join(item.dir ?? join("skills", item.name), "SKILL.md") : `${item.type}s/${item.name}.md`;
+  const src = item.type === "skill"
+    ? join(item.dir ?? join("skills", item.name), "SKILL.md")
+    : join(item.dir ?? `${item.type}s`, `${item.name}.md`);
   if (!item.files.includes(`${src}.njk`) || item.files.includes(src)) return false;
   const text = output.get(installPath(item, src))?.toString("utf8");
   if (text === undefined) return false;
