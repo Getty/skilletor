@@ -7511,7 +7511,7 @@ function samePrefix(a, b) {
 
 // src/sources/url.ts
 import { createHash as createHash3 } from "node:crypto";
-import { existsSync as existsSync5, mkdirSync as mkdirSync3, mkdtempSync, renameSync as renameSync2, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { existsSync as existsSync5, lstatSync as lstatSync3, mkdirSync as mkdirSync3, mkdtempSync, readdirSync, renameSync as renameSync2, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { dirname as dirname2, join as join7, resolve as resolvePath, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 var TarError = class extends Error {
@@ -7694,6 +7694,36 @@ function publishEntries(dir, entries) {
   }
   return cleanupWarnings.length ? cleanupWarnings.join("; ") : void 0;
 }
+var LEFTOVER = /^([0-9a-f]{16})\.(stage|backup)-[A-Za-z0-9]{6}$/;
+function sweepUrlCache(cacheRoot) {
+  let names;
+  try {
+    names = readdirSync(cacheRoot).sort();
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const m = LEFTOVER.exec(name);
+    if (!m) continue;
+    const path = join7(cacheRoot, name);
+    try {
+      if (m[2] === "backup") {
+        const dir = join7(cacheRoot, m[1]);
+        const tree = join7(path, "tree");
+        if (!existsSync5(dir) && isRealDir(tree)) renameSync2(tree, dir);
+      }
+      rmSync2(path, { recursive: true, force: true });
+    } catch {
+    }
+  }
+}
+function isRealDir(path) {
+  try {
+    return lstatSync3(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
 function writeEntries(dir, entries) {
   const root = resolvePath(dir);
   for (const e of entries) {
@@ -7711,7 +7741,7 @@ function writeEntries(dir, entries) {
 }
 
 // src/catalog.ts
-import { existsSync as existsSync6, lstatSync as lstatSync3, readFileSync as readFileSync3, readdirSync } from "node:fs";
+import { existsSync as existsSync6, lstatSync as lstatSync4, readFileSync as readFileSync3, readdirSync as readdirSync2 } from "node:fs";
 import { basename as basename3, isAbsolute, join as join8, relative } from "node:path";
 var CatalogError = class extends Error {
   name = "CatalogError";
@@ -7722,7 +7752,7 @@ var TYPE_DIRS = [
   { dir: "rules", type: "rule" }
 ];
 function noSymlink(path) {
-  const st = lstatSync3(path);
+  const st = lstatSync4(path);
   if (st.isSymbolicLink()) {
     throw new CatalogError(`symlink not allowed in source: ${path}`);
   }
@@ -7730,7 +7760,7 @@ function noSymlink(path) {
 }
 function walkFiles(dir, sourceDir) {
   const out = [];
-  for (const entry of readdirSync(dir)) {
+  for (const entry of readdirSync2(dir)) {
     const p = join8(dir, entry);
     const st = noSymlink(p);
     if (st.isDirectory()) out.push(...walkFiles(p, sourceDir));
@@ -7781,7 +7811,7 @@ function scan(dir) {
     const typeDir = join8(dir, sub);
     if (!existsSync6(typeDir)) continue;
     noSymlink(typeDir);
-    for (const entry of readdirSync(typeDir)) {
+    for (const entry of readdirSync2(typeDir)) {
       const p = join8(typeDir, entry);
       const st = noSymlink(p);
       if (type === "skill") {
@@ -7840,7 +7870,7 @@ function pluginSkills(dir, found) {
       add(target, file);
       continue;
     }
-    for (const child of readdirSync(target).sort()) {
+    for (const child of readdirSync2(target).sort()) {
       const c = join8(target, child);
       if (!noSymlink(c).isDirectory()) continue;
       const f = skillFile(c);
@@ -7868,14 +7898,14 @@ function pluginPath(dir, pluginFile, entry) {
     }
     noSymlink(cur);
   }
-  if (!lstatSync3(cur).isDirectory()) {
+  if (!lstatSync4(cur).isDirectory()) {
     throw new CatalogError(`${pluginFile}: skills path is not a directory: ${entry}`);
   }
   return cur;
 }
 function isDanglingLink(path) {
   try {
-    return lstatSync3(path).isSymbolicLink();
+    return lstatSync4(path).isSymbolicLink();
   } catch {
     return false;
   }
@@ -7885,7 +7915,7 @@ function scanBundles(dir) {
   if (!existsSync6(bdir)) return [];
   noSymlink(bdir);
   const byName = /* @__PURE__ */ new Map();
-  for (const entry of readdirSync(bdir).sort()) {
+  for (const entry of readdirSync2(bdir).sort()) {
     const m = /^(.+)\.ya?ml$/.exec(entry);
     if (!m) continue;
     const p = join8(bdir, entry);
@@ -7990,7 +8020,7 @@ function rendersEmpty(item, output) {
 }
 
 // src/apply.ts
-import { existsSync as existsSync7, lstatSync as lstatSync4, readFileSync as readFileSync6, readdirSync as readdirSync2, rmdirSync, rmSync as rmSync4 } from "node:fs";
+import { existsSync as existsSync7, lstatSync as lstatSync5, readFileSync as readFileSync6, readdirSync as readdirSync3, rmdirSync, rmSync as rmSync4 } from "node:fs";
 import { dirname as dirname3, join as join10, relative as relative3, resolve as resolvePath3, sep as sep3 } from "node:path";
 
 // src/lock.ts
@@ -8238,7 +8268,7 @@ function ownPath(key) {
 }
 function lstatOrUndefined(abs) {
   try {
-    return lstatSync4(abs, { throwIfNoEntry: false });
+    return lstatSync5(abs, { throwIfNoEntry: false });
   } catch (err) {
     if (err.code === "ENOTDIR") return void 0;
     throw err;
@@ -8290,7 +8320,7 @@ function pruneEmptyDirs(dirs, root) {
   for (let dir of sorted) {
     while (dir !== root && dir.startsWith(root + sep3)) {
       const st = lstatOrUndefined(dir);
-      if (!st?.isDirectory() || readdirSync2(dir).length > 0) break;
+      if (!st?.isDirectory() || readdirSync3(dir).length > 0) break;
       rmdirSync(dir);
       dir = dirname3(dir);
     }
@@ -8519,7 +8549,7 @@ function isGitWorkTree(dir) {
 }
 
 // src/briefing.ts
-import { existsSync as existsSync10, readdirSync as readdirSync3, readFileSync as readFileSync9 } from "node:fs";
+import { existsSync as existsSync10, readdirSync as readdirSync4, readFileSync as readFileSync9 } from "node:fs";
 import { join as join13 } from "node:path";
 var COMMENT = /^[ \t]*#[ \t]*briefing:[ \t]*skills[ \t]*=[ \t]*\[([^\]\r\n]*)\]/;
 function declaredSkills(harness, text) {
@@ -8563,7 +8593,7 @@ function pluginCacheRoots(home) {
 }
 function subdirs(dir) {
   try {
-    return readdirSync3(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
+    return readdirSync4(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
   } catch {
     return [];
   }
@@ -8849,9 +8879,15 @@ function mergeChainVars(chains, source, conflict) {
   }
   return out;
 }
-async function sync(ctx, opts = {}) {
+function withSyncLock(ctx, fn) {
   const state = new State(ctx.stateRoot);
-  return state.withLock(() => syncInner(scoped(ctx), opts, state));
+  return state.withLock(() => {
+    sweepUrlCache(cacheRootOf(ctx));
+    return fn(state);
+  });
+}
+async function sync(ctx, opts = {}) {
+  return withSyncLock(ctx, (state) => syncInner(scoped(ctx), opts, state));
 }
 async function syncInner(ctx, opts, state) {
   const loaded = loadWithTargets(ctx);
@@ -9653,10 +9689,12 @@ async function cmdSourceRemove(ctx, args) {
 }
 async function cmdAvailable(ctx, args = {}) {
   const config = load(ctx);
-  const state = new State(ctx.stateRoot);
   const installedKeys = installedSet(ctx, config);
   const declaredBundles = new Set([...config.user.bundles, ...config.project?.bundles ?? []].map(bundleLabel));
   const names = args.source ? [args.source] : [...config.sources.keys()];
+  return withSyncLock(ctx, (state) => listAvailable(ctx, config, state, names, installedKeys, declaredBundles));
+}
+async function listAvailable(ctx, config, state, names, installedKeys, declaredBundles) {
   const out = [];
   for (const name of names) {
     const src = config.userSources.get(name) ?? config.sources.get(name);
@@ -9711,7 +9749,7 @@ async function cmdInstall(ctx, args) {
   };
   const edits = [];
   const bundles = [];
-  for (const spec of args.items) {
+  const planItem = async (spec) => {
     const { type: explicitType, bundle, name, source } = parseItemSpec(spec);
     const src = sources.get(source);
     if (!src) {
@@ -9724,7 +9762,7 @@ async function cmdInstall(ctx, args) {
     }
     if (name.includes(WILDCARD)) {
       edits.push(() => addInstallEntry(path, explicitType, `${name}@${source}`));
-      continue;
+      return;
     }
     const cat = await catalogOf(source, backend);
     const hasBundle = cat.bundles.some((b) => b.name === name);
@@ -9732,7 +9770,7 @@ async function cmdInstall(ctx, args) {
     if (bundle || !explicitType && hasBundle && matches.length === 0) {
       bundles.push({ name, foreign: checkBundle(cat, name, source) });
       edits.push(() => addBundleEntry(path, `${name}@${source}`));
-      continue;
+      return;
     }
     if (matches.length === 0) {
       const suggestions = cat.items.map((i) => `${i.type}:${i.name}`).slice(0, 8).join(", ");
@@ -9745,7 +9783,10 @@ async function cmdInstall(ctx, args) {
     }
     const type = matches[0].type;
     edits.push(() => addInstallEntry(path, type, `${name}@${source}`));
-  }
+  };
+  await withSyncLock(ctx, async () => {
+    for (const spec of args.items) await planItem(spec);
+  });
   const additions = await missingSources(ctx, config, bundles, Boolean(args.project));
   for (const a of additions) {
     edits.push(() => {

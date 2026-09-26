@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
@@ -899,6 +899,88 @@ test("available lists a bundle's members of other sources with their address", a
     e.writeUserCfg({ sources: { mine: { local: src } } });
     const perl = (await cmdAvailable(e.ctx, { source: "mine" })).find((i) => i.type === "bundle")!;
     assert.deepEqual(perl.members, ["rule:p-*@gitlab.com/peter", "rule:r1"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// ---- the sync lock (k74) ------------------------------------------------------
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Another run holding `sync.lock/` (spec §6.5) until `release()`. */
+function holdSyncLock(stateRoot: string) {
+  let free!: () => void;
+  const held = new State(stateRoot).withLock(() => new Promise<void>((r) => (free = r)));
+  return { release: async () => { free(); await held; } };
+}
+
+// k74 (spec §6.5): resolving writes the source cache, so `available` resolves under the sync
+// lock, as a sync does. Asserts: while another run holds the lock, available has not
+// returned, has written nothing to the cache, and has left a dead run's leftovers alone; once
+// the lock is free it sweeps them, lists the source's items and frees the lock again.
+test("k74: available waits for a held sync lock before it fetches, then sweeps leftovers and lists", async () => {
+  const e = env();
+  try {
+    const url = gitRepo(e.tmp.dir, "peter", ["p-one"]);
+    e.writeUserCfg({ sources: { peter: { git: url } } });
+    const cache = join(e.ctx.stateRoot, "cache");
+    const leftovers = ["0123456789abcdef.backup-Ef34Gh", "0123456789abcdef.stage-Ab12Cd"];
+    for (const d of leftovers) mkdirSync(join(cache, d), { recursive: true });
+    const lock = holdSyncLock(e.ctx.stateRoot);
+    let done = false;
+    const run = cmdAvailable(e.ctx).then((r) => { done = true; return r; });
+    try {
+      await delay(200);
+      assert.equal(done, false, "available waits for the lock");
+      assert.deepEqual(readdirSync(cache).sort(), leftovers, "nothing fetched, nothing swept while another run holds it");
+    } finally {
+      await lock.release();
+      await run.catch(() => {});
+    }
+    const items = await run;
+    assert.deepEqual(items.map((i) => `${i.type}:${i.name}@${i.source}`), ["rule:p-one@peter"]);
+    assert.deepEqual(readdirSync(cache).filter((d) => /\.(stage|backup)-/.test(d)), []);
+    assert.equal(existsSync(join(e.ctx.stateRoot, "sync.lock")), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k74: install resolves under the lock for its planning pass only: the sync it runs takes
+// the lock itself (the mutex is not reentrant), and a question must not hold what the hooks
+// wait for. Asserts: while another run holds the lock, install neither fetches nor edits the
+// config; after release it installs the item (its own sync got the lock, no timeout); while
+// it asks about a bundle's missing source, the lock is free.
+test("k74: install plans under the sync lock, then asks and syncs without holding it", async () => {
+  const e = env();
+  try {
+    const url = gitRepo(e.tmp.dir, "peter", ["p-one"]);
+    e.writeUserCfg({ sources: { peter: { git: url } } });
+    const cache = join(e.ctx.stateRoot, "cache");
+    const lock = holdSyncLock(e.ctx.stateRoot);
+    let done = false;
+    const run = cmdInstall(e.ctx, { items: ["p-one@peter"] }).then((r) => { done = true; return r; });
+    try {
+      await delay(200);
+      assert.equal(done, false, "install waits for the lock");
+      assert.equal(existsSync(cache), false, "nothing fetched while another run holds the lock");
+      assert.equal(e.readUserCfg().install, undefined, "config untouched");
+    } finally {
+      await lock.release();
+      await run.catch(() => {});
+    }
+    const r = await run;
+    assert.equal(r.error, undefined);
+    assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`), ["rules/p-one@peter"]);
+
+    const paul = gitRepo(e.tmp.dir, "paul", ["q-one"]);
+    const src = makeSource(e.tmp.dir, "s", (d) => bundleFile(d, "perl", `description: P\nrules: [q-one@${paul}]\n`));
+    e.writeUserCfg({ ...e.readUserCfg(), sources: { peter: { git: url }, mine: { local: src } } });
+    const held: boolean[] = [];
+    const prompt = { ask: async () => { held.push(existsSync(join(e.ctx.stateRoot, "sync.lock"))); return "n"; } };
+    await cmdInstall({ ...e.ctx, prompt }, { items: ["bundle:perl@mine"] });
+    assert.deepEqual(held, [false], "asked once, with the lock free");
   } finally {
     e.cleanup();
   }

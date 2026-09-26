@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs, { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { basename, join } from "node:path";
-import { UrlSource } from "../src/sources/url.ts";
+import { sweepUrlCache, UrlSource } from "../src/sources/url.ts";
 import { sync, type EngineContext } from "../src/engine.ts";
 import { readLock } from "../src/lock.ts";
 import { makeTmpDir } from "./helpers/tmp.ts";
@@ -218,4 +218,82 @@ test("wildcard sync retains the installed old skill and lock after a colliding U
   assert.equal(readFileSync(join(target, "skills/old/SKILL.md"), "utf8"), OLD);
   assert.equal(existsSync(join(target, "skills/partial")), false);
   assert.deepEqual(readLock(lockPath), oldLock);
+});
+
+// ---- sweep (k74) ------------------------------------------------------------
+// What a run that failed or died leaves in the cache root is swept by the next run that
+// holds the sync lock (spec §6.5). Asserts: after publication and restoration both failed
+// (the cache dir gone, the last good tree only in `<hash>.backup-*/tree`), the sweep moves
+// that tree back into place and drops the backup, so an offline resolve serves the last
+// good cache again instead of failing.
+test("k74: sweep restores a last good cache left only in a backup; offline resolve serves it", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const src = new UrlSource({ url: URL, cacheRoot: tmp.dir });
+  t.mock.method(globalThis, "fetch", async () => response(goodArchive(), '"old"'));
+  const first = await src.resolve();
+  t.mock.method(globalThis, "fetch", async () => response(newArchive(), '"new"'));
+  const originalRename = fs.renameSync;
+  let renames = 0;
+  const mock = t.mock.method(fs, "renameSync", (...args: Parameters<typeof renameSync>) => {
+    if (++renames > 1) throw new Error("injected rename failure");
+    return originalRename(...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(() => src.resolve(first.version), /last good cache remains at/);
+  } finally {
+    mock.mock.restore();
+    syncBuiltinESMExports();
+  }
+  assert.equal(existsSync(first.dir), false);
+  sweepUrlCache(tmp.dir);
+  assert.deepEqual(readdirSync(tmp.dir), [basename(first.dir)], "the backup is gone, the cache is back");
+  assert.equal(readFileSync(join(first.dir, "skills/old/SKILL.md"), "utf8"), OLD);
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("offline"); });
+  const offline = await src.resolve(first.version);
+  assert.equal(offline.version, first.version);
+  assert.match(offline.warning ?? "", /using cache/);
+});
+
+// Asserts: a stage tree is removed whether or not its cache exists; a backup is removed when
+// its cache dir exists (published, cleanup failed) or when it holds no tree; the cache dir
+// itself, a git cache and names the url backend never creates are left as they are.
+test("k74: sweep removes stage trees and obsolete backups, nothing else", () => {
+  const tmp = makeTmpDir();
+  try {
+    const put = (rel: string, data = "x") => {
+      mkdirSync(join(tmp.dir, rel, ".."), { recursive: true });
+      writeFileSync(join(tmp.dir, rel), data);
+    };
+    const published = "0123456789abcdef";
+    put(`${published}/skills/new/SKILL.md`, "NEW");
+    put(`${published}.stage-Ab12Cd/skills/half/SKILL.md`);
+    put(`${published}.backup-Ef34Gh/tree/skills/old/SKILL.md`);
+    mkdirSync(join(tmp.dir, "fedcba9876543210.backup-Ij56Kl")); // died before the first rename
+    put("fedcba9876543210.stage-Mn78Op/skills/half/SKILL.md"); // died while extracting a first fetch
+    put("00112233445566ff/.git/HEAD", "ref: refs/heads/main\n"); // a git cache
+    put("notes.stage-Qr90St/keep.txt"); // not a cache name
+    put(`${published}.stage-/keep.txt`); // no mkdtemp suffix
+    sweepUrlCache(tmp.dir);
+    assert.deepEqual(readdirSync(tmp.dir).sort(), ["00112233445566ff", published, `${published}.stage-`, "notes.stage-Qr90St"]);
+    assert.equal(readFileSync(join(tmp.dir, published, "skills/new/SKILL.md"), "utf8"), "NEW");
+    assert.equal(existsSync(join(tmp.dir, "fedcba9876543210")), false, "an empty backup restores nothing");
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// Asserts: the sweep never throws – a missing cache root and a cache root that is a file
+// are no error (it runs on the hook path, spec §8).
+test("k74: sweep of a missing or unreadable cache root is silent", () => {
+  const tmp = makeTmpDir();
+  try {
+    sweepUrlCache(join(tmp.dir, "missing"));
+    writeFileSync(join(tmp.dir, "file"), "not a dir");
+    sweepUrlCache(join(tmp.dir, "file"));
+    assert.deepEqual(readdirSync(tmp.dir), ["file"]);
+  } finally {
+    tmp.cleanup();
+  }
 });

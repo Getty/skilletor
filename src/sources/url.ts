@@ -9,8 +9,12 @@
 // single GitHub-style top-level directory is stripped. Offline with a cache
 // reuses it and warns; without a cache it errors. Production is https-only;
 // `allowHttp` (tests only) permits http://127.0.0.1.
+//
+// An update is extracted into `<hash>.stage-*` and swapped in through `<hash>.backup-*`;
+// what a run that died leaves of these, `sweepUrlCache` clears – the engine calls it only
+// while it holds the sync lock, under which every resolve runs (spec §6.5).
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve as resolvePath, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 import type { Source, SourceLocation } from "./types.ts";
@@ -234,7 +238,8 @@ function publishEntries(dir: string, entries: TarEntry[]): string | undefined {
     published = true;
   } finally {
     // Keep the backup if restoration failed. This is not crash-atomic: a process
-    // killed between the two renames can leave the old tree only in the backup.
+    // killed between the two renames can leave the old tree only in the backup –
+    // sweepUrlCache puts it back.
     const obsolete = [staging, ...(backup && (!oldMoved || published) ? [backup] : [])];
     for (const path of obsolete) {
       try {
@@ -245,6 +250,48 @@ function publishEntries(dir: string, entries: TarEntry[]): string | undefined {
     }
   }
   return cleanupWarnings.length ? cleanupWarnings.join("; ") : undefined;
+}
+
+/** A stage or backup tree `publishEntries` makes next to a cache dir (`<hash>` of cacheDir). */
+const LEFTOVER = /^([0-9a-f]{16})\.(stage|backup)-[A-Za-z0-9]{6}$/;
+
+/**
+ * Clear what a run that failed or died left of an update in `cacheRoot`: a stage tree goes;
+ * a backup whose cache dir is missing holds the last good cache (a run killed between the two
+ * renames, or one whose restoration failed) and is renamed back into place; any other backup
+ * goes. Only safe while no resolve can run – the caller holds the sync lock (spec §6.5).
+ * Never throws: whatever cannot be cleared now is tried again by the next run.
+ */
+export function sweepUrlCache(cacheRoot: string): void {
+  let names: string[];
+  try {
+    names = readdirSync(cacheRoot).sort();
+  } catch {
+    return; // no cache yet, or none readable: nothing to sweep
+  }
+  for (const name of names) {
+    const m = LEFTOVER.exec(name);
+    if (!m) continue;
+    const path = join(cacheRoot, name);
+    try {
+      if (m[2] === "backup") {
+        const dir = join(cacheRoot, m[1]!);
+        const tree = join(path, "tree");
+        if (!existsSync(dir) && isRealDir(tree)) renameSync(tree, dir);
+      }
+      rmSync(path, { recursive: true, force: true });
+    } catch {
+      // left for the next run
+    }
+  }
+}
+
+function isRealDir(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 function writeEntries(dir: string, entries: TarEntry[]): void {

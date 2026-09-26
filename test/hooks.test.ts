@@ -605,3 +605,34 @@ test("k50: a scope Codex is not a target of contributes no rules, even with a st
     e.cleanup();
   }
 });
+
+// k74 (spec §6.5, §8): every sync, the hooks' too, first sweeps what a dead run left in the
+// source cache, under the sync lock. Asserts: SessionStart syncs and reports exactly as it
+// would without leftovers (no word about the sweep), and the leftovers are gone; with a cache
+// root that cannot be read (a file), the hook reports the same and never throws.
+test("k74: session-start's sync sweeps cache leftovers silently; an unreadable cache root changes nothing", async () => {
+  for (const broken of [false, true]) {
+    const e = env();
+    try {
+      const src = localSkill(e.tmp.dir, "s", "foo");
+      e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+      const cache = join(e.tmp.dir, "cache");
+      if (broken) {
+        writeFileSync(cache, "not a dir");
+      } else {
+        mkdirSync(join(cache, "0123456789abcdef/skills/new"), { recursive: true });
+        mkdirSync(join(cache, "0123456789abcdef.stage-Ab12Cd/skills/half"), { recursive: true });
+        mkdirSync(join(cache, "0123456789abcdef.backup-Ef34Gh/tree/skills/old"), { recursive: true });
+      }
+      const out = await runHook("session-start", { source: "startup" }, { ...e.ctx, cacheRoot: cache });
+      assert.deepEqual(out, {
+        systemMessage: "skilletor: 1 item(s) updated",
+        hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: "skilletor synced items:\n- skill foo@mine: active now" },
+      }, broken ? "unreadable cache root" : "with leftovers");
+      if (broken) assert.equal(readFileSync(cache, "utf8"), "not a dir");
+      else assert.deepEqual(readdirSync(cache), ["0123456789abcdef"]);
+    } finally {
+      e.cleanup();
+    }
+  }
+});

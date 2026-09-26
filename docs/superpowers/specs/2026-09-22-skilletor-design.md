@@ -223,7 +223,9 @@ name is `skills` everywhere.
 A `url` update is extracted into a staging tree and replaces the cache only after a complete
 extraction; a failed download, decompression or extraction keeps the last good cache and
 its version, with one warning (k68). An unsafe archive is rejected; the source then counts
-as unresolvable and keeps its items (§6.1).
+as unresolvable and keeps its items (§6.1). A run killed while swapping the trees can leave
+the last good cache only in its backup; the next run that takes the sync lock puts it back
+(§6.5, k74).
 
 The git cache is kept per URL and ref; an unpinned source uses the URL alone, so two pins
 of one URL never share a checkout, and caches written before 0.3.1 are not reused for an
@@ -444,6 +446,22 @@ the block is deleted. Content outside the block is never touched.
 `pending-report.json`, `unreached.json` (per lock, the drift the last sync could not reach,
 §14.3), `sync.lock/` (mkdir mutex with a stale timeout against parallel sessions).
 `CLAUDE_PLUGIN_DATA` is not used, so the CLI runs identically without Claude Code.
+
+`sync.lock/` guards the locks, the target dirs and the source cache: every run that resolves
+a source holds it while it resolves and reads the resolved trees – `sync` (the hooks'
+included), `available`, and `install` while it plans; `install` releases it before it asks
+about a bundle's missing sources (§15.6) and before its sync, which takes it again. A run
+waits up to 5 s for another holder, then fails with `timed out acquiring sync lock`;
+`SessionStart` turns that into its one warning line (§8), a background sync leaves no
+report. A lock whose owner record is older than 5 minutes counts as left by a dead run and
+is broken. `check` and `status` fetch nothing into the cache and take no lock (k74).
+
+A run that takes the lock first sweeps what a run that failed or died left of a `url` update
+(§4.4) in `cache/`: a `<hash>.stage-*` tree goes; a `<hash>.backup-*` goes too, unless its
+cache dir `<hash>` is missing – then the backup holds the last good cache and is moved back
+into place. Stage and backup trees are only made inside a resolve, and no other run can be
+inside one while this one holds the lock, so a live run's trees are never touched. The sweep
+is silent and never fails a run; what it cannot clear, the next run tries again (k74).
 
 ### 6.6 Error behavior
 

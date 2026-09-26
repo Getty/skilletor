@@ -26,7 +26,7 @@ import { atomicWrite, hashBuffer, sameFile, samePath } from "./fsutil.ts";
 import { convertForTarget } from "./convert.ts";
 import { expandHome, LocalSource } from "./sources/local.ts";
 import { GitSource } from "./sources/git.ts";
-import { UrlSource } from "./sources/url.ts";
+import { sweepUrlCache, UrlSource } from "./sources/url.ts";
 import type { Source } from "./sources/types.ts";
 import { scan, type Catalog } from "./catalog.ts";
 import { build, rendersEmpty, type RenderContext } from "./render.ts";
@@ -302,9 +302,23 @@ function mergeChainVars(
 
 // ---- sync -------------------------------------------------------------------
 
-export async function sync(ctx: EngineContext, opts: SyncOptions = {}): Promise<SyncReport> {
+/**
+ * Run `fn` holding `sync.lock/` (spec §6.5), the one mutex over the locks, the target dirs
+ * and the source cache: every resolve – a sync's, `available`'s, `install`'s – and every read
+ * of a resolved tree runs under it. It waits for another holder up to the lock timeout, then
+ * throws. Before `fn` it sweeps what a run that failed or died left in the cache: while this
+ * run holds the lock, no other can be inside a resolve.
+ */
+export function withSyncLock<T>(ctx: EngineContext, fn: (state: State) => Promise<T>): Promise<T> {
   const state = new State(ctx.stateRoot);
-  return state.withLock(() => syncInner(scoped(ctx), opts, state));
+  return state.withLock(() => {
+    sweepUrlCache(cacheRootOf(ctx));
+    return fn(state);
+  });
+}
+
+export async function sync(ctx: EngineContext, opts: SyncOptions = {}): Promise<SyncReport> {
+  return withSyncLock(ctx, (state) => syncInner(scoped(ctx), opts, state));
 }
 
 async function syncInner(ctx: EngineContext, opts: SyncOptions, state: State): Promise<SyncReport> {

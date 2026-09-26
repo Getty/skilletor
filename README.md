@@ -632,6 +632,12 @@ runs anyway. `--project-dir` goes with every command; any other option a command
 list is an error (exit 2, nothing runs). `-h`/`--help` anywhere prints the usage and runs
 nothing (`sync --help` does not sync); `-v`/`--version` only as the first argument.
 
+Every command that fetches sources — `sync`, `available`, `install`, and the sync that
+`add`, `uninstall` and `source remove` run — shares one lock with the hooks, so two runs
+never write the source cache or your items at once. While another skilletor run holds it
+(a session's sync, say), a command waits up to 5 s, then stops with `timed out acquiring
+sync lock`; run it again.
+
 ## Requirements
 
 - Node.js ≥ 18 and `git`. The only bundled runtime dependency is Nunjucks.

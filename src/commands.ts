@@ -11,8 +11,8 @@ import { BundleError, expandBundle, matchesPattern, sameIdentity, type ForeignEn
 import { resolveSpec, type Probe } from "./spec.ts";
 import { makeProbe } from "./probe.ts";
 import {
-  bundleLabel, servingSource, cacheRootOf, makeBackend, projectDirOf, resolveBackend, sourcesOf, sync, type EngineContext,
-  type ResolvedBackend,
+  bundleLabel, servingSource, cacheRootOf, makeBackend, projectDirOf, resolveBackend, sourcesOf, sync, withSyncLock,
+  type EngineContext, type ResolvedBackend,
 } from "./engine.ts";
 import type { SyncReport } from "./report.ts";
 import { scan, type Catalog } from "./catalog.ts";
@@ -134,11 +134,17 @@ export interface AvailableItem {
 
 export async function cmdAvailable(ctx: CommandContext, args: { source?: string } = {}): Promise<AvailableItem[]> {
   const config = load(ctx);
-  const state = new State(ctx.stateRoot);
   const installedKeys = installedSet(ctx, config);
   const declaredBundles = new Set([...config.user.bundles, ...(config.project?.bundles ?? [])].map(bundleLabel));
   const names = args.source ? [args.source] : [...config.sources.keys()];
+  // A resolve writes the source cache, a scan reads it: under the sync lock (spec §6.5).
+  return withSyncLock(ctx, (state) => listAvailable(ctx, config, state, names, installedKeys, declaredBundles));
+}
 
+async function listAvailable(
+  ctx: CommandContext, config: LoadedConfig, state: State, names: string[], installedKeys: Set<string>,
+  declaredBundles: Set<string>,
+): Promise<AvailableItem[]> {
   const out: AvailableItem[] = [];
   for (const name of names) {
     // What `install` would read: the user config's definition for a user source (the user
@@ -203,7 +209,7 @@ export async function cmdInstall(
   // Plan every edit first: a failure (or a missing source without a TTY) edits nothing.
   const edits: (() => void)[] = [];
   const bundles: { name: string; foreign: ForeignEntry[] }[] = [];
-  for (const spec of args.items) {
+  const planItem = async (spec: string): Promise<void> => {
     const { type: explicitType, bundle, name, source } = parseItemSpec(spec);
     const src = sources.get(source);
     if (!src) {
@@ -217,7 +223,7 @@ export async function cmdInstall(
     if (name.includes(WILDCARD)) {
       // Expanded at sync time; an empty match is fine here (items may arrive later).
       edits.push(() => addInstallEntry(path, explicitType!, `${name}@${source}`));
-      continue;
+      return;
     }
     const cat = await catalogOf(source, backend);
     const hasBundle = cat.bundles.some((b) => b.name === name);
@@ -226,7 +232,7 @@ export async function cmdInstall(
     if (bundle || (!explicitType && hasBundle && matches.length === 0)) {
       bundles.push({ name, foreign: checkBundle(cat, name, source) });
       edits.push(() => addBundleEntry(path, `${name}@${source}`));
-      continue;
+      return;
     }
     if (matches.length === 0) {
       const suggestions = cat.items.map((i) => `${i.type}:${i.name}`).slice(0, 8).join(", ");
@@ -239,7 +245,12 @@ export async function cmdInstall(
     }
     const type = matches[0]!.type;
     edits.push(() => addInstallEntry(path, type, `${name}@${source}`));
-  }
+  };
+  // Resolving writes the source cache, planning reads it: under the sync lock (spec §6.5),
+  // released before any question and before the sync, which takes it itself.
+  await withSyncLock(ctx, async () => {
+    for (const spec of args.items) await planItem(spec);
+  });
   const additions = await missingSources(ctx, config, bundles, Boolean(args.project));
   for (const a of additions) {
     edits.push(() => {
