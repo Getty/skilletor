@@ -115,6 +115,10 @@ Only `skill`, `agent` and `rule` are installable — skilletor never syncs hooks
 `settings.json` or MCP configs. An optional `"targets"` key picks the harnesses to install
 for (`claude`, `codex`) — see [Codex](#codex).
 
+A source's `git`, `ref` or `local`, when present, must be a non-empty string (omit `ref`
+for the remote's HEAD, never `""`), and `url` an `https://` URL. Anything else is a config
+error naming the file, the source and the key — never a field quietly read as absent.
+
 `skilletor uninstall` removes explicit entries from one config — the user config, or the
 project config with `--project`. `rule:k8s@shared` removes only from `rules`;
 `k8s@shared` removes from every list. Every item is checked before anything is edited:
@@ -596,6 +600,10 @@ rendered. This is the same trust level as installing a plugin.
   against your user config's sources alone. A project field merged into one of your
   sources (a `local` path, say) counts as the project's and needs its own trust; your
   own `local` override (author mode) stays trusted.
+- What a config, a source or git's output puts into a report — a source name, an address,
+  an error — shows control characters, terminal escapes and Unicode bidi overrides escaped
+  (`\u001b`, `‮`, a newline as `\n`), in the hook's session context and on the CLI
+  alike, so it cannot recolor, move or hide text in your terminal or in the model's context.
 - Fixed target directories per harness; item names, tar entries and includes may not escape the
   source or target root; symlinks in sources are rejected; `url` is HTTPS-only.
 - skilletor never writes or deletes through a linked skill directory or item file: a link

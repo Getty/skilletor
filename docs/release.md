@@ -25,7 +25,8 @@ explicit go-ahead. Everything before step 4 is local and can run anytime.
 
 ## Marketplace entries (Getty/marketplace)
 
-The description follows `.claude-plugin/plugin.json`.
+Each entry's description is its harness's plugin manifest description, verbatim: the
+Claude entry `.claude-plugin/plugin.json`'s, the Codex entry `.codex-plugin/plugin.json`'s.
 
 Claude (`.claude-plugin/marketplace.json`, `plugins`):
 
@@ -33,7 +34,7 @@ Claude (`.claude-plugin/marketplace.json`, `plugins`):
 {
   "name": "skilletor",
   "source": { "source": "github", "repo": "Getty/skilletor" },
-  "description": "Remote skills, agents and rules for Claude Code and Codex — declared once in skilletor.json, synced on every session, templated per project. The preferred successor to manage-skills.",
+  "description": "Remote skills, agents and rules for Claude Code and Codex — declared once in skilletor.json, synced on every session, templated per project. Adds sources like marketplaces and puts the skilletor CLI on PATH.",
   "license": "MIT",
   "homepage": "https://github.com/Getty/skilletor",
   "category": "productivity",
@@ -46,7 +47,7 @@ Codex (`.agents/plugins/marketplace.json`, `plugins`):
 ```json
 {
   "name": "skilletor",
-  "description": "Remote skills, agents and rules for Codex and Claude Code — declared once in skilletor.json, synced on every session, templated per project.",
+  "description": "Remote skills, agents and rules for Codex and Claude Code — declared once in skilletor.json, synced on every session, templated per project. For Codex: skills in .agents/skills, agents as agent-role TOML, rules injected at session start by the hook.",
   "source": { "source": "url", "url": "https://github.com/Getty/skilletor.git", "ref": "main" },
   "policy": { "installation": "AVAILABLE", "authentication": "ON_USE" },
   "category": "Productivity"
