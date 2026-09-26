@@ -254,6 +254,10 @@ files in the cache; the next run that takes the sync lock removes them once stal
 A cache it was creating – a `.git` that `git init` never finished, a repo without `origin` –
 the next resolve completes before it fetches, keeping its objects; git never takes a
 repository above the cache for it, and one without a commit is no cache to fall back to (k90).
+Every git skilletor runs – in a cache, `ls-remote`, a question about the project (§6.4) – drops
+git's repository-local variables (`git rev-parse --local-env-vars`: `GIT_DIR`, `GIT_WORK_TREE`,
+`GIT_INDEX_FILE`, …) but the command-line config, as git does for a submodule, so it acts on the
+repository at its directory, never on one an exported `GIT_DIR` names (a git hook, k91).
 
 ## 5. Templating
 
@@ -659,7 +663,7 @@ src/apply.ts                    # diff, write atomically, clean up
 src/gitignore.ts                # managed .gitignore blocks (§6.4)
 src/briefing.ts                 # briefing check for installed agents (§6.7)
 src/lock.ts  src/state.ts       # lock; trust, last-check, pending-report, mutex
-src/hooks.ts  src/report.ts  src/fsutil.ts
+src/hooks.ts  src/report.ts  src/fsutil.ts  src/gitenv.ts
 test/
 ```
 

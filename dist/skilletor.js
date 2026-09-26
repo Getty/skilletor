@@ -7159,6 +7159,28 @@ function codexHookTrusted(codexHome) {
   return false;
 }
 
+// src/gitenv.ts
+var REPO_LOCAL_VARS = [
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CONFIG",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_GRAFT_FILE",
+  "GIT_INDEX_FILE",
+  "GIT_NO_REPLACE_OBJECTS",
+  "GIT_REPLACE_REF_BASE",
+  "GIT_PREFIX",
+  "GIT_SHALLOW_FILE",
+  "GIT_COMMON_DIR"
+];
+function gitEnv(extra = {}) {
+  const env = { ...process.env };
+  for (const name of REPO_LOCAL_VARS) delete env[name];
+  return { ...env, GIT_TERMINAL_PROMPT: "0", ...extra };
+}
+
 // src/toml.ts
 var TomlWriteError = class extends Error {
   name = "TomlWriteError";
@@ -7437,11 +7459,8 @@ var GitSource = class {
           timeout: timeoutMs ?? this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
           // In a cache, git takes its `.git` or no repository (k90): one a killed `git init` left
           // unfinished is none to git, which would look further up – `~/.claude` may be a repo.
-          env: {
-            ...process.env,
-            GIT_TERMINAL_PROMPT: "0",
-            ...cwd ? { GIT_CEILING_DIRECTORIES: resolvePath(cwd, "..") } : {}
-          },
+          // Never one an exported GIT_DIR or GIT_WORK_TREE names (k91).
+          env: gitEnv(cwd ? { GIT_CEILING_DIRECTORIES: resolvePath(cwd, "..") } : {}),
           maxBuffer: 32 * 1024 * 1024
         },
         (err, stdout, stderr) => {
@@ -8819,7 +8838,7 @@ function gitTracked(dir, paths) {
       const listed = execFileSync(
         "git",
         ["-C", dir, "--literal-pathspecs", "ls-files", "-z", "--", ...paths.slice(i, i + LS_FILES_BATCH)],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5e3 }
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5e3, env: gitEnv() }
       );
       out.push(...listed.split("\0").filter(Boolean));
     } catch {
@@ -8833,7 +8852,8 @@ function isGitWorkTree(dir) {
     return execFileSync("git", ["-C", dir, "rev-parse", "--is-inside-work-tree"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5e3
+      timeout: 5e3,
+      env: gitEnv()
     }).trim() === "true";
   } catch {
     return false;
@@ -9150,7 +9170,8 @@ function gitRemote(dir) {
   try {
     return execFileSync2("git", ["-C", dir, "remote", "get-url", "origin"], {
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
+      stdio: ["ignore", "pipe", "ignore"],
+      env: gitEnv()
     }).trim();
   } catch {
     return "";
@@ -9942,7 +9963,8 @@ function makeProbe(timeoutMs = 5e3) {
         // `--`: never an option (k85)
         stdio: "ignore",
         timeout: timeoutMs,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+        env: gitEnv()
+        // never steered by an exported GIT_DIR's config (k91)
       });
       return { git: true };
     } catch {
@@ -10383,7 +10405,8 @@ function projectRootOf(cwd) {
     const top = execFileSync4("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      timeout: 2e3
+      timeout: 2e3,
+      env: gitEnv()
     }).trim();
     return top || cwd;
   } catch {

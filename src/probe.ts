@@ -3,6 +3,7 @@
 // Probe interface is sync); the HEAD is done in a short-lived child node so we
 // can await fetch without making resolveSpec async.
 import { execFileSync } from "node:child_process";
+import { gitEnv } from "./gitenv.ts";
 import type { Probe } from "./spec.ts";
 
 export function makeProbe(timeoutMs = 5_000): Probe {
@@ -11,7 +12,7 @@ export function makeProbe(timeoutMs = 5_000): Probe {
       execFileSync("git", ["ls-remote", "--", baseUrl], { // `--`: never an option (k85)
         stdio: "ignore",
         timeout: timeoutMs,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+        env: gitEnv(), // never steered by an exported GIT_DIR's config (k91)
       });
       return { git: true };
     } catch {

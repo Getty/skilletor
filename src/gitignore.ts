@@ -8,11 +8,14 @@
 // which root gets which entries. Content outside the block is untouched; the block is
 // rewritten idempotently (no change → no write). A block with no entries, or with
 // gitignore disabled, is removed, and the file is deleted if only the block remained.
-// `gitTracked` answers which managed paths git still tracks, for the report's warning.
+// `gitTracked` answers which managed paths git still tracks, for the report's warning. Both
+// questions are about the repository git finds from the directory, never one an exported GIT_DIR
+// names (k91).
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "./fsutil.ts";
+import { gitEnv } from "./gitenv.ts";
 
 const BEGIN = "# >>> skilletor >>>";
 const END = "# <<< skilletor <<<";
@@ -130,7 +133,7 @@ export function gitTracked(dir: string, paths: string[]): string[] {
     try {
       const listed = execFileSync(
         "git", ["-C", dir, "--literal-pathspecs", "ls-files", "-z", "--", ...paths.slice(i, i + LS_FILES_BATCH)],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 },
+        { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000, env: gitEnv() },
       );
       out.push(...listed.split("\0").filter(Boolean));
     } catch {
@@ -147,6 +150,7 @@ export function isGitWorkTree(dir: string): boolean {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 5_000,
+      env: gitEnv(),
     }).trim() === "true";
   } catch {
     return false;

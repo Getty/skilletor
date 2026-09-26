@@ -23,6 +23,7 @@ import {
   type Inspection, type Section,
 } from "./agentsmd.ts";
 import { atomicWrite, hashBuffer, sameFile, samePath } from "./fsutil.ts";
+import { gitEnv } from "./gitenv.ts";
 import { convertForTarget } from "./convert.ts";
 import { expandHome, LocalSource } from "./sources/local.ts";
 import { GitSource, sweepGitCache } from "./sources/git.ts";
@@ -268,11 +269,13 @@ function userClaudeEntries(claudeDir: string, stateRoot: string): string[] {
   return ["skilletor.lock.json", ...(under ? [rel.split(sep).join("/") + "/"] : []), ...LOCAL_ENTRIES];
 }
 
+/** The project's `origin` – of the repository found from `dir`, never an exported GIT_DIR's (k91). */
 function gitRemote(dir: string): string {
   try {
     return execFileSync("git", ["-C", dir, "remote", "get-url", "origin"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      env: gitEnv(),
     }).trim();
   } catch {
     return "";

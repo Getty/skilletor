@@ -15,11 +15,12 @@
 // The lock files a git killed midway leaves in a cache, `sweepGitCache` clears – the engine
 // calls it only while it holds the sync lock, under which every resolve runs (spec §6.5).
 // A cache a killed run was creating, resolve completes before it fetches (k90); in a cache,
-// git never looks for a repository above it.
+// git never looks for a repository above it, nor takes one an exported GIT_DIR names (k91).
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, rmSync, type Dirent } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
+import { gitEnv } from "../gitenv.ts";
 import type { Source, SourceLocation } from "./types.ts";
 
 export interface GitSourceOptions {
@@ -57,10 +58,8 @@ export class GitSource implements Source {
           timeout: timeoutMs ?? this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
           // In a cache, git takes its `.git` or no repository (k90): one a killed `git init` left
           // unfinished is none to git, which would look further up – `~/.claude` may be a repo.
-          env: {
-            ...process.env, GIT_TERMINAL_PROMPT: "0",
-            ...(cwd ? { GIT_CEILING_DIRECTORIES: resolvePath(cwd, "..") } : {}),
-          },
+          // Never one an exported GIT_DIR or GIT_WORK_TREE names (k91).
+          env: gitEnv(cwd ? { GIT_CEILING_DIRECTORIES: resolvePath(cwd, "..") } : {}),
           maxBuffer: 32 * 1024 * 1024,
         },
         (err, stdout, stderr) => {

@@ -15,6 +15,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { loadConfig, type Harness } from "./config.ts";
 import { State } from "./state.ts";
+import { gitEnv } from "./gitenv.ts";
 import { check, codexRulesFiles, projectDirOf, sync, type CheckReport, type EngineContext } from "./engine.ts";
 import { emptyScopeReport, reportHook, type SyncReport } from "./report.ts";
 
@@ -59,13 +60,17 @@ function toOutput(report: SyncReport, eventName: string): HookOutput {
   };
 }
 
-/** The project root for a cwd: its git top level, else the cwd itself. Never throws. */
+/**
+ * The project root for a cwd: its git top level – of the repository found from the cwd, never
+ * one an exported GIT_DIR names (k91) – else the cwd itself. Never throws.
+ */
 export function projectRootOf(cwd: string): string {
   try {
     const top = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 2_000,
+      env: gitEnv(),
     }).trim();
     return top || cwd;
   } catch {
