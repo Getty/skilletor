@@ -1,0 +1,28 @@
+---
+class: standard
+completed: 2026-09-26T16:48:26Z
+created: 2026-09-26T16:11:09Z
+id: 90
+priority: low
+started: 2026-09-26T16:35:20Z
+status: done
+tags:
+- sources
+- cache
+title: 'sources/git: a cache killed between git init and remote add never recovers'
+updated: 2026-09-26T16:48:36Z
+---
+
+Found during k84 (worker), confirmed with GitSource. resolve() treats a dir with .git as an existing repo and only runs `remote set-url` (error ignored); a cache whose run was killed after `git init` but before `remote add origin` has no origin, so every fetch fails and there is no good commit to fall back to – the source fails every sync until the cache dir is deleted by hand. Fix: treat a cache repo without an origin remote or without a commit (rev-parse HEAD fails) as no cache and re-init it (under the sync lock, like the k84 sweep). Test: plant `git init` only in the cache dir → next resolve succeeds.
+
+2026-09-26 16:39 Started. Confirmed every resolve runs under withSyncLock: sync (runResolver), available (listAvailable), install (planItem/catalogOf); check() only runs ls-remote with no cwd. Reproducing next.
+
+2026-09-26 16:42 Cause confirmed: set-url on a no-origin repo exits 2 (ignored), fetch then fails, fallback rev-parse HEAD fails (no commit) -> error every sync. 'origin, no commit' offline already errors (version() throws, not PinMismatch) - guard test only. Also found: a .git a killed 'git init' left unfinished (empty dir) is not a repo to git, so commands in the cache walk up to an enclosing repo (verified: rev-parse --absolute-git-dir returns the outer .git). Cache is ~/.claude/skilletor/cache, and ~/.claude is often versioned: set-url/fetch/reset --hard would hit it. My remote add would widen that to enclosing repos without origin, so I bound discovery with GIT_CEILING_DIRECTORIES=<cache root> for cache runs and let the repair path re-run 'git init' (completes a partial .git, no-op on a whole one - verified).
+
+2026-09-26 16:45 Also found (for this board, proposed new ticket, priority high): cache git runs pass the user's GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE etc. through ({...process.env} in GitSource.run). Reproduced in a scratch dir with GitSource directly: GIT_DIR=<a repo> exported, a first resolve added origin=<source url> to that repo and moved its HEAD branch to the source's commit. The GIT_CEILING_DIRECTORIES guard from this card does not help (an explicit GIT_DIR bypasses discovery). Likely fix: drop the names 'git rev-parse --local-env-vars' lists for cache runs (decide on GIT_CONFIG_PARAMETERS/COUNT, which carry -c auth config). Pre-existing, independent of k90's paths.
+
+2026-09-26 16:45 Also found (unverified, proposed ticket, low): a run killed inside 'git reset --hard' on an existing cache leaves files of the new commit in the worktree while HEAD still names the old one (git updates the ref after checkout). The offline fallback, and the online path while the fresh index.lock blocks reset (until the k84 sweep, 5 min), would serve that mixed tree under the old version. Left open here: a run killed inside 'remote add' between its two config writes (url written, fetch refspec not). repair() sees a matching url and leaves it. Only the abbreviated-SHA-pin fallback 'git fetch origin' uses the refspec.
+
+2026-09-26 16:46 Done: GitSource.resolve() repairs an existing cache before fetching (repair()). It reads origin with 'config --local --get'. Missing: 'git init -q' (finishes a .git a killed init left, no-op on a whole repo) then 'remote add', so no deletion and objects are kept. Different address: set-url, and a failure now fails the fetch. Equal: no write at all. Cache git runs set GIT_CEILING_DIRECTORIES=<cache root> so git never takes a repo above the cache. Before, a half-made .git made set-url/fetch/reset --hard run in an enclosing repo (e.g. a versioned ~/.claude); reproduced in a test. Offline, a cache without a commit already errored (version() throws), now covered by tests. Tests in test/git-cache.test.ts (12 new; 4 red before the fix, the guards checked by mutation). Spec 4.4 got one sentence. Verified: typecheck, npm test 622/622, build, check-dist clean.
+
+2026-09-26 16:48 Committed d155c0c on main.
