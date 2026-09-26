@@ -15,10 +15,10 @@ lane are in `.claude/rules/skilletor-rules.md`.
 | Implement / refactor / debug the engine, tests, hooks, build | `skilletor-worker` (default) |
 | Judge quality or strength of a skill, agent, rule, source, eval | `skilletor-skill-auditor` |
 | Write, rework, shrink or merge a skill, agent, rule, `.njk` item | `skilletor-skill-author` |
-| Pre-release audit | `skilletor-release-checker` |
+| Commits, `Changes`, card → done, pre-release audit | `skilletor-release-manager` |
 
 The agents carry their skills via `briefing.skills` (see `.claude/agents/`);
 the main agent delegates rather than loading them. Project skills live under
 `.claude/skills/` (`skilletor-core`, `skill-assessment`,
-`kanban-issues-karr-cli`); the shared authoring
+`kanban-issues-karr-coordination`); the shared authoring
 skills come from `~/.claude/skills/`. Tickets: `karr board`.

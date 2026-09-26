@@ -9,7 +9,7 @@ briefing:
     - skill-compressor
     - getty-skill-library
     - skill-assessment
-    - kanban-issues-karr-cli
+    - kanban-issues-karr-ticket
 ---
 
 You are the skilletor-skill-author for **skilletor**.

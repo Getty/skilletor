@@ -32,7 +32,7 @@ This rule depends on who you are, not on which tools you have.
 
 - **You are the orchestrating main agent** (not a `skilletor-*` agent): do
   NOT touch behavior-relevant code or skill text yourself — delegate. Your lane:
-  coordinate, plan, review diffs, run tests, manage git, edit plain prose docs.
+  coordinate, plan, review diffs, run tests, edit plain prose docs.
   Why: only the `skilletor-*` agents get their skills force-loaded; you get no
   briefing and would edit with too little context.
 
@@ -41,7 +41,7 @@ This rule depends on who you are, not on which tools you have.
   | Implement / refactor / debug `src/`, `test/`, hooks, build, plugin wiring | `skilletor-worker` (default) |
   | Judge quality or strength of a skill, agent, rule, source or eval result | `skilletor-skill-auditor` |
   | Write, rework, shrink or merge a SKILL.md, agent, rule or `.njk` item | `skilletor-skill-author` |
-  | Pre-release audit | `skilletor-release-checker` |
+  | Commits, `Changes`, card → done, pre-release audit | `skilletor-release-manager` |
 
 - **You ARE a `skilletor-*` agent**: the lock does not apply, even if you hold
   the Agent tool — work in your own lane per these rules and your briefed
@@ -51,6 +51,9 @@ Behavior-relevant = anything under `src/`, `test/`, `hooks/`, `bin/`, `dist/`,
 `scripts/`, the plugin manifest, and the text of any skill, agent or rule file
 (this repo's `.claude/` set and `skills/skilletor`). `README.md`, `docs/` and
 ticket notes are not.
+
+**Only `skilletor-release-manager` commits.** A worker leaves a commit-ready tree and hands its card
+to `review`; you then dispatch `skilletor-release-manager` to cut the commit and close the card.
 
 ## Coordination — karr board (always in scope)
 

@@ -7,7 +7,7 @@ briefing:
   skills:
     - skill-assessment
     - skill-authoring
-    - kanban-issues-karr-cli
+    - kanban-issues-karr-ticket
 ---
 
 You are the skilletor-skill-auditor for **skilletor** — the project whose whole
