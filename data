@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-26T22:59:02Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-26T22:59:02Z
+created: 2026-09-26T22:53:58Z
+id: 106
+priority: high
+started: 2026-09-26T22:59:02Z
+status: done
+tags:
+- test
+- flaky
+title: 'test: k87''s git timeout test is flaky under a full suite run'
+updated: 2026-09-26T22:59:02Z
+---
+
+Found during k105 (worker). test/git.test.ts:462 "k87: a git failure's message ends in git's last word, not its trailing newline": its last assertion (~line 481) runs ls-remote with timeoutMs: 1 and expects Node's one-line "Command failed" message. Under a full npm test run git can exit first with its own multi-line error ("does not appear to be a git repository\nfatal: ..."), and /^git ls-remote .*\S$/ (no s flag) cannot match across the line break: 702/703 once, green on rerun and 6/6 alone. The code under test is right; the assertion must accept either outcome (git's own trimmed multi-line error or the timeout message) while still proving the message ends in a non-whitespace character. Must not become a test that cannot fail. Blocks the 0.4.1 push (CI on ubuntu+macos).
+
+2026-09-26 22:56 Reproduced: forcing git's own error (timeoutMs 60000 in a scratch copy) turns the old /^git ls-remote .*\S$/ red on a correct, trimmed message ('...repository\nfatal: Could not read...\n\nPlease make sure...exists.'). Fix (test/git.test.ts only): /^git ls-remote .*: (?:fatal: |Command failed: )[^]*\S$/ - accepts either outcome, still pins git's or Node's words and a non-whitespace end. Mutation check in a scratch copy (shared tree untouched, release in flight): no-trim and trailing \n, scoped to the timeoutMs source, turn line 483 red for both outcomes; unscoped no-trim goes red at the first assertion.
+
+2026-09-26 22:57 Done: test/git.test.ts only. Last k87 assertion now /^git ls-remote .*: (?:fatal: |Command failed: )[^]*\S$/ (accepts git's own trimmed multi-line error or Node's timeout message, still fails on a trailing newline/whitespace); comment above the test states the race instead of the timeout as certain. Verified: both outcomes green when forced (timeoutMs 1 / 60000); mutations (no-trim, trailing \n) red at the new assertion for both outcomes; test alone 10/10; npm run typecheck + npm test twice: 703/703, 0 fail each. No src change, dist not rebuilt. Proposed commit: 'test: k87's timeout assertion accepts git's own multi-line error (k106)'.
+
+2026-09-26 22:58 Committed e076dc9: test: k87's timeout assertion accepts git's own multi-line error (k106)
