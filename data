@@ -1,0 +1,30 @@
+---
+class: standard
+completed: 2026-09-26T22:50:17Z
+created: 2026-09-26T22:37:32Z
+id: 101
+priority: high
+started: 2026-09-26T22:50:17Z
+status: done
+tags:
+- add
+- bug
+title: 'add: a second source with the same derived name silently replaces the first'
+updated: 2026-09-26T22:50:17Z
+---
+
+Found by the coordinator testing v0.4.0 from the marketplace (temp HOME): `skilletor add Getty/karr` stores source "getty" (git https://github.com/Getty/karr); a following `skilletor add Getty` stores "getty" = https://github.com/Getty/skills and karr is gone, no message. config.addSource does sources[name] = def, so re-adding also drops a ref pin or a local override on an existing entry.
+
+Two fixes (decided by the coordinator):
+1. add never replaces a source. If the target config already has a source by that name: same backend and address -> keep the entry as it is (ref, local and other fields stay), still trust and sync (idempotent re-add); a different address -> error, exit 1, config untouched, naming the existing address and the fix (pass a name: `skilletor add <name> <spec>`, or `skilletor source remove <name>` first). Only the file add writes to is checked.
+2. Derived name: a git spec that names a repo other than the default `skills` derives the repo name (normalized, .git stripped), not the owner: Getty/karr -> karr, obra/superpowers -> superpowers, github:Getty/karr, gitlab.com/u/tools, https://github.com/Getty/karr(.git), git@github.com:Getty/karr.git -> repo name. Getty, anthropics, github.com/u, gitlab.com/u/skills, https://github.com/Getty/skills -> owner, as now. Generic probed hosts and url/local unchanged. Existing configs keep their names (names are stored).
+
+Done when: tests red first for both; spec §4.2, README (Sources table/examples, and wherever a derived name is shown), skills/skilletor/SKILL.md updated; dist rebuilt; typecheck, npm test, build, check-dist green; hand test in a temp HOME with a ~/.claude dir: add Getty/karr then add Getty gives two sources karr and getty; add Getty/karr again keeps a ref you set by hand; add <name-of-existing> <other address> fails with exit 1 and leaves the file byte-identical.
+
+2026-09-26 22:42 Tests first, all red for the claimed reason: spec.test.ts k101 rows (15 red: owner derived instead of repo, e.g. obra/superpowers -> obra), commands.test.ts k101 kept/refused (entry replaced, ref+local dropped; no rejection), cli.test.ts k101 black-box (no kept line, exit 0 on other address). Existing rows changed on purpose: github:Getty/repo, Getty/repo -> repo, hf.co/user/repo -> repo, gitlab.com/u/r -> r; bundle no-TTY test clash moved from getty to repo (Getty/repo now derives repo). add --json is rejected (exit 2), so no JSON shape needed.
+
+2026-09-26 22:47 Also found (outside this card, not fixed): (a) install bundle: missing-source path (commands.ts missingSources) checks names against the merged config, not the target file. Reproduced: user file peter={local:X}, project file peter={git:C}, a user-scope bundle naming C -> prompt proposes [peter], accepting replaces the user entry with {git:C} and drops the local override (same class as k101, via config.addSource). Candidate card for this board. (b) add/install/uninstall/source remove exit 0 when the sync they run reports a config error (e.g. 'no agent harness detected'); sync exits 2 for the same. (c) github:Getty/ stores https://github.com/Getty/ (empty repo not defaulted); Getty/ correctly gives /skills. (d) Brief premise: an empty ~/.claude/ is not a harness marker (markers: ~/.claude.json, ~/.claude/settings.json, ~/.claude/projects); hand test used ~/.claude.json.
+
+2026-09-26 22:47 Done: (1) cmdAdd never replaces a source: config.sourceEntry reads the target file's entry; same backend+address (git/url via sameIdentity, local via resolved dir) -> entry kept byte-identical (ref/local/other fields stay), still trusted and synced, CLI prints 'source X already added (…), kept as is'; other address -> CommandError before any write/trust (exit 1), naming the existing address and both fixes (+ --project). (2) spec.ts derives the repo name for git specs naming a non-default repo (shorthand, github:, known forges, explicit https/ssh/scp URLs: last path segment), owner for default repo; probed hosts/url/local unchanged. Tests red first: spec.test.ts k101 rows (15 red), commands.test.ts 2 k101 tests, cli.test.ts k101 black-box; changed on purpose: 4 spec rows (Getty/repo, github:Getty/repo -> repo, hf.co/user/repo -> repo, gitlab.com/u/r -> r) and the bundle no-TTY clash (now on 'repo'). Spec §4.2, README Sources table/examples, skills/skilletor/SKILL.md updated; dist rebuilt. typecheck 0, npm test 703/703, build, check-dist up to date. Hand test (temp HOME + ~/.claude.json, github.com): add Getty/karr + add Getty -> karr, getty; ref main set by hand kept on re-add (cmp identical); add karr Getty exit 1, cmp identical; install skill:getty-perl-core@karr worked. Not committed.
+
+2026-09-26 22:50 Committed as e594651: add: never replace a source; a non-default repo names the source (k101)
