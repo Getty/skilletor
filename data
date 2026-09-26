@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-09-26T05:04:36Z
+created: 2026-09-26T03:51:18Z
+id: 69
+priority: high
+started: 2026-09-26T04:13:23Z
+status: done
+tags:
+- sources
+- cache
+- git
+title: 'sources/git: one cache per URL breaks pins offline'
+updated: 2026-09-26T05:04:36Z
+---
+
+The git cache is keyed by URL only; a second pin of the same URL moves the same checkout. The offline fallback does not verify the pin: a source pinned to SHA A serves SHA B from cache with "using cache" (probe 06). `check(undefined)` for a SHA pin returns false. Online explicit SHA sync and rollback work. Code: src/sources/git.ts:30-32, 58-97, 105-109. Fix: per-revision snapshots or pin verification; when the pin cannot be met, keep the installed state.
+
+Repro: probe file by the skilletor-71 audit session, copied to docs-free scratch; reproduced by the orchestrator against exports of e371b13 AND v0.2.0 (pre-existing, not introduced by k62/k63/k65).
+
+2026-09-26 04:15 Implementation claimed by skilletor-71-cache in the same isolated agent worktree, after k68. Scope: separate Git caches across refs/pins and reject mismatched offline commit fallbacks; preserve online pin/rollback behavior. GitSource.check desired-state detection remains k70. No main-checkout writes, commits or release actions by this session.
+
+2026-09-26 04:30 Implemented and independently reviewed in the same isolated worktree at base eb3bfb4. Explicit refs use URL+ref-specific cache directories; unpinned sources retain the legacy URL-only directory. Full and abbreviated commit pins are validated before returning a tree, including offline fallback. Tests cover independent A/B trees, offline A after B, missing or mismatched cache rejection, online rollback, branch/tag/default isolation and abbreviated pins. Worker demonstrated red before fix; coordinator independently ran typecheck, all 495 tests (0 failed/0 skipped), build and check-dist successfully. Integration patch for THIS CARD ONLY (no bundle): /tmp/skilletor-k69-integration.ET1TLm.patch. Apply/reverse checks passed. Apply and rebuild dist separately from k68 if committing one card at a time, so generated code matches each commit. Compatibility limit: explicit refs do not reuse old URL-only caches; first offline resolution fails safely until the new cache is populated. GitSource.check and SessionStart desired-state behavior remain k70. No main-checkout changes or commits by this session.
+
+2026-09-26 05:02 Integration into main (838c14e) by skilletor-worker, NOT committed: k69.patch applied clean. Review found two regressions in the patch, fixed test-first on top in src/sources/git.ts: (1) a tag/branch named like a SHA prefix (date tag 20260926) failed online AND offline, because version() demanded HEAD start with the ref (0.3.0 resolved it). Now a ref under 40 chars that names no other commit in the cache counts as a name; a full SHA stays strict, even when its object is gone. (2) Every no-cache failure (any git source, e.g. first resolve offline) gained a misleading '; cache rejected (git rev-parse ...)'. Now only a real pin mismatch (PinMismatch) is named. New tests: hex-named tag/branch, no-cache message (pinned/unpinned), full-SHA cache without the pinned object, plus an engine test (pinned source offline with only the URL-wide cache keeps its item at the pin, lock unchanged, per spec 6.1; fails on 0.3.0). Red on 0.3.0 git.ts: 8 git tests + the engine k69 test. typecheck 0, npm test 534/534 (0 skipped), build, check-dist clean. Probe 06 now fails at a.dir===b.dir; a variant without the shared-dir asserts fails at the offline 'SECOND' (actual FIRST). Probe 09 (k70) still reproduces. Also found, for the skilletor board: per-pin cache dirs accumulate with no cleanup (a URL used only pinned orphans its legacy URL dir); isCommitish ambiguity means a hex-named BRANCH pin is never flagged by check() (k70-adjacent).
+
+2026-09-26 05:04 Committed 0362285 (sources/git: one cache per URL and ref; an offline pin is served only at its commit (k69)). typecheck/test/build/check-dist clean, 534/534 tests.
