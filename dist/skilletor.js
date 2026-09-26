@@ -8767,6 +8767,7 @@ function withoutBriefing(r) {
   };
 }
 function reportHook(report) {
+  if (report.error) return { systemMessage: `skilletor: ${report.error}` };
   const r = hasChanges(report) ? report : withoutBriefing(report);
   if (!hasNotable(r)) return {};
   const changed = [];

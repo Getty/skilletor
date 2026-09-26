@@ -212,6 +212,34 @@ test("the background sync stores a pending report for later", async () => {
   }
 });
 
+// k86: a background sync that met a config error stored "skilletor: changes applied". Asserts:
+// with a malformed project config, __sync-background stores a pending report and the next
+// user-prompt-submit delivers exactly the line SessionStart gives for the same config – the
+// error, naming the file – with no context and no "changes applied"; the prompt after that
+// is silent again (the report is consumed, nothing else is said).
+test("k86: a config error in a background sync reaches the next prompt as that error", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    const projectCfg = join(e.projectDir, ".claude/skilletor.json");
+    writeFileSync(projectCfg, "{ not json");
+    const start = await runHook("session-start", { source: "startup" }, e.ctx);
+    assert.match(start.systemMessage ?? "", /^skilletor: .*skilletor\.json: invalid JSON/);
+
+    await runHook("__sync-background", {}, e.ctx);
+    const out = await runHook("user-prompt-submit", {}, e.ctx);
+    assert.equal(out.systemMessage, start.systemMessage);
+    assert.ok(out.systemMessage?.includes(projectCfg));
+    assert.equal(out.hookSpecificOutput?.additionalContext, undefined);
+    assert.doesNotMatch(JSON.stringify(out), /changes applied/);
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo")), false); // nothing touched
+    assert.deepEqual(await runHook("user-prompt-submit", {}, e.ctx), {});
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("an unknown hook event never throws, returns a warning", async () => {
   const e = env();
   try {
@@ -671,7 +699,8 @@ test("k85: a trusted project source whose ref turns into an option: one warning 
     assert.equal(readFileSync(skill, "utf8"), "---\nname: foo\ndescription: foo\n---\nFOO\n");
 
     await runHook("__sync-background", {}, e.ctx);
-    await runHook("user-prompt-submit", {}, e.ctx);
+    const delivered = await runHook("user-prompt-submit", {}, e.ctx);
+    assert.equal(delivered.systemMessage, out.systemMessage); // k86: the error, not "changes applied"
     assert.equal(existsSync(marker), false);
   } finally {
     e.cleanup();

@@ -162,8 +162,10 @@ function withoutBriefing(r: SyncReport): SyncReport {
   };
 }
 
-/** Hook output: a one-line systemMessage and a terse additionalContext. */
+/** Hook output: a one-line systemMessage and a terse additionalContext. A config error
+ *  touched nothing, so it is the whole output – one line, as SessionStart gives for it. */
 export function reportHook(report: SyncReport): { systemMessage?: string; additionalContext?: string } {
+  if (report.error) return { systemMessage: `skilletor: ${report.error}` };
   const r = hasChanges(report) ? report : withoutBriefing(report);
   if (!hasNotable(r)) return {};
   const changed: ItemChange[] = [];

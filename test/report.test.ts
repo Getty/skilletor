@@ -43,6 +43,22 @@ test("a config error is notable and reported", () => {
   assert.match(reportText(r), /config error.*invalid JSON/);
 });
 
+// k86: a config error rendered for a hook (the pending report of a background sync) said
+// "changes applied". Asserts: the hook output is exactly SessionStart's check-error shape –
+// one systemMessage line "skilletor: <error>", no additionalContext.
+test("k86: a config error renders as one warning line in the hook, never 'changes applied'", () => {
+  const r: SyncReport = { scopes: [], error: "/p/.claude/skilletor.json: invalid JSON (x)" };
+  assert.deepEqual(reportHook(r), { systemMessage: "skilletor: /p/.claude/skilletor.json: invalid JSON (x)" });
+});
+
+// k86: an error means nothing was touched (the engine sends no scopes with it). Asserts: a
+// report that carries scopes anyway renders the error alone in the hook, as it does in text.
+test("k86: an error wins over scope contents in the hook, as in the text report", () => {
+  const r: SyncReport = { ...sample(), error: "invalid JSON" };
+  assert.deepEqual(reportHook(r), { systemMessage: "skilletor: invalid JSON" });
+  assert.equal(reportText(r), "skilletor: config error, nothing changed — invalid JSON");
+});
+
 test("hasChanges is true only for add/update/remove", () => {
   const onlyWarn = emptyScopeReport("user");
   onlyWarn.warnings = ["x"];
