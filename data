@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-09-26T22:28:27Z
+created: 2026-09-26T22:11:59Z
+depends_on:
+- 96
+id: 97
+priority: high
+started: 2026-09-26T22:24:41Z
+status: done
+tags:
+- release
+title: 'release: bump to 0.4.0'
+updated: 2026-09-26T22:28:27Z
+---
+
+Bump package.json, package-lock.json (root and packages[""]), .claude-plugin/plugin.json and .codex-plugin/plugin.json from 0.3.0 to 0.4.0 (minor: configs 0.3.0 accepted by mistake are now errors, k85/k88; check triggers on more, k70/k76/k80; escaped output, k87; .claude/ layout, k96). npm run build injects the version; HOME=$(mktemp -d) bin/skilletor --version prints 0.4.0. Per docs/release.md steps 1-3.
+
+2026-09-26 22:25 Bumped 0.3.0 -> 0.4.0 in package.json, package-lock.json (root + packages[""]), .claude-plugin/plugin.json, .codex-plugin/plugin.json; running build + verify next.
+
+2026-09-26 22:25 Done: 0.3.0 -> 0.4.0 in package.json, package-lock.json (root + packages[""]), .claude-plugin/plugin.json, .codex-plugin/plugin.json; npm run build refreshed dist/skilletor.js (only the VERSION line changed). Verified: typecheck clean, npm test 676/676 pass (0 fail/skip), check-dist 'up to date' (exit 0), HOME=<tmp> bin/skilletor --version and node dist/skilletor.js --version both print 0.4.0. No new tests (version bump; the existing manifest-version test covers the lockstep). '<= 0.3.0' mentions in src/sources/url.ts, spec, test/engine.test.ts left as is. Not in this change: .claude/ edits (k98 skilletor-core, foreign karr-coordination skill edits).
+
+2026-09-26 22:28 Committed as b626339: release: bump to 0.4.0 (k97)
