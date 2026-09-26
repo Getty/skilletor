@@ -14,7 +14,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { loadConfig, type Harness } from "./config.ts";
-import { State } from "./state.ts";
+import { State, SyncLockTimeoutError } from "./state.ts";
 import { gitEnv } from "./gitenv.ts";
 import { check, codexRulesFiles, projectDirOf, sync, type CheckReport, type EngineContext } from "./engine.ts";
 import { emptyScopeReport, reportHook, type SyncReport } from "./report.ts";
@@ -147,8 +147,28 @@ async function checkAndSync(input: HookInput, ctx: HookContext): Promise<HookOut
   state.markChecked(key);
 
   if (!chk.changed) return unchangedOutput(chk);
-  const report = await sync(engineCtx);
+  let report: SyncReport;
+  try {
+    report = await sync(engineCtx);
+  } catch (err) {
+    if (err instanceof SyncLockTimeoutError) dueAgain(state, key);
+    throw err;
+  }
   return toOutput(report, "SessionStart");
+}
+
+/**
+ * A sync that timed out on the lock synced nothing: drop the project's check mark, so the next
+ * prompt is due and its background sync retries (k89). Each path marks before it syncs – the
+ * prompt's mark is what keeps a second one from spawning while its background sync runs – so
+ * the mark goes only once the sync has ended. Best effort: without it the interval decides.
+ */
+function dueAgain(state: State, key: string): void {
+  try {
+    state.clearChecked(key);
+  } catch {
+    // the state dir cannot be written
+  }
 }
 
 /** A check with nothing to sync: its warnings in one line – or, when a source awaits trust,
@@ -186,13 +206,22 @@ async function userPromptSubmit(input: HookInput, ctx: HookContext): Promise<Hoo
   return pending ?? {};
 }
 
-/** Runs in a detached child: sync, then store the result as a pending report. */
+/** Runs in a detached child: sync, then store the result as a pending report – its stdout
+ *  reaches no one. A sync that throws leaves its error, the line SessionStart would give;
+ *  one that timed out on the sync lock leaves no report – the run that holds the lock reports
+ *  its own sync (spec §6.5) – and the project due, so the next prompt retries. */
 async function syncBackground(input: HookInput, ctx: HookContext): Promise<void> {
   const key = projectKeyOf(ctx, input);
-  const report = await sync(ctx);
-  const output = toOutput(report, "UserPromptSubmit");
+  const state = new State(ctx.stateRoot);
+  let output: HookOutput;
+  try {
+    output = toOutput(await sync(ctx), "UserPromptSubmit");
+  } catch (err) {
+    if (err instanceof SyncLockTimeoutError) return dueAgain(state, key);
+    output = warn((err as Error).message);
+  }
   if (output.systemMessage || output.hookSpecificOutput) {
-    new State(ctx.stateRoot).putPendingReport(key, output);
+    state.putPendingReport(key, output);
   }
 }
 

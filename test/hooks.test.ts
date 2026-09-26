@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameS
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
-import { runHook, type HookContext } from "../src/hooks.ts";
+import { runHook, type HookContext, type HookOutput } from "../src/hooks.ts";
 import { State } from "../src/state.ts";
 
 function env() {
@@ -235,6 +235,116 @@ test("k86: a config error in a background sync reaches the next prompt as that e
     assert.doesNotMatch(JSON.stringify(out), /changes applied/);
     assert.equal(existsSync(join(e.home, ".claude/skills/foo")), false); // nothing touched
     assert.deepEqual(await runHook("user-prompt-submit", {}, e.ctx), {});
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k89: a background sync that threw – here a write error in apply (k71): ~/.claude/rules is a
+// file where the rule must land – stored no report, so the error never reached a prompt.
+// Asserts: __sync-background itself returns nothing and stores a pending report; the next
+// user-prompt-submit delivers exactly the one line SessionStart gives for the same failure,
+// naming the path, with no context; the prompt after that is silent (the report consumed).
+test("k89: a background sync that fails with a write error reaches the next prompt as that error", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    mkdirSync(join(src, "rules"));
+    writeFileSync(join(src, "rules/r.md"), "R\n");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"], rules: ["r@mine"] } });
+    const rulesPath = join(e.home, ".claude/rules");
+    writeFileSync(rulesPath, "a file where the rules dir goes");
+    const start = await runHook("session-start", { source: "startup" }, e.ctx);
+    assert.match(start.systemMessage ?? "", /^skilletor: .*(EEXIST|ENOTDIR)/);
+
+    assert.deepEqual(await runHook("__sync-background", {}, e.ctx), {});
+    const out = await runHook("user-prompt-submit", {}, e.ctx);
+    assert.deepEqual(out, { systemMessage: start.systemMessage });
+    assert.ok(out.systemMessage?.includes(rulesPath));
+    assert.deepEqual(await runHook("user-prompt-submit", {}, e.ctx), {});
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k89: a sync-lock timeout is the one throw a background sync keeps to itself – the run that
+// holds the lock reports its own sync, and the next due check retries – while SessionStart,
+// which the session waits on, says it in its one warning line (spec §6.5). Asserts: with the
+// lock held by another run, session-start warns with exactly the timeout; __sync-background
+// returns nothing and stores no pending report, so the next prompt is silent; nothing synced.
+test("k89: a sync-lock timeout: session-start warns in one line, the background sync leaves no report", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    const ctx: HookContext = { ...e.ctx, lockTimeoutMs: 100 };
+    const lockDir = join(e.ctx.stateRoot, "sync.lock");
+    await new State(e.ctx.stateRoot).withLock(async () => {
+      const start = await runHook("session-start", { source: "startup" }, ctx);
+      assert.deepEqual(start, { systemMessage: `skilletor: timed out acquiring sync lock at ${lockDir}` });
+      assert.deepEqual(await runHook("__sync-background", {}, ctx), {});
+    });
+    assert.deepEqual(await runHook("user-prompt-submit", {}, ctx), {});
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo")), false); // nothing synced
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k89: a background sync that timed out on the sync lock synced nothing, yet the prompt that
+// started it had marked the project checked – the retry waited a full checkInterval. Asserts
+// (the background runs the real __sync-background, as the detached child does): with the
+// lock held, a due prompt returns at once, before its background sync ends, and that sync
+// times out silently; once the lock is free, the next prompt is due again and starts a new
+// background sync, which installs the item; its report reaches the prompt after, which is
+// not due – one background sync per due prompt, never one per prompt.
+test("k89: a background sync that timed out on the lock leaves the project due; the next prompt's sync installs", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    const runs: Promise<HookOutput>[] = [];
+    const ctx: HookContext = { ...e.ctx, lockTimeoutMs: 100, background: (c) => void runs.push(runHook("__sync-background", {}, c)) };
+    await new State(e.ctx.stateRoot).withLock(async () => {
+      let settled = false;
+      assert.deepEqual(await runHook("user-prompt-submit", {}, ctx), {});
+      assert.equal(runs.length, 1);
+      void runs[0]!.then(() => (settled = true));
+      await Promise.resolve();
+      assert.equal(settled, false, "the prompt does not wait for its background sync");
+      assert.deepEqual(await runs[0], {});
+    });
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo")), false);
+
+    assert.deepEqual(await runHook("user-prompt-submit", {}, ctx), {});
+    assert.equal(runs.length, 2, "due again after the timeout");
+    await runs[1];
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo/SKILL.md")), true);
+    assert.equal((await runHook("user-prompt-submit", {}, ctx)).systemMessage, "skilletor: 1 item(s) updated");
+    assert.equal(runs.length, 2, "checked: not due");
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k89: the same for SessionStart, whose check marks the project before it syncs. Asserts: a
+// session-start that timed out on the lock warns once and leaves the project due, so the
+// first prompt starts a background sync; a session-start that synced leaves it checked.
+test("k89: a session-start that timed out on the lock leaves the project due for the first prompt", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    const ctx: HookContext = { ...e.ctx, lockTimeoutMs: 100 };
+    await new State(e.ctx.stateRoot).withLock(async () => {
+      assert.match((await runHook("session-start", { source: "startup" }, ctx)).systemMessage ?? "", /timed out acquiring sync lock/);
+    });
+    assert.deepEqual(await runHook("user-prompt-submit", {}, ctx), {});
+    assert.equal(e.backgroundCalls.length, 1, "due after the timeout");
+
+    assert.equal((await runHook("session-start", { source: "startup" }, ctx)).systemMessage, "skilletor: 1 item(s) updated");
+    assert.deepEqual(await runHook("user-prompt-submit", {}, ctx), {});
+    assert.equal(e.backgroundCalls.length, 1, "checked after a sync: not due");
   } finally {
     e.cleanup();
   }

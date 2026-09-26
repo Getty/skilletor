@@ -48,6 +48,11 @@ export interface WithLockOptions {
   afterMkdir?: () => void;
 }
 
+/** `withLock` gave up waiting for another holder of the lock (spec §6.5). */
+export class SyncLockTimeoutError extends Error {
+  override name = "SyncLockTimeoutError";
+}
+
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errCode = (err: unknown) => (err as NodeJS.ErrnoException).code;
 
@@ -119,6 +124,14 @@ export class State {
   markChecked(scopeKey: string): void {
     const checks = this.readJson("last-check.json");
     checks[scopeKey] = Date.now();
+    this.writeJson("last-check.json", checks);
+  }
+
+  /** Drop a mark: the next check is due at once. */
+  clearChecked(scopeKey: string): void {
+    const checks = this.readJson("last-check.json");
+    if (!(scopeKey in checks)) return;
+    delete checks[scopeKey];
     this.writeJson("last-check.json", checks);
   }
 
@@ -243,7 +256,7 @@ export class State {
         if (this.breakLock(lockDir, ownerFile, stale)) continue;
       }
       if (Date.now() >= deadline) {
-        throw new Error(`timed out acquiring sync lock at ${lockDir}`);
+        throw new SyncLockTimeoutError(`timed out acquiring sync lock at ${lockDir}`);
       }
       await delay(pollMs);
     }

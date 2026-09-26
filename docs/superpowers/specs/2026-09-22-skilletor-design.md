@@ -632,7 +632,11 @@ message naming the option, nothing touched.
   on – an untrusted source with its `skilletor trust` command, an overwritten change and a
   conflict with scope and path, a conflict also with the text report's hint (§6.3):
   `- conflict in user scope: skills/foo/SKILL.md already exists (use --force to adopt)`.
-  The pending report `UserPromptSubmit` delivers is the same output.
+  The pending report `UserPromptSubmit` delivers is the same output. A background sync that
+  stops with an error (a write error, §6.6) leaves that error as its report, the line
+  `SessionStart` gives; one that timed out on the sync lock leaves none (§6.5) and, like a
+  `SessionStart` that did, leaves the project due, so the next prompt starts a background
+  sync again (k89).
 - The plugin also puts the CLI on the Bash tool's `PATH` and ships a `skilletor` skill
   that explains the config format and CLI to the model.
 

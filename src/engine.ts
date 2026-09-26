@@ -52,6 +52,8 @@ export interface EngineContext {
   user?: { name: string; home: string };
   /** Per-source network timeout (the SessionStart hook uses 5 s). */
   timeoutMs?: number;
+  /** How long a run waits for another holder of `sync.lock/` (spec §6.5; default 5 s). */
+  lockTimeoutMs?: number;
   /** Harness detection markers (spec §14.1); default from `home` and `$CODEX_HOME`. */
   markers?: HarnessMarkers;
   /** `$CODEX_HOME` (spec §14.2): root of user-scope Codex agents and markers; default from the env. */
@@ -393,9 +395,9 @@ function mergeChainVars(
  * Run `fn` holding `sync.lock/` (spec §6.5), the one mutex over the locks, the target dirs
  * and the source cache: every resolve – a sync's, `available`'s, `install`'s – and every read
  * of a resolved tree runs under it. It waits for another holder up to the lock timeout, then
- * throws. Before `fn` it sweeps what a run that failed or died left in the cache – a url
- * update's trees, a killed git's lock files: while this run holds the lock, no other can be
- * inside a resolve.
+ * throws a `SyncLockTimeoutError`. Before `fn` it sweeps what a run that failed or died left in
+ * the cache – a url update's trees, a killed git's lock files: while this run holds the lock,
+ * no other can be inside a resolve.
  */
 export function withSyncLock<T>(ctx: EngineContext, fn: (state: State) => Promise<T>): Promise<T> {
   const state = new State(ctx.stateRoot);
@@ -404,7 +406,7 @@ export function withSyncLock<T>(ctx: EngineContext, fn: (state: State) => Promis
     sweepUrlCache(cacheRoot);
     sweepGitCache(cacheRoot);
     return fn(state);
-  });
+  }, { timeoutMs: ctx.lockTimeoutMs });
 }
 
 export async function sync(ctx: EngineContext, opts: SyncOptions = {}): Promise<SyncReport> {

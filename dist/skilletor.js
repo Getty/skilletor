@@ -8484,6 +8484,9 @@ import {
 } from "node:fs";
 import { hostname } from "node:os";
 import { join as join11 } from "node:path";
+var SyncLockTimeoutError = class extends Error {
+  name = "SyncLockTimeoutError";
+};
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
 var errCode = (err) => err.code;
 var LOCK = "sync.lock";
@@ -8534,6 +8537,13 @@ var State = class {
   markChecked(scopeKey) {
     const checks = this.readJson("last-check.json");
     checks[scopeKey] = Date.now();
+    this.writeJson("last-check.json", checks);
+  }
+  /** Drop a mark: the next check is due at once. */
+  clearChecked(scopeKey) {
+    const checks = this.readJson("last-check.json");
+    if (!(scopeKey in checks)) return;
+    delete checks[scopeKey];
     this.writeJson("last-check.json", checks);
   }
   // ---- unreached ------------------------------------------------------------
@@ -8642,7 +8652,7 @@ var State = class {
         if (this.breakLock(lockDir, ownerFile, stale)) continue;
       }
       if (Date.now() >= deadline) {
-        throw new Error(`timed out acquiring sync lock at ${lockDir}`);
+        throw new SyncLockTimeoutError(`timed out acquiring sync lock at ${lockDir}`);
       }
       await delay(pollMs);
     }
@@ -9264,7 +9274,7 @@ function withSyncLock(ctx, fn) {
     sweepUrlCache(cacheRoot);
     sweepGitCache(cacheRoot);
     return fn(state);
-  });
+  }, { timeoutMs: ctx.lockTimeoutMs });
 }
 async function sync(ctx, opts = {}) {
   return withSyncLock(ctx, (state) => syncInner(scoped(ctx), opts, state));
@@ -10527,8 +10537,20 @@ async function checkAndSync(input, ctx) {
   if (chk.error) return warn(chk.error);
   state.markChecked(key);
   if (!chk.changed) return unchangedOutput(chk);
-  const report = await sync(engineCtx);
+  let report;
+  try {
+    report = await sync(engineCtx);
+  } catch (err) {
+    if (err instanceof SyncLockTimeoutError) dueAgain(state, key);
+    throw err;
+  }
   return toOutput(report, "SessionStart");
+}
+function dueAgain(state, key) {
+  try {
+    state.clearChecked(key);
+  } catch {
+  }
 }
 function unchangedOutput(chk) {
   if (!chk.trustRequests?.length) return chk.warnings.length ? warn(chk.warnings.join("; ")) : {};
@@ -10558,10 +10580,16 @@ async function userPromptSubmit(input, ctx) {
 }
 async function syncBackground(input, ctx) {
   const key = projectKeyOf(ctx, input);
-  const report = await sync(ctx);
-  const output = toOutput(report, "UserPromptSubmit");
+  const state = new State(ctx.stateRoot);
+  let output;
+  try {
+    output = toOutput(await sync(ctx), "UserPromptSubmit");
+  } catch (err) {
+    if (err instanceof SyncLockTimeoutError) return dueAgain(state, key);
+    output = warn(err.message);
+  }
   if (output.systemMessage || output.hookSpecificOutput) {
-    new State(ctx.stateRoot).putPendingReport(key, output);
+    state.putPendingReport(key, output);
   }
 }
 function defaultBackground(ctx) {
