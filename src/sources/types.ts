@@ -12,8 +12,9 @@ export interface SourceLocation {
 }
 
 export interface Source {
-  /** Fetch/prepare the source and report where it landed and its version. */
-  resolve(cachedVersion?: string): Promise<SourceLocation>;
+  /** Fetch/prepare the source and report where it landed and its version. What a backend
+   *  compares with is its own cache's (k82), never the caller's lock. */
+  resolve(): Promise<SourceLocation>;
   /** Cheap check: has the source changed since `cachedVersion`? */
   check(cachedVersion: string | undefined): Promise<boolean>;
 }

@@ -2,7 +2,14 @@
 //
 // resolve(): GET with If-None-Match; 304 reuses the cache, 200 extracts a fresh
 //   tree. version = "etag:<etag>", or "sha256:<hash>" when the server sends none.
-// check():   HEAD + ETag comparison.
+// check():   HEAD + comparison with the ETag the caller read last.
+//
+// The cache owns its version (k82): URL_VERSION_FILE at the root of the tree, written into
+// the stage tree before the swap, so tree and version are only ever replaced together. It –
+// never the caller's lock – is the If-None-Match, the answer to a 304 and the label of a
+// fallback to the cache, since `available` and `install` replace the cache between syncs.
+// A cache without it (skilletor <= 0.3.0) has no known version: the GET is unconditional,
+// a fallback is labelled "unknown". An archive entry of that name is dropped.
 //
 // Unpacking is dependency-free: zlib gunzip + a minimal tar reader (no external
 // tar). Entries with `..`, absolute paths, symlinks or hardlinks are rejected; a
@@ -14,7 +21,7 @@
 // what a run that died leaves of these, `sweepUrlCache` clears – the engine calls it only
 // while it holds the sync lock, under which every resolve runs (spec §6.5).
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve as resolvePath, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 import type { Source, SourceLocation } from "./types.ts";
@@ -32,6 +39,9 @@ export class TarError extends Error {
 }
 
 const DEFAULT_TIMEOUT_MS = 60_000;
+
+/** The version of a cache's tree, at the root of the tree (reserved there). */
+export const URL_VERSION_FILE = ".skilletor-version";
 
 export class UrlSource implements Source {
   private readonly opts: UrlSourceOptions;
@@ -63,26 +73,22 @@ export class UrlSource implements Source {
     }
   }
 
-  async resolve(cachedVersion?: string): Promise<SourceLocation> {
+  async resolve(): Promise<SourceLocation> {
     this.assertScheme();
     const dir = this.cacheDir();
     try {
-      const headers: Record<string, string> = {};
-      const etag = cachedVersion?.startsWith("etag:") ? cachedVersion.slice(5) : undefined;
-      if (etag && existsSync(dir)) headers["If-None-Match"] = etag;
-
-      const res = await this.request("GET", headers);
-      if (res.status === 304 && existsSync(dir)) {
-        return { dir, version: cachedVersion! };
-      }
+      const cached = cacheVersion(dir);
+      const etag = cached?.startsWith("etag:") ? cached.slice(5) : undefined;
+      const res = await this.request("GET", etag ? { "If-None-Match": etag } : {});
+      if (res.status === 304 && etag) return { dir, version: cached! };
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
       const body = Buffer.from(await res.arrayBuffer());
       const resEtag = res.headers.get("etag");
       const version = resEtag ? `etag:${resEtag}` : `sha256:${createHash("sha256").update(body).digest("hex")}`;
 
-      const entries = stripTopLevel(parseTar(gunzipSync(body)));
-      const warning = publishEntries(dir, entries);
+      const entries = stripTopLevel(parseTar(gunzipSync(body))).filter((e) => !isReserved(e.name));
+      const warning = publishEntries(dir, entries, version);
       return { dir, version, ...(warning ? { warning } : {}) };
     } catch (err) {
       if (err instanceof TarError) {
@@ -91,7 +97,7 @@ export class UrlSource implements Source {
       if (existsSync(dir)) {
         return {
           dir,
-          version: cachedVersion ?? "unknown",
+          version: cacheVersion(dir) ?? "unknown", // of the tree there: a failed update restored the old one
           warning: `download failed for ${this.opts.url}, using cache (${(err as Error).message})`,
         };
       }
@@ -204,8 +210,26 @@ function stripTopLevel(entries: TarEntry[]): TarEntry[] {
     .filter((e) => e.name.length > 0);
 }
 
-/** Extract completely before replacing the cache; never expose a partial tree. */
-function publishEntries(dir: string, entries: TarEntry[]): string | undefined {
+/** The version of the tree in cache dir `dir`; undefined without a readable, well-formed one. */
+function cacheVersion(dir: string): string | undefined {
+  try {
+    const version = readFileSync(join(dir, URL_VERSION_FILE), "utf8");
+    return /^(etag|sha256):[^\r\n]+$/.test(version) ? version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** An archive entry at the version file's path, or under it (`./` prefixes too): never extracted. */
+function isReserved(name: string): boolean {
+  return name.split("/").find((seg) => seg !== "" && seg !== ".") === URL_VERSION_FILE;
+}
+
+/**
+ * Extract completely, with the tree's `version` inside it, before replacing the cache; never
+ * expose a partial tree. Every rename below moves tree and version together.
+ */
+function publishEntries(dir: string, entries: TarEntry[], version: string): string | undefined {
   mkdirSync(dirname(dir), { recursive: true });
   const staging = mkdtempSync(`${dir}.stage-`);
   let backup: string | undefined;
@@ -214,6 +238,7 @@ function publishEntries(dir: string, entries: TarEntry[]): string | undefined {
   const cleanupWarnings: string[] = [];
   try {
     writeEntries(staging, entries);
+    writeFileSync(join(staging, URL_VERSION_FILE), version);
     if (existsSync(dir)) {
       // A rename cannot replace a nonempty directory on supported filesystems.
       backup = mkdtempSync(`${dir}.backup-`);

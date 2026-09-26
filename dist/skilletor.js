@@ -5746,7 +5746,7 @@ import { join as join16 } from "node:path";
 // src/engine.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname as hostname2, platform, userInfo } from "node:os";
-import { existsSync as existsSync11, readFileSync as readFileSync10, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync11, readFileSync as readFileSync11, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync4 } from "node:fs";
 import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative4, resolve as resolvePath4, sep as sep4 } from "node:path";
 
 // src/config.ts
@@ -7398,7 +7398,7 @@ var LocalSource = class {
       return false;
     }
   }
-  async resolve(_cachedVersion) {
+  async resolve() {
     if (!existsSync3(this.dir)) {
       throw new Error(`local source directory does not exist: ${this.dir}`);
     }
@@ -7448,7 +7448,7 @@ var GitSource = class {
   isRepo(dir) {
     return existsSync4(join6(dir, ".git"));
   }
-  async resolve(_cachedVersion) {
+  async resolve() {
     const dir = this.cacheDir();
     const ref = this.opts.ref;
     try {
@@ -7595,13 +7595,14 @@ function samePrefix(a, b) {
 
 // src/sources/url.ts
 import { createHash as createHash3 } from "node:crypto";
-import { existsSync as existsSync5, lstatSync as lstatSync4, mkdirSync as mkdirSync3, mkdtempSync, readdirSync as readdirSync2, renameSync as renameSync2, rmSync as rmSync3, writeFileSync as writeFileSync2 } from "node:fs";
+import { existsSync as existsSync5, lstatSync as lstatSync4, mkdirSync as mkdirSync3, mkdtempSync, readFileSync as readFileSync3, readdirSync as readdirSync2, renameSync as renameSync2, rmSync as rmSync3, writeFileSync as writeFileSync2 } from "node:fs";
 import { dirname as dirname2, join as join7, resolve as resolvePath, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 var TarError = class extends Error {
   name = "TarError";
 };
 var DEFAULT_TIMEOUT_MS2 = 6e4;
+var URL_VERSION_FILE = ".skilletor-version";
 var UrlSource = class {
   opts;
   constructor(opts) {
@@ -7627,23 +7628,20 @@ var UrlSource = class {
       clearTimeout(timer);
     }
   }
-  async resolve(cachedVersion) {
+  async resolve() {
     this.assertScheme();
     const dir = this.cacheDir();
     try {
-      const headers = {};
-      const etag = cachedVersion?.startsWith("etag:") ? cachedVersion.slice(5) : void 0;
-      if (etag && existsSync5(dir)) headers["If-None-Match"] = etag;
-      const res = await this.request("GET", headers);
-      if (res.status === 304 && existsSync5(dir)) {
-        return { dir, version: cachedVersion };
-      }
+      const cached = cacheVersion(dir);
+      const etag = cached?.startsWith("etag:") ? cached.slice(5) : void 0;
+      const res = await this.request("GET", etag ? { "If-None-Match": etag } : {});
+      if (res.status === 304 && etag) return { dir, version: cached };
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const body = Buffer.from(await res.arrayBuffer());
       const resEtag = res.headers.get("etag");
       const version = resEtag ? `etag:${resEtag}` : `sha256:${createHash3("sha256").update(body).digest("hex")}`;
-      const entries = stripTopLevel(parseTar(gunzipSync(body)));
-      const warning = publishEntries(dir, entries);
+      const entries = stripTopLevel(parseTar(gunzipSync(body))).filter((e) => !isReserved(e.name));
+      const warning = publishEntries(dir, entries, version);
       return { dir, version, ...warning ? { warning } : {} };
     } catch (err) {
       if (err instanceof TarError) {
@@ -7652,7 +7650,8 @@ var UrlSource = class {
       if (existsSync5(dir)) {
         return {
           dir,
-          version: cachedVersion ?? "unknown",
+          version: cacheVersion(dir) ?? "unknown",
+          // of the tree there: a failed update restored the old one
           warning: `download failed for ${this.opts.url}, using cache (${err.message})`
         };
       }
@@ -7738,7 +7737,18 @@ function stripTopLevel(entries) {
   const prefix = `${top}/`;
   return entries.map((e) => ({ ...e, name: e.name === top ? "" : e.name.startsWith(prefix) ? e.name.slice(prefix.length) : e.name })).filter((e) => e.name.length > 0);
 }
-function publishEntries(dir, entries) {
+function cacheVersion(dir) {
+  try {
+    const version = readFileSync3(join7(dir, URL_VERSION_FILE), "utf8");
+    return /^(etag|sha256):[^\r\n]+$/.test(version) ? version : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function isReserved(name) {
+  return name.split("/").find((seg) => seg !== "" && seg !== ".") === URL_VERSION_FILE;
+}
+function publishEntries(dir, entries, version) {
   mkdirSync3(dirname2(dir), { recursive: true });
   const staging = mkdtempSync(`${dir}.stage-`);
   let backup;
@@ -7747,6 +7757,7 @@ function publishEntries(dir, entries) {
   const cleanupWarnings = [];
   try {
     writeEntries(staging, entries);
+    writeFileSync2(join7(staging, URL_VERSION_FILE), version);
     if (existsSync5(dir)) {
       backup = mkdtempSync(`${dir}.backup-`);
       renameSync2(dir, join7(backup, "tree"));
@@ -7825,7 +7836,7 @@ function writeEntries(dir, entries) {
 }
 
 // src/catalog.ts
-import { existsSync as existsSync6, lstatSync as lstatSync5, readFileSync as readFileSync3, readdirSync as readdirSync3 } from "node:fs";
+import { existsSync as existsSync6, lstatSync as lstatSync5, readFileSync as readFileSync4, readdirSync as readdirSync3 } from "node:fs";
 import { basename as basename3, isAbsolute, join as join8, relative } from "node:path";
 var CatalogError = class extends Error {
   name = "CatalogError";
@@ -7873,7 +7884,7 @@ function unquote(v) {
   return v;
 }
 function descriptionOf(filePath) {
-  return frontmatter(readFileSync3(filePath, "utf8")).description;
+  return frontmatter(readFileSync4(filePath, "utf8")).description;
 }
 function skillFile(dir) {
   for (const candidate of ["SKILL.md", "SKILL.md.njk"]) {
@@ -7922,7 +7933,7 @@ function pluginSkills(dir, found) {
   noSymlink(p);
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync3(p, "utf8"));
+    parsed = JSON.parse(readFileSync4(p, "utf8"));
   } catch (err) {
     throw new CatalogError(`${p}: invalid JSON (${err.message})`);
   }
@@ -8013,7 +8024,7 @@ function scanBundles(dir) {
       continue;
     }
     try {
-      out.push({ name, files, def: parseBundle(readFileSync3(join8(dir, files[0]), "utf8")) });
+      out.push({ name, files, def: parseBundle(readFileSync4(join8(dir, files[0]), "utf8")) });
     } catch (err) {
       if (!(err instanceof BundleError)) throw err;
       out.push({ name, files, error: `${files[0]}: ${err.message}` });
@@ -8027,7 +8038,7 @@ function readSourceMeta(dir) {
   noSymlink(p);
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync3(p, "utf8"));
+    parsed = JSON.parse(readFileSync4(p, "utf8"));
   } catch (err) {
     throw new CatalogError(`${p}: invalid JSON (${err.message})`);
   }
@@ -8041,7 +8052,7 @@ function readSourceMeta(dir) {
 
 // src/render.ts
 var import_nunjucks = __toESM(require_nunjucks(), 1);
-import { readFileSync as readFileSync4 } from "node:fs";
+import { readFileSync as readFileSync5 } from "node:fs";
 import { join as join9, relative as relative2, resolve as resolvePath2, sep as sep2 } from "node:path";
 var RenderError = class extends Error {
   name = "RenderError";
@@ -8057,7 +8068,7 @@ function makeLoader(root) {
       }
       let src;
       try {
-        src = readFileSync4(path, "utf8");
+        src = readFileSync5(path, "utf8");
       } catch {
         return null;
       }
@@ -8085,7 +8096,7 @@ function build(item, sourceDir, context) {
       }
       out.set(installPath(item, file.slice(0, -".njk".length)), Buffer.from(rendered, "utf8"));
     } else {
-      out.set(installPath(item, file), readFileSync4(join9(sourceDir, file)));
+      out.set(installPath(item, file), readFileSync5(join9(sourceDir, file)));
     }
   }
   return out;
@@ -8104,18 +8115,18 @@ function rendersEmpty(item, output) {
 }
 
 // src/apply.ts
-import { existsSync as existsSync7, lstatSync as lstatSync6, readFileSync as readFileSync6, readdirSync as readdirSync4, rmdirSync, rmSync as rmSync5 } from "node:fs";
+import { existsSync as existsSync7, lstatSync as lstatSync6, readFileSync as readFileSync7, readdirSync as readdirSync4, rmdirSync, rmSync as rmSync5 } from "node:fs";
 import { dirname as dirname3, join as join10, relative as relative3, resolve as resolvePath3, sep as sep3 } from "node:path";
 
 // src/lock.ts
-import { readFileSync as readFileSync5, rmSync as rmSync4 } from "node:fs";
+import { readFileSync as readFileSync6, rmSync as rmSync4 } from "node:fs";
 var LockError = class extends Error {
   name = "LockError";
 };
 function readLock(path) {
   let text;
   try {
-    text = readFileSync5(path, "utf8");
+    text = readFileSync6(path, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") return {};
     throw new LockError(`${path}: cannot read lock (${err.message})`);
@@ -8257,7 +8268,7 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
       const locked = existing?.files[rel];
       const st = lstatOrUndefined(abs);
       if (st?.isFile()) {
-        const diskHash = hashBuffer(readFileSync6(abs));
+        const diskHash = hashBuffer(readFileSync7(abs));
         if (diskHash === desired) {
           entryFiles[rel] = desired;
           if (locked === void 0) land(rel, desired);
@@ -8418,7 +8429,7 @@ import {
   lstatSync as lstatSync7,
   mkdirSync as mkdirSync4,
   readdirSync as readdirSync5,
-  readFileSync as readFileSync7,
+  readFileSync as readFileSync8,
   renameSync as renameSync3,
   rmdirSync as rmdirSync2,
   rmSync as rmSync6,
@@ -8443,7 +8454,7 @@ var State = class {
   }
   readJson(name) {
     try {
-      const value2 = JSON.parse(readFileSync7(this.path(name), "utf8"));
+      const value2 = JSON.parse(readFileSync8(this.path(name), "utf8"));
       return value2 && typeof value2 === "object" && !Array.isArray(value2) ? value2 : {};
     } catch {
       return {};
@@ -8610,7 +8621,7 @@ var State = class {
    *  age is another run's by now. Renamed away first, so no waiter sees it half removed. */
   release(lockDir, ownerFile, token) {
     try {
-      if (JSON.parse(readFileSync7(ownerFile, "utf8")).token !== token) return;
+      if (JSON.parse(readFileSync8(ownerFile, "utf8")).token !== token) return;
     } catch {
       return;
     }
@@ -8689,7 +8700,7 @@ function judge(lockDir, ownerFile, staleMs, graceMs) {
 function deadOwner(ownerFile, age) {
   let record;
   try {
-    record = JSON.parse(readFileSync7(ownerFile, "utf8"));
+    record = JSON.parse(readFileSync8(ownerFile, "utf8"));
   } catch {
     return false;
   }
@@ -8714,7 +8725,7 @@ function touch(path) {
 
 // src/gitignore.ts
 import { execFileSync } from "node:child_process";
-import { existsSync as existsSync9, readFileSync as readFileSync8, rmSync as rmSync7 } from "node:fs";
+import { existsSync as existsSync9, readFileSync as readFileSync9, rmSync as rmSync7 } from "node:fs";
 import { join as join12 } from "node:path";
 var BEGIN2 = "# >>> skilletor >>>";
 var END2 = "# <<< skilletor <<<";
@@ -8725,7 +8736,7 @@ var CODEX_ENTRIES = ["agents/**/.local.*", "skilletor-rules.md"];
 function updateGitignore(opts) {
   const path = join12(opts.dir, ".gitignore");
   const existed = existsSync9(path);
-  const existing = existed ? readFileSync8(path, "utf8") : "";
+  const existing = existed ? readFileSync9(path, "utf8") : "";
   const lines = existing.length ? existing.split("\n") : [];
   const { begin, end, hasBlock: hasBlock2 } = blockOf(lines);
   const outside = hasBlock2 ? [...lines.slice(0, begin), ...lines.slice(end + 1)] : lines;
@@ -8762,7 +8773,7 @@ function blockOf(lines) {
 }
 function hasBlock(dir) {
   try {
-    return blockOf(readFileSync8(join12(dir, ".gitignore"), "utf8").split("\n")).hasBlock;
+    return blockOf(readFileSync9(join12(dir, ".gitignore"), "utf8").split("\n")).hasBlock;
   } catch {
     return false;
   }
@@ -8810,7 +8821,7 @@ function isGitWorkTree(dir) {
 }
 
 // src/briefing.ts
-import { existsSync as existsSync10, readdirSync as readdirSync6, readFileSync as readFileSync9 } from "node:fs";
+import { existsSync as existsSync10, readdirSync as readdirSync6, readFileSync as readFileSync10 } from "node:fs";
 import { join as join13 } from "node:path";
 var COMMENT = /^[ \t]*#[ \t]*briefing:[ \t]*skills[ \t]*=[ \t]*\[([^\]\r\n]*)\]/;
 function declaredSkills(harness, text) {
@@ -8862,7 +8873,7 @@ function subdirs(dir) {
 function missingSkills(harness, file, roots) {
   let text;
   try {
-    text = readFileSync9(file, "utf8");
+    text = readFileSync10(file, "utf8");
   } catch {
     return void 0;
   }
@@ -9073,12 +9084,11 @@ function makeBackend(backend, cacheRoot, timeoutMs) {
 }
 function runResolver(cacheRoot, timeoutMs) {
   const runs = /* @__PURE__ */ new Map();
-  return (backend, version) => {
-    const sent = backend.kind === "url" ? version ?? null : null;
-    const key = JSON.stringify([backend.kind, backend.address, backend.ref ?? null, sent]);
+  return (backend) => {
+    const key = JSON.stringify([backend.kind, backend.address, backend.ref ?? null]);
     let run2 = runs.get(key);
     if (!run2) {
-      run2 = makeBackend(backend, cacheRoot, timeoutMs).resolve(version);
+      run2 = makeBackend(backend, cacheRoot, timeoutMs).resolve();
       runs.set(key, run2);
     }
     return run2;
@@ -9240,7 +9250,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
           resolved.set(name, null);
           return;
         }
-        const loc = await resolveSource(backend, sourceVersion(oldLock, name));
+        const loc = await resolveSource(backend);
         if (loc.warning && !rep.warnings.includes(loc.warning)) rep.warnings.push(loc.warning);
         resolved.set(name, { dir: loc.dir, version: loc.version, backend });
       } catch (err) {
@@ -9603,7 +9613,7 @@ function syncCodexRules(a) {
   const LEGACY = "AGENTS.md";
   let fileText = null;
   try {
-    fileText = readFileSync10(rulesFile, "utf8");
+    fileText = readFileSync11(rulesFile, "utf8");
   } catch {
   }
   const current = fileText === null ? /* @__PURE__ */ new Map() : parseRulesFile(fileText);
@@ -10331,7 +10341,7 @@ function installedSet(ctx, config) {
 
 // src/hooks.ts
 import { execFileSync as execFileSync4, spawn } from "node:child_process";
-import { readFileSync as readFileSync11 } from "node:fs";
+import { readFileSync as readFileSync12 } from "node:fs";
 var SESSION_START_TIMEOUT_MS = 5e3;
 var DEFAULT_INTERVAL = 600;
 function projectKeyOf(ctx, input) {
@@ -10396,7 +10406,7 @@ function withCodexRules(out, ctx) {
   const problems = [];
   for (const file of codexRulesFiles(ctx)) {
     try {
-      texts.push(readFileSync11(file, "utf8"));
+      texts.push(readFileSync12(file, "utf8"));
     } catch (err) {
       problems.push(`cannot read ${file} (${err.message})`);
     }

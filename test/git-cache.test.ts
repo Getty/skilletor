@@ -153,7 +153,7 @@ test("k84: the sweep removes stale git lock files in git caches and nothing else
   assert.deepEqual(kept.filter((p) => !existsSync(p)), [], "everything else is left");
 
   repo.commit("SECOND");
-  const again = await src.resolve(loc.version);
+  const again = await src.resolve();
   assert.equal(again.warning, undefined);
   assert.notEqual(again.version, loc.version);
 });

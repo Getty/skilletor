@@ -67,7 +67,7 @@ test("a 304 reuses the cache with the same version", async () => {
   try {
     const src = new UrlSource({ url: srv.url, cacheRoot: tmp.dir, allowHttp: true });
     const first = await src.resolve();
-    const second = await src.resolve(first.version);
+    const second = await src.resolve();
     assert.equal(second.version, first.version);
     assert.equal(readFileSync(join(second.dir, "skills/x/SKILL.md"), "utf8").includes("description: x"), true);
   } finally {
@@ -158,7 +158,7 @@ test("offline fallback uses the cache with a warning", async () => {
     const src = new UrlSource({ url: srv.url, cacheRoot: tmp.dir, allowHttp: true });
     const first = await src.resolve();
     await srv.close(); // server gone
-    const second = await src.resolve(first.version);
+    const second = await src.resolve();
     assert.equal(second.version, first.version);
     assert.match(second.warning ?? "", /cache/i);
   } finally {

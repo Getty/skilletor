@@ -152,7 +152,7 @@ test("offline pin A after resolving B still returns A, including its version", a
   const first = await new GitSource({ url: repo.url, ref: a, cacheRoot }).resolve();
   const second = await new GitSource({ url: repo.url, ref: b, cacheRoot }).resolve();
   rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
-  const offline = await new GitSource({ url: repo.url, ref: a, cacheRoot }).resolve(first.version);
+  const offline = await new GitSource({ url: repo.url, ref: a, cacheRoot }).resolve();
   assert.equal(readFileSync(join(offline.dir, "file.txt"), "utf8"), "A");
   assert.equal(offline.dir, first.dir);
   assert.equal(offline.version, first.version);
@@ -191,7 +191,7 @@ for (const abbreviated of [false, true]) {
     git(first.dir, "fetch", "-q", "origin", b);
     git(first.dir, "reset", "--hard", b);
     rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
-    await assert.rejects(() => src.resolve(first.version), /does not match requested pin/);
+    await assert.rejects(() => src.resolve(), /does not match requested pin/);
   });
 }
 
@@ -225,7 +225,7 @@ test("branch, tag and default HEAD caches are independent; branch updates and of
   const defaultLoc = await unpinned.resolve();
   assert.equal(new Set([tagLoc.dir, branchLoc.dir, defaultLoc.dir]).size, 3);
   repo.commit("B", "second");
-  const updated = await branch.resolve(branchLoc.version);
+  const updated = await branch.resolve();
   assert.equal(updated.dir, branchLoc.dir);
   assert.equal(updated.warning, undefined);
   assert.equal(readFileSync(join(updated.dir, "file.txt"), "utf8"), "B");
@@ -274,7 +274,7 @@ test("a full SHA pin cache moved to another commit is refused offline, even with
   git(first.dir, "gc", "-q", "--prune=now");
   assert.throws(() => git(first.dir, "cat-file", "-e", a), "fixture: the pinned object is gone");
   rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
-  await assert.rejects(() => src.resolve(first.version), /does not match requested pin/);
+  await assert.rejects(() => src.resolve(), /does not match requested pin/);
 });
 
 for (const kind of ["tag", "branch"] as const) {
@@ -290,7 +290,7 @@ for (const kind of ["tag", "branch"] as const) {
     assert.equal(online.warning, undefined);
     assert.equal(git(online.dir, "rev-parse", "HEAD").trim(), named);
     rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
-    const offline = await src.resolve(online.version);
+    const offline = await src.resolve();
     assert.equal(offline.version, online.version);
     assert.match(offline.warning ?? "", /using cache/);
     assert.equal(readFileSync(join(offline.dir, "file.txt"), "utf8"), "A");
@@ -354,7 +354,7 @@ for (const annotated of [true, false]) {
     assert.equal(await src.check(loc.version), false, "the tag did not move");
     repo.upstream("tag", "-f", ...(annotated ? ["-a", "-m", "moved"] : []), "v1", b);
     assert.equal(await src.check(loc.version), true, "the tag moved");
-    const moved = await src.resolve(loc.version);
+    const moved = await src.resolve();
     assert.equal(names(moved.version, b), true, `${moved.version} is the new commit ${b}`);
     assert.equal(readFileSync(join(moved.dir, "file.txt"), "utf8"), "B");
     assert.equal(await src.check(moved.version), false, "the moved tag is held");
@@ -387,7 +387,7 @@ for (const [ref, own, installs, movesTo] of [
     if (own.startsWith("refs/tags/")) repo.upstream("tag", "-f", "-a", "-m", "moved", "x", sha[movesTo]);
     else repo.upstream("update-ref", own, sha[movesTo]);
     assert.equal(await src.check(loc.version), true, `${own} moved`);
-    const moved = await src.resolve(loc.version);
+    const moved = await src.resolve();
     assert.equal(names(moved.version, sha[movesTo]), true, `${moved.version} is ${movesTo}`);
     assert.equal(await src.check(moved.version), false, "the moved ref is held");
   });

@@ -179,12 +179,12 @@ test("k83: a failed shared fetch serves every name from the cache with one warni
 
 const URL = "https://example.invalid/skills.tar.gz";
 
-// Asserts for `url` sources: names with the same URL share one download when they would send
-// the same conditional GET – two names new to the lock send none, so one request. A name
-// whose lock holds the current ETag sends it, and only it receives the 304: the new names
-// get their own unconditional GET, never an answer to an ETag they do not hold. Every item is
-// installed, no warning, and the lock records the one version.
-test("k83: url names share a download only when they send the same If-None-Match", async (t) => {
+// Asserts for `url` sources: every name of one URL shares one request per sync (k82: the
+// cache holds its own version, so the request no longer depends on a name's lock entries).
+// Two names new to the lock and one whose lock holds the current ETag send one conditional
+// GET with the cache's ETag; its 304 serves all three. Every item is installed, no warning,
+// and the lock records the one version.
+test("k83: url names of one URL share one request, conditional on the cache's ETag", async (t) => {
   const e = setup(t);
   const archive = makeTarGz(SKILLS.map((s) => ({ name: `pkg/skills/${s}/SKILL.md`, data: `---\ndescription: ${s}\n---\nBODY\n` })));
   const sent: (string | null)[] = [];
@@ -210,7 +210,7 @@ test("k83: url names share a download only when they send the same If-None-Match
   assert.equal(second.error, undefined);
   assert.deepEqual(second.scopes[0]!.warnings, []);
   assert.deepEqual(second.scopes[0]!.added.map((i) => i.key).sort(), ["skills/bar", "skills/baz"]);
-  assert.deepEqual(sent.map(String).sort(), ['"1"', "null"], "a's conditional GET, and one GET for b and c");
+  assert.deepEqual(sent, ['"1"'], "one conditional GET for a, b and c");
   const lock = readLock(join(e.home, ".claude/skilletor.lock.json"));
   assert.deepEqual(["foo", "bar", "baz"].map((s) => lock[`skills/${s}`]!.version), ['etag:"1"', 'etag:"1"', 'etag:"1"']);
 });

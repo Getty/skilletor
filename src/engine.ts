@@ -187,26 +187,25 @@ export function makeBackend(backend: ResolvedBackend, cacheRoot: string, timeout
   }
 }
 
-/** Resolve a backend, sending `version` (the lock's) to it. */
-type Resolver = (backend: ResolvedBackend, version: string | undefined) => Promise<SourceLocation>;
+/** Resolve a backend. */
+type Resolver = (backend: ResolvedBackend) => Promise<SourceLocation>;
 
 /**
  * A sync's resolver (spec §6.1, k83): each backend is resolved once per run, and every source
  * name that uses it – in either scope – gets that one result. Names with one git URL and ref
  * share one cache dir (§4.4), and a sync resolves in parallel: two gits must never work one
- * cache at once. The key is the backend identity, which names one cache; for `url` also the
- * version handed in – its `If-None-Match`, and what a fallback to the cache reports – so a 304
- * only ever answers an ETag every sharer holds (git and local ignore the version). Made per
- * run under the sync lock, never kept: a later run fetches again.
+ * cache at once. The key is the backend identity, which names one cache; nothing else goes
+ * into a resolve – a `url` cache's If-None-Match is the version it keeps with its tree
+ * (k82), so a 304 answers the tree every sharer reads. Made per run under the sync lock,
+ * never kept: a later run fetches again.
  */
 function runResolver(cacheRoot: string, timeoutMs?: number): Resolver {
   const runs = new Map<string, Promise<SourceLocation>>();
-  return (backend, version) => {
-    const sent = backend.kind === "url" ? version ?? null : null;
-    const key = JSON.stringify([backend.kind, backend.address, backend.ref ?? null, sent]);
+  return (backend) => {
+    const key = JSON.stringify([backend.kind, backend.address, backend.ref ?? null]);
     let run = runs.get(key);
     if (!run) {
-      run = makeBackend(backend, cacheRoot, timeoutMs).resolve(version);
+      run = makeBackend(backend, cacheRoot, timeoutMs).resolve();
       runs.set(key, run);
     }
     return run;
@@ -471,7 +470,7 @@ async function syncScopeRun(
           resolved.set(name, null);
           return;
         }
-        const loc = await resolveSource(backend, sourceVersion(oldLock, name));
+        const loc = await resolveSource(backend);
         // A shared resolve's warning (a fetch that fell back to the cache) is named once.
         if (loc.warning && !rep.warnings.includes(loc.warning)) rep.warnings.push(loc.warning);
         resolved.set(name, { dir: loc.dir, version: loc.version, backend });

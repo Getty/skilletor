@@ -29,7 +29,7 @@ export class LocalSource implements Source {
     }
   }
 
-  async resolve(_cachedVersion?: string): Promise<SourceLocation> {
+  async resolve(): Promise<SourceLocation> {
     if (!existsSync(this.dir)) {
       throw new Error(`local source directory does not exist: ${this.dir}`);
     }

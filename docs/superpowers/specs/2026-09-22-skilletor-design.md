@@ -221,7 +221,7 @@ name is `skills` everywhere.
 | Kind | `resolve` | `check` (cheap) |
 |---|---|---|
 | `git` | Shallow clone/fetch into the cache; auth = the user's git setup | a SHA pin vs. the commit the last sync read (§14.3), offline when they match; else the commit `git ls-remote <url>` lists for `ref` vs. that commit – the ref `git fetch` takes (git's rev-parse order: a tag before a branch of the name), an annotated tag peeled to its commit (k75); none, or nothing named `ref`: changed |
-| `url` | HTTPS-only, `.tar.gz`, conditional GET with ETag | `HEAD` + comparison with the ETag the last sync read |
+| `url` | HTTPS-only, `.tar.gz`, conditional GET with the ETag the cache holds | `HEAD` + comparison with the ETag the last sync read |
 | `local` | read directly | not applicable – always re-rendered |
 
 A `url` update is extracted into a staging tree and replaces the cache only after a complete
@@ -230,6 +230,17 @@ its version, with one warning (k68). An unsafe archive is rejected; the source t
 as unresolvable and keeps its items (§6.1). A run killed while swapping the trees can leave
 the last good cache only in its backup; the next run that takes the sync lock puts it back
 (§6.5, k74).
+
+The `url` cache keeps the version of its tree with the tree (k82): `.skilletor-version` at
+its root (the ETag, or the archive's sha256 when the server sends none), written into the
+staging tree before the swap, so tree and version are only replaced together – the backup,
+its restoration and the sweep move both. The If-None-Match, the version a 304 reports and
+the label of a fallback to the cache are the cache's, never the lock's: `available` and
+`install` resolve too and may replace the cache between syncs, so the lock can lag behind
+it. A cache without the file (written by skilletor ≤ 0.3.0) has no known version: its
+first fetch is unconditional, a fallback to it offline is labelled `unknown`. An archive
+entry of that name is not extracted. The file belongs to no item (§4.1): a scan reads only
+the layout's own paths at the source root.
 
 The git cache is kept per URL and ref; an unpinned source uses the URL alone, so two pins
 of one URL never share a checkout, and caches written before 0.3.1 are not reused for an
@@ -283,7 +294,8 @@ can therefore switch individual items on and off per user, project or local conf
 1. Load, merge, validate config.
 2. Resolve sources (in parallel) → local directory + version per source. A run resolves each
    backend once, for every name and scope that uses it, so two gits never work one cache at
-   once; a `url` download is shared only by names that send the same ETag (k83).
+   once; every name of one `url` shares its one conditional GET, which sends the ETag the
+   cache holds (k83, k82).
 3. Expand wildcards against each resolved source's catalog (overlap rules in §3), then
    **build each declared item in memory** (render or copy). An item whose main template
    renders empty (§5) is marked skipped instead; its installed files are removed in step 4.
