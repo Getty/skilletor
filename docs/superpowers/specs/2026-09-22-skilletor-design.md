@@ -475,8 +475,9 @@ the block is deleted. Content outside the block is never touched.
 `~/.claude/skilletor/`: `cache/` (deletable), `trust.json`, `last-check.json`,
 `pending-report.json`, `unreached.json` (per lock, the drift the last sync could not reach,
 §14.3), `sources-read.json` (per lock, the version of each source the last sync read and the
-backend it read it through, §14.3), `sync.lock/` (mkdir mutex against parallel sessions,
-refreshed while held; below).
+backend it read it through, §14.3), `render-inputs.json` (per lock, a hash of the vars and
+project the last sync rendered the scope's items with, §14.3), `sync.lock/` (mkdir mutex
+against parallel sessions, refreshed while held; below).
 `CLAUDE_PLUGIN_DATA` is not used, so the CLI runs identically without Claude Code.
 
 `sync.lock/` guards the locks, the target dirs and the source cache: every run that resolves
@@ -815,8 +816,10 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
   when the lock does not match what the config declares (k70): an explicit item an active
   target lacks, or holds from another source; an entry no explicit item, wildcard or
   bundle declares any more; a wildcard or bundle with nothing installed; an entry a failed
-  sync left partial (§6.2, k71). The test stays offline and read-only: the lock, the state
-  dir, two existence tests and at most one small read per root of a project not in use.
+  sync left partial (§6.2, k71). And when a scope's render inputs changed (k76, below). The
+  test stays offline and read-only: the lock, the state dir, two existence tests, at most
+  one small read per root of a project not in use, and for a project in use its git remote
+  (`git remote get-url origin`, a local config read).
 - **What a sync cannot reach costs one sync, not one per session** (k70). Drift a sync
   leaves in place although every source it needed was resolved and scanned – an item the
   source lacks, a lasting conflict, a template error, a wildcard that matches nothing – is
@@ -841,6 +844,27 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
   needs any more leaves the record with the next sync. With no record – before the first
   sync, or after one that stopped with an error, which clears it with `unreached.json` –
   `check` compares with the lock's version as before; a malformed record counts as none.
+- **Vars changed** (k76) means: since the last sync rendered with them. Each sync records per
+  lock in `render-inputs.json` (§6.5) one hash of what every item of the scope rendered with
+  apart from its source and its lock key – the config's merged `vars` (user < project <
+  local; key order is no change) and, in the project scope, `project.dir`, `project.name`
+  and `project.git_remote` – and `check` counts a scope whose inputs now hash differently.
+  One hash per scope, not per item: a var no template uses costs one sync that writes
+  nothing (and reports nothing); telling which vars a template reads would take more than
+  Nunjucks reports. Not among the inputs: source defaults and bundle vars (they move with
+  the source's version), `harness` (the targets test above), `scope` and `item` (fixed by the
+  lock key), `target.dir` (from the lock's base and `$CODEX_HOME`, the environment of
+  whichever harness started the session), `host.*` and `user.*` (the machine – a home shared
+  by several hosts would sync at every switch); after such a change `skilletor sync`
+  re-renders. With no record – the first session after an upgrade from a version without
+  it, after a sync that stopped with an error (which clears it with `unreached.json`), or a
+  malformed one – a scope counts as changed and one sync records it: counted as unchanged,
+  a var changed before the upgrade or around a failed sync would stay unrendered. A scope that declares
+  nothing and holds no lock entries records nothing and never counts, so a directory
+  without skilletor config costs no sync; nor does a scope whose every source is untrusted –
+  the trust request stands for it. A sync that could not resolve or scan a trusted source
+  it needs keeps the earlier record: that source's items were not re-rendered, so the change
+  stays open, like drift that source keeps.
 - **Git hygiene** (§6.4): Codex skills carry their own `.gitignore` like Claude skills, so
   `<project>/.agents` and `~/.agents` get no block (one left by an earlier version is
   removed). `<project>/.codex/.gitignore` and `$CODEX_HOME/.gitignore` hold the fixed block

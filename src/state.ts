@@ -175,6 +175,26 @@ export class State {
     this.writeJson("sources-read.json", all);
   }
 
+  // ---- render inputs --------------------------------------------------------
+
+  /** The hash of what the last sync of a scope (keyed by its lock path) rendered its items
+   *  with (spec §14.3, k76): `check` compares the scope's current inputs with it. A malformed
+   *  entry counts as none. */
+  renderInputs(scopeKey: string): string | undefined {
+    const hash = this.readJson("render-inputs.json")[scopeKey];
+    return typeof hash === "string" ? hash : undefined;
+  }
+
+  /** Replace a scope's render-inputs hash, or drop it (undefined); the file is written only
+   *  when it changes. */
+  putRenderInputs(scopeKey: string, hash: string | undefined): void {
+    const all = this.readJson("render-inputs.json");
+    if (all[scopeKey] === hash) return;
+    if (hash === undefined) delete all[scopeKey];
+    else all[scopeKey] = hash;
+    this.writeJson("render-inputs.json", all);
+  }
+
   // ---- pending report -------------------------------------------------------
 
   putPendingReport(projectKey: string, report: unknown): void {

@@ -619,3 +619,174 @@ test("k75: a source pinned to an annotated tag: the next session is silent and f
     e.tmp.cleanup();
   }
 });
+
+// ---- what a sync rendered with (k76) ---------------------------------------------------
+
+/** A skill whose body is rendered from `body` (a Nunjucks expression list). */
+const TEMPLATE = (name: string, body: string) => `---\nname: ${name}\ndescription: ${name} skill\n---\n${body}\n`;
+
+// Asserts: a var a template uses, changed in the config while no source moved, makes the next
+// SessionStart re-render the item with the new value – check names the scope in varsChanged –
+// and the session after that is silent; the same vars written again (keys in another order)
+// sync nothing.
+test("k76: a changed var re-renders at the next session; unchanged vars stay silent", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/greet/SKILL.md.njk": TEMPLATE("greet", "{{ vars.greeting }}") });
+    const declare = (vars: unknown) =>
+      e.writeCfg("user", { sources: { g: { git: repo.url } }, install: { skills: ["greet@g"] }, vars, checkInterval: 0 });
+    const greet = () => readFileSync(e.userFile("skills/greet/SKILL.md"), "utf8");
+    declare({ greeting: "hi", other: 1 });
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    assert.match(greet(), /\nhi\n$/);
+    assert.deepEqual(await e.session(), {});
+
+    declare({ other: 1, greeting: "hi" });
+    assert.equal((await check(e.ctx)).changed, false, "same vars, other key order");
+    assert.deepEqual(await e.session(), {});
+
+    declare({ other: 1, greeting: "hello" });
+    const chk = await check(e.ctx);
+    assert.deepEqual([chk.changed, chk.varsChanged, chk.sources], [true, ["user"], [{ name: "g", scope: "user", changed: false }]]);
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    assert.match(greet(), /\nhello\n$/);
+    assert.deepEqual(await e.session(), {});
+  } finally {
+    e.tmp.cleanup();
+  }
+});
+
+// Asserts: the project scope counts what its items render with – a var set in
+// skilletor.local.json over the user's, and the project's git remote – so each change
+// re-renders the project item at the next SessionStart; the user scope, which declares
+// nothing, is not named.
+test("k76: a var from skilletor.local.json and a changed git remote re-render the project's items", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", {
+      "skills/greet/SKILL.md.njk": TEMPLATE("greet", "{{ vars.greeting }} from {{ project.git_remote }}"),
+    });
+    const inProject = (...args: string[]) => execFileSync("git", args, { cwd: e.projectDir, env: GIT_ENV });
+    inProject("init", "-q", "-b", "main");
+    inProject("remote", "add", "origin", "https://example.com/a.git");
+    e.writeCfg("user", { sources: { g: { git: repo.url } }, vars: { greeting: "hi" }, checkInterval: 0 });
+    e.writeCfg("project", { install: { skills: ["greet@g"] } });
+    const greet = () => readFileSync(join(e.projectDir, ".claude/skills/greet/SKILL.md"), "utf8");
+    assert.match((await e.session()).systemMessage ?? "", /^skilletor: 1 item\(s\) updated/);
+    assert.match(greet(), /\nhi from https:\/\/example\.com\/a\.git\n$/);
+    assert.deepEqual(await e.session(), {});
+
+    writeFileSync(join(e.projectDir, ".claude/skilletor.local.json"), JSON.stringify({ vars: { greeting: "yo" } }));
+    assert.deepEqual((await check(e.ctx)).varsChanged, ["project"], "local var");
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    assert.match(greet(), /\nyo from https:\/\/example\.com\/a\.git\n$/);
+    assert.deepEqual(await e.session(), {});
+
+    inProject("remote", "set-url", "origin", "https://example.com/b.git");
+    assert.deepEqual((await check(e.ctx)).varsChanged, ["project"], "git remote");
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    assert.match(greet(), /\nyo from https:\/\/example\.com\/b\.git\n$/);
+    assert.deepEqual(await e.session(), {});
+  } finally {
+    e.tmp.cleanup();
+  }
+});
+
+// Asserts: with no record – the first session after an upgrade, or the record unreadable or
+// malformed – a scope in use counts as changed: one session syncs (silently: nothing
+// differs; the fetch shows it ran), writes the record, and the next is quiet. A scope that
+// declares nothing and holds nothing records nothing and never counts.
+test("k76: with no record an in-use scope syncs once, silently; a scope with nothing declared records nothing", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/foo/SKILL.md": SKILL("foo") });
+    e.writeCfg("user", { sources: { g: { git: repo.url } }, install: { skills: ["foo@g"] }, checkInterval: 0 });
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    assert.deepEqual(await e.session(), {});
+    const record = join(e.ctx.stateRoot, "render-inputs.json");
+    const lockPath = e.userFile("skilletor.lock.json");
+    const good = JSON.parse(readFileSync(record, "utf8"));
+    assert.deepEqual(Object.keys(good), [lockPath], "the project scope declares nothing: no record");
+    assert.match(good[lockPath], /^sha256:[0-9a-f]{64}$/);
+
+    for (const junk of [undefined, "{ broken", JSON.stringify({ [lockPath]: 42 })]) {
+      if (junk === undefined) rmSync(record); // as left by a version before k76
+      else writeFileSync(record, junk);
+      const chk = await check(e.ctx);
+      assert.deepEqual([chk.changed, chk.varsChanged], [true, ["user"]], String(junk));
+      rmSync(e.ctx.cacheRoot!, { recursive: true, force: true });
+      assert.deepEqual(await e.session(), {}, String(junk));
+      assert.equal(e.cacheEmpty(), false, `${junk}: the session synced`);
+      assert.deepEqual(JSON.parse(readFileSync(record, "utf8")), good, String(junk));
+      rmSync(e.ctx.cacheRoot!, { recursive: true, force: true });
+      assert.deepEqual(await e.session(), {}, String(junk));
+      assert.equal(e.cacheEmpty(), true, `${junk}: the next session fetched nothing`);
+    }
+  } finally {
+    e.tmp.cleanup();
+  }
+});
+
+// Asserts: a sync that stops with an error clears the scope's record with unreached.json and
+// sources-read.json (k71, k80): what it rendered before it stopped is unknown, so check
+// counts the vars again; the next sync finishes and records them, and the session after is quiet.
+test("k76: a sync that fails midway clears the record; check counts the vars again", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/foo/SKILL.md": SKILL("foo"), "rules/r.md": "R\n" });
+    const declare = (install: unknown) => e.writeCfg("user", { sources: { g: { git: repo.url } }, install, checkInterval: 0 });
+    const record = join(e.ctx.stateRoot, "render-inputs.json");
+    const lockPath = e.userFile("skilletor.lock.json");
+    const recorded = () => (existsSync(record) ? JSON.parse(readFileSync(record, "utf8")) : {})[lockPath];
+    declare({ skills: ["foo@g"] });
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    const hash = recorded();
+    assert.match(hash ?? "", /^sha256:/);
+
+    declare({ skills: ["foo@g"], rules: ["r@g"] });
+    writeFileSync(e.userFile("rules"), "a file where the rules dir goes");
+    assert.match((await e.session()).systemMessage ?? "", /EEXIST|ENOTDIR/);
+    assert.equal(recorded(), undefined, "cleared");
+    assert.deepEqual((await check(e.ctx)).varsChanged, ["user"]);
+
+    rmSync(e.userFile("rules"));
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    assert.equal(recorded(), hash);
+    assert.deepEqual(await e.session(), {});
+  } finally {
+    e.tmp.cleanup();
+  }
+});
+
+// Asserts: a sync that could not read a source its scope needs – here: no cache and the remote
+// gone – leaves that source's items as they were, so it keeps the earlier record: once the
+// source is back, the next session re-renders them with the changed var, though the source
+// did not move and the lock matches the config.
+test("k76: a var changed while a source cannot be read re-renders its items once the source is back", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/greet/SKILL.md.njk": TEMPLATE("greet", "{{ vars.greeting }}") });
+    const declare = (greeting: string) => e.writeCfg("user", {
+      sources: { g: { git: repo.url } }, install: { skills: ["greet@g"] }, vars: { greeting }, checkInterval: 0,
+    });
+    const greet = () => readFileSync(e.userFile("skills/greet/SKILL.md"), "utf8");
+    declare("hi");
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+
+    declare("hello");
+    renameSync(repo.bare, repo.bare + ".off");
+    rmSync(e.ctx.cacheRoot!, { recursive: true });
+    const offline = await e.session();
+    assert.match(offline.systemMessage ?? "", /warning/);
+    assert.match(offline.hookSpecificOutput?.additionalContext ?? "", /source g: /);
+    assert.match(greet(), /\nhi\n$/, "kept while its source cannot be read");
+
+    renameSync(repo.bare + ".off", repo.bare);
+    assert.deepEqual((await check(e.ctx)).varsChanged, ["user"]);
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    assert.match(greet(), /\nhello\n$/);
+    assert.deepEqual(await e.session(), {});
+  } finally {
+    e.tmp.cleanup();
+  }
+});

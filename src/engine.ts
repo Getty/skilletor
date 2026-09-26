@@ -282,23 +282,62 @@ function gitRemote(dir: string): string {
   }
 }
 
+/**
+ * The render inputs of a scope that come from neither the source nor the lock key (spec §5,
+ * §14.3, k76): the config's vars (user < project < local) and, in the project scope, the
+ * project with its git remote. Every item of the scope renders with them, and `check` counts
+ * a change to them. The rest of the context is not among them: source defaults and bundle vars
+ * move with the source's version; `harness` is the targets test's; `scope` and `item` are
+ * fixed by the lock key; `target.dir` derives from the lock's base and `$CODEX_HOME` – the
+ * environment of whichever harness ran the hook; `host` and `user` name the machine (a home
+ * shared across hosts would sync at every switch). Reads the project's git config only.
+ */
+interface RenderInputs {
+  vars: Record<string, unknown>;
+  project?: { dir: string; name: string; git_remote: string };
+}
+
+function renderInputsOf(ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig): RenderInputs {
+  if (scope !== "project") return { vars: scopeCfg.vars };
+  const dir = ctx.projectDir!;
+  return { vars: scopeCfg.vars, project: { dir, name: basename(dir), git_remote: gitRemote(dir) } };
+}
+
+/** `value` as JSON with every object's keys sorted: key order in a config file is no change. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    return `{${Object.keys(obj).sort().filter((k) => obj[k] !== undefined)
+      .map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function renderInputsHash(inputs: RenderInputs): string {
+  return hashBuffer(Buffer.from(canonicalJson(inputs), "utf8"));
+}
+
+/** The sources a scope renders items from: those it declares, and those its lock holds
+ *  entries of. None: no vars can make anything of it stale, and none are recorded (k76). */
+function renderSources(scopeCfg: ScopeConfig, lock: Lock): string[] {
+  return [...new Set([...scopeSources(scopeCfg), ...Object.values(lock).map((e) => e.source)])];
+}
+
 function makeContext(
   ctx: EngineContext,
+  inputs: RenderInputs,
   scope: ScopeName,
   harness: Harness,
   targetDir: string,
   item: { type: ItemType; name: string; source: string },
-  scopeVars: Record<string, unknown>,
   sourceVars: Record<string, unknown>,
   bundleVars: Record<string, unknown> = {},
 ): RenderContext {
   return {
     // source defaults < bundle vars (bundle items only) < user < project < local (spec §5, §15.3)
-    vars: { ...sourceVars, ...bundleVars, ...scopeVars },
-    project:
-      scope === "project"
-        ? { dir: ctx.projectDir!, name: basename(ctx.projectDir!), git_remote: gitRemote(ctx.projectDir!) }
-        : undefined,
+    vars: { ...sourceVars, ...bundleVars, ...inputs.vars },
+    project: inputs.project,
     scope,
     harness,
     target: { dir: targetDir },
@@ -407,8 +446,8 @@ function hookTrustWarning(ctx: EngineContext, targets: TargetSelection): string 
 
 /**
  * Sync one scope. A sync that stops with an error may have changed the lock – a partial
- * entry (spec §6.2, k71) – so the scope's unreached record no longer holds: it is cleared,
- * and `check` counts every drift again until a sync finishes (spec §14.3).
+ * entry (spec §6.2, k71) – so the scope's records no longer hold: they are cleared, and
+ * `check` counts every drift and the render inputs again until a sync finishes (spec §14.3).
  */
 async function syncScope(
   ctx: EngineContext,
@@ -427,6 +466,7 @@ async function syncScope(
       const lockPath = join(targetDirOf(ctx, scope), "skilletor.lock.json");
       state.putUnreached(lockPath, []);
       state.putSourcesRead(lockPath, {}); // `check` compares with the lock again (k80)
+      state.putRenderInputs(lockPath, undefined); // what it rendered with is unknown (k76)
     } catch {
       // the state dir cannot be written: the error that stopped the sync is the one reported
     }
@@ -451,6 +491,10 @@ async function syncScopeRun(
   const lockPath = join(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const gitignoreOn = scopeCfg.gitignore !== false;
+  // Read once, when the first item renders: every item renders with the same, and the record
+  // below keeps what they rendered with (k76).
+  let inputs: RenderInputs | undefined;
+  const inputsOf = (): RenderInputs => (inputs ??= renderInputsOf(ctx, scope, scopeCfg));
 
   // Resolve every needed source in parallel (skip untrusted, warn on failure). The trust
   // check and the fetch use the one resolved backend (spec §3, §4.3); names that share a
@@ -546,7 +590,7 @@ async function syncScopeRun(
       let output: Map<string, Buffer>;
       try {
         output = build(
-          catItem, r.dir, makeContext(ctx, scope, h, root, item, scopeCfg.vars, cat.meta.vars ?? {}, extra.bundleVars),
+          catItem, r.dir, makeContext(ctx, inputsOf(), scope, h, root, item, cat.meta.vars ?? {}, extra.bundleVars),
         );
       } catch (err) {
         const where = harnesses.length > 1 ? ` (${h})` : "";
@@ -836,6 +880,16 @@ async function syncScopeRun(
     else if (before[name]) read[name] = before[name];
   }
   state.putSourcesRead(lockPath, read);
+  // What this sync rendered with (spec §14.3, k76): `check` compares the scope's inputs with
+  // it. A source it could not read left its items as they were, so the earlier record stays
+  // and a change stays open, like drift that source keeps; an untrusted source waits for
+  // trust, not for a sync. A scope that renders nothing has nothing a var could make stale.
+  const untrusted = new Set(rep.trustRequests.map((t) => t.name));
+  if (renderSources(scopeCfg, finalLock).length === 0) {
+    state.putRenderInputs(lockPath, undefined);
+  } else if ([...resolved.keys()].every((name) => reachable(name) || untrusted.has(name))) {
+    state.putRenderInputs(lockPath, renderInputsHash(inputsOf()));
+  }
   return rep;
 }
 
@@ -1085,6 +1139,9 @@ export interface CheckReport {
    *  moved to another source, a wildcard or bundle with nothing installed (spec §14.3, k70),
    *  an item a failed sync left partial (spec §6.2, k71). Absent when none. */
   declaredChanged?: ScopeName[];
+  /** Scopes whose render inputs – the config's vars, the project's git remote – differ from
+   *  what the last sync rendered with, or were never recorded (spec §14.3, k76). Absent when none. */
+  varsChanged?: ScopeName[];
   /** Sources that need `skilletor trust` first (spec §4.3): neither checked nor fetched, and
    *  no reason to sync. Absent when none. */
   trustRequests?: (TrustRequest & { scope: ScopeName })[];
@@ -1137,6 +1194,14 @@ export async function check(given: EngineContext, opts: SyncOptions = {}): Promi
       if (!open.some((d) => d.kind === kind)) continue;
       out.changed = true;
       (out[DRIFT_FIELD[kind]] ??= []).push(scope);
+    }
+    // What the last sync rendered with (k76). No record – before the first sync since k76, or
+    // after one that failed – counts: one sync records it. Only while a trusted source has
+    // items to render: a sync re-renders nothing of an untrusted one.
+    if (renderSources(scopeCfg, oldLock).some(trusted) &&
+      state.renderInputs(lockPath) !== renderInputsHash(renderInputsOf(ctx, scope, scopeCfg))) {
+      out.changed = true;
+      (out.varsChanged ??= []).push(scope);
     }
     // Sources a bundle pulled items from (spec §15.6) are not declared here; the lock names them.
     const viaSources = Object.values(oldLock).flatMap((e) => (e.via?.length ? [e.source] : []));

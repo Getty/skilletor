@@ -8582,6 +8582,23 @@ var State = class {
     else delete all[scopeKey];
     this.writeJson("sources-read.json", all);
   }
+  // ---- render inputs --------------------------------------------------------
+  /** The hash of what the last sync of a scope (keyed by its lock path) rendered its items
+   *  with (spec §14.3, k76): `check` compares the scope's current inputs with it. A malformed
+   *  entry counts as none. */
+  renderInputs(scopeKey) {
+    const hash = this.readJson("render-inputs.json")[scopeKey];
+    return typeof hash === "string" ? hash : void 0;
+  }
+  /** Replace a scope's render-inputs hash, or drop it (undefined); the file is written only
+   *  when it changes. */
+  putRenderInputs(scopeKey, hash) {
+    const all = this.readJson("render-inputs.json");
+    if (all[scopeKey] === hash) return;
+    if (hash === void 0) delete all[scopeKey];
+    else all[scopeKey] = hash;
+    this.writeJson("render-inputs.json", all);
+  }
   // ---- pending report -------------------------------------------------------
   putPendingReport(projectKey, report) {
     const pending = this.readJson("pending-report.json");
@@ -9183,11 +9200,30 @@ function gitRemote(dir) {
     return "";
   }
 }
-function makeContext(ctx, scope, harness, targetDir, item, scopeVars, sourceVars, bundleVars = {}) {
+function renderInputsOf(ctx, scope, scopeCfg) {
+  if (scope !== "project") return { vars: scopeCfg.vars };
+  const dir = ctx.projectDir;
+  return { vars: scopeCfg.vars, project: { dir, name: basename4(dir), git_remote: gitRemote(dir) } };
+}
+function canonicalJson(value2) {
+  if (Array.isArray(value2)) return `[${value2.map(canonicalJson).join(",")}]`;
+  if (value2 !== null && typeof value2 === "object") {
+    const obj = value2;
+    return `{${Object.keys(obj).sort().filter((k) => obj[k] !== void 0).map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value2) ?? "null";
+}
+function renderInputsHash(inputs) {
+  return hashBuffer(Buffer.from(canonicalJson(inputs), "utf8"));
+}
+function renderSources(scopeCfg, lock) {
+  return [.../* @__PURE__ */ new Set([...scopeSources(scopeCfg), ...Object.values(lock).map((e) => e.source)])];
+}
+function makeContext(ctx, inputs, scope, harness, targetDir, item, sourceVars, bundleVars = {}) {
   return {
     // source defaults < bundle vars (bundle items only) < user < project < local (spec §5, §15.3)
-    vars: { ...sourceVars, ...bundleVars, ...scopeVars },
-    project: scope === "project" ? { dir: ctx.projectDir, name: basename4(ctx.projectDir), git_remote: gitRemote(ctx.projectDir) } : void 0,
+    vars: { ...sourceVars, ...bundleVars, ...inputs.vars },
+    project: inputs.project,
     scope,
     harness,
     target: { dir: targetDir },
@@ -9266,6 +9302,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, r
       const lockPath = join14(targetDirOf(ctx, scope), "skilletor.lock.json");
       state.putUnreached(lockPath, []);
       state.putSourcesRead(lockPath, {});
+      state.putRenderInputs(lockPath, void 0);
     } catch {
     }
     throw err;
@@ -9279,6 +9316,8 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   const lockPath = join14(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const gitignoreOn = scopeCfg.gitignore !== false;
+  let inputs;
+  const inputsOf = () => inputs ??= renderInputsOf(ctx, scope, scopeCfg);
   const needed = scopeSources(scopeCfg);
   const sources = sourcesOf(config, scope);
   const resolved = /* @__PURE__ */ new Map();
@@ -9359,7 +9398,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
         output = build(
           catItem,
           r.dir,
-          makeContext(ctx, scope, h, root, item, scopeCfg.vars, cat.meta.vars ?? {}, extra.bundleVars)
+          makeContext(ctx, inputsOf(), scope, h, root, item, cat.meta.vars ?? {}, extra.bundleVars)
         );
       } catch (err) {
         const where = harnesses.length > 1 ? ` (${h})` : "";
@@ -9587,6 +9626,12 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
     else if (before[name]) read[name] = before[name];
   }
   state.putSourcesRead(lockPath, read);
+  const untrusted = new Set(rep.trustRequests.map((t) => t.name));
+  if (renderSources(scopeCfg, finalLock).length === 0) {
+    state.putRenderInputs(lockPath, void 0);
+  } else if ([...resolved.keys()].every((name) => reachable(name) || untrusted.has(name))) {
+    state.putRenderInputs(lockPath, renderInputsHash(inputsOf()));
+  }
   return rep;
 }
 function projectInUse(targetDir, lock) {
@@ -9787,6 +9832,10 @@ async function check(given, opts = {}) {
       if (!open.some((d) => d.kind === kind)) continue;
       out.changed = true;
       (out[DRIFT_FIELD[kind]] ??= []).push(scope);
+    }
+    if (renderSources(scopeCfg, oldLock).some(trusted) && state.renderInputs(lockPath) !== renderInputsHash(renderInputsOf(ctx, scope, scopeCfg))) {
+      out.changed = true;
+      (out.varsChanged ??= []).push(scope);
     }
     const viaSources = Object.values(oldLock).flatMap((e) => e.via?.length ? [e.source] : []);
     for (const name of /* @__PURE__ */ new Set([...scopeSources(scopeCfg), ...viaSources])) {
