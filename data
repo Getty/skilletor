@@ -1,0 +1,26 @@
+---
+class: standard
+completed: 2026-09-26T15:00:10Z
+created: 2026-09-26T14:26:24Z
+id: 80
+priority: medium
+started: 2026-09-26T14:47:48Z
+status: done
+tags:
+- check
+- sources
+title: 'check: a source with no lock entry reads as changed every session'
+updated: 2026-09-26T15:00:19Z
+---
+
+Found during k72 (worker), a gap in the k70 bound: check asks backend.check(sourceVersion(oldLock, name)); when nothing from a declared git/url source is in the lock (its only item blocked by a conflict, missing from the source, an empty wildcard over it), the version is undefined and check() reports changed. So every SessionStart syncs and fetches again and repeats the warning, although unreached.json already holds the drift (e.g. missing:skills/foo@src) – contrary to README ("does not count again until a sync runs anyway"). A `local` source syncing every session is by design and out of scope. Repro: git source, its only item conflicts with a hand-written file; sync; `check --json` → sources[src].changed true, exit 1. Fix idea: record the resolved version of every source the last sync read (state or lock, per scope) and let check compare against that when the lock has no entry. Tests: black-box through runHook – the second session after such a sync is silent and fetches nothing.
+
+2026-09-26 14:50 Started. Reading check/scopeDrift/sync record path; will reproduce test-first via runHook.
+
+2026-09-26 14:54 Repro confirmed test-first (test/check.test.ts k80 section): (1) git source whose only item conflicts -> no lock entry -> check sources[g].changed true every session; (2) mirror bug is real and matters: an item removed upstream is kept at its old version, sourceVersion() returns the first lock entry (sorted keys) -> old version -> check changed every session, re-sync + repeated 'item not found' warning each SessionStart. Same for conflict-on-update / template error on update. Design: record per lock path in state (new sources-read.json, next to unreached.json), not in the lock: the k80 case is exactly a scope whose lock may be empty and is then deleted (spec 6.4), lock entries own files, and the record qualifies the k70 unreached record, which is state keyed by lock path and cleared on the same failure. Entry = {kind, address, ref?, version}; check uses it only for the same backend (else: changed); no record -> lock fallback as before (no mass resync on upgrade).
+
+2026-09-26 14:58 Also found (not changed, for the dispatcher to decide): (a) status.sourceVersions still comes from the lock (last entry wins): a source with nothing installed shows no version, one with mixed versions shows whichever entry is last - could show the recorded version. (b) sync's resolve still passes sourceVersion(oldLock) (first lock entry) as the url If-None-Match: stale/absent etag only means a full GET, never wrong content. (c) no engine-level url harness exists (makeBackend is https-only), so the url case is covered only through the backend-agnostic engine logic. (d) skills/skilletor/SKILL.md check sentence is still accurate, left alone.
+
+2026-09-26 14:58 Done: check compares each source with the version the last finished sync read (new state file sources-read.json, per lock path, entry {kind,address,ref?,version}) instead of the first lock entry. src/state.ts: SourceRead + sourcesRead/putSourcesRead (malformed = none, written only on change). src/engine.ts: resolved map carries the backend; syncScopeRun records every source it resolved+scanned (k70 'reachable'), carries over an earlier entry for one it tried but could not read, drops sources no longer tried; syncScope's failure path clears it with unreached.json; check uses checkedVersion(): same backend -> recorded version, other backend -> undefined (changed, one sync), no record -> lock version as before (no resync on upgrade). Also fixes the mirror bug (kept entries at an older version made every session sync). Tests: 6 new in test/check.test.ts (k80 section), black-box via runHook; 1 and 4 failed on the old code, 2/3/5 each fail under a targeted mutation (no-record-as-unchanged, unbound record, failure keeps record, removed source kept). Verified: typecheck, npm test 570/570 (0 skipped), build, check-dist up to date; hand test of bin/skilletor hook session-start with temp HOME/CODEX_HOME: card repro now silent in sessions 2-3, check --json changed false exit 0. Docs: spec 4.4 table, 6.5 state list, 14.3 new 'A source moved' bullet; README check paragraph. Not committed.
+
+2026-09-26 15:00 Committed 8d495d6: check: compare each source with the version the last sync read (k80)
