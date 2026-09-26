@@ -1,0 +1,30 @@
+---
+class: standard
+completed: 2026-09-26T04:49:32Z
+created: 2026-09-26T03:51:13Z
+id: 68
+priority: high
+started: 2026-09-26T04:13:23Z
+status: done
+tags:
+- sources
+- cache
+title: 'sources/url: a bad tarball destroys the last good cache'
+updated: 2026-09-26T04:51:43Z
+---
+
+Update archive holds a valid skill, then a file/subpath collision (`clash` file + `clash/child`). writeEntries deletes the old cache first; EEXIST is reported as "using cache" but the cache is now partial. With a wildcard the previously installed skill disappears, the partial one is installed and locked with the OLD etag (probe 08). Code: src/sources/url.ts:80-92, 203-217. Fix: extract into a staging dir, swap only after full success.
+
+Repro: probe file by the skilletor-71 audit session, copied to docs-free scratch; reproduced by the orchestrator against exports of e371b13 AND v0.2.0 (pre-existing, not introduced by k62/k63/k65).
+
+2026-09-26 04:15 Implementation claimed by skilletor-71-cache in an isolated agent worktree based on eb3bfb4. Scope: preserve last-good URL cache across failed extraction/publication, add failing regression tests first, stage extraction before publishing. Main checkout is reserved for concurrent k66/k67 and 0.3.0 release work. No commits or release actions by this session.
+
+2026-09-26 04:30 Implemented and independently reviewed in isolated worktree /home/getty/dev/skilletor/.claude/worktrees/agent-a0c70f505dcd3b5f0 at base eb3bfb4. URL updates extract into unique staging trees; failed publication restores the old cache; post-publication cleanup warnings preserve the NEW version instead of falling back to the old ETag. Regression tests cover failed extraction with/without cache, rename failures, cleanup failures, failed restoration, security rejection, successful replacement/304/offline, and wildcard retention. Worker demonstrated red before fix; coordinator independently ran typecheck, all 495 tests (0 failed/0 skipped), build and check-dist successfully, and reviewed the diff. Integration patch for THIS CARD ONLY (no bundle): /tmp/skilletor-k68-integration.qWGVWs.patch. git apply --check passes against the main checkout; reverse check passes against the fixed worktree. Rebuild dist after applying on the release branch. Limit: not crash-atomic between renames; failed restoration retains the recoverable backup and reports its path. No main-checkout changes, commits, tags or pushes by this session.
+
+2026-09-26 04:46 Integrated into main (fee6ebb, v0.3.0) for 0.3.1: k68.patch (identical to /tmp/skilletor-k68-integration.qWGVWs.patch) applied cleanly (src/sources/url.ts unchanged since eb3bfb4), dist rebuilt. Uncommitted, for skilletor-release-manager: src/sources/url.ts, test/url-cache.test.ts, dist/skilletor.js. Verified: typecheck ok; npm test 519/519 (0 fail, 0 skipped); check-dist up to date. Red without fix (HEAD url.ts): 8 of 12 new tests fail - extraction keeps old cache, first-extraction rejects, wildcard sync keeps skill + lock (the defect), plus 5 fault-injection tests of the new swap path; decompression/download/success+304+offline/unsafe-tar green both ways. Audit probe 08 now fails at probes.mjs:211 (keep/SKILL.md still present) = defect gone; other probes unchanged vs pre-patch baseline. Review nit: SourceLocation.warning doc in src/sources/types.ts still says 'stale cache (offline)' only; now also set for post-publication cleanup warnings.
+
+2026-09-26 04:46 Also found (pre-existing, not k68 scope, for the dispatcher to decide, skilletor board): only sync holds the state mutex; commands.ts:150 and :197 call UrlSource.resolve() outside it, so a concurrent list/add and hook sync can race on the same cache dir. With k68 the worst case is: restore fails, resolve returns 'using cache' with the old version over the other process's new tree, and a .backup-* dir leaks. Before k68 the race could leave a half-written tree (rmSync mid-extract). Also: .stage-*/.backup-* leftovers (cleanup failure, crash between renames) are never garbage-collected.
+
+Correction to the note above: the two unlocked resolve() calls are in cmdAvailable (commands.ts:150) and cmdInstall (commands.ts:197, before it enters sync), not list/add.
+
+2026-09-26 04:49 Committed as 838c14e (sources/url: extract into a staging tree; a failed update keeps the last good cache (k68)); docs/release.md fix landed separately in 518aed3.
