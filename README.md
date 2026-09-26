@@ -375,7 +375,9 @@ does not affect projects.
 
 A file is skilletor-managed exactly when it appears in
 `<scope>/.claude/skilletor.lock.json`. Managed files are overwritten on the next sync —
-change them in the source, not in place.
+change them in the source, not in place. A sync that stops on a write error (a full disk,
+a permission) still records what it wrote, so the next sync picks up where it stopped;
+until then `status` marks the item `(partial: the last sync stopped midway)`.
 
 ## Codex
 
@@ -596,7 +598,8 @@ rendered. This is the same trust level as installing a plugin.
 - skilletor never writes or deletes through a linked skill directory or item file: a link
   there is a conflict, and any conflict blocks the whole item. `--force` replaces the link
   itself and leaves its target alone. A `~/.claude/skills` or `~/.claude/agents` linked
-  into your dotfiles works as before.
+  into your dotfiles works as before. A directory where an item has a file is never
+  deleted, `--force` or not: move or remove it yourself.
 
 ## Coming from manage-skills
 
@@ -623,11 +626,11 @@ skilletor trust <source>
 
 `check` writes nothing and exits non-zero when a sync is due: a source moved, or what is
 installed no longer matches the config (an item added or removed, a pin changed, a target
-switched). What the last sync could not install although its source was there (an item the
-source lacks, a conflict) does not count again until a sync runs anyway. `--project-dir`
-goes with every command; any other option a command does not list is an error (exit 2,
-nothing runs). `-h`/`--help` anywhere prints the usage and runs nothing (`sync --help`
-does not sync); `-v`/`--version` only as the first argument.
+switched, the last sync stopped midway). What the last sync could not install although its
+source was there (an item the source lacks, a conflict) does not count again until a sync
+runs anyway. `--project-dir` goes with every command; any other option a command does not
+list is an error (exit 2, nothing runs). `-h`/`--help` anywhere prints the usage and runs
+nothing (`sync --help` does not sync); `-v`/`--version` only as the first argument.
 
 ## Requirements
 

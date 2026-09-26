@@ -49,8 +49,10 @@ export interface ScopeReport {
   /** Declared items that render empty (spec §5): not applicable, not an error.
    *  An item also in `removed` had an installed copy deleted this run. */
   skipped: ItemChange[];
-  /** `replace`: an agent's or rule's plain path (spec §6.3); `--force` deletes the file there. */
-  conflicts: { path: string; replace?: true }[];
+  /** `replace`: an agent's or rule's plain path, or a link in the way (spec §6.3); `--force`
+   *  deletes it. `notFile`: a directory (or other non-file) where a file goes; `--force`
+   *  does not resolve it. `conflictHint` words each. */
+  conflicts: ReportConflict[];
   overwritten: { path: string }[];
   warnings: string[];
   trustRequests: TrustRequest[];
@@ -60,6 +62,19 @@ export interface ScopeReport {
   /** `.gitignore` files whose skilletor block this sync created or changed, to be
    *  committed (spec §6.4): `.claude/.gitignore`, `~/.claude/.gitignore`. Absent when empty. */
   gitignoreUpdated?: string[];
+}
+
+export interface ReportConflict {
+  path: string;
+  replace?: true;
+  notFile?: true;
+}
+
+/** What a conflict is and what resolves it, the text after its path (spec §6.3):
+ *  `skills/foo/SKILL.md already exists (use --force to adopt)`. */
+export function conflictHint(c: { replace?: true; notFile?: true }): string {
+  if (c.notFile) return "is not a file (move or remove it yourself; --force leaves it)";
+  return `already exists (use --force to ${c.replace ? "replace it" : "adopt"})`;
 }
 
 export interface SyncReport {
@@ -119,9 +134,7 @@ export function reportText(r: SyncReport): string {
     const removed = new Set(s.removed.map((it) => it.key));
     for (const it of s.skipped) if (!removed.has(it.key)) lines.push(`  · ${it.key} skipped (renders empty)`);
     for (const c of s.overwritten) lines.push(`  overwrote local change: ${c.path}`);
-    for (const c of s.conflicts) {
-      lines.push(`  conflict: ${c.path} already exists (use --force to ${c.replace ? "replace it" : "adopt"})`);
-    }
+    for (const c of s.conflicts) lines.push(`  conflict: ${c.path} ${conflictHint(c)}`);
     for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${backendLabel(t)}) — run: skilletor trust ${t.name}`);
     for (const g of s.gitignoreUpdated ?? []) lines.push(`  ${commitHint(g)}`);
     for (const w of s.warnings) lines.push(`  warning: ${w}`);

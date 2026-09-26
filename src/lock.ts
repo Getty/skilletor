@@ -26,6 +26,10 @@ export interface LockEntry {
    *  (spec §15.5): lets `status` name them offline, and keeps the item while a bundle
    *  cannot be expanded (spec §15.4). Absent for explicit and wildcard items. */
   via?: string[];
+  /** Left by a sync that failed after writing (spec §6.2, k71): the entry owns the files
+   *  it lists, but the item may not match its source yet. `check` asks for a sync; the next
+   *  complete apply of the item drops the marker. */
+  partial?: boolean;
 }
 
 export type SkipReason = "renders-empty";
@@ -66,6 +70,7 @@ export function serializeLock(lock: Lock): string {
     if (entry.skipped) out[key].skipped = entry.skipped;
     if (entry.block) out[key].block = true;
     if (entry.via?.length) out[key].via = [...entry.via];
+    if (entry.partial) out[key].partial = true;
   }
   return JSON.stringify(out, null, 2) + "\n";
 }

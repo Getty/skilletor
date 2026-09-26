@@ -6,11 +6,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
-import { check, sync } from "../src/engine.ts";
+import { check, status, sync } from "../src/engine.ts";
 import { cmdTrust } from "../src/commands.ts";
 import { readLock } from "../src/lock.ts";
 import { runHook, type HookContext } from "../src/hooks.ts";
@@ -318,6 +320,98 @@ test("k70: a corrupt unreached.json counts as no record; session-start syncs and
       assert.equal((await e.session()).systemMessage, "skilletor: 1 warning(s)", junk); // counted again: one sync
       assert.deepEqual(await e.session(), {}, junk);
     }
+  } finally {
+    e.tmp.cleanup();
+  }
+});
+
+// ---- a sync that failed midway (k71) ---------------------------------------------------
+
+// Asserts: a lock entry an interrupted sync left partial is drift of its own – check asks
+// for a sync though no source moved and every item is declared, and status marks it; the
+// sync completes the entry, reports the item, and the next session is quiet.
+test("k71: a partial lock entry makes check ask for a sync; the sync completes it", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/foo/SKILL.md": SKILL("foo") });
+    e.writeCfg("user", { sources: { g: { git: repo.url } }, install: { skills: ["foo@g"] }, checkInterval: 0 });
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    const lockFile = e.userFile("skilletor.lock.json");
+    const lock = readLock(lockFile);
+    writeFileSync(lockFile, JSON.stringify({ "skills/foo": { ...lock["skills/foo"], partial: true } }, null, 2) + "\n");
+
+    const chk = await check(e.ctx);
+    assert.deepEqual([chk.changed, chk.declaredChanged, chk.sources], [true, ["user"], [{ name: "g", scope: "user", changed: false }]]);
+    const row = () => status(e.ctx, { scope: "user" }).scopes[0]!.declared[0];
+    assert.deepEqual(row(), { key: "skills/foo", source: "g", installed: true, partial: true });
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    assert.deepEqual(readLock(lockFile), lock);
+    assert.deepEqual(row(), { key: "skills/foo", source: "g", installed: true });
+    assert.deepEqual(await e.session(), {});
+  } finally {
+    e.tmp.cleanup();
+  }
+});
+
+// Asserts: a session-start sync that fails after writing (here: ~/.claude/rules is a file,
+// so the rule cannot land) is one warning line, not a crash; once the obstacle is gone the
+// next session finishes the job with no conflict on skilletor's own earlier output.
+test("k71: a session-start sync that fails midway warns; the next session resumes without conflicts", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/foo/SKILL.md": SKILL("foo"), "rules/r.md": "R\n" });
+    e.writeCfg("user", { sources: { g: { git: repo.url } }, install: { skills: ["foo@g"], rules: ["r@g"] }, checkInterval: 0 });
+    writeFileSync(e.userFile("rules"), "a file where the rules dir goes");
+    const failed = await e.session();
+    assert.match(failed.systemMessage ?? "", /^skilletor: .*(EEXIST|ENOTDIR)/);
+    assert.equal(existsSync(e.userFile("skills/foo/SKILL.md")), true, "foo landed before the failure");
+    assert.equal(readLock(e.userFile("skilletor.lock.json"))["skills/foo"]?.partial, true);
+
+    rmSync(e.userFile("rules"));
+    const out = await e.session();
+    assert.equal(out.systemMessage, "skilletor: 2 item(s) updated");
+    assert.doesNotMatch(out.hookSpecificOutput?.additionalContext ?? "", /conflict/);
+    assert.equal(readFileSync(e.userFile("rules/.local.r.md"), "utf8"), "R\n");
+    assert.deepEqual(await e.session(), {});
+  } finally {
+    e.tmp.cleanup();
+  }
+});
+
+// Asserts: a sync that fails midway clears the scope's unreached record. The record comes
+// from an earlier sync that left a partial entry blocked (a linked skill dir) and so keeps
+// `check` quiet about it; once the link is gone, a sync that fails again leaves the entry
+// partial – and `check` must count that again, though no source moved and nothing else
+// differs, so the next session finishes it.
+test("k71: a sync that fails midway clears the unreached record; check counts the partial entry again", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/foo/SKILL.md": SKILL("foo"), "rules/r.md": "R\n", "agents/a.md": "---\nname: a\n---\nA\n" });
+    const sources = { g: { git: repo.url } };
+    const declare = (install: unknown) => e.writeCfg("user", { sources, install, checkInterval: 0 });
+    declare({ skills: ["foo@g"], rules: ["r@g"] });
+    writeFileSync(e.userFile("rules"), "a file where the rules dir goes");
+    assert.match((await e.session()).systemMessage ?? "", /EEXIST|ENOTDIR/); // foo lands, partial
+    rmSync(e.userFile("rules"));
+    rmSync(e.userFile("skills/foo"), { recursive: true });
+    mkdirSync(join(e.tmp.dir, "elsewhere"));
+    symlinkSync(join(e.tmp.dir, "elsewhere"), e.userFile("skills/foo")); // blocks foo's retry
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated, 1 warning(s)"); // r; foo conflicts
+    assert.deepEqual(await e.session(), {}, "the blocked partial entry is recorded as unreached");
+
+    rmSync(e.userFile("skills/foo"));
+    declare({ skills: ["foo@g"], agents: ["a@g"], rules: ["r@g"] });
+    writeFileSync(e.userFile("agents"), "a file where the agents dir goes");
+    assert.match((await e.session()).systemMessage ?? "", /EEXIST|ENOTDIR/); // foo lands again, a fails
+    assert.equal(readLock(e.userFile("skilletor.lock.json"))["skills/foo"]?.partial, true);
+    rmSync(e.userFile("agents"));
+    declare({ skills: ["foo@g"], rules: ["r@g"] });
+
+    const chk = await check(e.ctx);
+    assert.deepEqual([chk.changed, chk.declaredChanged], [true, ["user"]]);
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    assert.equal(readLock(e.userFile("skilletor.lock.json"))["skills/foo"]?.partial, undefined);
+    assert.deepEqual(await e.session(), {});
   } finally {
     e.tmp.cleanup();
   }

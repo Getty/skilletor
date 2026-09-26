@@ -8026,6 +8026,7 @@ function serializeLock(lock) {
     if (entry.skipped) out[key].skipped = entry.skipped;
     if (entry.block) out[key].block = true;
     if (entry.via?.length) out[key].via = [...entry.via];
+    if (entry.partial) out[key].partial = true;
   }
   return JSON.stringify(out, null, 2) + "\n";
 }
@@ -8043,9 +8044,18 @@ function isValidItemName(name) {
   return NAME_RE.test(name);
 }
 function apply(plan, opts) {
-  const targetDir = resolvePath3(opts.targetDir);
-  const lockPath = join10(targetDir, "skilletor.lock.json");
+  const lockPath = join10(resolvePath3(opts.targetDir), "skilletor.lock.json");
   const oldLock = readLock(lockPath);
+  const landed = /* @__PURE__ */ new Map();
+  try {
+    return applyPlan(plan, opts, lockPath, oldLock, landed);
+  } catch (err) {
+    if (landed.size > 0) writeSalvageLock(lockPath, oldLock, landed);
+    throw err;
+  }
+}
+function applyPlan(plan, opts, lockPath, oldLock, landed) {
+  const targetDir = resolvePath3(opts.targetDir);
   const newLock = {};
   const res = {
     added: [],
@@ -8087,10 +8097,13 @@ function apply(plan, opts) {
     const removals = Object.keys(existing?.files ?? {}).filter((rel) => !it.output.has(rel));
     const found = [];
     const deleteFirst = [];
-    const conflict = (path, hard, replace) => {
-      if (found.some((f) => f.c.path === path)) return;
-      found.push({ c: replace ? { key: it.key, path, replace: true } : { key: it.key, path }, hard });
-      if (replace && !hard) deleteFirst.push(path);
+    const conflict = (path, notFile, replace) => {
+      if (found.some((c2) => c2.path === path)) return;
+      const c = { key: it.key, path };
+      if (replace) c.replace = true;
+      if (notFile) c.notFile = true;
+      found.push(c);
+      if (replace && !notFile) deleteFirst.push(path);
     };
     const claims = new Set(it.claims ?? []);
     for (const rel of /* @__PURE__ */ new Set([...claims, ...it.output.keys(), ...removals])) {
@@ -8107,7 +8120,7 @@ function apply(plan, opts) {
         conflict(rel, false, !isOutput);
       }
     }
-    const blocking = found.filter((f) => f.hard || !opts.force).map((f) => f.c);
+    const blocking = found.filter((c) => c.notFile || !opts.force);
     if (blocking.length > 0) {
       res.conflicts.push(...blocking);
       if (oldLock[it.key]) newLock[it.key] = oldLock[it.key];
@@ -8118,6 +8131,12 @@ function apply(plan, opts) {
     const entryFiles = {};
     let wrote = false;
     let removedFile = false;
+    const land = (rel, hash) => {
+      res.written.push({ key: it.key, path: rel });
+      let l = landed.get(it.key);
+      if (!l) landed.set(it.key, l = { item: it, files: {} });
+      l.files[rel] = hash;
+    };
     for (const [rel, buf] of it.output) {
       const abs = safeJoin(root, rel);
       const desired = hashBuffer(buf);
@@ -8127,7 +8146,7 @@ function apply(plan, opts) {
         const diskHash = hashBuffer(readFileSync6(abs));
         if (diskHash === desired) {
           entryFiles[rel] = desired;
-          if (locked === void 0) res.written.push({ key: it.key, path: rel });
+          if (locked === void 0) land(rel, desired);
           continue;
         }
         atomicWrite(abs, buf);
@@ -8140,7 +8159,7 @@ function apply(plan, opts) {
       }
       wrote = true;
       entryFiles[rel] = desired;
-      res.written.push({ key: it.key, path: rel });
+      land(rel, desired);
     }
     if (removeItemFiles(it.key, root, removals, touched(root), res)) removedFile = true;
     if (Object.keys(entryFiles).length > 0) {
@@ -8149,7 +8168,7 @@ function apply(plan, opts) {
     if (existing === void 0) {
       if (wrote) res.added.push(it.key);
       else res.unchanged.push(it.key);
-    } else if (wrote || removedFile) {
+    } else if (wrote || removedFile || existing.partial) {
       res.updated.push(it.key);
     } else {
       res.unchanged.push(it.key);
@@ -8174,6 +8193,17 @@ function apply(plan, opts) {
     writeLock(lockPath, newLock);
   }
   return res;
+}
+function writeSalvageLock(lockPath, oldLock, landed) {
+  const lock = { ...oldLock };
+  for (const [key, { item, files }] of landed) {
+    const prev = oldLock[key]?.skipped ? void 0 : oldLock[key];
+    lock[key] = withVia({ source: item.source, version: item.version, files: { ...prev?.files, ...files }, partial: true }, item);
+  }
+  try {
+    writeLock(lockPath, lock);
+  } catch {
+  }
 }
 function recordBlockItem(it, prev, newLock, res) {
   const had = prev !== void 0 && !prev.skipped;
@@ -8572,6 +8602,10 @@ function activationOf(it) {
 function backendLabel(b) {
   return `${b.kind} ${b.url}`;
 }
+function conflictHint(c) {
+  if (c.notFile) return "is not a file (move or remove it yourself; --force leaves it)";
+  return `already exists (use --force to ${c.replace ? "replace it" : "adopt"})`;
+}
 function emptyScopeReport(scope) {
   return {
     scope,
@@ -8617,9 +8651,7 @@ function reportText(r) {
     const removed = new Set(s.removed.map((it) => it.key));
     for (const it of s.skipped) if (!removed.has(it.key)) lines.push(`  \xB7 ${it.key} skipped (renders empty)`);
     for (const c of s.overwritten) lines.push(`  overwrote local change: ${c.path}`);
-    for (const c of s.conflicts) {
-      lines.push(`  conflict: ${c.path} already exists (use --force to ${c.replace ? "replace it" : "adopt"})`);
-    }
+    for (const c of s.conflicts) lines.push(`  conflict: ${c.path} ${conflictHint(c)}`);
     for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${backendLabel(t)}) \u2014 run: skilletor trust ${t.name}`);
     for (const g of s.gitignoreUpdated ?? []) lines.push(`  ${commitHint(g)}`);
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
@@ -8844,6 +8876,17 @@ function hookTrustWarning(ctx, targets) {
   return `Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${join14(codexHome, "config.toml")}); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules`;
 }
 async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
+  try {
+    return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state);
+  } catch (err) {
+    try {
+      state.putUnreached(join14(targetDirOf(ctx, scope), "skilletor.lock.json"), []);
+    } catch {
+    }
+    throw err;
+  }
+}
+async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
   const base = baseOf(ctx, scope);
@@ -9141,7 +9184,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
     const root = rootOfKey(rc, c.key) ?? targetDir;
     return { path: root === targetDir ? c.path : labelOf(join14(root, c.path)) };
   };
-  rep.conflicts = result.conflicts.map((c) => c.replace ? { ...shown(c), replace: c.replace } : shown(c));
+  rep.conflicts = result.conflicts.map(({ key, path, ...how }) => ({ ...shown({ key, path }), ...how }));
   rep.overwritten = [...result.overwritten.map(shown), ...rules.overwritten.map((path) => ({ path }))];
   for (const l of result.leftInPlace) {
     rep.warnings.push(`${shown(l).path} is a symbolic link: files of ${l.key} behind it left in place (never deleted through a link)`);
@@ -9418,6 +9461,7 @@ function declaredDrift(scopeCfg, harnesses, lock, servedBy) {
     const by = coverOf(scopeCfg, k, entry);
     for (const c of by) covered.add(c);
     if (by.length === 0 && !explicit.has(k.target)) drift(`orphan:${key}`, []);
+    if (entry.partial) drift(`partial:${key}`, [entry.source]);
   }
   for (const w of scopeCfg.wildcards) if (!covered.has(w)) drift(`wildcard:${w.type}:${w.raw}`, [w.source]);
   for (const b of scopeCfg.bundles) {
@@ -9467,6 +9511,7 @@ function status(given, opts = {}) {
         installed: entry !== void 0 && !entry.skipped
       };
       if (entry?.skipped) d.skipped = entry.skipped;
+      if (entry?.partial) d.partial = true;
       return d;
     });
     const via = /* @__PURE__ */ new Map();
@@ -9485,7 +9530,9 @@ function status(given, opts = {}) {
         declared.push({ key, source: entry.source, installed: false, via: label, skipped: entry.skipped });
         continue;
       }
-      declared.push({ key, source: entry.source, installed: true, via: label });
+      const d = { key, source: entry.source, installed: true, via: label };
+      if (entry.partial) d.partial = true;
+      declared.push(d);
       for (const c of covering2) via.set(c, (via.get(c) ?? /* @__PURE__ */ new Set()).add(k.target));
     }
     const installed = new Set(declared.filter((d) => d.installed).map((d) => d.key));
@@ -10185,7 +10232,7 @@ function statusText(report) {
     lines.push(claudeOnly ? `${s.scope} scope:` : `${s.scope} scope (${s.targets.join(", ") || "no targets"}):`);
     for (const d of s.declared) {
       const mark = d.installed ? "\u2713" : d.skipped ? "-" : "\xB7";
-      const note = (d.skipped ? " (skipped: renders empty)" : "") + (d.briefingMissing ? ` (briefing skills not installed: ${d.briefingMissing.join(", ")})` : "");
+      const note = (d.skipped ? " (skipped: renders empty)" : "") + (d.partial ? " (partial: the last sync stopped midway)" : "") + (d.briefingMissing ? ` (briefing skills not installed: ${d.briefingMissing.join(", ")})` : "");
       lines.push(`  ${mark} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}${note}`);
     }
     for (const w of s.wildcards) {

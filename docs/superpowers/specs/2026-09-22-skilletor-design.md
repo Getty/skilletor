@@ -308,6 +308,15 @@ is left alone (no conflict, `--force` irrelevant). The entry lets `status` repor
 skip without rendering (status stays offline and read-only), and it is kept like any
 other entry while its source cannot be resolved.
 
+**A sync that fails midway** (k71) – a write error (`EACCES`, `ENOSPC`, a failing rename)
+after some files landed – still leaves a lock that owns them: the old lock, plus every file
+the run wrote or adopted under its item, marked `"partial": true`. Everything the run did
+not reach keeps its old entry. A retry thus recognizes skilletor's own output instead of
+reporting it as a conflict; `check` counts a partial entry as drift (§14.3), so the next
+session retries, and `status` marks the item `(partial: the last sync stopped midway)`
+(`partial` in `--json`). The first complete apply of the item drops the marker and reports
+it as updated. A run that fails before its first write leaves the lock untouched.
+
 ### 6.3 Ownership and coexistence with your own files
 
 - If a target path exists that is **not** in the lock (a hand-written skill, a
@@ -324,8 +333,10 @@ other entry while its source cannot be resolved.
   `~/.claude/agents` linked into a dotfiles checkout) are the user's setup and are written
   through as before. Every path of an item is checked before its first write. A directory
   where the item has a file is a conflict even with `--force` – skilletor never deletes a
-  directory tree it does not own. Files of an undeclared item that sit behind such a link
-  are left in place with one warning, and the lock drops the entry.
+  directory tree it does not own; the report says so (`skills/foo/SKILL.md is not a file
+  (move or remove it yourself; --force leaves it)`, `notFile` in the JSON report). Files
+  of an undeclared item that sit behind such a link are left in place with one warning,
+  and the lock drops the entry.
 - Installed agent and rule files carry the prefix `.local.` (§6.4):
   `agents/.local.<name>.md`, `rules/.local.<name>.md`; a nested rule prefixes its file
   name (`rules/lang/.local.perl.md`). Such an item still claims its **plain** path: a
@@ -438,7 +449,8 @@ the block is deleted. Content outside the block is never touched.
 
 A sync error never aborts a session. Fetch error/offline → continue with the cache, one
 warning line. Template error → that item stays at its old state, error with file and
-line. Config error → nothing is touched, clear message.
+line. Config error → nothing is touched, clear message. Write error while applying → the
+sync stops with that error; the lock keeps what landed (§6.2), and the next sync resumes.
 
 ### 6.7 Briefing check for agents (#56)
 
@@ -717,17 +729,19 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
   project that is not in use (§6.4) but holds a skilletor block in one of its roots. And
   when the lock does not match what the config declares (k70): an explicit item an active
   target lacks, or holds from another source; an entry no explicit item, wildcard or
-  bundle declares any more; a wildcard or bundle with nothing installed. The test stays
-  offline and read-only: the lock, the state dir, two existence tests and at most one small
-  read per root of a project not in use.
+  bundle declares any more; a wildcard or bundle with nothing installed; an entry a failed
+  sync left partial (§6.2, k71). The test stays offline and read-only: the lock, the state
+  dir, two existence tests and at most one small read per root of a project not in use.
 - **What a sync cannot reach costs one sync, not one per session** (k70). Drift a sync
   leaves in place although every source it needed was resolved and scanned – an item the
   source lacks, a lasting conflict, a template error, a wildcard that matches nothing – is
   recorded per lock in `unreached.json` (§6.5), and `check` does not count it again. The
   next sync that runs anyway (a source moved, other drift, `skilletor sync`) tries it anew
-  and replaces the record; a conflict resolved by hand is picked up then. Drift kept by a
-  source that could not be resolved or scanned stays counted, so each session retries it;
-  drift that needs an untrusted source is not counted – the trust request stands for it.
+  and replaces the record; a conflict resolved by hand is picked up then. A sync that stops
+  with an error clears the record (k71): the lock may hold a partial entry again, so every
+  drift counts until a sync finishes. Drift kept by a source that could not be resolved or
+  scanned stays counted, so each session retries it; drift that needs an untrusted source is
+  not counted – the trust request stands for it.
 - **Git hygiene** (§6.4): Codex skills carry their own `.gitignore` like Claude skills, so
   `<project>/.agents` and `~/.agents` get no block (one left by an earlier version is
   removed). `<project>/.codex/.gitignore` and `$CODEX_HOME/.gitignore` hold the fixed block

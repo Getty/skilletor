@@ -1,7 +1,9 @@
 // Tests for report formatting (spec §8).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reportText, reportHook, hasChanges, hasNotable, emptyScopeReport, type SyncReport } from "../src/report.ts";
+import {
+  reportText, reportHook, hasChanges, hasNotable, emptyScopeReport, conflictHint, type SyncReport,
+} from "../src/report.ts";
 
 function sample(): SyncReport {
   const s = emptyScopeReport("user");
@@ -97,4 +99,22 @@ test("a plain-path conflict says --force replaces the file; an ordinary one says
   const text = reportText({ scopes: [s] });
   assert.match(text, /^ {2}conflict: agents\/a\.md already exists \(use --force to replace it\)$/m);
   assert.match(text, /^ {2}conflict: skills\/x\/SKILL\.md already exists \(use --force to adopt\)$/m);
+});
+
+// k71: a directory (or other non-file) where an item has a file is a conflict --force does
+// not resolve (skilletor never deletes a directory tree). Asserts: its hint says so and
+// names what the user does instead; the hint is one function of the conflict's data, so a
+// hook can show the same words (k72).
+test("a conflict that is not a file says to move or remove it, not --force", () => {
+  const s = emptyScopeReport("user");
+  s.conflicts = [{ path: "skills/x/SKILL.md", notFile: true }, { path: "agents/a.md", replace: true }, { path: "skills/y/SKILL.md" }];
+  const text = reportText({ scopes: [s] });
+  assert.match(text, /^ {2}conflict: skills\/x\/SKILL\.md is not a file \(move or remove it yourself; --force leaves it\)$/m);
+  assert.match(text, /^ {2}conflict: agents\/a\.md already exists \(use --force to replace it\)$/m);
+  assert.match(text, /^ {2}conflict: skills\/y\/SKILL\.md already exists \(use --force to adopt\)$/m);
+  assert.deepEqual(s.conflicts.map(conflictHint), [
+    "is not a file (move or remove it yourself; --force leaves it)",
+    "already exists (use --force to replace it)",
+    "already exists (use --force to adopt)",
+  ]);
 });

@@ -98,6 +98,33 @@ test("install 'rule:*@src' and status text marks wildcard items", () => {
   assert.match(st.stdout, /\* rules\/\* @shared \(1 installed\)/);
 });
 
+// k71: an entry a sync that stopped midway left partial. Asserts: status names it in text
+// and JSON, so a user sees why the next sync has work to do.
+test("status marks an item the last sync left partial", () => {
+  const home = join(tmp.dir, "partial-home");
+  const proj = join(tmp.dir, "partial-proj");
+  const src = join(tmp.dir, "partial-src");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(proj, { recursive: true });
+  mkdirSync(join(src, "skills", "foo"), { recursive: true });
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), "---\nname: foo\ndescription: foo\n---\nFOO\n");
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { shared: { local: src } } }));
+  const env = claudeOnlyEnv(home);
+  const common = ["--project-dir", proj];
+  const ok = runCli(["install", "foo@shared", ...common], env);
+  assert.equal(ok.status, 0, ok.stderr);
+  const lockFile = join(home, ".claude", "skilletor.lock.json");
+  const lock = JSON.parse(readFileSync(lockFile, "utf8"));
+  lock["skills/foo"].partial = true;
+  writeFileSync(lockFile, JSON.stringify(lock));
+
+  const st = runCli(["status", "--scope", "user", ...common], env);
+  assert.equal(st.status, 0, st.stderr);
+  assert.match(st.stdout, /^ {2}✓ skills\/foo @shared \(partial: the last sync stopped midway\)$/m);
+  const json = runCli(["status", "--scope", "user", "--json", ...common], env);
+  assert.equal(JSON.parse(json.stdout).scopes[0].declared[0].partial, true);
+});
+
 // k48: bundles and patterns through the real binary, with HOME in a temp dir.
 test("install bundle:name@src and a pattern; status and available show bundles; uninstall bundle:", () => {
   const home = join(tmp.dir, "bundle-home");

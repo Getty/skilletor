@@ -8,8 +8,10 @@
 // removed – unless --force adopts the file, replaces the link or deletes the file
 // at a claimed path. Nothing is ever written or deleted through such a link; links
 // above the item's path (a linked `skills` dir) are followed. Managed files that
-// drifted from their lock hash are overwritten and reported. `apply` knows nothing
-// about sources.
+// drifted from their lock hash are overwritten and reported. An error thrown after the
+// first write still leaves a lock that owns what landed (entries marked partial), so a
+// retry resumes instead of calling skilletor's own output a conflict. `apply` knows
+// nothing about sources.
 import { existsSync, lstatSync, readFileSync, readdirSync, rmdirSync, rmSync, type Stats } from "node:fs";
 import { dirname, join, relative, resolve as resolvePath, sep } from "node:path";
 import type { ItemType } from "./config.ts";
@@ -62,9 +64,8 @@ export interface ApplyResult {
   unchanged: string[];
   /** Plan items marked skipped (also in `removed` if files were deleted). */
   skipped: string[];
-  /** A conflict blocks its whole item (spec §6.3). `replace`: a claimed path, or a link
-   *  (or file) where the item needs a directory – `force` deletes it rather than adopts. */
-  conflicts: { key: string; path: string; replace?: true }[];
+  /** A conflict blocks its whole item (spec §6.3). */
+  conflicts: Conflict[];
   overwritten: { key: string; path: string }[];
   /** Paths written this run, or adopted into the lock with `force` (spec §6.4: the
    *  tracked-file check looks at these only). */
@@ -73,6 +74,18 @@ export interface ApplyResult {
    *  or skipped): the lock-owned files behind them were not deleted, and the lock lets
    *  go of them (spec §6.3). One entry per item and link. */
   leftInPlace: { key: string; path: string }[];
+}
+
+/** A path in the way of an item (spec §6.3). */
+export interface Conflict {
+  key: string;
+  path: string;
+  /** A claimed path, or a link (or file) where the item needs a directory: `force` deletes
+   *  it rather than adopts. */
+  replace?: true;
+  /** A directory (or other non-file) where the item has a file: `force` does not resolve
+   *  it – skilletor never deletes a directory tree. */
+  notFile?: true;
 }
 
 export class ApplyError extends Error {
@@ -86,10 +99,23 @@ export function isValidItemName(name: string): boolean {
   return NAME_RE.test(name);
 }
 
+/** Files a run wrote or adopted, per lock key, with the item that owns them. */
+type Landed = Map<string, { item: PlanItem; files: Record<string, string> }>;
+
 export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
-  const targetDir = resolvePath(opts.targetDir);
-  const lockPath = join(targetDir, "skilletor.lock.json");
+  const lockPath = join(resolvePath(opts.targetDir), "skilletor.lock.json");
   const oldLock = readLock(lockPath);
+  const landed: Landed = new Map();
+  try {
+    return applyPlan(plan, opts, lockPath, oldLock, landed);
+  } catch (err) {
+    if (landed.size > 0) writeSalvageLock(lockPath, oldLock, landed);
+    throw err;
+  }
+}
+
+function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLock: Lock, landed: Landed): ApplyResult {
+  const targetDir = resolvePath(opts.targetDir);
   const newLock: Lock = {};
   const res: ApplyResult = {
     added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [], written: [],
@@ -127,17 +153,20 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
     const own = ownPath(it.key);
     const removals = Object.keys(existing?.files ?? {}).filter((rel) => !it.output.has(rel));
 
-    // Check every path of the item before its first write (spec §6.3). A soft conflict
-    // blocks the item unless `force`; a hard one (a directory where a file goes, which
-    // is never deleted) blocks it with `force` too.
-    const found: { c: { key: string; path: string; replace?: true }; hard: boolean }[] = [];
+    // Check every path of the item before its first write (spec §6.3). A conflict blocks
+    // the item unless `force`; one that is not a file (a directory where a file goes,
+    // which is never deleted) blocks it with `force` too.
+    const found: Conflict[] = [];
     // Deleted before the writes: the item's own files where it now has a directory, and
     // with force the links/files in the way and foreign files at claimed paths.
     const deleteFirst: string[] = [];
-    const conflict = (path: string, hard: boolean, replace: boolean): void => {
-      if (found.some((f) => f.c.path === path)) return;
-      found.push({ c: replace ? { key: it.key, path, replace: true } : { key: it.key, path }, hard });
-      if (replace && !hard) deleteFirst.push(path);
+    const conflict = (path: string, notFile: boolean, replace: boolean): void => {
+      if (found.some((c) => c.path === path)) return;
+      const c: Conflict = { key: it.key, path };
+      if (replace) c.replace = true;
+      if (notFile) c.notFile = true;
+      found.push(c);
+      if (replace && !notFile) deleteFirst.push(path);
     };
     const claims = new Set(it.claims ?? []);
     for (const rel of new Set([...claims, ...it.output.keys(), ...removals])) {
@@ -156,7 +185,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
         conflict(rel, false, !isOutput);
       }
     }
-    const blocking = found.filter((f) => f.hard || !opts.force).map((f) => f.c);
+    const blocking = found.filter((c) => c.notFile || !opts.force);
     if (blocking.length > 0) {
       res.conflicts.push(...blocking);
       if (oldLock[it.key]) newLock[it.key] = oldLock[it.key]!; // left as it was
@@ -168,6 +197,13 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
     const entryFiles: Record<string, string> = {};
     let wrote = false;
     let removedFile = false;
+    /** A path written or adopted: reported, and owned even if a later step throws. */
+    const land = (rel: string, hash: string): void => {
+      res.written.push({ key: it.key, path: rel });
+      let l = landed.get(it.key);
+      if (!l) landed.set(it.key, (l = { item: it, files: {} }));
+      l.files[rel] = hash;
+    };
 
     for (const [rel, buf] of it.output) {
       const abs = safeJoin(root, rel);
@@ -180,7 +216,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
         if (diskHash === desired) {
           // Already correct; adopt into the lock (updates a stale hash silently).
           entryFiles[rel] = desired;
-          if (locked === undefined) res.written.push({ key: it.key, path: rel }); // adopted (force)
+          if (locked === undefined) land(rel, desired); // adopted (force)
           continue;
         }
         atomicWrite(abs, buf);
@@ -195,7 +231,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
       }
       wrote = true;
       entryFiles[rel] = desired;
-      res.written.push({ key: it.key, path: rel });
+      land(rel, desired);
     }
 
     // Files this item no longer contains but the lock still tracks.
@@ -208,8 +244,8 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
     if (existing === undefined) {
       if (wrote) res.added.push(it.key);
       else res.unchanged.push(it.key); // fully conflicted, nothing installed
-    } else if (wrote || removedFile) {
-      res.updated.push(it.key);
+    } else if (wrote || removedFile || existing.partial) {
+      res.updated.push(it.key); // a partial entry: the run that left it never reported it
     } else {
       res.unchanged.push(it.key);
     }
@@ -240,6 +276,26 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
   }
 
   return res;
+}
+
+/**
+ * The lock after a run that threw (spec §6.2, k71): the old lock, plus every file the run
+ * wrote or adopted, under its item marked partial – so a retry owns skilletor's own output
+ * instead of calling it a conflict, and `check` asks for that retry. Everything else stays
+ * as the old lock has it (a file deleted meanwhile is a harmless extra entry). Best effort:
+ * the error that stopped the run is the one reported.
+ */
+function writeSalvageLock(lockPath: string, oldLock: Lock, landed: Landed): void {
+  const lock: Lock = { ...oldLock };
+  for (const [key, { item, files }] of landed) {
+    const prev = oldLock[key]?.skipped ? undefined : oldLock[key];
+    lock[key] = withVia({ source: item.source, version: item.version, files: { ...prev?.files, ...files }, partial: true }, item);
+  }
+  try {
+    writeLock(lockPath, lock);
+  } catch {
+    // the lock cannot be written either: nothing left to save
+  }
 }
 
 /** Lock and report a block section by its hash; no disk access. */

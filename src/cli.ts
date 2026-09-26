@@ -142,6 +142,7 @@ function statusText(report: ReturnType<typeof status>): string {
     for (const d of s.declared) {
       const mark = d.installed ? "✓" : d.skipped ? "-" : "·";
       const note = (d.skipped ? " (skipped: renders empty)" : "") +
+        (d.partial ? " (partial: the last sync stopped midway)" : "") +
         (d.briefingMissing ? ` (briefing skills not installed: ${d.briefingMissing.join(", ")})` : "");
       lines.push(`  ${mark} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}${note}`);
     }

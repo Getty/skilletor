@@ -339,7 +339,33 @@ function hookTrustWarning(ctx: EngineContext, targets: TargetSelection): string 
     "until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules";
 }
 
+/**
+ * Sync one scope. A sync that stops with an error may have changed the lock – a partial
+ * entry (spec §6.2, k71) – so the scope's unreached record no longer holds: it is cleared,
+ * and `check` counts every drift again until a sync finishes (spec §14.3).
+ */
 async function syncScope(
+  ctx: EngineContext,
+  config: LoadedConfig,
+  scopeCfg: ScopeConfig,
+  scope: ScopeName,
+  harnesses: Harness[],
+  opts: SyncOptions,
+  state: State,
+): Promise<ScopeReport> {
+  try {
+    return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state);
+  } catch (err) {
+    try {
+      state.putUnreached(join(targetDirOf(ctx, scope), "skilletor.lock.json"), []);
+    } catch {
+      // the state dir cannot be written: the error that stopped the sync is the one reported
+    }
+    throw err;
+  }
+}
+
+async function syncScopeRun(
   ctx: EngineContext,
   config: LoadedConfig,
   scopeCfg: ScopeConfig,
@@ -708,7 +734,7 @@ async function syncScope(
     const root = rootOfKey(rc, c.key) ?? targetDir;
     return { path: root === targetDir ? c.path : labelOf(join(root, c.path)) };
   };
-  rep.conflicts = result.conflicts.map((c) => (c.replace ? { ...shown(c), replace: c.replace } : shown(c)));
+  rep.conflicts = result.conflicts.map(({ key, path, ...how }) => ({ ...shown({ key, path }), ...how }));
   rep.overwritten = [...result.overwritten.map(shown), ...rules.overwritten.map((path) => ({ path }))];
   for (const l of result.leftInPlace) {
     rep.warnings.push(`${shown(l).path} is a symbolic link: files of ${l.key} behind it left in place (never deleted through a link)`);
@@ -975,8 +1001,8 @@ export interface CheckReport {
   /** Scopes whose installed state does not match the layout of §6.4 (spec §14.3, k64). Absent when none. */
   layoutChanged?: ScopeName[];
   /** Scopes whose lock does not match what the config declares: an item added, removed or
-   *  moved to another source, a wildcard or bundle with nothing installed (spec §14.3, k70).
-   *  Absent when none. */
+   *  moved to another source, a wildcard or bundle with nothing installed (spec §14.3, k70),
+   *  an item a failed sync left partial (spec §6.2, k71). Absent when none. */
   declaredChanged?: ScopeName[];
   /** Sources that need `skilletor trust` first (spec §4.3): neither checked nor fetched, and
    *  no reason to sync. Absent when none. */
@@ -1118,7 +1144,8 @@ function layoutDrift(ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig
  * Where a scope's lock disagrees with what its config declares (spec §14.3, k70): an explicit
  * item an active target lacks, or holds from another source; an entry no explicit item,
  * wildcard or bundle declares any more; a wildcard or bundle with nothing installed – newly
- * declared, or matching nothing (the second is what the last sync's record keeps quiet).
+ * declared, or matching nothing (the second is what the last sync's record keeps quiet); an
+ * entry a failed sync left partial (spec §6.2, k71).
  * Entries of inactive targets and unknown harnesses are target drift or kept, not this.
  */
 function declaredDrift(
@@ -1141,6 +1168,7 @@ function declaredDrift(
     const by = coverOf(scopeCfg, k, entry);
     for (const c of by) covered.add(c);
     if (by.length === 0 && !explicit.has(k.target)) drift(`orphan:${key}`, []);
+    if (entry.partial) drift(`partial:${key}`, [entry.source]); // a sync failed midway (k71)
   }
   for (const w of scopeCfg.wildcards) if (!covered.has(w)) drift(`wildcard:${w.type}:${w.raw}`, [w.source]);
   for (const b of scopeCfg.bundles) {
@@ -1168,8 +1196,10 @@ export interface StatusReport {
     targets: Harness[];
     /** `via` names the wildcard entry or bundle (`bundle:perl@shared`) an item was installed through. */
     /** `briefingMissing`: an installed agent's declared briefing skills that do not resolve (spec §6.7). */
+    /** `partial`: the last sync stopped midway through the item (spec §6.2, k71). */
     declared: {
       key: string; source: string; installed: boolean; via?: string; skipped?: SkipReason; briefingMissing?: string[];
+      partial?: true;
     }[];
     orphans: string[];
     /** Each wildcard with the number of items currently installed through it. */
@@ -1223,6 +1253,7 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
         key: i.key, source: i.source, installed: entry !== undefined && !entry.skipped,
       };
       if (entry?.skipped) d.skipped = entry.skipped;
+      if (entry?.partial) d.partial = true;
       return d;
     });
     const via = new Map<WildcardItem | BundleItem, Set<string>>(); // distinct item targets per entry
@@ -1241,7 +1272,9 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
         declared.push({ key, source: entry.source, installed: false, via: label, skipped: entry.skipped });
         continue;
       }
-      declared.push({ key, source: entry.source, installed: true, via: label });
+      const d: StatusReport["scopes"][number]["declared"][number] = { key, source: entry.source, installed: true, via: label };
+      if (entry.partial) d.partial = true;
+      declared.push(d);
       for (const c of covering) via.set(c, (via.get(c) ?? new Set()).add(k.target));
     }
     const installed = new Set(declared.filter((d) => d.installed).map((d) => d.key));

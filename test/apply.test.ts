@@ -1,10 +1,13 @@
 // Tests for applying a build plan to disk (spec §6.1–6.3).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { apply, type PlanItem } from "../src/apply.ts";
+import { hashBuffer } from "../src/fsutil.ts";
 import { readLock } from "../src/lock.ts";
 import type { ItemType } from "../src/config.ts";
 
@@ -637,7 +640,7 @@ test("k67: a directory where the item has a file is a conflict, with --force too
     const plan = () => [item("skill", "moo", { "skills/moo/SKILL.md": "S", "skills/moo/ref.md": "R" })];
     for (const force of [false, true]) {
       const res = apply(plan(), { targetDir: tmp.dir, force });
-      assert.deepEqual(res.conflicts, [{ key: "skills/moo", path: "skills/moo/SKILL.md" }], `force=${force}`);
+      assert.deepEqual(res.conflicts, [{ key: "skills/moo", path: "skills/moo/SKILL.md", notFile: true }], `force=${force}`);
       assert.deepEqual(snapshot(join(tmp.dir, "skills/moo")), { "SKILL.md/keep": "MINE" });
     }
   } finally {
@@ -690,6 +693,96 @@ test("k67: an item's own file where it now has a directory is removed first, no 
     assert.equal(read(tmp.dir, "skills/moo/sub/x.md"), "X");
     assert.deepEqual(Object.keys(readLock(join(tmp.dir, "skilletor.lock.json"))["skills/moo"]!.files).sort(),
       ["skills/moo/SKILL.md", "skills/moo/sub/x.md"]);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+const hash = (text: string) => hashBuffer(Buffer.from(text));
+
+// k71: an error thrown after files landed (here the `rules` type dir is a file, so the rule
+// cannot be written – root cannot write there either) must not cost skilletor the ownership
+// of what it wrote. Asserts: the failed run leaves a lock that owns the landed files under
+// an entry marked partial and keeps every entry it did not reach as it was; the retry
+// reports no conflict on skilletor's own output and finishes the job.
+test("k71: an apply that fails midway keeps its landed files in the lock; the retry resumes without conflicts", () => {
+  const tmp = makeTmpDir();
+  try {
+    const lockFile = join(tmp.dir, "skilletor.lock.json");
+    apply([item("skill", "cow", { "skills/cow/SKILL.md": "C1" }), item("skill", "gone", { "skills/gone/SKILL.md": "G" })],
+      { targetDir: tmp.dir });
+    const before = readLock(lockFile);
+    writeFileSync(join(tmp.dir, "rules"), "a file where the rules dir goes");
+    const plan = () => [
+      { ...item("skill", "moo", { "skills/moo/SKILL.md": "S", "skills/moo/ref.md": "R" }), version: "git:bb" },
+      { ...item("rule", "x", { "rules/.local.x.md": "X" }), version: "git:bb" },
+      { ...item("skill", "cow", { "skills/cow/SKILL.md": "C2" }), version: "git:bb" },
+    ];
+    assert.throws(() => apply(plan(), { targetDir: tmp.dir }));
+    assert.equal(read(tmp.dir, "skills/moo/SKILL.md"), "S", "moo landed before the failure");
+    const lock = readLock(lockFile);
+    assert.deepEqual(lock["skills/moo"], {
+      source: "shared", version: "git:bb", partial: true,
+      files: { "skills/moo/SKILL.md": hash("S"), "skills/moo/ref.md": hash("R") },
+    });
+    assert.deepEqual([lock["skills/cow"], lock["skills/gone"], lock["rules/x"]], [before["skills/cow"], before["skills/gone"], undefined]);
+    assert.equal(read(tmp.dir, "skills/gone/SKILL.md"), "G", "not reached: not removed");
+
+    rmSync(join(tmp.dir, "rules"));
+    const res = apply(plan(), { targetDir: tmp.dir });
+    assert.deepEqual(res.conflicts, []);
+    // moo's report never arrived: it counts as updated now that its entry is complete.
+    assert.deepEqual([res.added, res.updated, res.removed], [["rules/x"], ["skills/moo", "skills/cow"], ["skills/gone"]]);
+    assert.deepEqual(snapshot(join(tmp.dir, "skills")), { "cow/SKILL.md": "C2", "moo/SKILL.md": "S", "moo/ref.md": "R" });
+    const after = readLock(lockFile);
+    assert.deepEqual(Object.keys(after).sort(), ["rules/x", "skills/cow", "skills/moo"]);
+    assert.equal(Object.values(after).some((e) => e.partial), false, "a finished run leaves no partial entry");
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// k71: the same inside one item – the first file of a new item lands, the second cannot be
+// written (a read-only directory; root ignores the mode, so the test is skipped there).
+// Asserts: the landed file is owned (partial); the retry after the fix writes the rest
+// with no conflict on the landed one.
+test("k71: a write failing inside a new item keeps the item's landed files", {
+  skip: process.platform === "win32" || process.getuid?.() === 0 ? "needs directory permissions that bind" : false,
+}, () => {
+  const tmp = makeTmpDir();
+  const sub = join(tmp.dir, "skills/moo/sub");
+  try {
+    mkdirSync(sub, { recursive: true });
+    chmodSync(sub, 0o555);
+    const plan = () => [item("skill", "moo", { "skills/moo/SKILL.md": "S", "skills/moo/sub/x.md": "X" })];
+    try {
+      assert.throws(() => apply(plan(), { targetDir: tmp.dir }), { code: "EACCES" });
+    } finally {
+      chmodSync(sub, 0o755);
+    }
+    assert.deepEqual(readLock(join(tmp.dir, "skilletor.lock.json"))["skills/moo"], {
+      source: "shared", version: "git:aa", partial: true, files: { "skills/moo/SKILL.md": hash("S") },
+    });
+    const res = apply(plan(), { targetDir: tmp.dir });
+    assert.deepEqual([res.conflicts, res.updated], [[], ["skills/moo"]]);
+    assert.deepEqual(snapshot(join(tmp.dir, "skills/moo")), { "SKILL.md": "S", "sub/x.md": "X" });
+  } finally {
+    chmodSync(sub, 0o755);
+    tmp.cleanup();
+  }
+});
+
+// k71: nothing landed, nothing to own – the lock stays byte for byte as it was.
+test("k71: an apply that fails before its first write leaves the lock untouched", () => {
+  const tmp = makeTmpDir();
+  try {
+    const lockFile = join(tmp.dir, "skilletor.lock.json");
+    apply([item("skill", "cow", { "skills/cow/SKILL.md": "C1" })], { targetDir: tmp.dir });
+    const before = readFileSync(lockFile, "utf8");
+    writeFileSync(join(tmp.dir, "rules"), "a file where the rules dir goes");
+    assert.throws(() => apply([item("rule", "x", { "rules/.local.x.md": "X" }), item("skill", "cow", { "skills/cow/SKILL.md": "C2" })],
+      { targetDir: tmp.dir }));
+    assert.equal(readFileSync(lockFile, "utf8"), before);
   } finally {
     tmp.cleanup();
   }
