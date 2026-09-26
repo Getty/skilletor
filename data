@@ -1,0 +1,24 @@
+---
+class: standard
+completed: 2026-09-26T16:34:38Z
+created: 2026-09-26T14:45:42Z
+id: 82
+priority: low
+started: 2026-09-26T16:23:51Z
+status: done
+tags:
+- sources
+- cache
+title: 'sources/url: available/install refresh the cache without recording its version'
+updated: 2026-09-26T16:34:47Z
+---
+
+Found during k74 (worker). `available` and `install` resolve url sources (now under the sync lock) and may replace the cache, but the version (etag/last-modified) is only recorded in the lock by a sync. The next sync then sends the older lock etag in If-None-Match; offline, the newer files are labelled with the old etag; if the server goes back to that etag, a 304 keeps the newer files under the old label. Fix idea: store the version next to the cache dir and compare/send that. Test in test/url-cache.test.ts.
+
+2026-09-26 16:27 Design: the url cache owns its version. publishEntries writes a reserved root file '.skilletor-version' (the SourceLocation version string) into the stage tree before the swap, so tree and label travel together through stage/backup/restore and the k74 sweep. UrlSource.resolve reads it for If-None-Match (etag: only), for the 304 answer and as the offline/failure label; the caller's version is no longer consulted. A cache without the file (written by <=0.3.0, or a corrupt file) is unknown: unconditional GET, offline label 'unknown'. check() keeps comparing with what the last sync read (k80) – an available/install refresh must still read as changed so a sync installs the newer tree. With no backend using it, the resolve(cachedVersion) parameter goes from the Source interface; the k83 resolver key drops the url version (every name of one URL gets the one resolve; the 304 answers the cache's own ETag). Also fixes k80's note (sync sent the first lock entry's version). Catalog never scans source-root files, so the file is invisible to items; archive entries of that name are dropped.
+
+2026-09-26 16:28 Tests first: 5 new k82 tests in test/url-cache.test.ts (available refresh → next sync sends/records the cache's ETag "2"; server back at the lock's "1" serves its tree, no 304 for the newer one; offline after refresh → label "2"; cache without version file → unconditional GET then conditional, offline label 'unknown'; archive entry named like the version file is dropped). Existing url-cache tests drop the version argument (they now assert the 304/fallback label comes from the cache). k83 url test in shared-resolve rewritten: one request for all names of one URL, conditional on the cache's ETag. Red before the fix: 13 failing, each for the claimed reason.
+
+2026-09-26 16:32 Done. src/sources/url.ts: the cache owns its version – publishEntries writes '.skilletor-version' (the version string) into the stage tree before the swap, so the backup/restore and the k74 sweep move tree and version together; resolve() reads it for If-None-Match (etag only), for the 304 answer and for the fallback label (re-read after a failed update); no file or a malformed one = unknown: unconditional GET, offline label 'unknown'. Archive entries whose first real path segment is that name are dropped. Source.resolve() loses its version parameter (git/local ignored it; url no longer uses it); engine runResolver key is [kind, address, ref] and sync no longer passes the lock's version (also closes k80's note about the first lock entry's version). check() unchanged: still compares with what the last sync read (k80), so a refresh by available/install reads as changed and the next sync installs the newer tree. Spec §4.4 (new paragraph + table row) and §6.1 step 2 updated. Tests: 6 new in test/url-cache.test.ts (k82 x4 through sync+cmdAvailable, reserved name x2), existing url-cache/url/git/git-cache tests drop the version argument, k83 url test in shared-resolve rewritten (one conditional GET for all names of one URL). Red before the fix for the stated reasons; filter/segment checks mutation-tested. Verify: typecheck ok, npm test 609/609 pass, build ok, check-dist up to date. Not committed.
+
+2026-09-26 16:34 Committed 95fbc2e: sources/url: the cache keeps its tree's version; a sync sends and records it, not the lock's (k82)
