@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-09-26T16:12:09Z
+created: 2026-09-26T14:45:52Z
+id: 84
+priority: low
+started: 2026-09-26T15:56:59Z
+status: done
+tags:
+- sources
+- cache
+title: 'sources/git: a fetch killed midway leaves index.lock/shallow.lock and the
+  cache never updates'
+updated: 2026-09-26T16:12:25Z
+---
+
+Found during k74 (worker). A git fetch/reset killed midway (hook timeout, crash) can leave .git/index.lock or .git/shallow.lock in a git cache. Every later fetch of that source then fails and falls back to the old cache with a warning, forever. Fix: the k74 sweep (runs under the sync lock, before any resolve) also removes stale *.lock files in git cache dirs – safe because no git command can run on the cache while the lock is held. Test: plant index.lock in a git cache, sync → fetch succeeds, lock gone.
+
+2026-09-26 16:03 Worker start. Measured on git 2.47.3 which stale locks block skilletor's commands: index.lock, HEAD.lock, refs/heads/<branch>.lock -> reset fails; shallow.lock, refs/remotes/origin/<b>.lock, refs/tags/<t>.lock, reftable/tables.list.lock -> fetch fails. config.lock only fails the (ignored) set-url; ORIG_HEAD.lock and packed-refs.lock print errors, exit 0. FETCH_HEAD takes no lock. Premise check: 'no git runs on the cache under the sync lock' is not strictly true - git fetch spawns 'git maintenance run --auto --detach' (seen in GIT_TRACE), and a SIGKILLed node orphans its git child. Plan: sweep under the sync lock + an age guard (lock older than 5 min, the sync lock's stale age).
+
+2026-09-26 16:09 Design: sweepGitCache(cacheRoot) in src/sources/git.ts, called by withSyncLock right after sweepUrlCache (before any resolve). Git cache = dir named /^[0-9a-f]{16}$/ (cacheDir's scheme; url caches share it) whose .git is a real directory (lstat: no symlink, no gitfile). Removed: fixed names in .git (index, shallow, config, HEAD, ORIG_HEAD, packed-refs, reftable/tables.list .lock) + any *.lock file under .git/refs (walked with readdir withFileTypes, never through a symlink; a ref name cannot end in .lock), only regular files older than 5 min (the sync lock's stale age) - covers the detached maintenance and orphaned git children that run outside the sync lock. objects/ and the checkout never walked. No resolve-level remove-and-retry: resolves run in parallel within a scope and two sources with one git address+ref share a cache dir, so a lock seen inside resolve can be a live sibling's; an old lock is gone by then anyway. Resolve callers re-checked: sync (engine resolveAll), available (listAvailable), install (catalogOf <- planItem) all under withSyncLock; check/probe only ls-remote, no cache cwd. Mid-reset: verified with raw git (half-updated worktree, old index, no lock; dir->file swap) - next reset --hard restores the tree exactly; a killed reset cannot leave untracked leftovers (git updates the worktree before it writes the index). Not built further.
+
+2026-09-26 16:09 Also found (for the board, not fixed): (1) a git cache killed between 'git init' and 'remote add' never recovers - set-url fails (no origin, error swallowed), fetch origin fails, no commit -> 'git source X failed' every run until the cache is deleted (verified with GitSource). Fix idea: a cache repo without origin/commit counts as no cache (re-init). (2) Two configured sources with the same git address+ref share one cache dir and syncScopeRun resolves them in parallel (Promise.all): concurrent git in one repo, one side fails on the other's live lock and falls back with a warning. (3) Informational: every git fetch starts 'git maintenance run --auto --detach' in the cache, a git outside the sync lock; the 5-min age guard accounts for it.
+
+2026-09-26 16:09 Done: the sync-lock sweep now clears stale git lock files (older than 5 min) in git caches (src/sources/git.ts sweepGitCache, wired in engine.ts withSyncLock); spec 4.4 + 6.5 updated; dist rebuilt. Tests: test/git-cache.test.ts (engine sync with stale index/shallow/branch-ref locks -> update lands, no warning, locks gone; sweep scope: only git's lock names in real .git dirs, fresh locks, objects/, checkout, url trees, non-cache dirs, symlinks left; silent on odd roots) + hooks.test.ts k84 black-box via runHook. Red before the fix (shallow.lock fetch fallback warning / '1 warning(s)'), mutation-checked age and symlink guards. Verified: npm run typecheck && npm test (599 pass) && npm run build && npm run check-dist green; hand test of bin/skilletor sync in a temp HOME/CODEX_HOME. Not committed.
+
+2026-09-26 16:12 Committed a9e1abe: sources/git: the sync-lock sweep clears stale git lock files a killed fetch left (k84)
