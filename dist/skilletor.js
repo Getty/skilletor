@@ -9931,7 +9931,7 @@ function defaultBackground(ctx) {
 }
 
 // src/cli.ts
-var VERSION = true ? "0.2.0" : "0.0.0-dev";
+var VERSION = true ? "0.3.0" : "0.0.0-dev";
 var USAGE = `skilletor ${VERSION}
 Remote skills, agents and rules for Claude Code and Codex.
 
