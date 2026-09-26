@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import {
-  defaultMarkers, detectHarnesses, lacksLocalPrefix, lockKey, parseLockKey, placeOutput, rootOfKey, selectTargets, targetDrift,
+  defaultMarkers, detectHarnesses, lacksLocalPrefix, lockKey, parseLockKey, placeOutput, rootOfKey, selectTargets, targetGaps,
   TargetError,
 } from "../src/targets.ts";
 
@@ -87,16 +87,16 @@ test("lock keys: claude unprefixed, codex prefixed; roots per harness and type",
   assert.equal(rootOfKey(u("/b"), "future:skills/foo"), undefined);
 });
 
-test("targetDrift: the lock must cover every active target that takes the type, and no inactive one", () => {
-  assert.equal(targetDrift([], ["claude", "codex"]), false);
-  assert.equal(targetDrift(["skills/a"], ["claude"]), false);
-  assert.equal(targetDrift(["skills/a"], ["claude", "codex"]), true); // codex copy missing
-  assert.equal(targetDrift(["skills/a", "codex:skills/a"], ["claude", "codex"]), false);
-  assert.equal(targetDrift(["skills/a", "codex:skills/a"], ["claude"]), true); // codex switched off
-  assert.equal(targetDrift(["rules/y"], ["claude", "codex"]), true); // codex takes rules (phase 3)
-  assert.equal(targetDrift(["rules/y", "codex:rules/y"], ["claude", "codex"]), false);
-  assert.equal(targetDrift(["agents/x"], ["claude", "codex"]), true); // codex takes agents (phase 2)
-  assert.equal(targetDrift(["future:skills/a"], ["claude"]), false); // unknown prefix: kept, no drift
+test("targetGaps: the lock must cover every active target that takes the type, and no inactive one", () => {
+  assert.deepEqual(targetGaps([], ["claude", "codex"]), []);
+  assert.deepEqual(targetGaps(["skills/a"], ["claude"]), []);
+  assert.deepEqual(targetGaps(["skills/a"], ["claude", "codex"]), [{ key: "skills/a", missing: "codex:skills/a" }]); // codex copy missing
+  assert.deepEqual(targetGaps(["skills/a", "codex:skills/a"], ["claude", "codex"]), []);
+  assert.deepEqual(targetGaps(["skills/a", "codex:skills/a"], ["claude"]), [{ key: "codex:skills/a" }]); // codex switched off
+  assert.deepEqual(targetGaps(["rules/y"], ["claude", "codex"]), [{ key: "rules/y", missing: "codex:rules/y" }]); // codex takes rules (phase 3)
+  assert.deepEqual(targetGaps(["rules/y", "codex:rules/y"], ["claude", "codex"]), []);
+  assert.deepEqual(targetGaps(["agents/x"], ["claude", "codex"]), [{ key: "agents/x", missing: "codex:agents/x" }]); // codex takes agents (phase 2)
+  assert.deepEqual(targetGaps(["future:skills/a"], ["claude"]), []); // unknown prefix: kept, no drift
 });
 
 // k62: agents and rules install as `.local.<name>`, claiming their plain path (spec §6.3).

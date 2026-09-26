@@ -202,7 +202,9 @@ name is `skills` everywhere.
 - Sources that only appear in a project config (a cloned repo) are **not** pulled
   automatically. The report and the hook name the source and the backend that would be
   used (§3, merging sources) – `untrusted source X (local /path)`, with `skilletor trust X`
-  as the fix; `--json` carries `kind` and the address. The
+  as the fix; `--json` carries `kind` and the address. `check` names it too
+  (`trustRequests`, with the scope), so `SessionStart` names it in every session until it
+  is trusted, without a sync and without fetching anything (k70). The
   confirmation (name + backend kind + address) lives in `~/.claude/skilletor/trust.json`;
   if the project changes the address – or the backend in use switches to another one of
   project origin – it lapses. Entries written before k66 (name + URL) keep counting for a
@@ -214,7 +216,7 @@ name is `skills` everywhere.
 
 | Kind | `resolve` | `check` (cheap) |
 |---|---|---|
-| `git` | Shallow clone/fetch into the cache; auth = the user's git setup | `git ls-remote <url> <ref>` vs. cached commit |
+| `git` | Shallow clone/fetch into the cache; auth = the user's git setup | a SHA pin vs. the locked commit, offline when they match; else `git ls-remote <url> <ref>` vs. the locked commit (nothing locked, or nothing named `ref`: changed) |
 | `url` | HTTPS-only, `.tar.gz`, conditional GET with ETag | `HEAD` + ETag comparison |
 | `local` | read directly | not applicable – always re-rendered |
 
@@ -428,9 +430,9 @@ the block is deleted. Content outside the block is never touched.
 ### 6.5 State
 
 `~/.claude/skilletor/`: `cache/` (deletable), `trust.json`, `last-check.json`,
-`pending-report.json`, `sync.lock/` (mkdir mutex with a stale timeout against parallel
-sessions). `CLAUDE_PLUGIN_DATA` is not used, so the CLI runs identically without Claude
-Code.
+`pending-report.json`, `unreached.json` (per lock, the drift the last sync could not reach,
+§14.3), `sync.lock/` (mkdir mutex with a stale timeout against parallel sessions).
+`CLAUDE_PLUGIN_DATA` is not used, so the CLI runs identically without Claude Code.
 
 ### 6.6 Error behavior
 
@@ -521,10 +523,10 @@ message naming the option, nothing touched.
 
 | Event | Behavior |
 |---|---|
-| `SessionStart` (`startup`, `resume`) | synchronous: `check` all sources in parallel (5 s network timeout per source), `sync` on change |
+| `SessionStart` (`startup`, `resume`) | synchronous: `check` all sources in parallel (5 s network timeout per source) and the config against the lock (§14.3), `sync` on change; untrusted sources are named without a sync (§4.3) |
 | `UserPromptSubmit` | not due → return immediately. Due → start a detached background `sync`, return at once. If a `pending-report.json` exists → emit it as `additionalContext` and delete it |
 
-- With no change, the plugin is silent.
+- With no change and no source awaiting trust, the plugin is silent.
 - With a change: one `systemMessage` line for the user, a terse `additionalContext` for
   the model, per item with an activation hint per the spike (section 12): `skill` →
   "active now"; `agent` and `rule` → "active after `/reload-plugins` or restart". The
@@ -712,11 +714,20 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
   `.local.` prefix; with `gitignore` enabled a skill entry without skilletor's
   `skills/<name>/.gitignore`, with it disabled one that still has it (told apart by its lock
   hash – with the switch off a `.gitignore` the source ships installs as shipped); or a
-  project that is not in use (§6.4) but holds a skilletor block in one of its roots. The
-  test stays offline and read-only: the lock, two existence tests and at most one small
-  read per root of a project not in use. An entry that cannot be migrated (a lasting
-  conflict, a failing source) keeps the test true, so each session syncs, as a `local`
-  source already does.
+  project that is not in use (§6.4) but holds a skilletor block in one of its roots. And
+  when the lock does not match what the config declares (k70): an explicit item an active
+  target lacks, or holds from another source; an entry no explicit item, wildcard or
+  bundle declares any more; a wildcard or bundle with nothing installed. The test stays
+  offline and read-only: the lock, the state dir, two existence tests and at most one small
+  read per root of a project not in use.
+- **What a sync cannot reach costs one sync, not one per session** (k70). Drift a sync
+  leaves in place although every source it needed was resolved and scanned – an item the
+  source lacks, a lasting conflict, a template error, a wildcard that matches nothing – is
+  recorded per lock in `unreached.json` (§6.5), and `check` does not count it again. The
+  next sync that runs anyway (a source moved, other drift, `skilletor sync`) tries it anew
+  and replaces the record; a conflict resolved by hand is picked up then. Drift kept by a
+  source that could not be resolved or scanned stays counted, so each session retries it;
+  drift that needs an untrusted source is not counted – the trust request stands for it.
 - **Git hygiene** (§6.4): Codex skills carry their own `.gitignore` like Claude skills, so
   `<project>/.agents` and `~/.agents` get no block (one left by an earlier version is
   removed). `<project>/.codex/.gitignore` and `$CODEX_HOME/.gitignore` hold the fixed block

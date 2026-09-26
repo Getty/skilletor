@@ -16,7 +16,7 @@ import {
 } from "./bundles.ts";
 import {
   defaultMarkers, detectHarnesses, lockKey, parseLockKey, placeOutput, rootOf, rootOfKey, selectTargets, supports,
-  targetDrift, allRoots, isBlockType, lacksLocalPrefix, type HarnessMarkers, type RootContext, type TargetSelection,
+  targetGaps, allRoots, isBlockType, lacksLocalPrefix, type HarnessMarkers, type RootContext, type TargetSelection,
 } from "./targets.ts";
 import {
   codexHookTrusted, inspectAgentsMd, parseRulesFile, pointerLines, projectDocLimit, rulesFileText, RULES_FILE, withBlock,
@@ -31,7 +31,7 @@ import type { Source } from "./sources/types.ts";
 import { scan, type Catalog } from "./catalog.ts";
 import { build, rendersEmpty, type RenderContext } from "./render.ts";
 import { apply, isValidItemName, type PlanItem } from "./apply.ts";
-import { readLock, writeLock, type Lock, type SkipReason } from "./lock.ts";
+import { readLock, writeLock, type Lock, type LockEntry, type SkipReason } from "./lock.ts";
 import { State } from "./state.ts";
 import {
   CODEX_ENTRIES, gitTracked, hasBlock, isGitWorkTree, LOCAL_ENTRIES, PROJECT_CLAUDE_ENTRIES, SKILL_GITIGNORE, skillGitignorePath,
@@ -715,9 +715,20 @@ async function syncScope(
   }
 
   // Briefing check (spec §6.7): every agent the lock holds now, from its installed file.
-  const briefing = briefingOf(ctx, scope, readLock(lockPath));
+  const finalLock = readLock(lockPath);
+  const briefing = briefingOf(ctx, scope, finalLock);
   for (const b of briefing) rep.warnings.push(briefingWarning(parseLockKey(b.key).name, b.harness, b.missing));
   if (briefing.length) rep.briefingMissing = briefing;
+
+  // What this sync left in place although every source it needed was read – an item its
+  // source lacks, a lasting conflict, a template error, a wildcard matching nothing – is not
+  // counted by `check` again; the next sync, for whatever reason it runs, tries it anew.
+  // Drift kept by a source that could not be resolved, scanned or trusted stays open (spec
+  // §14.3, k70). (A source served from its cache was read: what it lacks comes with a move.)
+  const reachable = (name: string) => Boolean(resolved.get(name)) && catalogs.get(name) !== null;
+  const served = new Map(expansions.map((x) => [x.label, x.foreign.flatMap((f) => (f.served ? [f.served] : []))]));
+  state.putUnreached(lockPath, scopeDrift(ctx, scope, scopeCfg, harnesses, finalLock, served)
+    .filter((d) => d.sources.every(reachable)).map((d) => d.id));
   return rep;
 }
 
@@ -963,9 +974,19 @@ export interface CheckReport {
   targetsChanged?: ScopeName[];
   /** Scopes whose installed state does not match the layout of §6.4 (spec §14.3, k64). Absent when none. */
   layoutChanged?: ScopeName[];
+  /** Scopes whose lock does not match what the config declares: an item added, removed or
+   *  moved to another source, a wildcard or bundle with nothing installed (spec §14.3, k70).
+   *  Absent when none. */
+  declaredChanged?: ScopeName[];
+  /** Sources that need `skilletor trust` first (spec §4.3): neither checked nor fetched, and
+   *  no reason to sync. Absent when none. */
+  trustRequests?: (TrustRequest & { scope: ScopeName })[];
   warnings: string[];
   error?: string;
 }
+
+/** Which `CheckReport` field names the scopes with drift of a kind. */
+const DRIFT_FIELD = { targets: "targetsChanged", layout: "layoutChanged", declared: "declaredChanged" } as const;
 
 export async function check(given: EngineContext, opts: SyncOptions = {}): Promise<CheckReport> {
   const ctx = scoped(given);
@@ -982,24 +1003,45 @@ export async function check(given: EngineContext, opts: SyncOptions = {}): Promi
   if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
 
   for (const [scope, scopeCfg] of scopes) {
-    const oldLock = readLock(join(targetDirOf(ctx, scope), "skilletor.lock.json"));
-    if (targetDrift(Object.keys(oldLock), targets[scope])) {
+    const lockPath = join(targetDirOf(ctx, scope), "skilletor.lock.json");
+    const oldLock = readLock(lockPath);
+    const sources = sourcesOf(config, scope);
+    const trust = new Map<string, boolean>();
+    const trusted = (name: string): boolean => {
+      if (!trust.has(name)) {
+        const src = sources.get(name);
+        let ok = false;
+        try {
+          ok = src !== undefined && state.isTrusted(name, resolveBackend(src, ctx.home));
+        } catch {
+          // no backend: nothing a sync could fetch
+        }
+        trust.set(name, ok);
+      }
+      return trust.get(name)!;
+    };
+    // Drift counts unless the last sync already tried it with its sources at hand, or a
+    // source it needs is untrusted – that asks for trust, not for a sync (spec §14.3, k70).
+    const unreached = new Set(state.unreached(lockPath));
+    const open = scopeDrift(ctx, scope, scopeCfg, targets[scope], oldLock)
+      .filter((d) => !unreached.has(d.id) && d.sources.every(trusted));
+    for (const kind of ["targets", "layout", "declared"] as const) {
+      if (!open.some((d) => d.kind === kind)) continue;
       out.changed = true;
-      (out.targetsChanged ??= []).push(scope);
-    }
-    if (layoutDrift(ctx, scope, scopeCfg, oldLock)) {
-      out.changed = true;
-      (out.layoutChanged ??= []).push(scope);
+      (out[DRIFT_FIELD[kind]] ??= []).push(scope);
     }
     // Sources a bundle pulled items from (spec §15.6) are not declared here; the lock names them.
     const viaSources = Object.values(oldLock).flatMap((e) => (e.via?.length ? [e.source] : []));
-    const sources = sourcesOf(config, scope);
     for (const name of new Set([...scopeSources(scopeCfg), ...viaSources])) {
       const src = sources.get(name);
       if (!src) continue;
       try {
         const backend = resolveBackend(src, ctx.home);
-        if (!state.isTrusted(name, backend)) continue;
+        if (!state.isTrusted(name, backend)) {
+          // Named in every check, as a sync names it (spec §4.3); never fetched.
+          (out.trustRequests ??= []).push({ scope, ...trustRequestOf(name, backend) });
+          continue;
+        }
         const changed = await makeBackend(backend, cacheRoot, ctx.timeoutMs).check(sourceVersion(oldLock, name));
         out.sources.push({ name, scope, changed });
         if (changed) out.changed = true;
@@ -1015,25 +1057,106 @@ export async function check(given: EngineContext, opts: SyncOptions = {}): Promi
 const SKILL_GITIGNORE_HASH = hashBuffer(Buffer.from(SKILL_GITIGNORE, "utf8"));
 
 /**
- * Does a scope's installed state disagree with the layout of §6.4 (spec §14.3, k64), so an
- * upgrade migrates in the first session? From the lock: an agent or rule entry owning a
+ * One way a scope's lock differs from the desired state (spec §14.3, k70). `id` names it
+ * the same way in every run (what the last sync left unreached is stored by id); `sources`
+ * are the sources a sync needs to reach it.
+ */
+interface Drift {
+  kind: keyof typeof DRIFT_FIELD;
+  id: string;
+  sources: string[];
+}
+
+/** Every drift of a scope: targets, layout, declarations. Reads the lock, the config and at
+ *  most one small file per root of a project not in use – no git, no network. `servedBy`
+ *  (sync only): the other sources a bundle's entries are served by (spec §15.6). */
+function scopeDrift(
+  ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig, harnesses: Harness[], lock: Lock,
+  servedBy?: Map<string, string[]>,
+): Drift[] {
+  const out: Drift[] = [];
+  // An entry of an inactive target goes; a copy an active target lacks is added (§14.3).
+  for (const g of targetGaps(Object.keys(lock), harnesses)) {
+    const source = lock[g.key]!.source;
+    out.push(g.missing === undefined
+      ? { kind: "targets", id: `orphan:${g.key}`, sources: [] }
+      : { kind: "targets", id: `missing:${g.missing}@${source}`, sources: [source] });
+  }
+  return [...out, ...layoutDrift(ctx, scope, scopeCfg, lock), ...declaredDrift(scopeCfg, harnesses, lock, servedBy)];
+}
+
+/**
+ * Where a scope's installed state disagrees with the layout of §6.4 (spec §14.3, k64), so an
+ * upgrade migrates in the first session. From the lock: an agent or rule entry owning a
  * file without the `.local.` prefix; a skill entry whose `.gitignore` is not skilletor's
  * while the switch is on, or is while it is off (by hash – with the switch off, a
  * `.gitignore` the source ships installs as shipped). A project not in use: a skilletor
  * block in one of its roots, one read per root. Skip entries, rule sections and unknown
- * harnesses own nothing to move. No git, no network.
+ * harnesses own nothing to move.
  */
-function layoutDrift(ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig, lock: Lock): boolean {
+function layoutDrift(ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig, lock: Lock): Drift[] {
   const gitignoreOn = scopeCfg.gitignore !== false;
+  const out: Drift[] = [];
   for (const [key, entry] of Object.entries(lock)) {
     const k = parseLockKey(key);
     const files = Object.keys(entry.files ?? {});
     if (!k.harness || !supports(k.harness, k.type) || entry.skipped || entry.block || files.length === 0) continue;
-    if (lacksLocalPrefix(k.harness, k.type, files)) return true;
-    if (k.type === "skill" && (entry.files[skillGitignorePath(k.name)] === SKILL_GITIGNORE_HASH) !== gitignoreOn) return true;
+    const drift = (what: string) => out.push({ kind: "layout", id: `layout:${key}:${what}`, sources: [entry.source] });
+    if (lacksLocalPrefix(k.harness, k.type, files)) drift("local");
+    if (k.type === "skill" && (entry.files[skillGitignorePath(k.name)] === SKILL_GITIGNORE_HASH) !== gitignoreOn) {
+      drift(gitignoreOn ? "gitignore" : "no-gitignore");
+    }
   }
-  if (scope !== "project" || projectInUse(targetDirOf(ctx, scope), lock)) return false;
-  return allRoots({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }).some((dir) => hasBlock(dir));
+  if (scope === "project" && !projectInUse(targetDirOf(ctx, scope), lock) &&
+    allRoots({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }).some((dir) => hasBlock(dir))) {
+    out.push({ kind: "layout", id: "layout:unused-project", sources: [] });
+  }
+  return out;
+}
+
+/**
+ * Where a scope's lock disagrees with what its config declares (spec §14.3, k70): an explicit
+ * item an active target lacks, or holds from another source; an entry no explicit item,
+ * wildcard or bundle declares any more; a wildcard or bundle with nothing installed – newly
+ * declared, or matching nothing (the second is what the last sync's record keeps quiet).
+ * Entries of inactive targets and unknown harnesses are target drift or kept, not this.
+ */
+function declaredDrift(
+  scopeCfg: ScopeConfig, harnesses: Harness[], lock: Lock, servedBy?: Map<string, string[]>,
+): Drift[] {
+  const out: Drift[] = [];
+  const drift = (id: string, sources: string[]) => out.push({ kind: "declared", id, sources });
+  const explicit = new Set<string>();
+  for (const item of scopeCfg.install) {
+    explicit.add(item.target);
+    for (const h of harnesses.filter((x) => supports(x, item.type))) {
+      const key = lockKey(h, item.target);
+      if (lock[key]?.source !== item.source) drift(`missing:${key}@${item.source}`, [item.source]);
+    }
+  }
+  const covered = new Set<WildcardItem | BundleItem>();
+  for (const [key, entry] of Object.entries(lock)) {
+    const k = parseLockKey(key);
+    if (!k.harness || !harnesses.includes(k.harness) || !supports(k.harness, k.type)) continue;
+    const by = coverOf(scopeCfg, k, entry);
+    for (const c of by) covered.add(c);
+    if (by.length === 0 && !explicit.has(k.target)) drift(`orphan:${key}`, []);
+  }
+  for (const w of scopeCfg.wildcards) if (!covered.has(w)) drift(`wildcard:${w.type}:${w.raw}`, [w.source]);
+  for (const b of scopeCfg.bundles) {
+    const label = bundleLabel(b);
+    if (!covered.has(b)) drift(label, [b.source, ...(servedBy?.get(label) ?? [])]);
+  }
+  return out;
+}
+
+/** The wildcards and bundles of a scope that declare a lock entry (spec §3, §15.5): a bundle
+ *  its `via` names, a wildcard of its source and type whose pattern matches its name. */
+function coverOf(scopeCfg: ScopeConfig, k: { type: ItemType; name: string }, entry: LockEntry): (WildcardItem | BundleItem)[] {
+  return [
+    ...scopeCfg.bundles.filter((b) => entry.via?.includes(bundleLabel(b))),
+    ...scopeCfg.wildcards.filter((x) => x.source === entry.source && x.type === k.type && matchesPattern(x.pattern, k.name)),
+  ];
 }
 
 // ---- status -----------------------------------------------------------------
@@ -1107,12 +1230,7 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
     for (const [key, entry] of Object.entries(lock)) {
       if (declaredKeys.has(key)) continue;
       const k = parseLockKey(key);
-      const covering: (WildcardItem | BundleItem)[] = [];
-      if (k.harness && active.includes(k.harness)) {
-        covering.push(...scopeCfg.bundles.filter((b) => entry.via?.includes(bundleLabel(b))));
-        covering.push(...scopeCfg.wildcards.filter((x) =>
-          x.source === entry.source && x.type === k.type && matchesPattern(x.pattern, k.name)));
-      }
+      const covering = k.harness && active.includes(k.harness) ? coverOf(scopeCfg, k, entry) : [];
       const first = covering[0];
       if (!first) {
         orphans.push(key);

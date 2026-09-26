@@ -295,6 +295,42 @@ for (const kind of ["tag", "branch"] as const) {
   });
 }
 
+// k70 (spec §4.4): a SHA pin is compared with the commit the lock holds, never assumed installed.
+test("check on a SHA pin: changed with nothing installed or another commit locked, unchanged at the pin without the remote", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const repo = makeRepo(tmp);
+  const a = repo.commit("A", "first");
+  const b = repo.commit("B", "second");
+  const cacheRoot = join(tmp.dir, "cache");
+  const pinA = new GitSource({ url: repo.url, ref: a, cacheRoot });
+  const locked = (await pinA.resolve()).version;
+  const lockedB = (await new GitSource({ url: repo.url, ref: b, cacheRoot }).resolve()).version;
+  for (const ref of [a, a.slice(0, 7), a.toUpperCase()]) {
+    const src = new GitSource({ url: repo.url, ref, cacheRoot });
+    assert.equal(await src.check(undefined), true, `${ref}: nothing installed yet`);
+    assert.equal(await src.check(lockedB), true, `${ref}: the lock holds another commit`);
+    assert.equal(await src.check(locked), false, `${ref}: the lock holds the pin`);
+  }
+  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+  assert.equal(await pinA.check(locked), false, "a held pin is decided without the remote");
+});
+
+test("check on a tag named like a SHA prefix compares by name, like any other ref", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const repo = makeRepo(tmp);
+  repo.commit("A", "first");
+  repo.tag("20260926");
+  const b = repo.commit("B", "second");
+  const src = new GitSource({ url: repo.url, ref: "20260926", cacheRoot: join(tmp.dir, "cache") });
+  const loc = await src.resolve();
+  assert.equal(await src.check(loc.version), false);
+  // The tag moves to B: the name now points elsewhere.
+  git(tmp.dir, "--git-dir", new URL(repo.url).pathname, "tag", "-f", "20260926", b);
+  assert.equal(await src.check(loc.version), true);
+});
+
 for (const ref of [undefined, "0123456789abcdef0123456789abcdef01234567"]) {
   test(`without a cache, an unreachable ${ref ? "pinned" : "unpinned"} remote names the fetch error, no cache`, async (t) => {
     const tmp = makeTmpDir();

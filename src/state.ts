@@ -84,6 +84,25 @@ export class State {
     this.writeJson("last-check.json", checks);
   }
 
+  // ---- unreached ------------------------------------------------------------
+
+  /** The drift the last sync of a scope (keyed by its lock path) left in place although
+   *  every source it needed was at hand (spec §14.3, k70): `check` does not count it again. */
+  unreached(scopeKey: string): string[] {
+    const ids = this.readJson("unreached.json")[scopeKey];
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  }
+
+  /** Replace a scope's unreached drift; the file is written only when it changes. */
+  putUnreached(scopeKey: string, ids: string[]): void {
+    const all = this.readJson("unreached.json");
+    const next = [...new Set(ids)].sort();
+    if (JSON.stringify(all[scopeKey] ?? []) === JSON.stringify(next)) return;
+    if (next.length > 0) all[scopeKey] = next;
+    else delete all[scopeKey];
+    this.writeJson("unreached.json", all);
+  }
+
   // ---- pending report -------------------------------------------------------
 
   putPendingReport(projectKey: string, report: unknown): void {

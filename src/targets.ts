@@ -202,17 +202,24 @@ export function allRoots(r: RootContext): string[] {
 }
 
 /**
- * Does the lock disagree with the active targets? True when an entry belongs to
- * an inactive (known) harness, or an item locked for one target is missing for
- * another active target that supports its type (spec §14.3).
+ * Where the lock disagrees with the active targets (spec §14.3), one gap each: an entry
+ * of an inactive (known) harness (`key` alone), or an item locked for one target but
+ * missing for another active target that supports its type (`missing`: the key it lacks).
  */
-export function targetDrift(keys: string[], active: Harness[]): boolean {
+export function targetGaps(keys: string[], active: Harness[]): { key: string; missing?: string }[] {
   const set = new Set(keys);
+  const gaps: { key: string; missing?: string }[] = [];
   for (const key of keys) {
     const k = parseLockKey(key);
     if (!k.harness || !supports(k.harness, k.type)) continue; // kept untouched, never drift
-    if (!active.includes(k.harness)) return true;
-    for (const h of active) if (supports(h, k.type) && !set.has(lockKey(h, k.target))) return true;
+    if (!active.includes(k.harness)) {
+      gaps.push({ key });
+      continue;
+    }
+    for (const h of active) {
+      const missing = lockKey(h, k.target);
+      if (supports(h, k.type) && !set.has(missing)) gaps.push({ key, missing });
+    }
   }
-  return false;
+  return gaps;
 }

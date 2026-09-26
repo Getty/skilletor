@@ -6974,15 +6974,22 @@ function allRoots(r) {
   }
   return [...roots];
 }
-function targetDrift(keys, active) {
+function targetGaps(keys, active) {
   const set = new Set(keys);
+  const gaps = [];
   for (const key of keys) {
     const k = parseLockKey(key);
     if (!k.harness || !supports(k.harness, k.type)) continue;
-    if (!active.includes(k.harness)) return true;
-    for (const h of active) if (supports(h, k.type) && !set.has(lockKey(h, k.target))) return true;
+    if (!active.includes(k.harness)) {
+      gaps.push({ key });
+      continue;
+    }
+    for (const h of active) {
+      const missing = lockKey(h, k.target);
+      if (supports(h, k.type) && !set.has(missing)) gaps.push({ key, missing });
+    }
   }
-  return false;
+  return gaps;
 }
 
 // src/agentsmd.ts
@@ -7486,17 +7493,20 @@ var GitSource = class {
     return `git:${sha}`;
   }
   async check(cachedVersion) {
-    const ref = this.opts.ref;
-    if (ref && isCommitish(ref)) return false;
     if (!cachedVersion) return true;
+    const ref = this.opts.ref;
+    const cached = cachedVersion.replace(/^git:/, "").toLowerCase();
+    if (ref && isCommitish(ref) && samePrefix(cached, ref.toLowerCase())) return false;
     const out = await this.run("", ["ls-remote", this.opts.url, ref ?? "HEAD"], this.opts.timeoutMs);
     const remote = out.split(/\s+/)[0] ?? "";
-    const cached = cachedVersion.replace(/^git:/, "");
     return !(cached.length > 0 && remote.startsWith(cached));
   }
 };
 function isCommitish(ref) {
   return /^[0-9a-f]{7,40}$/i.test(ref);
+}
+function samePrefix(a, b) {
+  return a.length > 0 && b.length > 0 && (a.startsWith(b) || b.startsWith(a));
 }
 
 // src/sources/url.ts
@@ -8309,6 +8319,22 @@ var State = class {
     checks[scopeKey] = Date.now();
     this.writeJson("last-check.json", checks);
   }
+  // ---- unreached ------------------------------------------------------------
+  /** The drift the last sync of a scope (keyed by its lock path) left in place although
+   *  every source it needed was at hand (spec §14.3, k70): `check` does not count it again. */
+  unreached(scopeKey) {
+    const ids = this.readJson("unreached.json")[scopeKey];
+    return Array.isArray(ids) ? ids.filter((id) => typeof id === "string") : [];
+  }
+  /** Replace a scope's unreached drift; the file is written only when it changes. */
+  putUnreached(scopeKey, ids) {
+    const all = this.readJson("unreached.json");
+    const next = [...new Set(ids)].sort();
+    if (JSON.stringify(all[scopeKey] ?? []) === JSON.stringify(next)) return;
+    if (next.length > 0) all[scopeKey] = next;
+    else delete all[scopeKey];
+    this.writeJson("unreached.json", all);
+  }
   // ---- pending report -------------------------------------------------------
   putPendingReport(projectKey, report) {
     const pending = this.readJson("pending-report.json");
@@ -8994,23 +9020,23 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
       offer(m.type, m.name, { from: label, source: b.source, live: true, via: label, chains: m.chains });
     }
     const missing = [];
-    for (const { f, served } of foreign) {
-      const cat = served ? catalogOf(served) : null;
-      if (!served) {
+    for (const { f, served: served2 } of foreign) {
+      const cat = served2 ? catalogOf(served2) : null;
+      if (!served2) {
         if (!missing.some((u) => sameIdentity(u, f.url))) {
           missing.push(f.url);
           rep.warnings.push(`bundle ${b.name}@${b.source} needs ${f.spec} (${f.url}): run skilletor install ${label}`);
         }
       }
       if (!cat) {
-        keepFromLock((l) => l.type === f.type && l.entry.source !== b.source && matchesPattern(f.name, l.name) && (!served || l.entry.source === served));
+        keepFromLock((l) => l.type === f.type && l.entry.source !== b.source && matchesPattern(f.name, l.name) && (!served2 || l.entry.source === served2));
         continue;
       }
       const hits = matchEntry(cat, f.type, f.name);
       const miss = entryMiss(f.type, f.name, hits.length);
-      if (miss) rep.warnings.push(`bundle ${f.chain.path.at(-1)}@${b.source}: ${miss.replace(/ in the source$/, "")} in ${served}`);
+      if (miss) rep.warnings.push(`bundle ${f.chain.path.at(-1)}@${b.source}: ${miss.replace(/ in the source$/, "")} in ${served2}`);
       for (const ci of hits) {
-        offer(ci.type, ci.name, { from: label, source: served, live: true, via: label, chains: [f.chain] });
+        offer(ci.type, ci.name, { from: label, source: served2, live: true, via: label, chains: [f.chain] });
       }
     }
   }
@@ -9120,9 +9146,13 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   for (const l of result.leftInPlace) {
     rep.warnings.push(`${shown(l).path} is a symbolic link: files of ${l.key} behind it left in place (never deleted through a link)`);
   }
-  const briefing = briefingOf(ctx, scope, readLock(lockPath));
+  const finalLock = readLock(lockPath);
+  const briefing = briefingOf(ctx, scope, finalLock);
   for (const b of briefing) rep.warnings.push(briefingWarning(parseLockKey(b.key).name, b.harness, b.missing));
   if (briefing.length) rep.briefingMissing = briefing;
+  const reachable = (name) => Boolean(resolved.get(name)) && catalogs.get(name) !== null;
+  const served = new Map(expansions.map((x) => [x.label, x.foreign.flatMap((f) => f.served ? [f.served] : [])]));
+  state.putUnreached(lockPath, scopeDrift(ctx, scope, scopeCfg, harnesses, finalLock, served).filter((d) => d.sources.every(reachable)).map((d) => d.id));
   return rep;
 }
 function projectInUse(targetDir, lock) {
@@ -9286,6 +9316,7 @@ function codexRulesFiles(given) {
   }
   return out;
 }
+var DRIFT_FIELD = { targets: "targetsChanged", layout: "layoutChanged", declared: "declaredChanged" };
 async function check(given, opts = {}) {
   const ctx = scoped(given);
   const loaded = loadWithTargets(ctx);
@@ -9299,23 +9330,39 @@ async function check(given, opts = {}) {
   if (sel === "user" || sel === "all") scopes.push(["user", config.user]);
   if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
   for (const [scope, scopeCfg] of scopes) {
-    const oldLock = readLock(join14(targetDirOf(ctx, scope), "skilletor.lock.json"));
-    if (targetDrift(Object.keys(oldLock), targets[scope])) {
+    const lockPath = join14(targetDirOf(ctx, scope), "skilletor.lock.json");
+    const oldLock = readLock(lockPath);
+    const sources = sourcesOf(config, scope);
+    const trust = /* @__PURE__ */ new Map();
+    const trusted = (name) => {
+      if (!trust.has(name)) {
+        const src = sources.get(name);
+        let ok = false;
+        try {
+          ok = src !== void 0 && state.isTrusted(name, resolveBackend(src, ctx.home));
+        } catch {
+        }
+        trust.set(name, ok);
+      }
+      return trust.get(name);
+    };
+    const unreached = new Set(state.unreached(lockPath));
+    const open = scopeDrift(ctx, scope, scopeCfg, targets[scope], oldLock).filter((d) => !unreached.has(d.id) && d.sources.every(trusted));
+    for (const kind of ["targets", "layout", "declared"]) {
+      if (!open.some((d) => d.kind === kind)) continue;
       out.changed = true;
-      (out.targetsChanged ??= []).push(scope);
-    }
-    if (layoutDrift(ctx, scope, scopeCfg, oldLock)) {
-      out.changed = true;
-      (out.layoutChanged ??= []).push(scope);
+      (out[DRIFT_FIELD[kind]] ??= []).push(scope);
     }
     const viaSources = Object.values(oldLock).flatMap((e) => e.via?.length ? [e.source] : []);
-    const sources = sourcesOf(config, scope);
     for (const name of /* @__PURE__ */ new Set([...scopeSources(scopeCfg), ...viaSources])) {
       const src = sources.get(name);
       if (!src) continue;
       try {
         const backend = resolveBackend(src, ctx.home);
-        if (!state.isTrusted(name, backend)) continue;
+        if (!state.isTrusted(name, backend)) {
+          (out.trustRequests ??= []).push({ scope, ...trustRequestOf(name, backend) });
+          continue;
+        }
         const changed = await makeBackend(backend, cacheRoot, ctx.timeoutMs).check(sourceVersion(oldLock, name));
         out.sources.push({ name, scope, changed });
         if (changed) out.changed = true;
@@ -9327,17 +9374,63 @@ async function check(given, opts = {}) {
   return out;
 }
 var SKILL_GITIGNORE_HASH = hashBuffer(Buffer.from(SKILL_GITIGNORE, "utf8"));
+function scopeDrift(ctx, scope, scopeCfg, harnesses, lock, servedBy) {
+  const out = [];
+  for (const g of targetGaps(Object.keys(lock), harnesses)) {
+    const source = lock[g.key].source;
+    out.push(g.missing === void 0 ? { kind: "targets", id: `orphan:${g.key}`, sources: [] } : { kind: "targets", id: `missing:${g.missing}@${source}`, sources: [source] });
+  }
+  return [...out, ...layoutDrift(ctx, scope, scopeCfg, lock), ...declaredDrift(scopeCfg, harnesses, lock, servedBy)];
+}
 function layoutDrift(ctx, scope, scopeCfg, lock) {
   const gitignoreOn = scopeCfg.gitignore !== false;
+  const out = [];
   for (const [key, entry] of Object.entries(lock)) {
     const k = parseLockKey(key);
     const files = Object.keys(entry.files ?? {});
     if (!k.harness || !supports(k.harness, k.type) || entry.skipped || entry.block || files.length === 0) continue;
-    if (lacksLocalPrefix(k.harness, k.type, files)) return true;
-    if (k.type === "skill" && entry.files[skillGitignorePath(k.name)] === SKILL_GITIGNORE_HASH !== gitignoreOn) return true;
+    const drift = (what) => out.push({ kind: "layout", id: `layout:${key}:${what}`, sources: [entry.source] });
+    if (lacksLocalPrefix(k.harness, k.type, files)) drift("local");
+    if (k.type === "skill" && entry.files[skillGitignorePath(k.name)] === SKILL_GITIGNORE_HASH !== gitignoreOn) {
+      drift(gitignoreOn ? "gitignore" : "no-gitignore");
+    }
   }
-  if (scope !== "project" || projectInUse(targetDirOf(ctx, scope), lock)) return false;
-  return allRoots({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }).some((dir) => hasBlock(dir));
+  if (scope === "project" && !projectInUse(targetDirOf(ctx, scope), lock) && allRoots({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }).some((dir) => hasBlock(dir))) {
+    out.push({ kind: "layout", id: "layout:unused-project", sources: [] });
+  }
+  return out;
+}
+function declaredDrift(scopeCfg, harnesses, lock, servedBy) {
+  const out = [];
+  const drift = (id, sources) => out.push({ kind: "declared", id, sources });
+  const explicit = /* @__PURE__ */ new Set();
+  for (const item of scopeCfg.install) {
+    explicit.add(item.target);
+    for (const h of harnesses.filter((x) => supports(x, item.type))) {
+      const key = lockKey(h, item.target);
+      if (lock[key]?.source !== item.source) drift(`missing:${key}@${item.source}`, [item.source]);
+    }
+  }
+  const covered = /* @__PURE__ */ new Set();
+  for (const [key, entry] of Object.entries(lock)) {
+    const k = parseLockKey(key);
+    if (!k.harness || !harnesses.includes(k.harness) || !supports(k.harness, k.type)) continue;
+    const by = coverOf(scopeCfg, k, entry);
+    for (const c of by) covered.add(c);
+    if (by.length === 0 && !explicit.has(k.target)) drift(`orphan:${key}`, []);
+  }
+  for (const w of scopeCfg.wildcards) if (!covered.has(w)) drift(`wildcard:${w.type}:${w.raw}`, [w.source]);
+  for (const b of scopeCfg.bundles) {
+    const label = bundleLabel(b);
+    if (!covered.has(b)) drift(label, [b.source, ...servedBy?.get(label) ?? []]);
+  }
+  return out;
+}
+function coverOf(scopeCfg, k, entry) {
+  return [
+    ...scopeCfg.bundles.filter((b) => entry.via?.includes(bundleLabel(b))),
+    ...scopeCfg.wildcards.filter((x) => x.source === entry.source && x.type === k.type && matchesPattern(x.pattern, k.name))
+  ];
 }
 function status(given, opts = {}) {
   const ctx = scoped(given);
@@ -9381,11 +9474,7 @@ function status(given, opts = {}) {
     for (const [key, entry] of Object.entries(lock)) {
       if (declaredKeys.has(key)) continue;
       const k = parseLockKey(key);
-      const covering2 = [];
-      if (k.harness && active.includes(k.harness)) {
-        covering2.push(...scopeCfg.bundles.filter((b) => entry.via?.includes(bundleLabel(b))));
-        covering2.push(...scopeCfg.wildcards.filter((x) => x.source === entry.source && x.type === k.type && matchesPattern(x.pattern, k.name)));
-      }
+      const covering2 = k.harness && active.includes(k.harness) ? coverOf(scopeCfg, k, entry) : [];
       const first = covering2[0];
       if (!first) {
         orphans.push(key);
@@ -9940,10 +10029,19 @@ async function checkAndSync(input, ctx) {
   const chk = await check(engineCtx);
   if (chk.error) return warn(chk.error);
   state.markChecked(key);
-  if (!chk.changed) {
-    return chk.warnings.length ? warn(chk.warnings.join("; ")) : {};
-  }
+  if (!chk.changed) return unchangedOutput(chk);
   const report = await sync(engineCtx);
+  return toOutput(report, "SessionStart");
+}
+function unchangedOutput(chk) {
+  if (!chk.trustRequests?.length) return chk.warnings.length ? warn(chk.warnings.join("; ")) : {};
+  const report = { scopes: [] };
+  for (const { scope, ...request } of chk.trustRequests) {
+    let rep = report.scopes.find((s) => s.scope === scope);
+    if (!rep) report.scopes.push(rep = emptyScopeReport(scope));
+    rep.trustRequests.push(request);
+  }
+  report.scopes[0].warnings.push(...chk.warnings);
   return toOutput(report, "SessionStart");
 }
 async function userPromptSubmit(input, ctx) {
@@ -9992,7 +10090,7 @@ Usage:
 
 Commands:
   sync                  Reconcile installed items with the config
-  check                 Report whether any source has changed (writes nothing)
+  check                 Report whether a sync is due (writes nothing)
   status                Show declared vs. installed items
   add [name] <spec>     Add and trust a source, then sync
   source list           List declared sources

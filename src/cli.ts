@@ -23,7 +23,7 @@ Usage:
 
 Commands:
   sync                  Reconcile installed items with the config
-  check                 Report whether any source has changed (writes nothing)
+  check                 Report whether a sync is due (writes nothing)
   status                Show declared vs. installed items
   add [name] <spec>     Add and trust a source, then sync
   source list           List declared sources

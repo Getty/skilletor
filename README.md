@@ -37,7 +37,9 @@ source (git | https tarball | local dir)
    ~/.agents/skills, $CODEX_HOME/{agents,skilletor-rules.md}   ·   <project>/{.agents/skills,.codex/{agents,skilletor-rules.md}}
 ```
 
-- **SessionStart** — check every source (5s timeout each); on a change, sync and report.
+- **SessionStart** — check every source (5s timeout each) and compare the config with what
+  is installed; on a change, sync and report. An untrusted project source is named every
+  session until you trust it.
 - **UserPromptSubmit** — when the throttle is due, kick off a detached background sync and
   deliver its result on a later prompt; otherwise return instantly and silent.
 
@@ -581,10 +583,10 @@ rendered. This is the same trust level as installing a plugin.
 
 - Adding a source with `skilletor add` (or your own user config) trusts it.
 - A source that appears **only** in a project config (a cloned repo) is never fetched
-  until you run `skilletor trust <name>`. Trust is stored for the backend actually used
-  — kind and address, a `local` path as its real path — so it lapses when the project
-  changes the address or the backend in use switches (say, a project adds a `local`
-  directory to a source you trusted by its git URL).
+  until you run `skilletor trust <name>`; each session start names it until then. Trust
+  is stored for the backend actually used — kind and address, a `local` path as its real
+  path — so it lapses when the project changes the address or the backend in use switches
+  (say, a project adds a `local` directory to a source you trusted by its git URL).
 - A project cannot change what your user-scope items are built from: those resolve
   against your user config's sources alone. A project field merged into one of your
   sources (a `local` path, say) counts as the project's and needs its own trust; your
@@ -619,10 +621,13 @@ skilletor sync --force                    # overwrite and adopt unmanaged files 
 skilletor trust <source>
 ```
 
-`check` writes nothing and exits non-zero when a source has changed. `--project-dir` goes
-with every command; any other option a command does not list is an error (exit 2, nothing
-runs). `-h`/`--help` anywhere prints the usage and runs nothing (`sync --help` does not
-sync); `-v`/`--version` only as the first argument.
+`check` writes nothing and exits non-zero when a sync is due: a source moved, or what is
+installed no longer matches the config (an item added or removed, a pin changed, a target
+switched). What the last sync could not install although its source was there (an item the
+source lacks, a conflict) does not count again until a sync runs anyway. `--project-dir`
+goes with every command; any other option a command does not list is an error (exit 2,
+nothing runs). `-h`/`--help` anywhere prints the usage and runs nothing (`sync --help`
+does not sync); `-v`/`--version` only as the first argument.
 
 ## Requirements
 

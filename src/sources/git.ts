@@ -2,7 +2,8 @@
 //
 // resolve(): shallow clone/fetch into a URL/ref-specific cache, hard reset to ref.
 //   The unpinned source retains its legacy URL-only cache; explicit refs never share it.
-// check():   `git ls-remote` vs the cached commit (a pinned commit never moves).
+// check():   a SHA pin against the locked commit, without the remote when they match;
+//            otherwise `git ls-remote` vs the locked commit.
 // Git runs via execFile (no shell), with GIT_TERMINAL_PROMPT=0 so a hook never
 // blocks on a credential prompt. When the remote is unreachable but a cache
 // exists, resolve reuses it and reports a warning; without a cache, or with one
@@ -128,14 +129,16 @@ export class GitSource implements Source {
   }
 
   async check(cachedVersion: string | undefined): Promise<boolean> {
-    const ref = this.opts.ref;
-    // A pinned commit never moves.
-    if (ref && isCommitish(ref)) return false;
     if (!cachedVersion) return true;
+    const ref = this.opts.ref;
+    const cached = cachedVersion.replace(/^git:/, "").toLowerCase();
+    // A SHA pin the lock already holds never moves: decided without the remote.
+    if (ref && isCommitish(ref) && samePrefix(cached, ref.toLowerCase())) return false;
 
+    // What the ref names upstream. Nothing – a SHA pin the lock does not hold, or a ref
+    // that is gone – counts as changed; a tag named like a SHA (a date) compares by name.
     const out = await this.run("", ["ls-remote", this.opts.url, ref ?? "HEAD"], this.opts.timeoutMs);
     const remote = out.split(/\s+/)[0] ?? "";
-    const cached = cachedVersion.replace(/^git:/, "");
     return !(cached.length > 0 && remote.startsWith(cached));
   }
 }
@@ -143,4 +146,9 @@ export class GitSource implements Source {
 /** A full or abbreviated commit SHA. */
 function isCommitish(ref: string): boolean {
   return /^[0-9a-f]{7,40}$/i.test(ref);
+}
+
+/** Do two (lowercase) SHAs, either abbreviated, name the same commit? */
+function samePrefix(a: string, b: string): boolean {
+  return a.length > 0 && b.length > 0 && (a.startsWith(b) || b.startsWith(a));
 }

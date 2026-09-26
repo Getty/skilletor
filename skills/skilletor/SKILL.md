@@ -54,7 +54,9 @@ skilletor trust <source>                  # confirm a project-declared source (s
 ```
 
 `add`, `install`, `uninstall` only edit `skilletor.json` (the single source of truth), then
-sync; `check` writes nothing, exits non-zero when a source changed. `uninstall` edits one
+sync; `check` writes nothing, exits non-zero when a sync is due (a source moved, or the
+config no longer matches the lock; what the last sync could not install although its source
+was there counts once). `uninstall` edits one
 config; no explicit entry there → exit 1, config untouched, the error names what covers it.
 An option a command does not list (`--project-dir` goes with all) → exit 2, nothing runs;
 `-h`/`--help` anywhere only prints usage; `-v`/`--version` only as the first argument.

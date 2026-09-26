@@ -1,6 +1,7 @@
 // Claude Code hooks (spec §8). Black box: stdin JSON in, stdout JSON out.
 //
-// SessionStart: check all sources (short timeout), sync on change, report.
+// SessionStart: check all sources (short timeout) and the config against the lock, sync
+// on change, report; untrusted sources are named without a sync.
 // UserPromptSubmit: if not due, return at once; if due, kick off a detached
 // background sync that writes a pending report for a later prompt; deliver any
 // pending report for this project. A hook must never disturb the session — every
@@ -14,8 +15,8 @@ import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { loadConfig, type Harness } from "./config.ts";
 import { State } from "./state.ts";
-import { check, codexRulesFiles, projectDirOf, sync, type EngineContext } from "./engine.ts";
-import { reportHook, type SyncReport } from "./report.ts";
+import { check, codexRulesFiles, projectDirOf, sync, type CheckReport, type EngineContext } from "./engine.ts";
+import { emptyScopeReport, reportHook, type SyncReport } from "./report.ts";
 
 export interface HookInput {
   cwd?: string;
@@ -140,10 +141,22 @@ async function checkAndSync(input: HookInput, ctx: HookContext): Promise<HookOut
   if (chk.error) return warn(chk.error);
   state.markChecked(key);
 
-  if (!chk.changed) {
-    return chk.warnings.length ? warn(chk.warnings.join("; ")) : {};
-  }
+  if (!chk.changed) return unchangedOutput(chk);
   const report = await sync(engineCtx);
+  return toOutput(report, "SessionStart");
+}
+
+/** A check with nothing to sync: its warnings in one line – or, when a source awaits trust,
+ *  the report a sync would give, trust requests and warnings alike (spec §4.3, §8). */
+function unchangedOutput(chk: CheckReport): HookOutput {
+  if (!chk.trustRequests?.length) return chk.warnings.length ? warn(chk.warnings.join("; ")) : {};
+  const report: SyncReport = { scopes: [] };
+  for (const { scope, ...request } of chk.trustRequests) {
+    let rep = report.scopes.find((s) => s.scope === scope);
+    if (!rep) report.scopes.push((rep = emptyScopeReport(scope)));
+    rep.trustRequests.push(request);
+  }
+  report.scopes[0]!.warnings.push(...chk.warnings);
   return toOutput(report, "SessionStart");
 }
 
