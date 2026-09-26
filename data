@@ -1,0 +1,24 @@
+---
+class: standard
+completed: 2026-09-26T22:28:09Z
+created: 2026-09-26T22:24:25Z
+id: 98
+priority: low
+started: 2026-09-26T22:28:09Z
+status: done
+tags:
+- skills
+- docs
+title: 'skills: skilletor-core says only skills carry a catalog dir'
+updated: 2026-09-26T22:28:09Z
+---
+
+Found during k96 (worker). .claude/skills/skilletor-core/SKILL.md ~line 43: "A catalog item may carry dir (a skill found via a nested plugin.json path); render maps its files to skills/<name>/..." is incomplete since a078138: agents and rules from a source's .claude/ carry dir too, and render.installPath maps them to agents/<file>, rules/<file>. One sentence; skilletor-skill-author lane.
+
+2026-09-26 22:25 Rewrote the dir bullet in .claude/skills/skilletor-core/SKILL.md (lines 43-48). It now covers .claude/{skills,agents,rules} items carrying dir: read last, so a name already found wins; best effort, where a symlink skips the dir or item, never the scan; own installed copies are not offered. It also names installPath and its three targets skills/<name>/, agents/<file>, rules/<file>. Checked against catalog.ts claudeItems/claudeItem and render.ts installPath. Static check: 0 errors.
+
+2026-09-26 22:26 Also found: the Security invariant (SKILL.md ~line 84, 'symlinks in sources are rejected') doesn't mention the .claude/ exception. The new dir bullet states it, and the verify agent reconciled the two correctly, so I left it. It's a candidate one-clause follow-up if wanted.
+
+2026-09-26 22:26 Done: .claude/skills/skilletor-core/SKILL.md dir bullet (lines 43-48) now says .claude/ agents and rules carry dir too. It covers read-last precedence, best-effort symlink skipping and own installed copies not offered, and names installPath's targets skills/<name>/, agents/<file>, rules/<file>. Verified with a fresh-subagent A/B on a source that has only .claude/agents, .claude/rules and a symlinked .claude/skills entry. Old text: 0/4 answers stated by the doc, and it wrongly guessed that .claude agents are not offered. New text: 4/4 correct with quotes (offered; agents/reviewer.md; the symlink skips only that item; top-level agents/ wins). skill-static-check: 0 errors, 0 warnings. Only this file touched; not committed.
+
+2026-09-26 22:27 Committed as d09efd0: skills: skilletor-core's dir bullet covers the .claude/ layout and agents and rules (k98)
