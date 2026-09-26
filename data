@@ -1,0 +1,25 @@
+---
+class: standard
+completed: 2026-09-26T18:11:43Z
+created: 2026-09-26T16:59:44Z
+id: 93
+priority: low
+started: 2026-09-26T18:05:43Z
+status: done
+tags:
+- test
+title: 'test: fixtures run git with the raw process env'
+updated: 2026-09-26T18:11:50Z
+---
+
+Found during k91 (worker). Test helpers in test/*.test.ts (makeRepo, bare-repo setup, git wrappers) spawn git with {...process.env}. `npm test` started from a git hook (GIT_DIR/GIT_WORK_TREE exported) would build fixtures in that hook's repository – the k91 bug class on the test side. Fix: one test helper that spawns git through src/gitenv.ts gitEnv() (or strips the same list), used by every fixture; optionally have the test runner delete the repo-local vars at startup. Also: the k91 guard test compares with the installed git's `rev-parse --local-env-vars`; a CI git upgrade that grows the list turns it red on purpose – note that in the test.
+
+2026-09-26 18:07 Started (worker). Plan: test/setup.ts loaded via --import in the npm test script deletes src/gitenv.ts REPO_LOCAL_VARS (exported) from process.env once, so the runner, every test file and every child inherit a clean env; regression test drives the npm test flags against a scratch fixture with GIT_DIR naming a victim repo.
+
+2026-09-26 18:07 Reproduced: temp victim repo, GIT_DIR=<victim>/.git exported, 'node --test test/git.test.ts' as npm test runs it -> victim HEAD went from 1 to 26 commits (fixture commits 'first'/'second' landed in it) and its file.txt was modified.
+
+2026-09-26 18:08 Regression test (test/gitenv.test.ts, k93): runs a one-test fixture file (git init/add/commit in a temp dir) with the flags of package.json's test script and GIT_DIR naming a victim; asserts victim remotes/HEAD/index/files/config unchanged, file passes, commit in the fixture's own repo. Red before the fix: victim HEAD moved, index got fixture.txt.
+
+2026-09-26 18:10 Done: test/setup.ts (new) deletes src/gitenv.ts REPO_LOCAL_VARS (now exported, dist unchanged) from process.env once; package.json test script loads it via --import ./test/setup.ts, which node's runner runs in itself and passes on to every test-file child, so fixtures, spawned CLIs and code under test inherit a clean env. test/gitenv.test.ts: k93 test runs a one-test git init/add/commit fixture with package.json's test-script flags and GIT_DIR naming a victim, asserts victim remotes/HEAD/index/files/config unchanged + commit in the fixture's own repo (red before: victim HEAD moved, index got fixture.txt); k91 guard test notes it is red on purpose when git's --local-env-vars list grows. Verified: typecheck, npm test 665/665, build, check-dist up to date; full 'GIT_DIR=<victim> GIT_INDEX_FILE=<victim index> npm test' 665/665 with the victim untouched (before the fix, test/git.test.ts alone put 25 commits into it). Open: a test file run by hand without --import ./test/setup.ts is unprotected (noted in setup.ts).
+
+2026-09-26 18:11 Committed d0d1620: test: npm test drops git's repository-local variables before any fixture runs (k93)
