@@ -851,3 +851,103 @@ test("k85: a trusted project source whose ref turns into an option: one warning 
     e.cleanup();
   }
 });
+
+// ---- k87: strings from a config, a source or git are display-safe --------------------
+
+/** An ANSI color escape, a BEL, a right-to-left override and a newline. */
+const EVIL = "\u001b[31mred\u0007\u202eevil\nnext";
+/** How EVIL shows: each of them escaped the JSON way, the text around them as it was. */
+const SHOWN = "\\u001b[31mred\\u0007\\u202eevil\\nnext";
+/** A character hook output never carries raw (a tab may; a newline only between context lines). */
+const RAW = /(?![\t\n])[\p{Cc}\p{Bidi_Control}\u200b\u2028\u2029\u2060\ufeff]/u;
+
+/** The output's systemMessage is one clean line; its context has no raw character. */
+function assertDisplaySafe(out: HookOutput): void {
+  assert.doesNotMatch(out.systemMessage ?? "", /\n/);
+  assert.doesNotMatch(out.systemMessage ?? "", RAW);
+  assert.doesNotMatch(out.hookSpecificOutput?.additionalContext ?? "", RAW);
+}
+
+// Asserts: a cloned project config that declares a source whose name and local path carry
+// EVIL gets its trust request into the context escaped – name, address and the command to
+// run – on one line, the systemMessage counting it; nothing raw reaches the output.
+test("k87: session-start names an untrusted project source escaped, on one context line", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({});
+    const payload = join(e.tmp.dir, "payload");
+    writeFileSync(join(e.projectDir, ".claude/skilletor.json"), JSON.stringify({
+      sources: { [`team${EVIL}`]: { local: payload + EVIL } },
+      install: { skills: [`foo@team${EVIL}`] },
+    }));
+    const out = await runHook("session-start", { source: "startup" }, e.ctx);
+    assertDisplaySafe(out);
+    assert.match(out.systemMessage ?? "", /^skilletor: 1 warning\(s\)/);
+    const lines = (out.hookSpecificOutput?.additionalContext ?? "").split("\n");
+    assert.ok(
+      lines.includes(`- untrusted source team${SHOWN} (local ${payload}${SHOWN}); run: skilletor trust team${SHOWN}`),
+      lines.join("\n"),
+    );
+  } finally {
+    e.cleanup();
+  }
+});
+
+// Asserts: a config error naming such a source – the warning SessionStart gives in one line –
+// is that one line with EVIL escaped, and the background sync's report the next prompt
+// delivers is the same line.
+test("k87: a config error naming such a source is one escaped warning line, now and on the next prompt", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({});
+    const cfg = join(e.projectDir, ".claude/skilletor.json");
+    writeFileSync(cfg, JSON.stringify({ sources: { [`team${EVIL}`]: { local: "/src", x: 1 } } }));
+    const out = await runHook("session-start", { source: "startup" }, e.ctx);
+    assert.deepEqual(out, { systemMessage: `skilletor: ${cfg}: sources.team${SHOWN}: unknown key "x"` });
+    await runHook("__sync-background", {}, e.ctx);
+    const delivered = await runHook("user-prompt-submit", {}, e.ctx);
+    assert.equal(delivered.systemMessage, out.systemMessage);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// Asserts: git's stderr, which spans lines ("fatal: …\nfatal: …\n\nPlease make sure …"), is
+// one context line for the one warning the systemMessage counts (k72's claim held only for
+// one-line messages), its line breaks escaped – and not the newline git ends it with.
+test("k87: a git failure's multi-line stderr stays one context line", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({ sources: { shared: { git: "file:///nonexistent/skilletor-k87/never.git" } }, install: { skills: ["foo@shared"] } });
+    const out = await runHook("session-start", { source: "startup" }, e.ctx);
+    assertDisplaySafe(out);
+    assert.equal(out.systemMessage, "skilletor: 1 warning(s)");
+    const context = out.hookSpecificOutput?.additionalContext ?? "";
+    assert.equal(context.split("\n").length, 1, context);
+    assert.match(context, /^- warning: source shared: git source .* failed: .*fatal: .*\\nfatal: /);
+    assert.doesNotMatch(context, /\\n$/); // git's final newline is trimmed, not shown escaped
+  } finally {
+    e.cleanup();
+  }
+});
+
+// Asserts: a Codex rules file that cannot be read, in a project directory whose name carries
+// EVIL, is named in the systemMessage escaped, on its one line.
+test("k87: codex session-start names an unreadable rules file escaped", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({});
+    const projectDir = join(e.tmp.dir, `proj${EVIL}`);
+    mkdirSync(join(projectDir, ".codex", "skilletor-rules.md"), { recursive: true }); // a directory: unreadable
+    const ctx: HookContext = {
+      ...e.ctx, projectDir, markers: { claude: [], codex: [e.home] }, codexHome: join(e.home, ".codex"), harness: "codex",
+    };
+    const out = await runHook("session-start", { source: "startup" }, ctx);
+    assertDisplaySafe(out);
+    const message = out.systemMessage ?? "";
+    assert.match(message, /^skilletor: cannot read /);
+    assert.ok(message.includes(`${join(e.tmp.dir, "proj")}${SHOWN}/.codex/skilletor-rules.md (EISDIR`), message);
+  } finally {
+    e.cleanup();
+  }
+});

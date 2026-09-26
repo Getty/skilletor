@@ -17,7 +17,7 @@ import { loadConfig, type Harness } from "./config.ts";
 import { State, SyncLockTimeoutError } from "./state.ts";
 import { gitEnv } from "./gitenv.ts";
 import { check, codexRulesFiles, projectDirOf, sync, type CheckReport, type EngineContext } from "./engine.ts";
-import { emptyScopeReport, reportHook, type SyncReport } from "./report.ts";
+import { displaySafe, emptyScopeReport, reportHook, type SyncReport } from "./report.ts";
 
 export interface HookInput {
   cwd?: string;
@@ -47,8 +47,9 @@ function projectKeyOf(ctx: HookContext, input: HookInput): string {
   return ctx.projectDir ?? input.cwd ?? "";
 }
 
+/** One warning line; the message – an error, git's stderr, a name from a config – display-safe. */
 function warn(message: string): HookOutput {
-  return { systemMessage: `skilletor: ${message}` };
+  return { systemMessage: displaySafe(`skilletor: ${message}`) };
 }
 
 function toOutput(report: SyncReport, eventName: string): HookOutput {
@@ -128,7 +129,7 @@ function withCodexRules(out: HookOutput, ctx: HookContext): HookOutput {
     }
   }
   const result: HookOutput = { ...out };
-  if (problems.length) result.systemMessage = [out.systemMessage, `skilletor: ${problems.join("; ")}`].filter(Boolean).join("; ");
+  if (problems.length) result.systemMessage = [out.systemMessage, warn(problems.join("; ")).systemMessage].filter(Boolean).join("; ");
   if (texts.length) {
     const rules = texts.join("\n");
     const report = out.hookSpecificOutput?.additionalContext;

@@ -637,6 +637,14 @@ message naming the option, nothing touched.
   `SessionStart` gives; one that timed out on the sync lock leaves none (§6.5) and, like a
   `SessionStart` that did, leaves the project due, so the next prompt starts a background
   sync again (k89).
+- What skilletor reports, in a hook or on the CLI, never carries a control character (C0 but
+  tab, DEL, C1), a Unicode bidi control, a line or paragraph separator or an invisible
+  zero-width character raw: whatever a config, a source or git's output puts into a line
+  shows escaped the JSON way (`\u001b`, `\u202e`, a newline as `\n`), so it stays on its
+  line and cannot recolor, move, reorder or hide text in the terminal or the model's context –
+  only a CLI error message keeps its own line breaks, and the Codex rules files a hook injects
+  are installed content, passed on as they are – while `--json` uses the same escapes, which
+  parse back to the original values (k87).
 - The plugin also puts the CLI on the Bash tool's `PATH` and ships a `skilletor` skill
   that explains the config format and CLI to the model.
 

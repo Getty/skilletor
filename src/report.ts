@@ -35,6 +35,23 @@ export interface TrustRequest {
   url: string;
 }
 
+/** What a display line never carries raw: control characters but tab (C0, DEL, C1), the Unicode
+ *  bidi controls, the line and paragraph separators, and the invisible zero-width space, word
+ *  joiner and BOM – whatever moves the cursor, recolors, reorders or hides text. ZWJ and ZWNJ
+ *  stay: emoji sequences and scripts need them. */
+const UNSAFE = /(?!\t)[\p{Cc}\p{Bidi_Control}\u200B\u2028\u2029\u2060\uFEFF]/gu;
+
+/**
+ * One display line safe for a terminal and the model's context (spec §8): each UNSAFE character
+ * escaped the JSON way – a C0 control as JSON.stringify writes it (`\n`, `\u001b`), any other as
+ * `\uXXXX` – the rest unchanged. For every string a config, a source or git put into a report;
+ * a newline in it shows as `\n`, so a line stays one line.
+ */
+export function displaySafe(line: string): string {
+  return line.replace(UNSAFE, (c) =>
+    c < " " ? JSON.stringify(c).slice(1, -1) : `\\u${c.codePointAt(0)!.toString(16).padStart(4, "0")}`);
+}
+
 /** How a backend is named in trust requests and `skilletor trust`: `local /path`, `git https://…`. */
 export function backendLabel(b: { kind: BackendKind; url: string }): string {
   return `${b.kind} ${b.url}`;
@@ -119,9 +136,9 @@ export function reportJson(r: SyncReport): string {
   return JSON.stringify(r, null, 2);
 }
 
-/** Human-readable text; empty string when there is nothing to say. */
+/** Human-readable text, every line display-safe; empty string when there is nothing to say. */
 export function reportText(r: SyncReport): string {
-  if (r.error) return `skilletor: config error, nothing changed — ${r.error}`;
+  if (r.error) return displaySafe(`skilletor: config error, nothing changed — ${r.error}`);
   const lines: string[] = [];
   for (const s of r.scopes) {
     // Skips are informational: shown here, but not "notable" (the hook stays quiet).
@@ -140,7 +157,7 @@ export function reportText(r: SyncReport): string {
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
   for (const w of r.warnings ?? []) lines.push(`skilletor: warning: ${w}`);
-  return lines.join("\n");
+  return lines.map(displaySafe).join("\n");
 }
 
 /** The commit hint for a `.gitignore` whose block sync created or changed (spec §6.4). */
@@ -162,10 +179,10 @@ function withoutBriefing(r: SyncReport): SyncReport {
   };
 }
 
-/** Hook output: a one-line systemMessage and a terse additionalContext. A config error
- *  touched nothing, so it is the whole output – one line, as SessionStart gives for it. */
+/** Hook output: a one-line systemMessage and a terse additionalContext, each line display-safe.
+ *  A config error touched nothing, so it is the whole output – one line, as SessionStart gives. */
 export function reportHook(report: SyncReport): { systemMessage?: string; additionalContext?: string } {
-  if (report.error) return { systemMessage: `skilletor: ${report.error}` };
+  if (report.error) return { systemMessage: displaySafe(`skilletor: ${report.error}`) };
   const r = hasChanges(report) ? report : withoutBriefing(report);
   if (!hasNotable(r)) return {};
   const changed: ItemChange[] = [];
@@ -182,7 +199,7 @@ export function reportHook(report: SyncReport): { systemMessage?: string; additi
   if (removed) parts.push(`${removed} removed`);
   if (warnings) parts.push(`${warnings} warning(s)`);
   if (gitignores.length) parts.push(`${gitignores.join(", ")} updated — commit ${gitignores.length > 1 ? "them" : "it"}`);
-  const systemMessage = `skilletor: ${parts.join(", ") || "changes applied"}`;
+  const systemMessage = displaySafe(`skilletor: ${parts.join(", ") || "changes applied"}`);
 
   const ctx: string[] = [];
   if (changed.length) {
@@ -200,5 +217,5 @@ export function reportHook(report: SyncReport): { systemMessage?: string; additi
     for (const g of s.gitignoreUpdated ?? []) ctx.push(`- ${commitHint(g)}`);
     for (const w of s.warnings) ctx.push(`- warning: ${w}`);
   }
-  return { systemMessage, additionalContext: ctx.length ? ctx.join("\n") : undefined };
+  return { systemMessage, additionalContext: ctx.length ? ctx.map(displaySafe).join("\n") : undefined };
 }

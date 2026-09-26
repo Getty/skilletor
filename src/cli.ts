@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { sync, check, status, type EngineContext } from "./engine.ts";
-import { backendLabel, reportJson, reportText, type SyncReport } from "./report.ts";
+import { backendLabel, displaySafe, reportJson, reportText, type SyncReport } from "./report.ts";
 import {
   cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall, type Prompter,
 } from "./commands.ts";
@@ -124,7 +124,7 @@ function ttyPrompter(): Prompter | undefined {
     ask: async (question) => {
       const rl = createInterface({ input: process.stdin, output: process.stderr });
       try {
-        return await rl.question(`${question} `);
+        return await rl.question(`${displaySafe(question)} `);
       } finally {
         rl.close();
       }
@@ -133,7 +133,7 @@ function ttyPrompter(): Prompter | undefined {
 }
 
 function statusText(report: ReturnType<typeof status>): string {
-  if (report.error) return `skilletor: config error — ${report.error}`;
+  if (report.error) return displaySafe(`skilletor: config error — ${report.error}`);
   const lines: string[] = [];
   for (const s of report.scopes) {
     // Name the targets unless they are just claude (output unchanged for Claude-only users).
@@ -156,7 +156,21 @@ function statusText(report: ReturnType<typeof status>): string {
   }
   if (report.projectIsHome) lines.push("project scope: none (the project directory is the home directory)");
   for (const w of report.warnings ?? []) lines.push(`warning: ${w}`);
-  return lines.join("\n");
+  return lines.map(displaySafe).join("\n");
+}
+
+/** Write display lines, each escaped whole (spec §8): a name, an address or a description a
+ *  config or a source put into one shows its control and bidi characters escaped, and its own
+ *  newline as `\n`, so a line stays one line. */
+function printLines(stream: NodeJS.WritableStream, lines: string[]): void {
+  stream.write(lines.map(displaySafe).join("\n") + "\n");
+}
+
+/** Write text whose newlines are line breaks – a report, JSON, an error that spans lines – with
+ *  each line escaped: the one exit for all other CLI output. On JSON the escapes are JSON's own,
+ *  so `--json` parses to the same values. */
+function printText(stream: NodeJS.WritableStream, text: string): void {
+  printLines(stream, text.split("\n"));
 }
 
 /** The sync report, or "up to date" when no scope has anything to say; run-level
@@ -181,18 +195,18 @@ export async function run(argv: string[]): Promise<number> {
 
   const cmd = argv[0]!;
   if (cmd.startsWith("-")) {
-    process.stderr.write(`skilletor: unknown option: ${cmd} (run skilletor --help)\n`);
+    printLines(process.stderr, [`skilletor: unknown option: ${cmd} (run skilletor --help)`]);
     return 2;
   }
   const flags = parseFlags(argv.slice(1));
   const unknown = cmd === "hook" ? undefined : unknownOption(cmd, flags);
   if (unknown !== undefined) {
     const name = cmd === "source" && Object.hasOwn(ACCEPTED, `source ${flags.rest[0]}`) ? `source ${flags.rest[0]}` : cmd;
-    process.stderr.write(`skilletor: unknown option for ${name}: ${unknown} (run skilletor --help)\n`);
+    printLines(process.stderr, [`skilletor: unknown option for ${name}: ${unknown} (run skilletor --help)`]);
     return 2;
   }
   if (!["user", "project", "all"].includes(flags.scope)) {
-    process.stderr.write(`skilletor: invalid --scope: ${flags.scope}\n`);
+    printLines(process.stderr, [`skilletor: invalid --scope: ${flags.scope}`]);
     return 2;
   }
   const ctx = makeContext(flags);
@@ -202,26 +216,24 @@ export async function run(argv: string[]): Promise<number> {
       case "sync": {
         const r = await sync(ctx, { scope: flags.scope, force: flags.force });
         if (r.error) {
-          process.stderr.write((flags.json ? reportJson(r) : reportText(r)) + "\n");
+          printText(process.stderr, flags.json ? reportJson(r) : reportText(r));
           return 2;
         }
-        process.stdout.write((flags.json ? reportJson(r) : syncText(r)) + "\n");
+        printText(process.stdout, flags.json ? reportJson(r) : syncText(r));
         return 0;
       }
       case "check": {
         const r = await check(ctx, { scope: flags.scope });
         if (r.error) {
-          process.stderr.write(`skilletor: ${r.error}\n`);
+          printLines(process.stderr, [`skilletor: ${r.error}`]);
           return 2;
         }
-        process.stdout.write(
-          (flags.json ? JSON.stringify(r, null, 2) : r.changed ? "changed" : "up to date") + "\n",
-        );
+        printText(process.stdout, flags.json ? JSON.stringify(r, null, 2) : r.changed ? "changed" : "up to date");
         return r.changed ? 1 : 0;
       }
       case "status": {
         const r = status(ctx, { scope: flags.scope });
-        process.stdout.write((flags.json ? JSON.stringify(r, null, 2) : statusText(r)) + "\n");
+        printText(process.stdout, flags.json ? JSON.stringify(r, null, 2) : statusText(r));
         return r.error ? 2 : 0;
       }
       case "add": {
@@ -232,17 +244,16 @@ export async function run(argv: string[]): Promise<number> {
         const name = flags.rest.length >= 2 ? flags.rest[0] : undefined;
         const spec = flags.rest.length >= 2 ? flags.rest[1]! : flags.rest[0]!;
         const r = await cmdAdd(ctx, { name, spec, project: flags.project });
-        process.stdout.write(`added source ${r.name} (${JSON.stringify(r.def)})\n`);
-        process.stdout.write(syncText(r.report) + "\n");
+        printLines(process.stdout, [`added source ${r.name} (${JSON.stringify(r.def)})`]);
+        printText(process.stdout, syncText(r.report));
         return 0;
       }
       case "source": {
         const sub = flags.rest[0];
         if (sub === "list") {
           const list = cmdSourceList(ctx);
-          process.stdout.write(
-            (flags.json ? JSON.stringify(list, null, 2) : list.map((s) => `${s.name} [${s.origin}] ${JSON.stringify(s.def)}`).join("\n")) + "\n",
-          );
+          if (flags.json) printText(process.stdout, JSON.stringify(list, null, 2));
+          else printLines(process.stdout, list.map((s) => `${s.name} [${s.origin}] ${JSON.stringify(s.def)}`));
           return 0;
         }
         if (sub === "remove") {
@@ -252,7 +263,7 @@ export async function run(argv: string[]): Promise<number> {
             return 2;
           }
           const r = await cmdSourceRemove(ctx, { name, project: flags.project, force: flags.force });
-          process.stdout.write((reportText(r) || `removed source ${name}`) + "\n");
+          printText(process.stdout, reportText(r) || displaySafe(`removed source ${name}`));
           return 0;
         }
         process.stderr.write("skilletor: usage: source list | source remove <name>\n");
@@ -261,15 +272,15 @@ export async function run(argv: string[]): Promise<number> {
       case "available": {
         const items = await cmdAvailable(ctx, { source: flags.rest[0] });
         if (flags.json) {
-          process.stdout.write(JSON.stringify(items, null, 2) + "\n");
+          printText(process.stdout, JSON.stringify(items, null, 2));
         } else {
-          const lines = items.map((i) => {
+          const lines = items.flatMap((i) => {
             const line = `${i.installed ? "✓" : " "} ${i.type} ${i.name}@${i.source}${i.description ? ` — ${i.description}` : ""}`;
-            if (i.type !== "bundle") return line;
+            if (i.type !== "bundle") return [line];
             // A bundle's members (spec §15.5) on the next line, or why it cannot be expanded.
-            return `${line}\n    ${i.error !== undefined ? `error: ${i.error}` : i.members!.join(", ") || "(no items)"}`;
+            return [line, `    ${i.error !== undefined ? `error: ${i.error}` : i.members!.join(", ") || "(no items)"}`];
           });
-          process.stdout.write(lines.join("\n") + "\n");
+          printLines(process.stdout, lines);
         }
         return 0;
       }
@@ -279,7 +290,7 @@ export async function run(argv: string[]): Promise<number> {
           return 2;
         }
         const r = await cmdInstall({ ...ctx, prompt: ttyPrompter() }, { items: flags.rest, project: flags.project });
-        process.stdout.write(syncText(r) + "\n");
+        printText(process.stdout, syncText(r));
         return 0;
       }
       case "uninstall": {
@@ -288,8 +299,8 @@ export async function run(argv: string[]): Promise<number> {
           return 2;
         }
         const r = await cmdUninstall(ctx, { items: flags.rest, project: flags.project });
-        for (const h of r.hints) process.stderr.write(`skilletor: warning: ${h}\n`);
-        process.stdout.write(syncText(r.report) + "\n");
+        for (const h of r.hints) printLines(process.stderr, [`skilletor: warning: ${h}`]);
+        printText(process.stdout, syncText(r.report));
         return 0;
       }
       case "trust": {
@@ -299,17 +310,17 @@ export async function run(argv: string[]): Promise<number> {
           return 2;
         }
         const r = cmdTrust(ctx, { name });
-        process.stdout.write(`trusted source ${r.name} (${backendLabel(r)})\n`);
+        printLines(process.stdout, [`trusted source ${r.name} (${backendLabel(r)})`]);
         return 0;
       }
       case "hook":
         return runHookCommand(flags.rest);
       default:
-        process.stderr.write(`skilletor: unknown command: ${cmd}\n`);
+        printLines(process.stderr, [`skilletor: unknown command: ${cmd}`]);
         return 2;
     }
   } catch (err) {
-    process.stderr.write(`skilletor: ${(err as Error).message}\n`);
+    printText(process.stderr, `skilletor: ${(err as Error).message}`);
     return 1;
   }
 }
@@ -359,7 +370,7 @@ async function runHookCommand(args: string[]): Promise<number> {
       process.stdout.write(JSON.stringify(out) + "\n");
     }
   } catch (err) {
-    process.stdout.write(JSON.stringify({ systemMessage: `skilletor: ${(err as Error).message}` }) + "\n");
+    process.stdout.write(JSON.stringify({ systemMessage: displaySafe(`skilletor: ${(err as Error).message}`) }) + "\n");
   }
   return 0;
 }
@@ -382,7 +393,7 @@ if (isEntryPoint()) {
   run(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (err) => {
-      process.stderr.write(`skilletor: ${err?.stack ?? err}\n`);
+      printText(process.stderr, `skilletor: ${err?.stack ?? err}`);
       process.exit(1);
     },
   );

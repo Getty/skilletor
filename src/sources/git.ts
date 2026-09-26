@@ -63,7 +63,9 @@ export class GitSource implements Source {
           maxBuffer: 32 * 1024 * 1024,
         },
         (err, stdout, stderr) => {
-          if (err) reject(new Error(`git ${args.join(" ")}: ${stderr || err.message}`));
+          // Trimmed: git's stderr, and Node's "Command failed: …" when git wrote none, end in a
+          // newline, which a report would show escaped as a stray `\n` (k87).
+          if (err) reject(new Error(`git ${args.join(" ")}: ${stderr.toString().trim() || err.message.trim()}`));
           else resolvePromise(stdout.toString());
         },
       );

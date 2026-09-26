@@ -7470,7 +7470,7 @@ var GitSource = class {
           maxBuffer: 32 * 1024 * 1024
         },
         (err, stdout, stderr) => {
-          if (err) reject(new Error(`git ${args.join(" ")}: ${stderr || err.message}`));
+          if (err) reject(new Error(`git ${args.join(" ")}: ${stderr.toString().trim() || err.message.trim()}`));
           else resolvePromise(stdout.toString());
         }
       );
@@ -8974,6 +8974,10 @@ var CODEX_ACTIVATION = "active from the next Codex session";
 function activationOf(it) {
   return parseLockKey(it.key).harness === "codex" ? CODEX_ACTIVATION : ACTIVATION[it.type];
 }
+var UNSAFE = /(?!\t)[\p{Cc}\p{Bidi_Control}\u200B\u2028\u2029\u2060\uFEFF]/gu;
+function displaySafe(line) {
+  return line.replace(UNSAFE, (c) => c < " " ? JSON.stringify(c).slice(1, -1) : `\\u${c.codePointAt(0).toString(16).padStart(4, "0")}`);
+}
 function backendLabel(b) {
   return `${b.kind} ${b.url}`;
 }
@@ -9014,7 +9018,7 @@ function reportJson(r) {
   return JSON.stringify(r, null, 2);
 }
 function reportText(r) {
-  if (r.error) return `skilletor: config error, nothing changed \u2014 ${r.error}`;
+  if (r.error) return displaySafe(`skilletor: config error, nothing changed \u2014 ${r.error}`);
   const lines = [];
   for (const s of r.scopes) {
     if (!isNotable(s) && s.skipped.length === 0) continue;
@@ -9032,7 +9036,7 @@ function reportText(r) {
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
   for (const w of r.warnings ?? []) lines.push(`skilletor: warning: ${w}`);
-  return lines.join("\n");
+  return lines.map(displaySafe).join("\n");
 }
 function commitHint(file) {
   return `${file} updated \u2014 commit it`;
@@ -9049,7 +9053,7 @@ function withoutBriefing(r) {
   };
 }
 function reportHook(report) {
-  if (report.error) return { systemMessage: `skilletor: ${report.error}` };
+  if (report.error) return { systemMessage: displaySafe(`skilletor: ${report.error}`) };
   const r = hasChanges(report) ? report : withoutBriefing(report);
   if (!hasNotable(r)) return {};
   const changed = [];
@@ -9065,7 +9069,7 @@ function reportHook(report) {
   if (removed) parts.push(`${removed} removed`);
   if (warnings) parts.push(`${warnings} warning(s)`);
   if (gitignores.length) parts.push(`${gitignores.join(", ")} updated \u2014 commit ${gitignores.length > 1 ? "them" : "it"}`);
-  const systemMessage = `skilletor: ${parts.join(", ") || "changes applied"}`;
+  const systemMessage = displaySafe(`skilletor: ${parts.join(", ") || "changes applied"}`);
   const ctx = [];
   if (changed.length) {
     ctx.push("skilletor synced items:");
@@ -9081,7 +9085,7 @@ function reportHook(report) {
     for (const g of s.gitignoreUpdated ?? []) ctx.push(`- ${commitHint(g)}`);
     for (const w of s.warnings) ctx.push(`- warning: ${w}`);
   }
-  return { systemMessage, additionalContext: ctx.length ? ctx.join("\n") : void 0 };
+  return { systemMessage, additionalContext: ctx.length ? ctx.map(displaySafe).join("\n") : void 0 };
 }
 
 // src/engine.ts
@@ -10455,7 +10459,7 @@ function projectKeyOf(ctx, input) {
   return ctx.projectDir ?? input.cwd ?? "";
 }
 function warn(message) {
-  return { systemMessage: `skilletor: ${message}` };
+  return { systemMessage: displaySafe(`skilletor: ${message}`) };
 }
 function toOutput(report, eventName) {
   const h = reportHook(report);
@@ -10520,7 +10524,7 @@ function withCodexRules(out, ctx) {
     }
   }
   const result = { ...out };
-  if (problems.length) result.systemMessage = [out.systemMessage, `skilletor: ${problems.join("; ")}`].filter(Boolean).join("; ");
+  if (problems.length) result.systemMessage = [out.systemMessage, warn(problems.join("; ")).systemMessage].filter(Boolean).join("; ");
   if (texts.length) {
     const rules = texts.join("\n");
     const report = out.hookSpecificOutput?.additionalContext;
@@ -10695,7 +10699,7 @@ function ttyPrompter() {
     ask: async (question) => {
       const rl = createInterface({ input: process.stdin, output: process.stderr });
       try {
-        return await rl.question(`${question} `);
+        return await rl.question(`${displaySafe(question)} `);
       } finally {
         rl.close();
       }
@@ -10703,7 +10707,7 @@ function ttyPrompter() {
   };
 }
 function statusText(report) {
-  if (report.error) return `skilletor: config error \u2014 ${report.error}`;
+  if (report.error) return displaySafe(`skilletor: config error \u2014 ${report.error}`);
   const lines = [];
   for (const s of report.scopes) {
     const claudeOnly = s.targets.length === 1 && s.targets[0] === "claude";
@@ -10723,7 +10727,13 @@ function statusText(report) {
   }
   if (report.projectIsHome) lines.push("project scope: none (the project directory is the home directory)");
   for (const w of report.warnings ?? []) lines.push(`warning: ${w}`);
-  return lines.join("\n");
+  return lines.map(displaySafe).join("\n");
+}
+function printLines(stream, lines) {
+  stream.write(lines.map(displaySafe).join("\n") + "\n");
+}
+function printText(stream, text) {
+  printLines(stream, text.split("\n"));
 }
 function syncText(r) {
   const text = reportText(r);
@@ -10742,21 +10752,18 @@ async function run(argv) {
   }
   const cmd = argv[0];
   if (cmd.startsWith("-")) {
-    process.stderr.write(`skilletor: unknown option: ${cmd} (run skilletor --help)
-`);
+    printLines(process.stderr, [`skilletor: unknown option: ${cmd} (run skilletor --help)`]);
     return 2;
   }
   const flags = parseFlags(argv.slice(1));
   const unknown = cmd === "hook" ? void 0 : unknownOption(cmd, flags);
   if (unknown !== void 0) {
     const name = cmd === "source" && Object.hasOwn(ACCEPTED, `source ${flags.rest[0]}`) ? `source ${flags.rest[0]}` : cmd;
-    process.stderr.write(`skilletor: unknown option for ${name}: ${unknown} (run skilletor --help)
-`);
+    printLines(process.stderr, [`skilletor: unknown option for ${name}: ${unknown} (run skilletor --help)`]);
     return 2;
   }
   if (!["user", "project", "all"].includes(flags.scope)) {
-    process.stderr.write(`skilletor: invalid --scope: ${flags.scope}
-`);
+    printLines(process.stderr, [`skilletor: invalid --scope: ${flags.scope}`]);
     return 2;
   }
   const ctx = makeContext2(flags);
@@ -10765,27 +10772,24 @@ async function run(argv) {
       case "sync": {
         const r = await sync(ctx, { scope: flags.scope, force: flags.force });
         if (r.error) {
-          process.stderr.write((flags.json ? reportJson(r) : reportText(r)) + "\n");
+          printText(process.stderr, flags.json ? reportJson(r) : reportText(r));
           return 2;
         }
-        process.stdout.write((flags.json ? reportJson(r) : syncText(r)) + "\n");
+        printText(process.stdout, flags.json ? reportJson(r) : syncText(r));
         return 0;
       }
       case "check": {
         const r = await check(ctx, { scope: flags.scope });
         if (r.error) {
-          process.stderr.write(`skilletor: ${r.error}
-`);
+          printLines(process.stderr, [`skilletor: ${r.error}`]);
           return 2;
         }
-        process.stdout.write(
-          (flags.json ? JSON.stringify(r, null, 2) : r.changed ? "changed" : "up to date") + "\n"
-        );
+        printText(process.stdout, flags.json ? JSON.stringify(r, null, 2) : r.changed ? "changed" : "up to date");
         return r.changed ? 1 : 0;
       }
       case "status": {
         const r = status(ctx, { scope: flags.scope });
-        process.stdout.write((flags.json ? JSON.stringify(r, null, 2) : statusText(r)) + "\n");
+        printText(process.stdout, flags.json ? JSON.stringify(r, null, 2) : statusText(r));
         return r.error ? 2 : 0;
       }
       case "add": {
@@ -10796,18 +10800,16 @@ async function run(argv) {
         const name = flags.rest.length >= 2 ? flags.rest[0] : void 0;
         const spec = flags.rest.length >= 2 ? flags.rest[1] : flags.rest[0];
         const r = await cmdAdd(ctx, { name, spec, project: flags.project });
-        process.stdout.write(`added source ${r.name} (${JSON.stringify(r.def)})
-`);
-        process.stdout.write(syncText(r.report) + "\n");
+        printLines(process.stdout, [`added source ${r.name} (${JSON.stringify(r.def)})`]);
+        printText(process.stdout, syncText(r.report));
         return 0;
       }
       case "source": {
         const sub = flags.rest[0];
         if (sub === "list") {
           const list = cmdSourceList(ctx);
-          process.stdout.write(
-            (flags.json ? JSON.stringify(list, null, 2) : list.map((s) => `${s.name} [${s.origin}] ${JSON.stringify(s.def)}`).join("\n")) + "\n"
-          );
+          if (flags.json) printText(process.stdout, JSON.stringify(list, null, 2));
+          else printLines(process.stdout, list.map((s) => `${s.name} [${s.origin}] ${JSON.stringify(s.def)}`));
           return 0;
         }
         if (sub === "remove") {
@@ -10817,7 +10819,7 @@ async function run(argv) {
             return 2;
           }
           const r = await cmdSourceRemove(ctx, { name, project: flags.project, force: flags.force });
-          process.stdout.write((reportText(r) || `removed source ${name}`) + "\n");
+          printText(process.stdout, reportText(r) || displaySafe(`removed source ${name}`));
           return 0;
         }
         process.stderr.write("skilletor: usage: source list | source remove <name>\n");
@@ -10826,15 +10828,14 @@ async function run(argv) {
       case "available": {
         const items = await cmdAvailable(ctx, { source: flags.rest[0] });
         if (flags.json) {
-          process.stdout.write(JSON.stringify(items, null, 2) + "\n");
+          printText(process.stdout, JSON.stringify(items, null, 2));
         } else {
-          const lines = items.map((i) => {
+          const lines = items.flatMap((i) => {
             const line = `${i.installed ? "\u2713" : " "} ${i.type} ${i.name}@${i.source}${i.description ? ` \u2014 ${i.description}` : ""}`;
-            if (i.type !== "bundle") return line;
-            return `${line}
-    ${i.error !== void 0 ? `error: ${i.error}` : i.members.join(", ") || "(no items)"}`;
+            if (i.type !== "bundle") return [line];
+            return [line, `    ${i.error !== void 0 ? `error: ${i.error}` : i.members.join(", ") || "(no items)"}`];
           });
-          process.stdout.write(lines.join("\n") + "\n");
+          printLines(process.stdout, lines);
         }
         return 0;
       }
@@ -10844,7 +10845,7 @@ async function run(argv) {
           return 2;
         }
         const r = await cmdInstall({ ...ctx, prompt: ttyPrompter() }, { items: flags.rest, project: flags.project });
-        process.stdout.write(syncText(r) + "\n");
+        printText(process.stdout, syncText(r));
         return 0;
       }
       case "uninstall": {
@@ -10853,9 +10854,8 @@ async function run(argv) {
           return 2;
         }
         const r = await cmdUninstall(ctx, { items: flags.rest, project: flags.project });
-        for (const h of r.hints) process.stderr.write(`skilletor: warning: ${h}
-`);
-        process.stdout.write(syncText(r.report) + "\n");
+        for (const h of r.hints) printLines(process.stderr, [`skilletor: warning: ${h}`]);
+        printText(process.stdout, syncText(r.report));
         return 0;
       }
       case "trust": {
@@ -10865,20 +10865,17 @@ async function run(argv) {
           return 2;
         }
         const r = cmdTrust(ctx, { name });
-        process.stdout.write(`trusted source ${r.name} (${backendLabel(r)})
-`);
+        printLines(process.stdout, [`trusted source ${r.name} (${backendLabel(r)})`]);
         return 0;
       }
       case "hook":
         return runHookCommand(flags.rest);
       default:
-        process.stderr.write(`skilletor: unknown command: ${cmd}
-`);
+        printLines(process.stderr, [`skilletor: unknown command: ${cmd}`]);
         return 2;
     }
   } catch (err) {
-    process.stderr.write(`skilletor: ${err.message}
-`);
+    printText(process.stderr, `skilletor: ${err.message}`);
     return 1;
   }
 }
@@ -10921,7 +10918,7 @@ async function runHookCommand(args) {
       process.stdout.write(JSON.stringify(out) + "\n");
     }
   } catch (err) {
-    process.stdout.write(JSON.stringify({ systemMessage: `skilletor: ${err.message}` }) + "\n");
+    process.stdout.write(JSON.stringify({ systemMessage: displaySafe(`skilletor: ${err.message}`) }) + "\n");
   }
   return 0;
 }
@@ -10939,8 +10936,7 @@ if (isEntryPoint()) {
   run(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (err) => {
-      process.stderr.write(`skilletor: ${err?.stack ?? err}
-`);
+      printText(process.stderr, `skilletor: ${err?.stack ?? err}`);
       process.exit(1);
     }
   );

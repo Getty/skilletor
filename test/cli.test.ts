@@ -185,6 +185,8 @@ test("install bundle: with a missing source and no TTY exits 1, prints the add c
   const r = runCli(["install", "bundle:perl@shared", ...common], env, "");
   assert.equal(r.status, 1);
   assert.match(r.stderr, /skilletor add peter gitlab\.com\/peter/);
+  // k87: the error's own line breaks stay line breaks – the add command is a line to copy.
+  assert.match(r.stderr, /install again:\n {2}skilletor add peter gitlab\.com\/peter\n$/);
   assert.equal(readFileSync(cfgPath, "utf8"), cfg);
 
   const av = runCli(["available", "shared", ...common], env);
@@ -590,4 +592,110 @@ test("k85: a project ref starting with \"-\": sync fails naming it, the hook exi
   assert.equal(hook.status, 0, hook.stderr);
   assert.equal(hook.stdout, JSON.stringify({ systemMessage: `skilletor: ${problem}` }) + "\n");
   assert.equal(existsSync(join(tmp.dir, "dash-pwned")), false);
+});
+
+// ---- k87: strings from a config, a source or git are display-safe --------------------
+
+/** An ANSI color escape, a BEL, a right-to-left override and a newline. */
+const EVIL = "\u001b[31mred\u0007\u202eevil\nnext";
+/** How EVIL shows: each of them escaped the JSON way, the text around them as it was. */
+const SHOWN = "\\u001b[31mred\\u0007\\u202eevil\\nnext";
+/** A character no output line carries raw (a tab may; a newline only between lines). */
+const RAW = /(?![\t\n])[\p{Cc}\p{Bidi_Control}\u200b\u2028\u2029\u2060\ufeff]/u;
+
+/** A home, a project whose config (a cloned repo) declares a source named and placed with EVIL. */
+function evilProject(tag: string) {
+  const home = join(tmp.dir, `${tag}-home`);
+  const proj = join(tmp.dir, `${tag}-proj`);
+  const payload = join(tmp.dir, `${tag}-payload`);
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(proj, ".claude"), { recursive: true });
+  writeFileSync(join(proj, ".claude", "skilletor.json"), JSON.stringify({
+    sources: { [`team${EVIL}`]: { local: payload + EVIL } },
+    install: { skills: [`foo@team${EVIL}`] },
+  }));
+  return { home, proj, payload, env: claudeOnlyEnv(home), common: ["--project-dir", proj] };
+}
+
+// Asserts: `status`, `source list` and `trust` name an untrusted project source whose name and
+// address carry EVIL escaped, each on its one line, nothing raw; `status --json` carries it
+// escaped too, and parses back to the very name and address (JSON's own escapes).
+test("k87: status, source list and trust show a project source's name and address escaped", () => {
+  const p = evilProject("k87-status");
+  const st = runCli(["status", "--scope", "project", ...p.common], p.env);
+  assert.equal(st.status, 0, st.stderr);
+  assert.doesNotMatch(st.stdout, RAW);
+  assert.ok(st.stdout.split("\n").includes(`  trust: team${SHOWN} (local ${p.payload}${SHOWN})`), st.stdout);
+
+  const json = runCli(["status", "--scope", "project", "--json", ...p.common], p.env);
+  assert.equal(json.status, 0, json.stderr);
+  assert.doesNotMatch(json.stdout, RAW);
+  assert.ok(json.stdout.includes(`"name": "team${SHOWN}"`), json.stdout);
+  assert.deepEqual(JSON.parse(json.stdout).scopes[0].trustRequests, [{ name: `team${EVIL}`, kind: "local", url: p.payload + EVIL }]);
+
+  const list = runCli(["source", "list", ...p.common], p.env);
+  assert.equal(list.status, 0, list.stderr);
+  assert.equal(list.stdout, `team${SHOWN} [project] {"local":"${p.payload}${SHOWN}"}\n`);
+
+  const trust = runCli(["trust", `team${EVIL}`, ...p.common], p.env);
+  assert.equal(trust.status, 0, trust.stderr);
+  assert.equal(trust.stdout, `trusted source team${SHOWN} (local ${p.payload}${SHOWN})\n`);
+});
+
+// Asserts: a config error naming such a source is one escaped line on sync's and check's
+// stderr, and the SessionStart hook through the binary gives that line as its systemMessage;
+// an error thrown for an unknown source of that name shows no raw escape, BEL or override.
+test("k87: a config error or a failed command naming such a source is escaped on stderr and in the hook", () => {
+  const p = evilProject("k87-error");
+  const cfg = join(p.proj, ".claude", "skilletor.json");
+  writeFileSync(cfg, JSON.stringify({ sources: { [`team${EVIL}`]: { local: "/src", x: 1 } } }));
+  const problem = `${cfg}: sources.team${SHOWN}: unknown key "x"`;
+
+  const sy = runCli(["sync", ...p.common], p.env);
+  assert.equal(sy.status, 2);
+  assert.equal(sy.stderr, `skilletor: config error, nothing changed — ${problem}\n`);
+  const ch = runCli(["check", ...p.common], p.env);
+  assert.equal(ch.status, 2);
+  assert.equal(ch.stderr, `skilletor: ${problem}\n`);
+
+  const env = { ...p.env };
+  delete env.CLAUDE_PROJECT_DIR;
+  delete env.SKILLETOR_PROJECT_DIR;
+  const hook = runCli(["hook", "session-start"], env, JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: p.proj }));
+  assert.equal(hook.status, 0, hook.stderr);
+  assert.doesNotMatch(hook.stdout, RAW);
+  assert.deepEqual(JSON.parse(hook.stdout), { systemMessage: `skilletor: ${problem}` });
+
+  writeFileSync(cfg, "{}");
+  const un = runCli(["install", `foo@team${EVIL}`, ...p.common], p.env);
+  assert.equal(un.status, 1);
+  assert.doesNotMatch(un.stderr, /[\u001b\u0007\u202e]/);
+  assert.ok(un.stderr.includes("team\\u001b[31mred\\u0007\\u202eevil"), un.stderr);
+});
+
+// Asserts: `available` shows a source's free text – a skill's description, a bundle's – with
+// EVIL escaped and each item on its line(s), while ordinary text (umlauts, emoji, a tab) is
+// printed as written.
+test("k87: available shows a source's descriptions escaped, ordinary text as written", () => {
+  const home = join(tmp.dir, "k87-av-home");
+  const proj = join(tmp.dir, "k87-av-proj");
+  const src = join(tmp.dir, "k87-av-src");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(proj, { recursive: true });
+  mkdirSync(join(src, "skills", "foo"), { recursive: true });
+  mkdirSync(join(src, "bundles"), { recursive: true });
+  const oneLine = EVIL.replace("\n", " ");
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), `---\nname: foo\ndescription: Grüße 🍳\tok ${oneLine}\n---\nFOO\n`);
+  writeFileSync(join(src, "bundles", "b.yaml"), `description: ${JSON.stringify(`Perl${EVIL}`)}\nskills: [foo]\n`);
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { shared: { local: src } } }));
+  const env = claudeOnlyEnv(home);
+
+  const av = runCli(["available", "shared", "--project-dir", proj], env);
+  assert.equal(av.status, 0, av.stderr);
+  assert.doesNotMatch(av.stdout, RAW);
+  assert.deepEqual(av.stdout.split("\n").filter(Boolean).sort(), [
+    `    skill:foo`,
+    `  bundle b@shared — Perl${SHOWN}`,
+    `  skill foo@shared — Grüße 🍳\tok ${SHOWN.replace("\\n", " ")}`,
+  ].sort());
 });

@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  reportText, reportHook, hasChanges, hasNotable, emptyScopeReport, conflictHint, type SyncReport,
+  reportText, reportHook, hasChanges, hasNotable, emptyScopeReport, conflictHint, displaySafe, type SyncReport,
 } from "../src/report.ts";
 
 function sample(): SyncReport {
@@ -185,4 +185,82 @@ test("every warning the systemMessage counts has its own context line", () => {
   const hook = reportHook({ scopes: [s] });
   assert.equal(hook.systemMessage, "skilletor: 4 warning(s)");
   assert.equal(hook.additionalContext?.split("\n").length, 4);
+});
+
+// ---- k87: strings from a config, a source or git are display-safe ----------------------
+
+/** An ANSI color escape, a BEL, a right-to-left override and a newline: what a cloned
+ *  project config, a source's files or git's stderr can put into a report. */
+const EVIL = "\u001b[31mred\u0007\u202eevil\nnext";
+/** How EVIL shows: each of them escaped the JSON way, the text around them as it was. */
+const SHOWN = "\\u001b[31mred\\u0007\\u202eevil\\nnext";
+/** A character no display line carries raw (a tab may; a newline only between lines). */
+const RAW = /(?![\t\n])[\p{Cc}\p{Bidi_Control}\u200b\u2028\u2029\u2060\ufeff]/u;
+
+// Asserts: every character that can move the cursor, recolor, reorder or hide text – C0
+// controls but tab (as JSON.stringify writes them), DEL, C1, the Unicode bidi controls, the
+// line and paragraph separators, the invisible zero-width space, word joiner and BOM – shows
+// as its escape; ordinary text (umlauts, CJK, emoji with a ZWJ, Persian with a ZWNJ, a tab,
+// backslashes, a literal "\u001b") comes back unchanged.
+test("k87: displaySafe escapes control, bidi and invisible characters and keeps ordinary text", () => {
+  const cases: [string, string][] = [
+    ["\u0000", "\\u0000"], ["\u0007", "\\u0007"], ["\b", "\\b"], ["\n", "\\n"], ["\u000b", "\\u000b"], ["\f", "\\f"],
+    ["\r", "\\r"], ["\u001b", "\\u001b"], ["\u001f", "\\u001f"], ["\u007f", "\\u007f"], ["\u0085", "\\u0085"],
+    ["\u009b", "\\u009b"], ["\u061c", "\\u061c"], ["\u200e", "\\u200e"], ["\u200f", "\\u200f"], ["\u202a", "\\u202a"],
+    ["\u202e", "\\u202e"], ["\u2066", "\\u2066"], ["\u2069", "\\u2069"], ["\u2028", "\\u2028"], ["\u2029", "\\u2029"],
+    ["\u200b", "\\u200b"], ["\u2060", "\\u2060"], ["\ufeff", "\\ufeff"],
+  ];
+  for (const [raw, shown] of cases) assert.equal(displaySafe(`a${raw}b`), `a${shown}b`, JSON.stringify(raw));
+  const ordinary = "Grüße, 日本語, 🍳 👨\u200d👩\u200d👧, می\u200cخواهم, a\ttab, C:\\dir\\x, literal \\u001b — ‹ok›";
+  assert.equal(displaySafe(ordinary), ordinary);
+  assert.equal(displaySafe(EVIL), SHOWN);
+});
+
+// Asserts: a trust request whose name and address carry EVIL, a conflict path from a source's
+// file names, a scope warning and a run-level warning show escaped in the text report, each
+// still on one line of its own, no raw character anywhere; the report's own line breaks stay.
+// A config error naming such a source is one escaped line too.
+test("k87: reportText escapes config-, source- and git-derived strings, one line each", () => {
+  const s = emptyScopeReport("project");
+  s.conflicts = [{ path: `skills/foo/${EVIL}.md` }];
+  s.trustRequests = [{ name: `team${EVIL}`, kind: "local", url: `/src/${EVIL}` }];
+  s.warnings = [`git fetch failed: ${EVIL}`];
+  const text = reportText({ scopes: [s], warnings: [`codex: ${EVIL}`] });
+  assert.doesNotMatch(text, RAW);
+  assert.deepEqual(text.split("\n"), [
+    "skilletor: project scope",
+    `  conflict: skills/foo/${SHOWN}.md already exists (use --force to adopt)`,
+    `  trust: source "team${SHOWN}" (local /src/${SHOWN}) — run: skilletor trust team${SHOWN}`,
+    `  warning: git fetch failed: ${SHOWN}`,
+    `skilletor: warning: codex: ${SHOWN}`,
+  ]);
+  assert.equal(
+    reportText({ scopes: [], error: `sources.team${EVIL}: unknown key` }),
+    `skilletor: config error, nothing changed — sources.team${SHOWN}: unknown key`,
+  );
+});
+
+// Asserts: the hook output escapes the same strings – a synced item's source name, an
+// overwritten path, a trust request, a warning – with the systemMessage one line and exactly
+// one context line per counted warning (a newline inside a value no longer splits one in
+// two); a config error is one escaped systemMessage line.
+test("k87: reportHook escapes them too: one systemMessage line, one context line per warning", () => {
+  const s = emptyScopeReport("project");
+  s.added = [{ key: "skills/foo", type: "skill", name: "foo", source: `team${EVIL}` }];
+  s.overwritten = [{ path: `skills/foo/${EVIL}.md` }];
+  s.trustRequests = [{ name: `team${EVIL}`, kind: "local", url: `/src/${EVIL}` }];
+  s.warnings = [`git fetch failed: ${EVIL}`];
+  const hook = reportHook({ scopes: [s] });
+  assert.equal(hook.systemMessage, "skilletor: 1 item(s) updated, 3 warning(s)");
+  assert.doesNotMatch(hook.additionalContext ?? "", RAW);
+  assert.deepEqual(hook.additionalContext?.split("\n"), [
+    "skilletor synced items:",
+    `- skill foo@team${SHOWN}: active now`,
+    `- overwrote local change in project scope: skills/foo/${SHOWN}.md`,
+    `- untrusted source team${SHOWN} (local /src/${SHOWN}); run: skilletor trust team${SHOWN}`,
+    `- warning: git fetch failed: ${SHOWN}`,
+  ]);
+  assert.deepEqual(reportHook({ scopes: [], error: `sources.team${EVIL}: unknown key` }), {
+    systemMessage: `skilletor: sources.team${SHOWN}: unknown key`,
+  });
 });

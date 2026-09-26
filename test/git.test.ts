@@ -453,3 +453,33 @@ test("k85: an address shaped like an option never runs as one, in check or resol
   await assert.rejects(() => src.resolve());
   assert.equal(existsSync(marker), false, "the address ran as --upload-pack in git fetch");
 });
+
+// k87: git ends its stderr with a newline, and a failure's message carried it – every git
+// warning then ended in a visible "\n" once report text escaped it. Asserts: the fallback
+// warning, the error without a cache, and a check's error (ls-remote failing, and killed by
+// its timeout – Node's "Command failed: …\n" when git wrote nothing) each carry git's words
+// and end in a word, never in whitespace.
+test("k87: a git failure's message ends in git's last word, not its trailing newline", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const repo = makeRepo(tmp);
+  repo.commit("A", "first");
+  const cacheRoot = join(tmp.dir, "cache");
+  await new GitSource({ url: repo.url, cacheRoot }).resolve();
+  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+
+  const offline = await new GitSource({ url: repo.url, cacheRoot }).resolve();
+  assert.match(offline.warning ?? "", /using cache \(git fetch .*: fatal: [^]*\S\)$/);
+  await assert.rejects(new GitSource({ url: repo.url, cacheRoot: join(tmp.dir, "empty") }).resolve(), (err: Error) => {
+    assert.match(err.message, /^git source .* failed: git fetch .*: fatal: [^]*\S$/);
+    return true;
+  });
+  await assert.rejects(new GitSource({ url: repo.url, cacheRoot }).check("git:abc"), (err: Error) => {
+    assert.match(err.message, /^git ls-remote .*: fatal: [^]*\S$/);
+    return true;
+  });
+  await assert.rejects(new GitSource({ url: repo.url, cacheRoot, timeoutMs: 1 }).check("git:abc"), (err: Error) => {
+    assert.match(err.message, /^git ls-remote .*\S$/);
+    return true;
+  });
+});
