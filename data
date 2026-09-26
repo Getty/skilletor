@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-09-26T15:25:55Z
+created: 2026-09-26T15:08:08Z
+id: 85
+priority: high
+started: 2026-09-26T15:10:31Z
+status: done
+tags:
+- sources
+- security
+- trust
+title: 'sources/git: a ref (or url) starting with ''-'' is passed to git as an option'
+updated: 2026-09-26T15:26:04Z
+---
+
+Found during k75 (worker), confirmed by the orchestrator. GitSource.resolve runs `git fetch --depth 1 origin <ref>` (src/sources/git.ts ~81-87) with the configured ref unvalidated (config.ts). git still parses options after the remote name, so ref `--upload-pack=<cmd>` runs <cmd> (worker reproduced in a scratch repo). Trust (state.ts isTrusted) binds only kind+address, NOT the ref: a project config (a cloned repo) whose source the user trusted can later change that source's ref to an option and get command execution at the next SessionStart without any new trust prompt. Also harden the url: a url starting with "-" in ls-remote/clone/remote add, and probe.ts `git ls-remote <baseUrl>`. Fix: reject a ref or git url starting with "-" at config load (clear error naming the source), AND pass `--end-of-options` (or `--` where git supports it) before every user-supplied positional in git invocations (fetch, ls-remote, clone/remote add, probe) as defence in depth; check the minimum git version skilletor documents supports --end-of-options (git 2.24+) or pick a form that works on older git. Tests: config rejects ref/url with leading "-"; a direct GitSource call with such a ref never runs the injected command (e.g. --upload-pack=touch <marker> → marker absent); runHook with a trusted project source whose ref turns into an option → no marker, a warning, exit 0.
+
+2026-09-26 15:15 Worker start. Reproduced on git 2.47 in a scratch repo: `git fetch --depth 1 origin '--upload-pack=touch M'` creates M; `ls-remote '--upload-pack=touch M' <repo>` too (url side, with a repo-path pattern after it). Plan: (1) config.ts parseSources refuses git ref / git address with a leading '-' (+ check-ref-format character rules for refs) as a ConfigError naming file+source+key — the hook then warns once and fetches nothing (same path as every config error), CLI sync exits 2; spec.ts resolveSpec refuses a spec starting with '-' (covers add + bundle foreign entries). (2) '--' before user positionals in fetch / ls-remote / remote add / set-url / probe ls-remote: verified '--' stops option parsing for fetch too (refspec then 'invalid refspec'), works on git long before 2.24, unlike --end-of-options; README documents no minimum git.
+
+2026-09-26 15:22 Decisions: (1) config.ts parseSources → gitField(): git/ref starting with '-' is a ConfigError '<file>: sources.<name>.<key> "<value>" must not start with "-" (git would read it as an option)'; ref additionally refused for check-ref-format's per-character rules (whitespace, control chars, ~ ^ : ? * [ \, '..', '@{') — they make a name refspec/revision syntax (verified: 'main:refs/heads/x' made fetch write a ref). Structural rules (.lock, slashes, dots) left to git; empty ref left alone (fetches HEAD). Git address: only the leading '-' (local paths may contain spaces; git itself blocks '-' hosts/paths). Hook: same path as every config error — check() error → one systemMessage naming file/source/key, exit 0, nothing fetched (user scope included, as with any broken project config). CLI sync: exit 2. spec.ts resolveSpec refuses a spec starting with '-' (covers add and bundle foreign entries, before any config write or probe). (2) '--' (not --end-of-options) before origin/url in remote add, remote set-url, fetch (both), ls-remote (check + probe.ts): verified on git 2.47 — fetch then says 'invalid refspec', ls-remote 'strange pathname blocked'; '--' is parse-options' generic end marker, so no 2.24 floor (README documents none).
+
+2026-09-26 15:22 Also found (drift, not fixed — for the dispatcher): (a) report.ts reportHook ignores SyncReport.error: a background (UserPromptSubmit) sync that hits any config error stores the pending report 'skilletor: changes applied' — misleading; session-start path is right. Suggest a skilletor-board ticket. (b) Trust binds no ref by design: a project can still move a trusted source to another valid branch/tag of the same repo without a prompt — design question, skilletor board. (c) Trust requests / warnings echo project-controlled addresses and git stderr verbatim into hook output (control chars / ANSI escapes possible) — display sanitization, skilletor board. (d) config: non-string git/ref silently ignored (ref: 123 drops the pin); ref '' fetches HEAD but check finds nothing → 'changed' every session. (e) skills/skilletor/SKILL.md:97 documents ref — could mention the new restriction (skill-author lane; branch/tag/commit names are unaffected).
+
+2026-09-26 15:23 Done: config.ts refuses a git address/ref starting with '-' and refs with check-ref-format's per-character rules (ConfigError naming file, source, key); spec.ts refuses specs starting with '-'; git.ts/probe.ts pass address and ref after '--' in remote add/set-url, fetch, ls-remote. 7 new tests (config x2, spec, git layer-2 x2 with validation bypassed, runHook black-box, CLI bundle sync-vs-hook), each red before the fix (layer-2 ones confirmed red with HEAD's git.ts). README Security & trust + spec §4.3/§4.4 one sentence each. Verify: typecheck, npm test 583/583, build, check-dist green; dist rebuilt. Uncommitted, tree commit-ready.
+
+2026-09-26 15:25 Committed 23c55e0 -- sources/git: a ref or address never reaches git as an option; config refuses them (k85)
