@@ -1,0 +1,22 @@
+---
+class: standard
+completed: 2026-09-26T14:32:53Z
+created: 2026-09-26T04:42:13Z
+id: 73
+priority: low
+started: 2026-09-26T14:27:53Z
+status: done
+tags:
+- skill
+- docs
+title: 'skill: bundled skilletor skill lacks k67 conflict/link behaviour'
+updated: 2026-09-26T14:33:02Z
+---
+
+Found by the 0.3.0 release audit: skills/skilletor/SKILL.md (conflict paragraph, ~lines 34-40) still only describes the plain agent/rule-name conflict. It does not say that a conflict now blocks the whole item, that a linked skill directory or item file is a conflict (nothing written or deleted through it), that `--force` replaces the link itself and leaves its target alone, and that a directory at a file path is a conflict even with --force. README "Security & trust" and spec §6.3 already state it. Lane: skilletor-worker (bundled skill). Keep it short; the skill is loaded into sessions.
+
+2026-09-26 14:29 Started: verified conflict/link/notFile/partial behaviour against src/apply.ts (inspect, conflict(), blocking filter, writeSalvageLock), src/report.ts conflictHint, src/cli.ts status marker, engine check drift partial:, spec §6.2/§6.3. No test pins skills/skilletor/SKILL.md text. Rewriting the conflict paragraph (lines 34-40) in place.
+
+2026-09-26 14:31 Done: rewrote the ownership/conflict paragraph of skills/skilletor/SKILL.md (was lines 36-40) in place: a conflict blocks the whole item; --force adopts a foreign file, replaces a linked skill dir or item file (the link itself, never its target), deletes a plain-name agent/rule file; a directory at a file path (`is not a file`) stays a conflict even with --force; 'Fixed by hand? skilletor sync installs the item now' (k70); partial sync keeps what it wrote, status marks '(partial: the last sync stopped midway)', next session resumes (k71). check sentence now names 'the last sync stopped midway' like README (and the stray short line there reflowed). Every claim checked against src/apply.ts (inspect/conflict/blocking/writeSalvageLock), report.ts conflictHint, cli.ts status marker, engine.ts partial drift, hooks.ts SessionStart check->sync. SKILL.md 168 -> 173 lines (+5). No test pins the text. Verified: typecheck + npm test (558/558 pass) + build + check-dist ('up to date', dist unchanged). Proposed commit: 'skill: state whole-item conflicts, links, non-file paths and partial syncs (k73)'.
+
+2026-09-26 14:32 Committed 3203ec2: rewrote the ownership/conflict paragraph in skills/skilletor/SKILL.md (whole-item conflicts, link/target replacement, non-file-path conflicts, hand-fixed reinstall, partial-sync resume). 558/558 tests re-verified, no code changed so build/check-dist not rerun.
