@@ -746,6 +746,157 @@ test("k65: while the lock still holds entries the block stays; an emptied lock n
   }
 });
 
+// ---- k64: check sees an installed state off the §6.4 layout (spec §14.3) ----------
+
+/** `check`'s layout verdict. Local sources always count as changed, so tests with one
+ *  look at `layoutChanged`, the signal under test. */
+const layoutOf = async (ctx: EngineContext, scope: "user" | "project" = "project") =>
+  (await check(ctx, { scope })).layoutChanged;
+
+test("k64: check reports pre-k62 lock entries (plain agent and rule files, a skill without .gitignore); one sync migrates", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k64a", { ...K62_FILES, "rules/lang/perl.md": RULE_MD });
+    const install = { ...K62_INSTALL, rules: ["r@mine", "lang/perl@mine"] };
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install });
+    await sync(e.ctx, { scope: "project" });
+    assert.equal(await layoutOf(e.ctx), undefined);
+    // One earlier-version entry at a time: the verdict comes from the lock alone.
+    const lockPath = join(e.projectDir, ".claude/skilletor.lock.json");
+    const current = readFileSync(lockPath, "utf8");
+    const old: Record<string, string> = {
+      "agents/a": "agents/a.md", "rules/r": "rules/r.md", "rules/lang/perl": "rules/lang/perl.md", "skills/foo": "skills/foo/SKILL.md",
+    };
+    for (const [key, rel] of Object.entries(old)) {
+      writeFileSync(lockPath, JSON.stringify({ ...JSON.parse(current), [key]: { source: "mine", version: "local", files: { [rel]: "sha256:x" } } }));
+      assert.deepEqual(await layoutOf(e.ctx), ["project"], key);
+      assert.equal(await layoutOf(e.ctx, "user"), undefined, key);
+    }
+
+    // The whole tree as 0.2.0 left it: check says so, the sync migrates, check is quiet.
+    rmSync(join(e.projectDir, ".claude"), { recursive: true });
+    const claude = join(e.projectDir, ".claude");
+    const files: Record<string, string> = { "skills/foo/SKILL.md": SKILL_MD, "agents/a.md": AGENT_MD, "rules/r.md": RULE_MD };
+    for (const [rel, text] of Object.entries(files)) {
+      mkdirSync(join(claude, rel, ".."), { recursive: true });
+      writeFileSync(join(claude, rel), text);
+    }
+    const entry = (rel: string) => ({ source: "mine", version: "local", files: { [rel]: hashBuffer(Buffer.from(files[rel]!)) } });
+    writeFileSync(lockPath, JSON.stringify({
+      "agents/a": entry("agents/a.md"), "rules/r": entry("rules/r.md"), "skills/foo": entry("skills/foo/SKILL.md"),
+    }));
+    e.writeCfg("project", { install: K62_INSTALL });
+    const chk = await check(e.ctx, { scope: "project" });
+    assert.deepEqual([chk.changed, chk.layoutChanged, chk.targetsChanged], [true, ["project"], undefined]);
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(r.scopes[0]!.updated.map((i) => i.key).sort(), ["agents/a", "rules/r", "skills/foo"]);
+    assert.equal(existsSync(join(claude, "agents/.local.a.md")), true);
+    assert.equal(existsSync(join(claude, "skills/foo/.gitignore")), true);
+    assert.equal(await layoutOf(e.ctx), undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k64: a current lock is no layout drift; skip entries and entries of unknown harnesses are never drift", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k64b", K62_FILES);
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: K62_INSTALL });
+    e.writeCfg("project", { install: K62_INSTALL });
+    await sync(e.ctx);
+    const chk = await check(e.ctx);
+    assert.deepEqual([chk.error, chk.layoutChanged, chk.targetsChanged], [undefined, undefined, undefined]);
+    const lockPath = join(e.projectDir, ".claude/skilletor.lock.json");
+    writeFileSync(lockPath, JSON.stringify({
+      ...readLock(lockPath),
+      "skills/gated": { source: "mine", version: "local", files: {}, skipped: "renders-empty" },
+      "agents/gated": { source: "mine", version: "local", files: {}, skipped: "renders-empty" },
+      "later:agents/x": { source: "mine", version: "v1", files: { "agents/x.md": "sha256:x" } },
+    }));
+    assert.equal(await layoutOf(e.ctx), undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k64: the gitignore switch: skilletor's skill .gitignore is drift while off, its absence while on; a shipped one is not", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k64c", {
+      "skills/foo/SKILL.md": SKILL_MD, "skills/bar/SKILL.md": SKILL_MD, "skills/bar/.gitignore": "node_modules/\n",
+    });
+    const install = { skills: ["foo@mine", "bar@mine"] };
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install });
+    await sync(e.ctx, { scope: "project" });
+    assert.equal(await layoutOf(e.ctx), undefined);
+
+    e.writeCfg("project", { install, gitignore: false });
+    assert.deepEqual(await layoutOf(e.ctx), ["project"]);
+    await sync(e.ctx, { scope: "project" });
+    // bar installs the .gitignore its source ships: owned, but not skilletor's.
+    assert.equal(readFileSync(join(e.projectDir, ".claude/skills/bar/.gitignore"), "utf8"), "node_modules/\n");
+    assert.equal(await layoutOf(e.ctx), undefined);
+
+    e.writeCfg("project", { install });
+    assert.deepEqual(await layoutOf(e.ctx), ["project"]);
+    await sync(e.ctx, { scope: "project" });
+    assert.equal(await layoutOf(e.ctx), undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k64: an unused project holding a skilletor block in any root is drift; the sync removes it, own lines stay", async () => {
+  const e = env();
+  try {
+    e.writeCfg("user", {}); // no source: a change can only come from the layout
+    const p = e.projectDir;
+    assert.deepEqual(await check(e.ctx), { changed: false, sources: [], warnings: [] });
+    writeFileSync(join(p, ".claude/.gitignore"), "own\n");
+    assert.equal((await check(e.ctx)).changed, false);
+    for (const root of [".claude", ".agents", ".codex"]) {
+      mkdirSync(join(p, root), { recursive: true });
+      writeFileSync(join(p, root, ".gitignore"), "own\n\n" + BLOCK("skilletor.local.json", "skilletor.lock.json"));
+      const chk = await check(e.ctx);
+      assert.deepEqual([chk.changed, chk.layoutChanged], [true, ["project"]], root);
+      assert.equal(await layoutOf(e.ctx, "user"), undefined, root);
+      const r = await sync(e.ctx);
+      assert.equal(readFileSync(join(p, root, ".gitignore"), "utf8"), "own\n", root);
+      assert.equal(reportText(r), "", root);
+      assert.equal((await check(e.ctx)).changed, false, root);
+    }
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k64: a project in use with its block, and a user block in a work tree, are no drift; check asks git nothing", async () => {
+  const e = env();
+  try {
+    e.writeCfg("user", {});
+    e.writeCfg("project", {});
+    await sync({ ...e.ctx, isGitWorkTree: () => true });
+    assert.equal(readFileSync(join(e.projectDir, ".claude/.gitignore"), "utf8"), PROJECT_BLOCK);
+    assert.equal(existsSync(join(e.home, ".claude/.gitignore")), true);
+    const asked: string[] = [];
+    const ctx: EngineContext = {
+      ...e.ctx,
+      isGitWorkTree: (dir) => (asked.push(dir), true),
+      gitTracked: (dir) => (asked.push(dir), []),
+    };
+    assert.deepEqual(await check(ctx), { changed: false, sources: [], warnings: [] });
+    rmSync(join(e.projectDir, ".claude/skilletor.json"));
+    e.writeCfg("local", {});
+    assert.deepEqual(await check(ctx), { changed: false, sources: [], warnings: [] });
+    assert.deepEqual(asked, []);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("author mode: a user local override wins over a project git definition", async () => {
   const e = env();
   try {

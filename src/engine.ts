@@ -16,7 +16,7 @@ import {
 } from "./bundles.ts";
 import {
   defaultMarkers, detectHarnesses, lockKey, parseLockKey, placeOutput, rootOf, rootOfKey, selectTargets, supports,
-  targetDrift, allRoots, isBlockType, type HarnessMarkers, type RootContext, type TargetSelection,
+  targetDrift, allRoots, isBlockType, lacksLocalPrefix, type HarnessMarkers, type RootContext, type TargetSelection,
 } from "./targets.ts";
 import {
   codexHookTrusted, inspectAgentsMd, parseRulesFile, pointerLines, projectDocLimit, rulesFileText, RULES_FILE, withBlock,
@@ -34,8 +34,8 @@ import { apply, isValidItemName, type PlanItem } from "./apply.ts";
 import { readLock, writeLock, type Lock, type SkipReason } from "./lock.ts";
 import { State } from "./state.ts";
 import {
-  CODEX_ENTRIES, gitTracked, isGitWorkTree, LOCAL_ENTRIES, PROJECT_CLAUDE_ENTRIES, skillGitignorePath, updateGitignore,
-  withSkillGitignore,
+  CODEX_ENTRIES, gitTracked, hasBlock, isGitWorkTree, LOCAL_ENTRIES, PROJECT_CLAUDE_ENTRIES, SKILL_GITIGNORE, skillGitignorePath,
+  updateGitignore, withSkillGitignore,
 } from "./gitignore.ts";
 import { briefingWarning, missingSkills, skillRoots, type BriefingMissing } from "./briefing.ts";
 import {
@@ -604,8 +604,7 @@ async function syncScope(
     // scope is in use – a project config file, or lock entries left – else a block found
     // there goes (every sync runs the project scope of whatever directory it starts in).
     const newLock = readLock(lockPath);
-    const inUse = scope === "user" || Object.keys(newLock).length > 0 ||
-      existsSync(join(targetDir, "skilletor.json")) || existsSync(join(targetDir, "skilletor.local.json"));
+    const inUse = scope === "user" || projectInUse(targetDir, newLock);
     const codexRoot = rootOf(rc, "codex", "rule")!;
     const inWorkTree = (dir: string): boolean => {
       try {
@@ -664,6 +663,13 @@ async function syncScope(
   for (const b of briefing) rep.warnings.push(briefingWarning(parseLockKey(b.key).name, b.harness, b.missing));
   if (briefing.length) rep.briefingMissing = briefing;
   return rep;
+}
+
+/** Is the project scope in use (spec §6.4): a project config file exists, or the lock
+ *  (in the project's `.claude`, `targetDir`) holds entries? */
+function projectInUse(targetDir: string, lock: Lock): boolean {
+  return Object.keys(lock).length > 0 ||
+    existsSync(join(targetDir, "skilletor.json")) || existsSync(join(targetDir, "skilletor.local.json"));
 }
 
 /** A path for the commit hint and the tracked warning (spec §6.4): relative to the
@@ -899,6 +905,8 @@ export interface CheckReport {
   sources: { name: string; scope: ScopeName; changed: boolean }[];
   /** Scopes whose lock does not match the active targets (spec §14.3). Absent when none. */
   targetsChanged?: ScopeName[];
+  /** Scopes whose installed state does not match the layout of §6.4 (spec §14.3, k64). Absent when none. */
+  layoutChanged?: ScopeName[];
   warnings: string[];
   error?: string;
 }
@@ -923,6 +931,10 @@ export async function check(given: EngineContext, opts: SyncOptions = {}): Promi
       out.changed = true;
       (out.targetsChanged ??= []).push(scope);
     }
+    if (layoutDrift(ctx, scope, scopeCfg, oldLock)) {
+      out.changed = true;
+      (out.layoutChanged ??= []).push(scope);
+    }
     // Sources a bundle pulled items from (spec §15.6) are not declared here; the lock names them.
     const viaSources = Object.values(oldLock).flatMap((e) => (e.via?.length ? [e.source] : []));
     for (const name of new Set([...scopeSources(scopeCfg), ...viaSources])) {
@@ -938,6 +950,31 @@ export async function check(given: EngineContext, opts: SyncOptions = {}): Promi
     }
   }
   return out;
+}
+
+/** The hash of skilletor's own skill `.gitignore`, which tells it from one a source ships. */
+const SKILL_GITIGNORE_HASH = hashBuffer(Buffer.from(SKILL_GITIGNORE, "utf8"));
+
+/**
+ * Does a scope's installed state disagree with the layout of §6.4 (spec §14.3, k64), so an
+ * upgrade migrates in the first session? From the lock: an agent or rule entry owning a
+ * file without the `.local.` prefix; a skill entry whose `.gitignore` is not skilletor's
+ * while the switch is on, or is while it is off (by hash – with the switch off, a
+ * `.gitignore` the source ships installs as shipped). A project not in use: a skilletor
+ * block in one of its roots, one read per root. Skip entries, rule sections and unknown
+ * harnesses own nothing to move. No git, no network.
+ */
+function layoutDrift(ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig, lock: Lock): boolean {
+  const gitignoreOn = scopeCfg.gitignore !== false;
+  for (const [key, entry] of Object.entries(lock)) {
+    const k = parseLockKey(key);
+    const files = Object.keys(entry.files ?? {});
+    if (!k.harness || !supports(k.harness, k.type) || entry.skipped || entry.block || files.length === 0) continue;
+    if (lacksLocalPrefix(k.harness, k.type, files)) return true;
+    if (k.type === "skill" && (entry.files[skillGitignorePath(k.name)] === SKILL_GITIGNORE_HASH) !== gitignoreOn) return true;
+  }
+  if (scope !== "project" || projectInUse(targetDirOf(ctx, scope), lock)) return false;
+  return allRoots({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }).some((dir) => hasBlock(dir));
 }
 
 // ---- status -----------------------------------------------------------------

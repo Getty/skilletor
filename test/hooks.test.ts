@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
@@ -274,6 +274,88 @@ test("k65: session-start in a project that never used skilletor writes nothing t
     assert.equal(again.systemMessage, "skilletor: 1 item(s) updated");
     assert.doesNotMatch(again.hookSpecificOutput?.additionalContext ?? "", /gitignore/);
     assert.equal(existsSync(join(e.projectDir, ".claude/.gitignore")), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+const GIT_ENV = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
+
+/** A bare git repo holding `files` in one commit; returns its file:// URL. */
+function gitSource(root: string, files: Record<string, string>): string {
+  const work = join(root, "git-work");
+  const bare = join(root, "git-src.git");
+  for (const [rel, content] of Object.entries(files)) {
+    mkdirSync(join(work, rel, ".."), { recursive: true });
+    writeFileSync(join(work, rel), content);
+  }
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, env: { ...process.env, ...GIT_ENV }, stdio: "ignore" });
+  git(root, "init", "-q", "-b", "main", "--bare", bare);
+  git(work, "init", "-q", "-b", "main");
+  git(work, "add", ".");
+  git(work, "commit", "-qm", "init");
+  const url = "file://" + resolvePath(bare);
+  git(work, "push", "-q", url, "main");
+  return url;
+}
+
+// k64 (spec §14.3): the source does not move, so only check's layout test can start the sync.
+test("k64: session-start migrates a pre-k62 install of an unchanged git source in one session, both harnesses", async () => {
+  const e = env();
+  try {
+    const url = gitSource(e.tmp.dir, {
+      "skills/foo/SKILL.md": "---\nname: foo\ndescription: foo\n---\nFOO\n",
+      "agents/a.md": "---\nname: a\ndescription: A\n---\nAGENT\n",
+      "rules/r.md": "RULE\n",
+    });
+    const codexHome = join(e.tmp.dir, "codex");
+    const ctx: HookContext = { ...e.ctx, markers: { claude: [e.home], codex: [e.home] }, codexHome };
+    e.writeUserCfg({ sources: { g: { git: url } }, install: { skills: ["foo@g"], agents: ["a@g"], rules: ["r@g"] } });
+    const input = { source: "startup", cwd: e.projectDir };
+    assert.match((await runHook("session-start", input, ctx)).systemMessage ?? "", /6 item\(s\) updated/);
+    assert.deepEqual(await runHook("session-start", input, ctx), {}); // nothing moved: no sync
+
+    // What 0.2.0 left: plain agent and rule files, skills without .gitignore (both harnesses).
+    const claude = join(e.home, ".claude");
+    const lockPath = join(claude, "skilletor.lock.json");
+    const lock = JSON.parse(readFileSync(lockPath, "utf8"));
+    const unprefix = (root: string, key: string, from: string, to: string) => {
+      renameSync(join(root, from), join(root, to));
+      lock[key].files = { [to]: lock[key].files[from] };
+    };
+    unprefix(claude, "agents/a", "agents/.local.a.md", "agents/a.md");
+    unprefix(claude, "rules/r", "rules/.local.r.md", "rules/r.md");
+    unprefix(codexHome, "codex:agents/a", "agents/.local.a.toml", "agents/a.toml");
+    for (const [root, key] of [[claude, "skills/foo"], [join(e.home, ".agents"), "codex:skills/foo"]] as const) {
+      rmSync(join(root, "skills/foo/.gitignore"));
+      delete lock[key].files["skills/foo/.gitignore"];
+    }
+    writeFileSync(lockPath, JSON.stringify(lock));
+
+    const out = await runHook("session-start", input, ctx);
+    assert.match(out.systemMessage ?? "", /5 item\(s\) updated/);
+    assert.deepEqual(readdirSync(join(claude, "agents")), [".local.a.md"]);
+    assert.deepEqual(readdirSync(join(claude, "rules")), [".local.r.md"]);
+    assert.deepEqual(readdirSync(join(codexHome, "agents")), [".local.a.toml"]);
+    assert.equal(existsSync(join(claude, "skills/foo/.gitignore")), true);
+    assert.equal(existsSync(join(e.home, ".agents/skills/foo/.gitignore")), true);
+    assert.deepEqual(await runHook("session-start", input, ctx), {}); // migrated: silent again
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k64: session-start in an unused project removes 0.2.0's block though nothing else changed, silently", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({});
+    const gi = join(e.projectDir, ".claude/.gitignore");
+    writeFileSync(gi, "# >>> skilletor >>>\nskilletor.local.json\nskilletor.lock.json\n# <<< skilletor <<<\n");
+    mkdirSync(join(e.projectDir, ".codex"));
+    writeFileSync(join(e.projectDir, ".codex/.gitignore"), "own\n\n# >>> skilletor >>>\nagents/x.toml\n# <<< skilletor <<<\n");
+    assert.deepEqual(await runHook("session-start", { source: "startup", cwd: e.projectDir }, e.ctx), {});
+    assert.equal(existsSync(gi), false);
+    assert.equal(readFileSync(join(e.projectDir, ".codex/.gitignore"), "utf8"), "own\n");
   } finally {
     e.cleanup();
   }

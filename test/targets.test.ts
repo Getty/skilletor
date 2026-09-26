@@ -5,7 +5,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import {
-  defaultMarkers, detectHarnesses, lockKey, parseLockKey, placeOutput, rootOfKey, selectTargets, targetDrift, TargetError,
+  defaultMarkers, detectHarnesses, lacksLocalPrefix, lockKey, parseLockKey, placeOutput, rootOfKey, selectTargets, targetDrift,
+  TargetError,
 } from "../src/targets.ts";
 
 test("default markers: Claude by its own files, never by ~/.claude alone", () => {
@@ -113,4 +114,15 @@ test("placeOutput prefixes Claude agents and rules and Codex agents; skills and 
   assert.deepEqual(placed("codex", "skill", "skills/s/SKILL.md"), { paths: ["skills/s/SKILL.md"], claims: [] });
   // The bytes travel with the renamed path.
   assert.equal(placeOutput("claude", "agent", out("agents/a.md")).output.get("agents/.local.a.md")!.toString(), "agents/a.md");
+});
+
+// k64: `check` spots the layout before k62 by the installed paths alone (spec §14.3).
+test("lacksLocalPrefix: a plain file of an agent or rule is the old layout; skills and Codex rules never are", () => {
+  assert.equal(lacksLocalPrefix("claude", "agent", ["agents/.local.a.md"]), false);
+  assert.equal(lacksLocalPrefix("claude", "agent", ["agents/a.md"]), true);
+  assert.equal(lacksLocalPrefix("claude", "rule", ["rules/lang/.local.perl.md"]), false);
+  assert.equal(lacksLocalPrefix("claude", "rule", ["rules/.local.lang/perl.md"]), true); // the file name counts
+  assert.equal(lacksLocalPrefix("codex", "agent", ["agents/.local.a.toml", "agents/b.toml"]), true);
+  assert.equal(lacksLocalPrefix("codex", "rule", ["skilletor-rules.md"]), false);
+  assert.equal(lacksLocalPrefix("claude", "skill", ["skills/s/SKILL.md"]), false);
 });

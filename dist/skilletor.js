@@ -6896,6 +6896,10 @@ function placeOutput(harness, type, output) {
   }
   return { output: placed, claims };
 }
+function lacksLocalPrefix(harness, type, paths) {
+  if (!LAYOUTS[harness].localTypes?.includes(type)) return false;
+  return paths.some((rel) => !rel.slice(Math.max(rel.lastIndexOf("/"), rel.lastIndexOf("\\")) + 1).startsWith(LOCAL_PREFIX));
+}
 function defaultMarkers(home, codexHome) {
   const cx = codexHome || join3(home, ".codex");
   return {
@@ -8256,17 +8260,15 @@ function updateGitignore(opts) {
   const existed = existsSync9(path);
   const existing = existed ? readFileSync8(path, "utf8") : "";
   const lines = existing.length ? existing.split("\n") : [];
-  const begin = lines.indexOf(BEGIN2);
-  const end = lines.indexOf(END2);
-  const hasBlock = begin !== -1 && end !== -1 && end > begin;
-  const outside = hasBlock ? [...lines.slice(0, begin), ...lines.slice(end + 1)] : lines;
+  const { begin, end, hasBlock: hasBlock2 } = blockOf(lines);
+  const outside = hasBlock2 ? [...lines.slice(0, begin), ...lines.slice(end + 1)] : lines;
   const entries = [...new Set(opts.entries)].sort();
   const write = opts.enabled && entries.length > 0;
   let out;
   let change;
   if (write) {
     const block = [BEGIN2, ...entries, END2];
-    if (hasBlock) {
+    if (hasBlock2) {
       out = [...lines.slice(0, begin), ...block, ...lines.slice(end + 1)];
       change = lines.slice(begin + 1, end).join("\n") === entries.join("\n") ? "unchanged" : "changed";
     } else {
@@ -8276,7 +8278,7 @@ function updateGitignore(opts) {
     }
   } else {
     out = trimTrailingEmpty(outside);
-    change = hasBlock ? "removed" : "unchanged";
+    change = hasBlock2 ? "removed" : "unchanged";
   }
   const result = out.length && out.some((l) => l.trim() !== "") ? out.join("\n").replace(/\n*$/, "") + "\n" : "";
   if (result === "") {
@@ -8285,6 +8287,18 @@ function updateGitignore(opts) {
   }
   if (result !== existing) atomicWrite(path, result);
   return change;
+}
+function blockOf(lines) {
+  const begin = lines.indexOf(BEGIN2);
+  const end = lines.indexOf(END2);
+  return { begin, end, hasBlock: begin !== -1 && end !== -1 && end > begin };
+}
+function hasBlock(dir) {
+  try {
+    return blockOf(readFileSync8(join12(dir, ".gitignore"), "utf8").split("\n")).hasBlock;
+  } catch {
+    return false;
+  }
 }
 function skillGitignorePath(name) {
   return join12("skills", name, ".gitignore");
@@ -8910,7 +8924,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) || existsSync11(join14(rootOf(rc, "codex", "rule"), RULES_FILE)) ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings }) : { overwritten: [], exists: false, written: false };
   {
     const newLock = readLock(lockPath);
-    const inUse = scope === "user" || Object.keys(newLock).length > 0 || existsSync11(join14(targetDir, "skilletor.json")) || existsSync11(join14(targetDir, "skilletor.local.json"));
+    const inUse = scope === "user" || projectInUse(targetDir, newLock);
     const codexRoot = rootOf(rc, "codex", "rule");
     const inWorkTree = (dir) => {
       try {
@@ -8961,6 +8975,9 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   for (const b of briefing) rep.warnings.push(briefingWarning(parseLockKey(b.key).name, b.harness, b.missing));
   if (briefing.length) rep.briefingMissing = briefing;
   return rep;
+}
+function projectInUse(targetDir, lock) {
+  return Object.keys(lock).length > 0 || existsSync11(join14(targetDir, "skilletor.json")) || existsSync11(join14(targetDir, "skilletor.local.json"));
 }
 function scopeLabel(scope, base, abs) {
   const rel = relative3(base, abs);
@@ -9138,6 +9155,10 @@ async function check(given, opts = {}) {
       out.changed = true;
       (out.targetsChanged ??= []).push(scope);
     }
+    if (layoutDrift(ctx, scope, scopeCfg, oldLock)) {
+      out.changed = true;
+      (out.layoutChanged ??= []).push(scope);
+    }
     const viaSources = Object.values(oldLock).flatMap((e) => e.via?.length ? [e.source] : []);
     for (const name of /* @__PURE__ */ new Set([...scopeSources(scopeCfg), ...viaSources])) {
       const src = config.sources.get(name);
@@ -9152,6 +9173,19 @@ async function check(given, opts = {}) {
     }
   }
   return out;
+}
+var SKILL_GITIGNORE_HASH = hashBuffer(Buffer.from(SKILL_GITIGNORE, "utf8"));
+function layoutDrift(ctx, scope, scopeCfg, lock) {
+  const gitignoreOn = scopeCfg.gitignore !== false;
+  for (const [key, entry] of Object.entries(lock)) {
+    const k = parseLockKey(key);
+    const files = Object.keys(entry.files ?? {});
+    if (!k.harness || !supports(k.harness, k.type) || entry.skipped || entry.block || files.length === 0) continue;
+    if (lacksLocalPrefix(k.harness, k.type, files)) return true;
+    if (k.type === "skill" && entry.files[skillGitignorePath(k.name)] === SKILL_GITIGNORE_HASH !== gitignoreOn) return true;
+  }
+  if (scope !== "project" || projectInUse(targetDirOf(ctx, scope), lock)) return false;
+  return allRoots({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }).some((dir) => hasBlock(dir));
 }
 function status(given, opts = {}) {
   const ctx = scoped(given);

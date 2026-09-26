@@ -652,7 +652,17 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
 - `check` reports a change not only when a source moved but also when the lock does not
   match the active targets (an item locked for one active target but not another, or an
   entry for an inactive target), so SessionStart syncs a newly enabled harness without
-  waiting for a source change.
+  waiting for a source change. Likewise when the installed state does not match the
+  layout of §6.4 (k64), so an upgrade from an earlier version migrates in the first
+  session: an agent or rule entry (Claude, or a Codex agent) whose files lack the
+  `.local.` prefix; with `gitignore` enabled a skill entry without skilletor's
+  `skills/<name>/.gitignore`, with it disabled one that still has it (told apart by its lock
+  hash – with the switch off a `.gitignore` the source ships installs as shipped); or a
+  project that is not in use (§6.4) but holds a skilletor block in one of its roots. The
+  test stays offline and read-only: the lock, two existence tests and at most one small
+  read per root of a project not in use. An entry that cannot be migrated (a lasting
+  conflict, a failing source) keeps the test true, so each session syncs, as a `local`
+  source already does.
 - **Git hygiene** (§6.4): Codex skills carry their own `.gitignore` like Claude skills, so
   `<project>/.agents` and `~/.agents` get no block (one left by an earlier version is
   removed). `<project>/.codex/.gitignore` and `$CODEX_HOME/.gitignore` hold the fixed block

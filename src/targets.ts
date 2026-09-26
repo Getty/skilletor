@@ -85,6 +85,13 @@ export function placeOutput(
   return { output: placed, claims };
 }
 
+/** Does an installed item own a file without the `.local.` prefix its type takes for the
+ *  harness – the layout before k62 (spec §6.4, §14.3)? Always false for other types. */
+export function lacksLocalPrefix(harness: Harness, type: ItemType, paths: string[]): boolean {
+  if (!LAYOUTS[harness].localTypes?.includes(type)) return false;
+  return paths.some((rel) => !rel.slice(Math.max(rel.lastIndexOf("/"), rel.lastIndexOf("\\")) + 1).startsWith(LOCAL_PREFIX));
+}
+
 /** Per harness: absolute paths whose existence means the harness is in use. */
 export type HarnessMarkers = Record<Harness, string[]>;
 

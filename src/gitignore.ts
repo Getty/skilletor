@@ -48,9 +48,7 @@ export function updateGitignore(opts: GitignoreOptions): BlockChange {
   const existing = existed ? readFileSync(path, "utf8") : "";
   const lines = existing.length ? existing.split("\n") : [];
 
-  const begin = lines.indexOf(BEGIN);
-  const end = lines.indexOf(END);
-  const hasBlock = begin !== -1 && end !== -1 && end > begin;
+  const { begin, end, hasBlock } = blockOf(lines);
   const outside = hasBlock ? [...lines.slice(0, begin), ...lines.slice(end + 1)] : lines;
 
   const entries = [...new Set(opts.entries)].sort();
@@ -80,6 +78,23 @@ export function updateGitignore(opts: GitignoreOptions): BlockChange {
   }
   if (result !== existing) atomicWrite(path, result);
   return change;
+}
+
+/** The block's marker lines in a `.gitignore`'s lines; a block needs both, in order. */
+function blockOf(lines: string[]): { begin: number; end: number; hasBlock: boolean } {
+  const begin = lines.indexOf(BEGIN);
+  const end = lines.indexOf(END);
+  return { begin, end, hasBlock: begin !== -1 && end !== -1 && end > begin };
+}
+
+/** Does `<dir>/.gitignore` hold a skilletor block – one `updateGitignore` would find?
+ *  One read; a missing or unreadable file holds none (spec §14.3, the `check` test). */
+export function hasBlock(dir: string): boolean {
+  try {
+    return blockOf(readFileSync(join(dir, ".gitignore"), "utf8").split("\n")).hasBlock;
+  } catch {
+    return false;
+  }
 }
 
 /** Where skilletor's `.gitignore` of the skill `name` goes, relative to the skills' root. */

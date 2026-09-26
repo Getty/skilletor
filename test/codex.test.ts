@@ -629,6 +629,76 @@ test("k62: the first sync after the upgrade migrates both harnesses; the .agents
   }
 });
 
+// k64 (spec §14.3): local sources always count as changed; layoutChanged is the signal under test.
+test("k64: check sees the pre-k62 Codex layout in both scopes (plain .toml agent, skill without .gitignore); one sync migrates", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", {
+      "skills/foo/SKILL.md": SKILL("foo"), "agents/helper.md": AGENT("Helps", "B\n"), "rules/r.md": "R.\n",
+    });
+    const install = { skills: ["foo@mine"], agents: ["helper@mine"], rules: ["r@mine"] };
+    e.writeCfg("user", { sources: { mine: { local: src } }, install });
+    e.writeCfg("project", { install });
+    await sync(e.ctx);
+    const quiet = await check(e.ctx);
+    assert.deepEqual([quiet.error, quiet.layoutChanged, quiet.targetsChanged], [undefined, undefined, undefined]);
+
+    // User scope, one earlier-version Codex entry at a time (the rule sections are no files to rename).
+    const userLock = join(e.home, ".claude/skilletor.lock.json");
+    const current = readLock(userLock);
+    assert.equal(current["codex:rules/r"]!.block, true);
+    const old: Record<string, Record<string, string>> = {
+      "codex:agents/helper": { "agents/helper.toml": "sha256:x" },
+      "codex:skills/foo": { "skills/foo/SKILL.md": current["codex:skills/foo"]!.files["skills/foo/SKILL.md"]! },
+    };
+    for (const [key, files] of Object.entries(old)) {
+      writeFileSync(userLock, JSON.stringify({ ...current, [key]: { ...current[key]!, files } }));
+      const chk = await check(e.ctx);
+      assert.deepEqual(chk.layoutChanged, ["user"], key);
+    }
+    writeFileSync(userLock, JSON.stringify(current));
+
+    // Project scope: the tree as 0.2.0 left it for Codex.
+    const p = e.projectDir;
+    const lockPath = join(p, ".claude/skilletor.lock.json");
+    const lock = readLock(lockPath);
+    rmSync(join(p, ".agents/skills/foo/.gitignore"));
+    delete lock["codex:skills/foo"]!.files["skills/foo/.gitignore"];
+    const toml = readFileSync(join(p, ".codex/agents/.local.helper.toml"));
+    rmSync(join(p, ".codex/agents/.local.helper.toml"));
+    writeFileSync(join(p, ".codex/agents/helper.toml"), toml);
+    lock["codex:agents/helper"]!.files = { "agents/helper.toml": hashBuffer(toml) };
+    writeFileSync(lockPath, JSON.stringify(lock));
+    assert.deepEqual((await check(e.ctx)).layoutChanged, ["project"]);
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(r.scopes[0]!.updated.map((i) => i.key).sort(), ["codex:agents/helper", "codex:skills/foo"]);
+    assert.equal(existsSync(join(p, ".codex/agents/helper.toml")), false);
+    assert.equal(readFileSync(join(p, ".codex/agents/.local.helper.toml"), "utf8"), toml.toString());
+    assert.equal(readFileSync(join(p, ".agents/skills/foo/.gitignore"), "utf8"), SKILL_GITIGNORE);
+    assert.equal((await check(e.ctx)).layoutChanged, undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k64: gitignore false: a Codex skill still holding skilletor's .gitignore is drift until the sync removes it", async () => {
+  const e = env(["codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo") });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["foo@mine"] } });
+    await sync(e.ctx, { scope: "project" });
+    assert.equal((await check(e.ctx, { scope: "project" })).layoutChanged, undefined);
+    e.writeCfg("project", { install: { skills: ["foo@mine"] }, gitignore: false });
+    assert.deepEqual((await check(e.ctx, { scope: "project" })).layoutChanged, ["project"]);
+    await sync(e.ctx, { scope: "project" });
+    assert.equal(existsSync(join(e.projectDir, ".agents/skills/foo/.gitignore")), false);
+    assert.equal((await check(e.ctx, { scope: "project" })).layoutChanged, undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("k62: an old block in ~/.agents is removed outside a work tree too, without asking git", async () => {
   const e = env(["codex"]);
   try {

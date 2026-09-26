@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import {
-  CODEX_ENTRIES, gitTracked, isGitWorkTree, PROJECT_CLAUDE_ENTRIES, SKILL_GITIGNORE, updateGitignore, withSkillGitignore,
+  CODEX_ENTRIES, gitTracked, hasBlock, isGitWorkTree, PROJECT_CLAUDE_ENTRIES, SKILL_GITIGNORE, updateGitignore, withSkillGitignore,
 } from "../src/gitignore.ts";
 
 const BEGIN = "# >>> skilletor >>>";
@@ -85,6 +85,25 @@ test("no entries: the block is removed and no file is created (spec §6.4)", () 
     updateGitignore({ dir: tmp.dir, entries: CODEX_ENTRIES, enabled: true });
     assert.equal(updateGitignore({ dir: tmp.dir, entries: [], enabled: true }), "removed");
     assert.equal(existsSync(join(tmp.dir, ".gitignore")), false);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// k64: `check` asks whether a sync would find a block to remove (spec §14.3).
+test("hasBlock: true exactly for a block updateGitignore would find", () => {
+  const tmp = makeTmpDir();
+  try {
+    assert.equal(hasBlock(tmp.dir), false); // no file
+    writeFileSync(join(tmp.dir, ".gitignore"), "own\n");
+    assert.equal(hasBlock(tmp.dir), false);
+    writeFileSync(join(tmp.dir, ".gitignore"), `own\n${BEGIN}\nx\n`); // no end marker: no block
+    assert.equal(hasBlock(tmp.dir), false);
+    assert.equal(updateGitignore({ dir: tmp.dir, entries: [], enabled: true }), "unchanged");
+    writeFileSync(join(tmp.dir, ".gitignore"), "own\n\n" + BLOCK("x"));
+    assert.equal(hasBlock(tmp.dir), true);
+    mkdirSync(join(tmp.dir, "sub/.gitignore"), { recursive: true }); // unreadable as a file
+    assert.equal(hasBlock(join(tmp.dir, "sub")), false);
   } finally {
     tmp.cleanup();
   }
