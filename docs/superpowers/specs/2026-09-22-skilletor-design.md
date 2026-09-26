@@ -237,7 +237,9 @@ explicit ref (the first resolve fetches again; offline, that source counts as un
 and keeps its items, §6.1). Offline, a SHA pin is served from cache only if the cached
 commit is the pin; a ref shorter than a full SHA that names no other commit there (a tag or
 branch named like a date) is taken as a name (k69). Git gets the address and the ref after
-`--`, never as an option (k85).
+`--`, never as an option (k85). A git killed midway (a hook timeout, a crash) can leave its
+lock files in the cache; the next run that takes the sync lock removes them once stale
+(§6.5, k84).
 
 ## 5. Templating
 
@@ -484,6 +486,21 @@ cache dir `<hash>` is missing – then the backup holds the last good cache and 
 into place. Stage and backup trees are only made inside a resolve, and no other run can be
 inside one while this one holds the lock, so a live run's trees are never touched. The sweep
 is silent and never fails a run; what it cannot clear, the next run tries again (k74).
+
+The same sweep clears the lock files a git killed midway left in a git cache (k84): git never
+removes another process's lock, so every later fetch or reset of that cache would fail and
+fall back to it with a warning. A git cache is a `cache/<hash>` dir whose `.git` is a real
+directory (not a symlink or a gitfile); what goes are the locks git takes for what a resolve
+runs – `index.lock`, `shallow.lock`, `config.lock`, `HEAD.lock`, `ORIG_HEAD.lock`,
+`packed-refs.lock` and `reftable/tables.list.lock` in `.git`, and any `*.lock` file under
+`.git/refs` (a ref name cannot end in `.lock`) – never the object store or the checkout, and
+each only once it is older than 5 minutes. The age is for git that runs outside the sync
+lock: the `git maintenance run --auto --detach` each fetch starts, and a git child that
+outlived its killed run. A younger lock stays; that fetch falls back to the cache once more,
+and a later run clears it. `url` caches share the `<hash>` naming, so only a `url`
+archive that carries a top-level `.git` of its own could lose files of those names (never an
+item). A checkout that a killed `reset --hard` left half-updated needs nothing more: the next
+resolve's `reset --hard` restores it.
 
 ### 6.6 Error behavior
 

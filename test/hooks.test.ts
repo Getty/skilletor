@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
@@ -445,6 +445,41 @@ test("k64: session-start migrates a pre-k62 install of an unchanged git source i
     assert.equal(existsSync(join(claude, "skills/foo/.gitignore")), true);
     assert.equal(existsSync(join(e.home, ".agents/skills/foo/.gitignore")), true);
     assert.deepEqual(await runHook("session-start", input, ctx), {}); // migrated: silent again
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k84 (spec §6.5, §8): a git killed midway through a session-start fetch (SIGKILL on a hook
+// timeout) leaves its lock files in the source's cache, and every later fetch fell back to the
+// cache with a warning. Asserts: once upstream moved, the next session-start clears the stale
+// `shallow.lock` and `index.lock` before it fetches, so the update lands and the hook reports
+// it without a warning, and no lock file is left.
+test("k84: session-start after a killed fetch clears the stale git locks; the update lands, no warning", async () => {
+  const e = env();
+  try {
+    const skill = (body: string) => `---\nname: foo\ndescription: foo\n---\n${body}\n`;
+    const url = gitSource(e.tmp.dir, { "skills/foo/SKILL.md": skill("FIRST") });
+    e.writeUserCfg({ sources: { g: { git: url } }, install: { skills: ["foo@g"] } });
+    const input = { source: "startup", cwd: e.projectDir };
+    assert.equal((await runHook("session-start", input, e.ctx)).systemMessage, "skilletor: 1 item(s) updated");
+
+    const work = join(e.tmp.dir, "git-work");
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: work, env: { ...process.env, ...GIT_ENV }, stdio: "ignore" });
+    writeFileSync(join(work, "skills/foo/SKILL.md"), skill("SECOND"));
+    git("commit", "-qam", "second");
+    git("push", "-q", url, "main");
+    const cacheRoot = join(e.ctx.stateRoot, "cache");
+    const gitDir = join(cacheRoot, readdirSync(cacheRoot)[0]!, ".git");
+    const killed = new Date(Date.now() - 10 * 60_000);
+    for (const name of ["shallow.lock", "index.lock"]) {
+      writeFileSync(join(gitDir, name), "");
+      utimesSync(join(gitDir, name), killed, killed);
+    }
+
+    assert.equal((await runHook("session-start", input, e.ctx)).systemMessage, "skilletor: 1 item(s) updated");
+    assert.match(readFileSync(join(e.home, ".claude/skills/foo/SKILL.md"), "utf8"), /SECOND/);
+    assert.deepEqual(readdirSync(gitDir).filter((n) => n.endsWith(".lock")), []);
   } finally {
     e.cleanup();
   }

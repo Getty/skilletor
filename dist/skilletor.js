@@ -5746,7 +5746,7 @@ import { join as join16 } from "node:path";
 // src/engine.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname as hostname2, platform, userInfo } from "node:os";
-import { existsSync as existsSync11, readFileSync as readFileSync10, realpathSync as realpathSync2, rmSync as rmSync7, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync11, readFileSync as readFileSync10, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync4 } from "node:fs";
 import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative4, resolve as resolvePath4, sep as sep4 } from "node:path";
 
 // src/config.ts
@@ -7412,7 +7412,7 @@ var LocalSource = class {
 // src/sources/git.ts
 import { execFile } from "node:child_process";
 import { createHash as createHash2 } from "node:crypto";
-import { existsSync as existsSync4, mkdirSync as mkdirSync2 } from "node:fs";
+import { existsSync as existsSync4, lstatSync as lstatSync3, mkdirSync as mkdirSync2, readdirSync, rmSync as rmSync2 } from "node:fs";
 import { join as join6 } from "node:path";
 var DEFAULT_TIMEOUT_MS = 6e4;
 var PinMismatch = class extends Error {
@@ -7535,6 +7535,57 @@ function remoteCommit(lsRemote, ref) {
   }
   return "";
 }
+var CACHE_NAME = /^[0-9a-f]{16}$/;
+var LOCK_FILES = [
+  "index.lock",
+  "shallow.lock",
+  "config.lock",
+  "HEAD.lock",
+  "ORIG_HEAD.lock",
+  "packed-refs.lock",
+  join6("reftable", "tables.list.lock")
+];
+var STALE_LOCK_MS = 5 * 6e4;
+function sweepGitCache(cacheRoot) {
+  let names;
+  try {
+    names = readdirSync(cacheRoot);
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  for (const name of names) {
+    if (!CACHE_NAME.test(name)) continue;
+    const gitDir = join6(cacheRoot, name, ".git");
+    try {
+      if (!lstatSync3(gitDir).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    for (const path of [...LOCK_FILES.map((f) => join6(gitDir, f)), ...refLocks(join6(gitDir, "refs"))]) {
+      try {
+        const st = lstatSync3(path);
+        if (st.isFile() && now - st.mtimeMs > STALE_LOCK_MS) rmSync2(path, { force: true });
+      } catch {
+      }
+    }
+  }
+}
+function refLocks(dir) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const e of entries) {
+    const path = join6(dir, e.name);
+    if (e.isDirectory()) out.push(...refLocks(path));
+    else if (e.isFile() && e.name.endsWith(".lock")) out.push(path);
+  }
+  return out;
+}
 function isCommitish(ref) {
   return /^[0-9a-f]{7,40}$/i.test(ref);
 }
@@ -7544,7 +7595,7 @@ function samePrefix(a, b) {
 
 // src/sources/url.ts
 import { createHash as createHash3 } from "node:crypto";
-import { existsSync as existsSync5, lstatSync as lstatSync3, mkdirSync as mkdirSync3, mkdtempSync, readdirSync, renameSync as renameSync2, rmSync as rmSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { existsSync as existsSync5, lstatSync as lstatSync4, mkdirSync as mkdirSync3, mkdtempSync, readdirSync as readdirSync2, renameSync as renameSync2, rmSync as rmSync3, writeFileSync as writeFileSync2 } from "node:fs";
 import { dirname as dirname2, join as join7, resolve as resolvePath, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 var TarError = class extends Error {
@@ -7719,7 +7770,7 @@ function publishEntries(dir, entries) {
     const obsolete = [staging, ...backup && (!oldMoved || published) ? [backup] : []];
     for (const path of obsolete) {
       try {
-        rmSync2(path, { recursive: true, force: true });
+        rmSync3(path, { recursive: true, force: true });
       } catch (err) {
         cleanupWarnings.push(`cache cleanup failed for ${path} (${err.message})`);
       }
@@ -7731,7 +7782,7 @@ var LEFTOVER = /^([0-9a-f]{16})\.(stage|backup)-[A-Za-z0-9]{6}$/;
 function sweepUrlCache(cacheRoot) {
   let names;
   try {
-    names = readdirSync(cacheRoot).sort();
+    names = readdirSync2(cacheRoot).sort();
   } catch {
     return;
   }
@@ -7745,14 +7796,14 @@ function sweepUrlCache(cacheRoot) {
         const tree = join7(path, "tree");
         if (!existsSync5(dir) && isRealDir(tree)) renameSync2(tree, dir);
       }
-      rmSync2(path, { recursive: true, force: true });
+      rmSync3(path, { recursive: true, force: true });
     } catch {
     }
   }
 }
 function isRealDir(path) {
   try {
-    return lstatSync3(path).isDirectory();
+    return lstatSync4(path).isDirectory();
   } catch {
     return false;
   }
@@ -7774,7 +7825,7 @@ function writeEntries(dir, entries) {
 }
 
 // src/catalog.ts
-import { existsSync as existsSync6, lstatSync as lstatSync4, readFileSync as readFileSync3, readdirSync as readdirSync2 } from "node:fs";
+import { existsSync as existsSync6, lstatSync as lstatSync5, readFileSync as readFileSync3, readdirSync as readdirSync3 } from "node:fs";
 import { basename as basename3, isAbsolute, join as join8, relative } from "node:path";
 var CatalogError = class extends Error {
   name = "CatalogError";
@@ -7785,7 +7836,7 @@ var TYPE_DIRS = [
   { dir: "rules", type: "rule" }
 ];
 function noSymlink(path) {
-  const st = lstatSync4(path);
+  const st = lstatSync5(path);
   if (st.isSymbolicLink()) {
     throw new CatalogError(`symlink not allowed in source: ${path}`);
   }
@@ -7793,7 +7844,7 @@ function noSymlink(path) {
 }
 function walkFiles(dir, sourceDir) {
   const out = [];
-  for (const entry of readdirSync2(dir)) {
+  for (const entry of readdirSync3(dir)) {
     const p = join8(dir, entry);
     const st = noSymlink(p);
     if (st.isDirectory()) out.push(...walkFiles(p, sourceDir));
@@ -7844,7 +7895,7 @@ function scan(dir) {
     const typeDir = join8(dir, sub);
     if (!existsSync6(typeDir)) continue;
     noSymlink(typeDir);
-    for (const entry of readdirSync2(typeDir)) {
+    for (const entry of readdirSync3(typeDir)) {
       const p = join8(typeDir, entry);
       const st = noSymlink(p);
       if (type === "skill") {
@@ -7903,7 +7954,7 @@ function pluginSkills(dir, found) {
       add(target, file);
       continue;
     }
-    for (const child of readdirSync2(target).sort()) {
+    for (const child of readdirSync3(target).sort()) {
       const c = join8(target, child);
       if (!noSymlink(c).isDirectory()) continue;
       const f = skillFile(c);
@@ -7931,14 +7982,14 @@ function pluginPath(dir, pluginFile, entry) {
     }
     noSymlink(cur);
   }
-  if (!lstatSync4(cur).isDirectory()) {
+  if (!lstatSync5(cur).isDirectory()) {
     throw new CatalogError(`${pluginFile}: skills path is not a directory: ${entry}`);
   }
   return cur;
 }
 function isDanglingLink(path) {
   try {
-    return lstatSync4(path).isSymbolicLink();
+    return lstatSync5(path).isSymbolicLink();
   } catch {
     return false;
   }
@@ -7948,7 +7999,7 @@ function scanBundles(dir) {
   if (!existsSync6(bdir)) return [];
   noSymlink(bdir);
   const byName = /* @__PURE__ */ new Map();
-  for (const entry of readdirSync2(bdir).sort()) {
+  for (const entry of readdirSync3(bdir).sort()) {
     const m = /^(.+)\.ya?ml$/.exec(entry);
     if (!m) continue;
     const p = join8(bdir, entry);
@@ -8053,11 +8104,11 @@ function rendersEmpty(item, output) {
 }
 
 // src/apply.ts
-import { existsSync as existsSync7, lstatSync as lstatSync5, readFileSync as readFileSync6, readdirSync as readdirSync3, rmdirSync, rmSync as rmSync4 } from "node:fs";
+import { existsSync as existsSync7, lstatSync as lstatSync6, readFileSync as readFileSync6, readdirSync as readdirSync4, rmdirSync, rmSync as rmSync5 } from "node:fs";
 import { dirname as dirname3, join as join10, relative as relative3, resolve as resolvePath3, sep as sep3 } from "node:path";
 
 // src/lock.ts
-import { readFileSync as readFileSync5, rmSync as rmSync3 } from "node:fs";
+import { readFileSync as readFileSync5, rmSync as rmSync4 } from "node:fs";
 var LockError = class extends Error {
   name = "LockError";
 };
@@ -8094,7 +8145,7 @@ function serializeLock(lock) {
   return JSON.stringify(out, null, 2) + "\n";
 }
 function writeLock(path, lock) {
-  if (Object.keys(lock).length === 0) rmSync3(path, { force: true });
+  if (Object.keys(lock).length === 0) rmSync4(path, { force: true });
   else atomicWrite(path, serializeLock(lock));
 }
 
@@ -8301,7 +8352,7 @@ function ownPath(key) {
 }
 function lstatOrUndefined(abs) {
   try {
-    return lstatSync5(abs, { throwIfNoEntry: false });
+    return lstatSync6(abs, { throwIfNoEntry: false });
   } catch (err) {
     if (err.code === "ENOTDIR") return void 0;
     throw err;
@@ -8344,7 +8395,7 @@ function removeItemFiles(key, root, files, dirsTouched, res) {
 function removeFile(abs, dirsTouched) {
   const st = lstatOrUndefined(abs);
   if (st && !st.isDirectory()) {
-    rmSync4(abs, { force: true });
+    rmSync5(abs, { force: true });
     dirsTouched.add(dirname3(abs));
   }
 }
@@ -8353,7 +8404,7 @@ function pruneEmptyDirs(dirs, root) {
   for (let dir of sorted) {
     while (dir !== root && dir.startsWith(root + sep3)) {
       const st = lstatOrUndefined(dir);
-      if (!st?.isDirectory() || readdirSync3(dir).length > 0) break;
+      if (!st?.isDirectory() || readdirSync4(dir).length > 0) break;
       rmdirSync(dir);
       dir = dirname3(dir);
     }
@@ -8364,13 +8415,13 @@ function pruneEmptyDirs(dirs, root) {
 import { randomBytes } from "node:crypto";
 import {
   existsSync as existsSync8,
-  lstatSync as lstatSync6,
+  lstatSync as lstatSync7,
   mkdirSync as mkdirSync4,
-  readdirSync as readdirSync4,
+  readdirSync as readdirSync5,
   readFileSync as readFileSync7,
   renameSync as renameSync3,
   rmdirSync as rmdirSync2,
-  rmSync as rmSync5,
+  rmSync as rmSync6,
   statSync as statSync3,
   utimesSync,
   writeFileSync as writeFileSync3
@@ -8570,7 +8621,7 @@ var State = class {
       return;
     }
     try {
-      rmSync5(gone, { recursive: true, force: true });
+      rmSync6(gone, { recursive: true, force: true });
     } catch {
     }
   }
@@ -8579,7 +8630,7 @@ var State = class {
   sweepLeftovers(staleMs) {
     let names;
     try {
-      names = readdirSync4(this.root);
+      names = readdirSync5(this.root);
     } catch {
       return;
     }
@@ -8587,7 +8638,7 @@ var State = class {
       if (!name.startsWith(LEFTOVER2)) continue;
       const p = this.path(name);
       try {
-        if (Date.now() - lstatSync6(p).mtimeMs > staleMs) rmSync5(p, { recursive: true, force: true });
+        if (Date.now() - lstatSync7(p).mtimeMs > staleMs) rmSync6(p, { recursive: true, force: true });
       } catch {
       }
     }
@@ -8608,7 +8659,7 @@ function acquire(lockDir, ownerFile, token, refreshMs, afterMkdir) {
     const code = errCode(err);
     if (code === "EEXIST" || code === "ENOENT") return false;
     try {
-      rmSync5(ownerFile, { force: true });
+      rmSync6(ownerFile, { force: true });
       rmdirSync2(lockDir);
     } catch {
     }
@@ -8663,7 +8714,7 @@ function touch(path) {
 
 // src/gitignore.ts
 import { execFileSync } from "node:child_process";
-import { existsSync as existsSync9, readFileSync as readFileSync8, rmSync as rmSync6 } from "node:fs";
+import { existsSync as existsSync9, readFileSync as readFileSync8, rmSync as rmSync7 } from "node:fs";
 import { join as join12 } from "node:path";
 var BEGIN2 = "# >>> skilletor >>>";
 var END2 = "# <<< skilletor <<<";
@@ -8698,7 +8749,7 @@ function updateGitignore(opts) {
   }
   const result = out.length && out.some((l) => l.trim() !== "") ? out.join("\n").replace(/\n*$/, "") + "\n" : "";
   if (result === "") {
-    if (existed) rmSync6(path, { force: true });
+    if (existed) rmSync7(path, { force: true });
     return change;
   }
   if (result !== existing) atomicWrite(path, result);
@@ -8759,7 +8810,7 @@ function isGitWorkTree(dir) {
 }
 
 // src/briefing.ts
-import { existsSync as existsSync10, readdirSync as readdirSync5, readFileSync as readFileSync9 } from "node:fs";
+import { existsSync as existsSync10, readdirSync as readdirSync6, readFileSync as readFileSync9 } from "node:fs";
 import { join as join13 } from "node:path";
 var COMMENT = /^[ \t]*#[ \t]*briefing:[ \t]*skills[ \t]*=[ \t]*\[([^\]\r\n]*)\]/;
 function declaredSkills(harness, text) {
@@ -8803,7 +8854,7 @@ function pluginCacheRoots(home) {
 }
 function subdirs(dir) {
   try {
-    return readdirSync5(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
+    return readdirSync6(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
   } catch {
     return [];
   }
@@ -9103,7 +9154,9 @@ function mergeChainVars(chains, source, conflict) {
 function withSyncLock(ctx, fn) {
   const state = new State(ctx.stateRoot);
   return state.withLock(() => {
-    sweepUrlCache(cacheRootOf(ctx));
+    const cacheRoot = cacheRootOf(ctx);
+    sweepUrlCache(cacheRoot);
+    sweepGitCache(cacheRoot);
     return fn(state);
   });
 }
@@ -9573,7 +9626,7 @@ function syncCodexRules(a) {
   let written = false;
   try {
     if (next !== fileText) {
-      if (next === null) rmSync7(rulesFile, { force: true });
+      if (next === null) rmSync8(rulesFile, { force: true });
       else atomicWrite(rulesFile, next);
       written = next !== null;
     }
@@ -9595,7 +9648,7 @@ function syncCodexRules(a) {
   const shownRules = scope === "user" ? rulesFile : `.codex/${RULES_FILE}`;
   const agentsNext = withBlock(state.text, want ? pointerLines(scope, shownRules) : null);
   if (agentsNext !== state.text) {
-    if (agentsNext === null) rmSync7(agentsFile, { force: true });
+    if (agentsNext === null) rmSync8(agentsFile, { force: true });
     else atomicWrite(agentsFile, agentsNext);
   }
   if (want) {

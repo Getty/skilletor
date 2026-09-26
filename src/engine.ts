@@ -25,7 +25,7 @@ import {
 import { atomicWrite, hashBuffer, sameFile, samePath } from "./fsutil.ts";
 import { convertForTarget } from "./convert.ts";
 import { expandHome, LocalSource } from "./sources/local.ts";
-import { GitSource } from "./sources/git.ts";
+import { GitSource, sweepGitCache } from "./sources/git.ts";
 import { sweepUrlCache, UrlSource } from "./sources/url.ts";
 import type { Source } from "./sources/types.ts";
 import { scan, type Catalog } from "./catalog.ts";
@@ -326,13 +326,16 @@ function mergeChainVars(
  * Run `fn` holding `sync.lock/` (spec §6.5), the one mutex over the locks, the target dirs
  * and the source cache: every resolve – a sync's, `available`'s, `install`'s – and every read
  * of a resolved tree runs under it. It waits for another holder up to the lock timeout, then
- * throws. Before `fn` it sweeps what a run that failed or died left in the cache: while this
- * run holds the lock, no other can be inside a resolve.
+ * throws. Before `fn` it sweeps what a run that failed or died left in the cache – a url
+ * update's trees, a killed git's lock files: while this run holds the lock, no other can be
+ * inside a resolve.
  */
 export function withSyncLock<T>(ctx: EngineContext, fn: (state: State) => Promise<T>): Promise<T> {
   const state = new State(ctx.stateRoot);
   return state.withLock(() => {
-    sweepUrlCache(cacheRootOf(ctx));
+    const cacheRoot = cacheRootOf(ctx);
+    sweepUrlCache(cacheRoot);
+    sweepGitCache(cacheRoot);
     return fn(state);
   });
 }

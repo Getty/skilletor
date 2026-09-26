@@ -11,9 +11,11 @@
 // git 2.24); only a SHA pin – hex, never an option – also reaches rev-parse and reset.
 // When the remote is unreachable but a cache exists, resolve reuses it and reports a
 // warning; without a cache, or with one that holds another commit than a SHA pin, it errors.
+// The lock files a git killed midway leaves in a cache, `sweepGitCache` clears – the engine
+// calls it only while it holds the sync lock, under which every resolve runs (spec §6.5).
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, rmSync, type Dirent } from "node:fs";
 import { join } from "node:path";
 import type { Source, SourceLocation } from "./types.ts";
 
@@ -172,6 +174,83 @@ function remoteCommit(lsRemote: string, ref: string): string {
     if (sha) return sha;
   }
   return "";
+}
+
+/** The name `cacheDir` gives a cache: 16 hex digits of a sha256 (url caches share the scheme). */
+const CACHE_NAME = /^[0-9a-f]{16}$/;
+
+/**
+ * The lock files, relative to `.git`, git takes for what resolve runs: `remote` (config),
+ * `fetch` (shallow, packed-refs; reftable's table list), `reset` (index, HEAD, ORIG_HEAD) –
+ * besides the ref locks under `refs/`, which `refLocks` finds.
+ */
+const LOCK_FILES = [
+  "index.lock", "shallow.lock", "config.lock", "HEAD.lock", "ORIG_HEAD.lock", "packed-refs.lock",
+  join("reftable", "tables.list.lock"),
+];
+
+/**
+ * How old a lock file must be to count as a dead git's: the sync lock's stale age (spec §6.5).
+ * No resolve runs while the sweep does, but git can run outside the sync lock: the
+ * `maintenance run --auto --detach` each fetch starts, a git child that outlived its killed run.
+ */
+const STALE_LOCK_MS = 5 * 60_000;
+
+/**
+ * Remove the lock files a git killed midway left in the git caches of `cacheRoot` – git never
+ * removes another process's lock, so each later fetch or reset of that cache would fail. A git
+ * cache is a dir named like `cacheDir`'s with a real `.git` directory; only the names in
+ * LOCK_FILES and `*.lock` files under `.git/refs` go, each once older than STALE_LOCK_MS.
+ * Only safe while no resolve can run – the caller holds the sync lock (spec §6.5). Never
+ * throws: whatever cannot be cleared now is tried again by the next run.
+ */
+export function sweepGitCache(cacheRoot: string): void {
+  let names: string[];
+  try {
+    names = readdirSync(cacheRoot);
+  } catch {
+    return; // no cache yet, or none readable: nothing to sweep
+  }
+  const now = Date.now();
+  for (const name of names) {
+    if (!CACHE_NAME.test(name)) continue;
+    const gitDir = join(cacheRoot, name, ".git");
+    try {
+      if (!lstatSync(gitDir).isDirectory()) continue; // a symlink or a gitfile: not one git init made
+    } catch {
+      continue;
+    }
+    for (const path of [...LOCK_FILES.map((f) => join(gitDir, f)), ...refLocks(join(gitDir, "refs"))]) {
+      try {
+        const st = lstatSync(path);
+        if (st.isFile() && now - st.mtimeMs > STALE_LOCK_MS) rmSync(path, { force: true });
+      } catch {
+        // absent, or left for the next run
+      }
+    }
+  }
+}
+
+/**
+ * Every `*.lock` file under `dir` (a `.git/refs`), never through a symlink. A ref name cannot
+ * end in `.lock` (git check-ref-format), so each is a ref lock. One readdir per directory: the
+ * loose refs a cache holds – a few after a shallow fetch, every branch and tag after the full
+ * fetch a SHA pin falls back to – never the object store.
+ */
+function refLocks(dir: string): string[] {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  for (const e of entries) {
+    const path = join(dir, e.name);
+    if (e.isDirectory()) out.push(...refLocks(path));
+    else if (e.isFile() && e.name.endsWith(".lock")) out.push(path);
+  }
+  return out;
 }
 
 /** A full or abbreviated commit SHA. */
