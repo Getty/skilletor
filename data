@@ -1,0 +1,24 @@
+---
+class: standard
+completed: 2026-09-26T15:32:21Z
+created: 2026-09-26T15:24:38Z
+id: 86
+priority: medium
+started: 2026-09-26T15:26:39Z
+status: done
+tags:
+- report
+- hooks
+title: 'report: a background sync that fails on a config error says ''changes applied'''
+updated: 2026-09-26T15:32:30Z
+---
+
+Found during k85 (worker). reportHook (src/report.ts) ignores SyncReport.error. A UserPromptSubmit background sync that hits any config error (e.g. a project ref refused by k85, a malformed skilletor.json) stores a pending report whose systemMessage is "skilletor: changes applied" – the next prompt tells the model/user the opposite of what happened. SessionStart is correct (it returns the check error). Fix: reportHook renders SyncReport.error as a warning systemMessage (and context line), never "changes applied"; the pending-report path goes through the same function. Test: black-box runHook __sync-background + user-prompt-submit with a broken project config → the delivered message names the error.
+
+2026-09-26 15:28 Cause confirmed: reportHook (src/report.ts) counts only scope contents; hasNotable is true for an error, parts stay empty, so the fallback 'changes applied' fires. Engine returns {scopes: [], error} for a config error (syncInner), so every hook path that renders a sync report (toOutput: SessionStart after check, __sync-background -> pending) hits it. CLI sync already right: reportText -> 'config error, nothing changed — <error>' on stderr, exit 2. Plan: reportHook returns exactly SessionStart's check-error shape, one systemMessage 'skilletor: <error>', no context line (hooks invariant: a problem is one warning line; SessionStart's warn() has none). Error + scopes: error wins, as in reportText (SyncReport.error means nothing was touched).
+
+2026-09-26 15:30 Also found (outside this card, for the skilletor board): a sync that THROWS in __sync-background (write error while applying per spec §6.6, sync-lock timeout, any unexpected throw) stores no pending report – runHook's catch returns warn() into the detached child's ignored stdout, so the error never reaches a prompt. Not a SyncReport, so not touched here; whether a lock timeout should stay silent while a write error is reported is a design call. Also: spec §8 does not describe the config-error hook output (§6.6 only says 'clear message'), so the spec is unchanged; a sentence there is optional.
+
+2026-09-26 15:30 Done: reportHook (src/report.ts) returns {systemMessage: 'skilletor: <error>'} for a SyncReport with error – SessionStart's check-error line exactly, no context line; error wins over any scope contents, as in reportText. Every hook path that renders a sync report goes through it (toOutput: SessionStart after check, __sync-background -> pending report). CLI unchanged: sync already prints 'config error, nothing changed — …' (stderr, exit 2); install/uninstall fail on config load before syncing (exit 1, error named). Tests: test/report.test.ts two k86 tests (error-only -> exact one-line output; error+scopes -> error alone in hook and text); test/hooks.test.ts k86 black-box (malformed project config: __sync-background -> user-prompt-submit delivers SessionStart's exact line naming the file, no context, nothing installed, next prompt {}), plus one assertion in the k85 test (delivered pending == SessionStart line). All four red before the fix ('changes applied'). Verified: typecheck, npm test 586/586, build, check-dist green; real binary in temp HOME/CODEX_HOME: hooks exit 0, pending names the error, later prompts silent. dist/skilletor.js rebuilt.
+
+2026-09-26 15:32 Committed a0908dc: reportHook returns SyncReport.error's line for a hook, before falling through to 'changes applied'. Tests: report.test.ts (error-only, error+scopes), hooks.test.ts (malformed config, k85 ref-refusal). 586/586 pass, build + check-dist clean.
