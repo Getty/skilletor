@@ -546,7 +546,12 @@ message naming the option, nothing touched.
   pulled agents/rules become active only in the next session or after `/reload-plugins`
   – the report states this per item.
 - Warnings (untrusted source, overwritten change, conflict, template error, offline) run
-  as a single line over the same channel.
+  as a single line over the same channel: the `systemMessage` counts them, and the
+  `additionalContext` names each on a line of its own, so the model has something to act
+  on – an untrusted source with its `skilletor trust` command, an overwritten change and a
+  conflict with scope and path, a conflict also with the text report's hint (§6.3):
+  `- conflict in user scope: skills/foo/SKILL.md already exists (use --force to adopt)`.
+  The pending report `UserPromptSubmit` delivers is the same output.
 - The plugin also puts the CLI on the Bash tool's `PATH` and ships a `skilletor` skill
   that explains the config format and CLI to the model.
 

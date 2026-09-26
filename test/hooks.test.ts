@@ -59,6 +59,62 @@ test("session-start with a linked skill dir of the same name: a conflict warning
   }
 });
 
+// k72 (spec §8): a conflict counted in the systemMessage is named in the context. Asserts:
+// a hand-written SKILL.md and a directory where SKILL.md goes, both real on disk, each get
+// one context line with scope, path and the text report's hint; neither is touched.
+test("k72: session-start names each conflict on disk in the context, with path and hint", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    localSkill(e.tmp.dir, "s", "bar");
+    mkdirSync(join(e.home, ".claude/skills/foo"), { recursive: true });
+    writeFileSync(join(e.home, ".claude/skills/foo/SKILL.md"), "MINE\n");
+    mkdirSync(join(e.home, ".claude/skills/bar/SKILL.md"), { recursive: true });
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine", "bar@mine"] } });
+    const out = await runHook("session-start", { source: "startup" }, e.ctx);
+    assert.equal(out.systemMessage, "skilletor: 2 warning(s)");
+    assert.equal(out.hookSpecificOutput?.hookEventName, "SessionStart");
+    const lines = (out.hookSpecificOutput?.additionalContext ?? "").split("\n").sort();
+    assert.deepEqual(lines, [
+      "- conflict in user scope: skills/bar/SKILL.md is not a file (move or remove it yourself; --force leaves it)",
+      "- conflict in user scope: skills/foo/SKILL.md already exists (use --force to adopt)",
+    ]);
+    assert.equal(readFileSync(join(e.home, ".claude/skills/foo/SKILL.md"), "utf8"), "MINE\n");
+    assert.deepEqual(readdirSync(join(e.home, ".claude/skills/bar/SKILL.md")), []);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k72: the UserPromptSubmit path renders its pending report through the same function.
+// Asserts: a background sync that overwrites a local edit and meets a conflict stores a
+// report whose context names both, and the next prompt delivers exactly that.
+test("k72: the pending report names an overwritten local change and a conflict in the context", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    localSkill(e.tmp.dir, "s", "bar");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    await runHook("session-start", { source: "startup" }, e.ctx);
+    writeFileSync(join(e.home, ".claude/skills/foo/SKILL.md"), "EDITED\n"); // local drift
+    mkdirSync(join(e.home, ".claude/skills/bar"), { recursive: true });
+    writeFileSync(join(e.home, ".claude/skills/bar/SKILL.md"), "MINE\n");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine", "bar@mine"] } });
+    await runHook("__sync-background", {}, e.ctx);
+    const out = await runHook("user-prompt-submit", {}, e.ctx);
+    assert.equal(out.systemMessage, "skilletor: 1 item(s) updated, 2 warning(s)"); // foo restored
+    assert.equal(out.hookSpecificOutput?.hookEventName, "UserPromptSubmit");
+    assert.deepEqual((out.hookSpecificOutput?.additionalContext ?? "").split("\n"), [
+      "skilletor synced items:",
+      "- skill foo@mine: active now",
+      "- overwrote local change in user scope: skills/foo/SKILL.md",
+      "- conflict in user scope: skills/bar/SKILL.md already exists (use --force to adopt)",
+    ]);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("session-start is silent with nothing declared", async () => {
   const e = env();
   try {

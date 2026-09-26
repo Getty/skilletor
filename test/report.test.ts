@@ -118,3 +118,55 @@ test("a conflict that is not a file says to move or remove it, not --force", () 
     "already exists (use --force to adopt)",
   ]);
 });
+
+// ---- k72: the hook context names what the systemMessage counts -------------------
+
+// Asserts: every conflict gets one context line – its scope, its path and the same hint the
+// text report shows (`conflictHint`, so the two cannot drift apart); the scope is named
+// because a Claude path is relative to `.claude` and would not say which one.
+test("the hook context names every conflict with its scope, path and the text report's hint", () => {
+  const user = emptyScopeReport("user");
+  user.conflicts = [{ path: "skills/x/SKILL.md", notFile: true }, { path: "agents/a.md", replace: true }];
+  const project = emptyScopeReport("project");
+  project.conflicts = [{ path: "skills/y/SKILL.md" }];
+  const r: SyncReport = { scopes: [user, project] };
+  const hook = reportHook(r);
+  assert.equal(hook.systemMessage, "skilletor: 3 warning(s)");
+  assert.equal(hook.additionalContext, [
+    `- conflict in user scope: skills/x/SKILL.md ${conflictHint({ notFile: true })}`,
+    `- conflict in user scope: agents/a.md ${conflictHint({ replace: true })}`,
+    `- conflict in project scope: skills/y/SKILL.md ${conflictHint({})}`,
+  ].join("\n"));
+  assert.match(hook.additionalContext ?? "", /skills\/x\/SKILL\.md is not a file \(move or remove it yourself; --force leaves it\)/);
+  // The text report carries the same path and hint.
+  for (const c of [...user.conflicts, ...project.conflicts]) {
+    assert.ok(reportText(r).includes(`conflict: ${c.path} ${conflictHint(c)}`));
+  }
+});
+
+// Asserts: a managed file whose local change the sync overwrote is named in the context
+// too, with its scope – it is counted as a warning like a conflict.
+test("the hook context names every overwritten local change with its scope", () => {
+  const s = emptyScopeReport("project");
+  s.overwritten = [{ path: "skills/x/SKILL.md" }, { path: ".codex/skilletor-rules.md#rules/k8s" }];
+  const hook = reportHook({ scopes: [s] });
+  assert.equal(hook.systemMessage, "skilletor: 2 warning(s)");
+  assert.equal(hook.additionalContext, [
+    "- overwrote local change in project scope: skills/x/SKILL.md",
+    "- overwrote local change in project scope: .codex/skilletor-rules.md#rules/k8s",
+  ].join("\n"));
+});
+
+// Asserts the card's claim in general: the systemMessage's warning count equals the number
+// of context lines the model gets for them – one per warning, conflict, trust request and
+// overwritten file – so "N warning(s)" never comes without N things to act on.
+test("every warning the systemMessage counts has its own context line", () => {
+  const s = emptyScopeReport("user");
+  s.warnings = ["source team offline"];
+  s.conflicts = [{ path: "skills/y/SKILL.md" }];
+  s.trustRequests = [{ name: "team", kind: "local", url: "/src/team" }];
+  s.overwritten = [{ path: "skills/x/SKILL.md" }];
+  const hook = reportHook({ scopes: [s] });
+  assert.equal(hook.systemMessage, "skilletor: 4 warning(s)");
+  assert.equal(hook.additionalContext?.split("\n").length, 4);
+});

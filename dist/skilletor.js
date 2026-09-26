@@ -8699,6 +8699,8 @@ function reportHook(report) {
     }
   }
   for (const s of r.scopes) {
+    for (const c of s.overwritten) ctx.push(`- overwrote local change in ${s.scope} scope: ${c.path}`);
+    for (const c of s.conflicts) ctx.push(`- conflict in ${s.scope} scope: ${c.path} ${conflictHint(c)}`);
     for (const t of s.trustRequests) ctx.push(`- untrusted source ${t.name} (${backendLabel(t)}); run: skilletor trust ${t.name}`);
     for (const g of s.gitignoreUpdated ?? []) ctx.push(`- ${commitHint(g)}`);
     for (const w of s.warnings) ctx.push(`- warning: ${w}`);
