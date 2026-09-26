@@ -1,0 +1,22 @@
+---
+class: standard
+completed: 2026-09-26T18:18:45Z
+created: 2026-09-26T16:59:49Z
+id: 94
+priority: low
+started: 2026-09-26T18:12:08Z
+status: done
+tags:
+- skill
+- docs
+title: 'skill: skilletor-core module map lacks src/gitenv.ts'
+updated: 2026-09-26T18:18:52Z
+---
+
+Found during k91 (worker). .claude/skills/skilletor-core/SKILL.md lists the module boundaries; k91 added src/gitenv.ts (the one env for every git spawn: repo-local vars dropped, GIT_TERMINAL_PROMPT=0) and the rule "every git spawn goes through gitEnv()". Add one line to the module map and, if the skill has a hazards list, one hazard ("never spawn git with {...process.env}"). Lane: skilletor-skill-author (project skill text).
+
+2026-09-26 18:14 Verified against code at d0d1620: gitEnv() used by every git spawn (sources/git, probe, gitignore, hooks, engine); test/setup.ts loaded via --import in npm test; withSyncLock (engine.ts) wraps every resolve (k74); displaySafe (report.ts) is the output boundary (k87); k85 puts address/ref after --. Edited .claude/skills/skilletor-core/SKILL.md: map row gitenv.ts (shares fsutil row, +0), git-run bullet (+3), withSyncLock bullet (+1), displaySafe clause in Security (+1), single-file test command in Verify (+1): net +6. Static check 0/0. Running old-vs-new fresh-subagent A/B.
+
+2026-09-26 18:17 Done: .claude/skills/skilletor-core/SKILL.md net +4 lines (137 -> 141). Map: gitenv.ts row shares the fsutil row. New module-boundary bullet: every git run uses execFile* with env: gitEnv(), never {...process.env}, and a user's address/ref goes after -- (k85). Verify block: single-file test command with --import ./test/setup.ts. Old-vs-new fresh-subagent A/B (Explore, one run per arm; task: new git helper, a 'files' command, run one test file): both arms reached gitEnv, --, withSyncLock, printLines/displaySafe and the setup.ts command, because the code comments carry these rules (S0 smoke). Lines for withSyncLock and displaySafe were drafted and then dropped for zero delta. The baseline did flag the stale map. Static check: 0 errors, 0 warnings. Not committed.
+
+2026-09-26 18:18 Committed a913dc5: skilletor-core names gitenv.ts, every git run goes through gitEnv() (k94). npm test: 665/665 pass.
