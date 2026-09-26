@@ -1,0 +1,33 @@
+---
+claimed_at: 2026-09-26T04:16:37Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-26T04:16:37Z
+created: 2026-09-26T03:51:04Z
+id: 66
+priority: critical
+started: 2026-09-26T04:00:40Z
+status: done
+tags:
+- security
+- config
+- trust
+title: 'trust: project config can swap a user source''s backend (field-wise merge)'
+updated: 2026-09-26T04:16:37Z
+---
+
+A project `.claude/skilletor.json` declaring `sources.shared = { local: <path> }` merges field-wise into the user source `shared = { git: … }`; origin stays `user`, the backend picks `local`. Result: a cloned repo renders its own templates into the GLOBAL user scope (`~/.claude/skills`) with no trust request (probe 01). Also a trusted project git URL can gain a `local` field and switch backend without renewed trust: `identityOf` prefers git, `makeBackend` picks local (probe 02). Code: src/config.ts:177-180, 341-349; src/engine.ts:133-144, 319-325. Fix direction: resolve sources per scope (a project may not alter a user source), bind trust to the actual backend and its origin.
+
+Repro: probe file by the skilletor-71 audit session, copied to docs-free scratch; reproduced by the orchestrator against exports of e371b13 AND v0.2.0 (pre-existing, not introduced by k62/k63/k65).
+
+2026-09-26 04:04 Reproduced on HEAD eb3bfb4: audit probes 01+02 pass (defect present). Baseline npm test 474/474. Plan: loadConfig keeps a user-only source map for the user scope and per-field origins (git/url/local) in the merged map; one exported resolveBackend(src, home) -> {kind, address (local: realpath), origin, ref}; makeBackend and State.isTrusted both take that value only; identityOf removed. trust.json entries become {kind, address}; legacy string entries count for git/url with the exact URL only.
+
+2026-09-26 04:11 Red-before verified in a HEAD worktree: test/trust.test.ts 14/16 red (probe 01/02 repro, backend switch git->local and local->git, user-local-missing git and url fallbacks untrusted/unfetched, legacy trust.json not trusting local, user bundle foreign source from user map, project/local ref ignored in user scope, check/status/trust agreeing, session-start hook naming the local backend, user-scope install/available reading only the user source, add --project trust format). 2 author-mode guards green before and after. Implementation in: config.ts (per-field origins, userSources map), engine.ts (resolveBackend/makeBackend/sourcesOf/trustRequestOf), state.ts (trust {kind,address}, legacy string), commands.ts, report.ts/cli.ts (backend label).
+
+2026-09-26 04:13 Decisions/deviations (spec is silent or loose here): (1) Trust request wording kept as 'trust: source "X" (<kind> <address>)' / hook '- untrusted source X (<kind> <address>)', not literally 'project wants source X'; JSON trustRequests gain 'kind', 'url' stays as the address (a real path for local) for compatibility. (2) trust.json holds one entry per name, {kind,address}; 'trust X' replaces it, so switching back to an earlier backend needs trust again. Legacy string entries are read, never rewritten, until 'trust X'. (3) 'available' reads the user config's definition for names the user declares and the merged one for project-only names (what 'install' would read). (4) 'source list' origin = origin of the backend the project scope would use (was: declared in user/local file). (5) 'install' without --project resolves against the user config's sources; a project-only source now errors 'unknown source: X in the user config (a project declares it: use --project)' instead of writing an entry that then fails config load.
+
+2026-09-26 04:13 Also found (not fixed, for the orchestrator to triage): (a) README.md 'Security & trust' (~l.582-585) still says 'if the project later changes the URL, trust lapses' — needs the per-scope rule and kind+address trust; README is the orchestrator's. (b) Relative 'local' paths (e.g. './dir' stored verbatim by 'add') resolve against the process cwd, as before; trust binds to the resolved absolute path, so a different cwd fails closed with a new trust request — possibly worth its own card. (c) Per spec a project 'ref' still merges over a user-origin git in the PROJECT scope and is not part of trust, so a project can pin any commit of a repo the user trusts, in its own scope only — flagging for the spec owner, not changed. (d) No 'Changes' file exists in the repo; the proposed entry is in the handoff note.
+
+2026-09-26 04:14 Done, uncommitted, tree commit-ready. The user scope resolves against the user config's sources only (LoadedConfig.userSources: Map). The merged map keeps an origin per field (ResolvedSource.origins; the source-level 'origin' is gone). A single resolver, engine.ts resolveBackend(src, home), returns {kind, address (local: realpath), origin, ref}; makeBackend(backend) and State.isTrusted(name, backend) take only that value, and identityOf is removed. sync, check, status, servingSource, and cmdTrust/Add/Install/Available/SourceList all use it. trust.json stores {kind,address}; legacy strings count for git/url at exactly that URL, never for local. Tests: new test/trust.test.ts (16; 14 red on HEAD in a worktree, 2 author-mode guards green both ways), state/config/report tests updated. typecheck OK; npm test 492/492 (baseline 474); build + check-dist up to date. Audit probes 01/02 now FAIL (ENOENT, nothing written). Hand-tested bin/skilletor with temp HOME/CODEX_HOME: hook exit 0 names 'local <path>', the user item comes from git, the project item waits for trust. Skill text updated (SKILL.md Trust, references/bundles.md). Proposed subject: 'trust: bind trust to the backend in use; a project cannot change user-scope sources (k66)'.
+
+2026-09-26 04:16 Committed as 0c2f43b: trust: bind trust to the backend in use; a project cannot change user-scope sources (k66)
