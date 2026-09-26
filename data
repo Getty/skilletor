@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-09-26T17:48:43Z
+id: 95
+priority: low
+status: backlog
+tags:
+- config
+title: 'config: a source name may contain control characters and anything else'
+updated: 2026-09-26T17:48:43Z
+---
+
+Found during k87 (worker). config.ts accepts any source name (the key under `sources`), control characters, spaces and slashes included, while the bundle-source prompt enforces ^[A-Za-z0-9][A-Za-z0-9._-]*$ and item specs `name@source` need a parseable name. Since k87 such names are displayed escaped, but they still flow into lock entries, state keys (trust.json, sources-read.json) and `name@source` specs. Design decision: reject names outside the bundle-prompt pattern at config load (breaks configs that use odd names – check README/spec for what names are documented; maybe warn first for one release), or accept and keep escaping. Tests in test/config.test.ts.
