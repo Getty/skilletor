@@ -5745,8 +5745,8 @@ import { join as join16 } from "node:path";
 
 // src/engine.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
-import { hostname, platform, userInfo } from "node:os";
-import { existsSync as existsSync11, readFileSync as readFileSync10, realpathSync as realpathSync2, rmSync as rmSync7, statSync as statSync3 } from "node:fs";
+import { hostname as hostname2, platform, userInfo } from "node:os";
+import { existsSync as existsSync11, readFileSync as readFileSync10, realpathSync as realpathSync2, rmSync as rmSync7, statSync as statSync4 } from "node:fs";
 import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative4, resolve as resolvePath4, sep as sep4 } from "node:path";
 
 // src/config.ts
@@ -8361,9 +8361,26 @@ function pruneEmptyDirs(dirs, root) {
 }
 
 // src/state.ts
-import { existsSync as existsSync8, mkdirSync as mkdirSync4, readFileSync as readFileSync7, rmSync as rmSync5, writeFileSync as writeFileSync3 } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  existsSync as existsSync8,
+  lstatSync as lstatSync6,
+  mkdirSync as mkdirSync4,
+  readdirSync as readdirSync4,
+  readFileSync as readFileSync7,
+  renameSync as renameSync3,
+  rmdirSync as rmdirSync2,
+  rmSync as rmSync5,
+  statSync as statSync3,
+  utimesSync,
+  writeFileSync as writeFileSync3
+} from "node:fs";
+import { hostname } from "node:os";
 import { join as join11 } from "node:path";
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
+var errCode = (err) => err.code;
+var LOCK = "sync.lock";
+var LEFTOVER2 = `${LOCK}.`;
 var State = class {
   root;
   constructor(root) {
@@ -8473,46 +8490,176 @@ var State = class {
     return report;
   }
   // ---- mutex ----------------------------------------------------------------
+  /**
+   * Run `fn` holding `sync.lock/` (spec §6.5). The dir is made with mkdir, the owner record in
+   * it (`owner.json`: pid, host, token, refresh interval) is created exclusively: of two runs
+   * that each made the dir (one broke the other's as owner-less), the one that creates the
+   * record holds the lock. While `fn` runs, a timer refreshes the record's mtime. A record not
+   * refreshed for `staleMs` – or for two of its refreshes when its pid on this host is gone –
+   * marks a lock a dead run left; an owner-less dir older than `graceMs`, one that died before
+   * writing its record. A stale lock is renamed to a tombstone named after what the waiter saw,
+   * so of two waiters that judged it stale only one moves it.
+   */
   async withLock(fn, opts = {}) {
     const timeoutMs = opts.timeoutMs ?? 5e3;
     const staleMs = opts.staleMs ?? 3e5;
+    const refreshMs = Math.max(1, opts.refreshMs ?? Math.min(1e4, Math.floor(staleMs / 3)));
+    const graceMs = opts.graceMs ?? 2e3;
     const pollMs = opts.pollMs ?? 25;
-    const lockDir = this.path("sync.lock");
+    const lockDir = this.path(LOCK);
     const ownerFile = join11(lockDir, "owner.json");
+    const token = randomBytes(8).toString("hex");
     const deadline = Date.now() + timeoutMs;
     for (; ; ) {
-      try {
-        mkdirSync4(lockDir);
-        writeFileSync3(ownerFile, JSON.stringify({ pid: process.pid, at: Date.now() }));
-        break;
-      } catch (err) {
-        if (err.code !== "EEXIST") throw err;
-        if (this.isStale(ownerFile, staleMs)) {
-          rmSync5(lockDir, { recursive: true, force: true });
-          continue;
-        }
-        if (Date.now() >= deadline) {
-          throw new Error(`timed out acquiring sync lock at ${lockDir}`);
-        }
-        await delay(pollMs);
+      if (acquire(lockDir, ownerFile, token, refreshMs, opts.afterMkdir)) break;
+      const stale = judge(lockDir, ownerFile, staleMs, graceMs);
+      if (stale) {
+        if (opts.beforeBreak) await opts.beforeBreak();
+        if (this.breakLock(lockDir, ownerFile, stale)) continue;
       }
+      if (Date.now() >= deadline) {
+        throw new Error(`timed out acquiring sync lock at ${lockDir}`);
+      }
+      await delay(pollMs);
     }
+    const heartbeat = setInterval(() => touch(ownerFile), refreshMs);
+    heartbeat.unref();
     try {
+      this.sweepLeftovers(staleMs);
       return await fn();
     } finally {
-      rmSync5(lockDir, { recursive: true, force: true });
+      clearInterval(heartbeat);
+      this.release(lockDir, ownerFile, token);
     }
   }
-  isStale(ownerFile, staleMs) {
+  /** Break a lock judged stale; true when it is gone, so taking it is worth a try at once. */
+  breakLock(lockDir, ownerFile, stale) {
+    if (stale.ownerless) {
+      try {
+        rmdirSync2(lockDir);
+        return true;
+      } catch (err) {
+        if (errCode(err) === "ENOENT") return true;
+        if (existsSync8(ownerFile)) return false;
+      }
+    }
+    const tomb = this.path(`${LEFTOVER2}broken-${stale.ino}-${Math.floor(stale.mtimeMs)}`);
+    touch(lockDir);
     try {
-      const owner = JSON.parse(readFileSync7(ownerFile, "utf8"));
-      if (typeof owner.at !== "number") return true;
-      return Date.now() - owner.at > staleMs;
+      renameSync3(lockDir, tomb);
+      return true;
+    } catch (err) {
+      const code = errCode(err);
+      if (code === "ENOENT") return true;
+      if (code === "ENOTEMPTY" || code === "EEXIST") return false;
+      throw err;
+    }
+  }
+  /** Give the lock up – only this run's own: one broken while this run stalled past the stale
+   *  age is another run's by now. Renamed away first, so no waiter sees it half removed. */
+  release(lockDir, ownerFile, token) {
+    try {
+      if (JSON.parse(readFileSync7(ownerFile, "utf8")).token !== token) return;
     } catch {
-      return existsSync8(ownerFile) ? false : true;
+      return;
+    }
+    const gone = this.path(`${LEFTOVER2}released-${token}`);
+    try {
+      renameSync3(lockDir, gone);
+    } catch {
+      return;
+    }
+    try {
+      rmSync5(gone, { recursive: true, force: true });
+    } catch {
+    }
+  }
+  /** Remove what earlier locks left beside `sync.lock/` once it is older than the stale age:
+   *  no waiter can still act on having judged that lock stale. Silent; the next holder retries. */
+  sweepLeftovers(staleMs) {
+    let names;
+    try {
+      names = readdirSync4(this.root);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (!name.startsWith(LEFTOVER2)) continue;
+      const p = this.path(name);
+      try {
+        if (Date.now() - lstatSync6(p).mtimeMs > staleMs) rmSync5(p, { recursive: true, force: true });
+      } catch {
+      }
     }
   }
 };
+function acquire(lockDir, ownerFile, token, refreshMs, afterMkdir) {
+  try {
+    mkdirSync4(lockDir);
+  } catch (err) {
+    if (errCode(err) === "EEXIST") return false;
+    throw err;
+  }
+  afterMkdir?.();
+  const record = { pid: process.pid, host: hostname(), token, at: Date.now(), refreshMs };
+  try {
+    writeFileSync3(ownerFile, JSON.stringify(record), { flag: "wx" });
+  } catch (err) {
+    const code = errCode(err);
+    if (code === "EEXIST" || code === "ENOENT") return false;
+    try {
+      rmSync5(ownerFile, { force: true });
+      rmdirSync2(lockDir);
+    } catch {
+    }
+    throw err;
+  }
+  touch(ownerFile);
+  return true;
+}
+function judge(lockDir, ownerFile, staleMs, graceMs) {
+  let owner;
+  try {
+    owner = statSync3(ownerFile);
+  } catch {
+    let dir;
+    try {
+      dir = statSync3(lockDir);
+    } catch {
+      return void 0;
+    }
+    if (Date.now() - dir.mtimeMs <= graceMs) return void 0;
+    return { ownerless: true, ino: dir.ino, mtimeMs: dir.mtimeMs };
+  }
+  const age = Date.now() - owner.mtimeMs;
+  if (age <= staleMs && !deadOwner(ownerFile, age)) return void 0;
+  return { ownerless: false, ino: owner.ino, mtimeMs: owner.mtimeMs };
+}
+function deadOwner(ownerFile, age) {
+  let record;
+  try {
+    record = JSON.parse(readFileSync7(ownerFile, "utf8"));
+  } catch {
+    return false;
+  }
+  if (record === null || typeof record !== "object") return false;
+  const { pid, host, refreshMs } = record;
+  if (host !== hostname() || typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
+  if (typeof refreshMs !== "number" || !(refreshMs > 0) || age <= 2 * refreshMs) return false;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (err) {
+    return errCode(err) === "ESRCH";
+  }
+}
+function touch(path) {
+  try {
+    const now = /* @__PURE__ */ new Date();
+    utimesSync(path, now, now);
+  } catch {
+  }
+}
 
 // src/gitignore.ts
 import { execFileSync } from "node:child_process";
@@ -8612,7 +8759,7 @@ function isGitWorkTree(dir) {
 }
 
 // src/briefing.ts
-import { existsSync as existsSync10, readdirSync as readdirSync4, readFileSync as readFileSync9 } from "node:fs";
+import { existsSync as existsSync10, readdirSync as readdirSync5, readFileSync as readFileSync9 } from "node:fs";
 import { join as join13 } from "node:path";
 var COMMENT = /^[ \t]*#[ \t]*briefing:[ \t]*skills[ \t]*=[ \t]*\[([^\]\r\n]*)\]/;
 function declaredSkills(harness, text) {
@@ -8656,7 +8803,7 @@ function pluginCacheRoots(home) {
 }
 function subdirs(dir) {
   try {
-    return readdirSync4(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
+    return readdirSync5(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
   } catch {
     return [];
   }
@@ -8844,7 +8991,7 @@ function loadWithTargets(ctx) {
 function localDir(path, home) {
   const abs = resolvePath4(expandHome(path, home));
   try {
-    if (statSync3(abs).isDirectory()) return { path: realpathSync2(abs), exists: true };
+    if (statSync4(abs).isDirectory()) return { path: realpathSync2(abs), exists: true };
   } catch {
   }
   return { path: abs, exists: false };
@@ -8923,7 +9070,7 @@ function makeContext(ctx, scope, harness, targetDir, item, scopeVars, sourceVars
     scope,
     harness,
     target: { dir: targetDir },
-    host: ctx.host ?? { name: hostname(), os: platform() },
+    host: ctx.host ?? { name: hostname2(), os: platform() },
     user: ctx.user ?? { name: userInfo().username, home: ctx.home },
     item: { name: item.name, type: item.type, source: item.source }
   };

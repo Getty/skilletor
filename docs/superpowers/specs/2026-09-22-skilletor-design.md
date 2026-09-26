@@ -450,8 +450,8 @@ the block is deleted. Content outside the block is never touched.
 `~/.claude/skilletor/`: `cache/` (deletable), `trust.json`, `last-check.json`,
 `pending-report.json`, `unreached.json` (per lock, the drift the last sync could not reach,
 §14.3), `sources-read.json` (per lock, the version of each source the last sync read and the
-backend it read it through, §14.3), `sync.lock/` (mkdir mutex with a stale timeout against
-parallel sessions).
+backend it read it through, §14.3), `sync.lock/` (mkdir mutex against parallel sessions,
+refreshed while held; below).
 `CLAUDE_PLUGIN_DATA` is not used, so the CLI runs identically without Claude Code.
 
 `sync.lock/` guards the locks, the target dirs and the source cache: every run that resolves
@@ -460,8 +460,23 @@ included), `available`, and `install` while it plans; `install` releases it befo
 about a bundle's missing sources (§15.6) and before its sync, which takes it again. A run
 waits up to 5 s for another holder, then fails with `timed out acquiring sync lock`;
 `SessionStart` turns that into its one warning line (§8), a background sync leaves no
-report. A lock whose owner record is older than 5 minutes counts as left by a dead run and
-is broken. `check` and `status` fetch nothing into the cache and take no lock (k74).
+report. `check` and `status` fetch nothing into the cache and take no lock (k74).
+
+The lock is the dir; a run makes it with mkdir, then creates its owner record
+`owner.json` (pid, host, a token, its refresh interval) exclusively – of two runs that each
+made the dir (one broke the other's as owner-less), the one that creates the record holds
+the lock, the other waits. While it holds the lock, a run refreshes the record's mtime every
+10 s. A lock counts as left by a dead run, and is broken, when its record was not refreshed
+for 5 minutes, or when it names a pid of this host that is gone and missed two of its
+refreshes (a live holder in another pid namespace keeps refreshing); a dir without a record
+counts as a run between mkdir and record for 2 s, after that as one that died there. A
+waiter breaks a lock by renaming it to a tombstone `sync.lock.broken-<id>` named after the
+record it judged: a second waiter that judged the same lock stale renames onto that tombstone
+and fails, so it cannot move the lock that replaced the stale one. A run gives up only its
+own lock (token check), renamed away before it is removed; the run that takes the lock
+removes `sync.lock.*` leftovers older than 5 minutes. Limits: a holder stalled for more than
+5 minutes (a suspended laptop) counts as dead; skilletor ≤ 0.3.0 still judges a lock by the
+record's acquisition time `at` and breaks a dir without a record at once (k81).
 
 A run that takes the lock first sweeps what a run that failed or died left of a `url` update
 (§4.4) in `cache/`: a `<hash>.stage-*` tree goes; a `<hash>.backup-*` goes too, unless its
