@@ -1,0 +1,24 @@
+---
+class: standard
+completed: 2026-09-26T15:09:46Z
+created: 2026-09-26T13:56:30Z
+id: 75
+priority: medium
+started: 2026-09-26T15:00:51Z
+status: done
+tags:
+- sources
+- check
+title: 'sources/git: a source pinned to an annotated tag reads as changed every session'
+updated: 2026-09-26T15:09:55Z
+---
+
+Found during k70 (worker): `ls-remote` for an annotated tag returns the tag object first (refs/tags/X), not the peeled commit (refs/tags/X^{}), so GitSource.check compares the tag object SHA with the locked commit and always reports changed. Every SessionStart then syncs and fetches the source. Pre-existing before k70, confirmed with a scratch probe. Fix: ask for the peeled ref (X^{}) and prefer it when present. Test in test/git.test.ts with an annotated tag in a bare repo.
+
+2026-09-26 15:03 Probe (git 2.47.3): ls-remote <url> v1 lists only refs/tags/v1 (tag object); adding pattern 'v1^{}' also lists the peeled commit, protocol v0 and v2 alike. resolve() is fine: fetch writes the tag object to FETCH_HEAD, reset --hard peels it, version = rev-parse HEAD = the commit. Second, older mismatch: check took the first ls-remote line, sorted by refname, while fetch resolves a short name by git's ref_rev_parse_rules (exact, refs/, refs/tags/, refs/heads/, refs/remotes/, refs/remotes/<n>/HEAD) — so ref 'main' with a remote branch 'feature/main' compared against feature/main, and a tag+branch of one name compared against the branch while fetch installs the tag. Plan: parse all lines, pick the ref git fetch would pick, prefer its ^{} line.
+
+2026-09-26 15:07 Also found (outside k75, for the dispatcher to file on this board): GitSource.resolve passes the configured ref to 'git fetch --depth 1 origin <ref>' with no '--end-of-options' and config.ts does not validate ref; git fetch parses options after positionals, so a ref '--upload-pack=<cmd>' runs <cmd> (verified in a scratch repo). ls-remote patterns are safe (it stops at the first non-option); a url starting with '-' was not probed. Inside the trust boundary (a trusted config already means code execution via Nunjucks), so hardening, not a hole: reject refs/urls starting with '-' in config.ts or pass --end-of-options.
+
+2026-09-26 15:07 Done: GitSource.check (src/sources/git.ts) asks ls-remote for ref, ref^{}, ref/HEAD, ref/HEAD^{} and picks the commit via new remoteCommit(): the first name in git's ref_rev_parse_rules order (exact, refs/, refs/tags/, refs/heads/, refs/remotes/, refs/remotes/<n>/HEAD) that is listed – the ref git fetch takes – through its peeled ^{} line when present. Fixes annotated tags (compared the tag object) and names matching several refs (took the first sorted line: refs/heads/feature/main for 'main', the branch for a tag+branch 'x' while fetch installs the tag). resolve() needed no change: it already records the peeled commit. Tests: test/git.test.ts annotated+lightweight tag (resolve records the commit; check false unmoved, true moved, false after re-resolve), three namesake cases (main vs feature/main, tag x vs branch x, refs/heads/x); test/check.test.ts runHook: annotated-tag source, second session silent and fetches nothing, tag move syncs once. Red before the fix: annotated, 'main', 'x', hook test; lightweight and refs/heads/x green (regression guards). Spec §4.4 check cell updated. Verify: typecheck ok, npm test 576/576 pass, build ok, check-dist up to date. Not committed.
+
+2026-09-26 15:09 Committed 94800f9 on main: sources/git: check the commit an annotated tag names, picking the ref git fetch takes (k75).
