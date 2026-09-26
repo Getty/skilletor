@@ -1,0 +1,29 @@
+---
+class: standard
+completed: 2026-09-26T17:09:02Z
+created: 2026-09-26T15:24:49Z
+id: 88
+priority: low
+started: 2026-09-26T17:02:00Z
+status: done
+tags:
+- config
+- check
+title: 'config: a non-string git/ref is silently dropped; ref "" reads as changed
+  every session'
+updated: 2026-09-26T17:09:11Z
+---
+
+Found during k85 (worker). parseSources (src/config.ts) takes `git`/`ref` only when typeof string, so `ref: 123` silently drops the pin (installs HEAD) instead of a ConfigError. `ref: ""` fetches HEAD but check finds no matching ref and reports changed every session. Fix: a present non-string git/ref (or local/url) is a ConfigError naming file, source and key; an empty ref is either refused or treated as absent consistently in resolve and check. Also: skills/skilletor/SKILL.md (~line 97, the `ref` field) could say a ref must be a plain git ref name (k85: no leading "-", no whitespace/control chars/~^:?*[\\/../@{) – one clause.
+
+2026-09-26 16:22 From k83 (worker): GitSource.cacheDir treats ref "" as unpinned (URL-only cache) but resolve fetches the empty ref, so an unpinned name and a ref:"" name on the same URL share a cache dir but get different k83 resolver keys – the parallel-git race survives for that config. Refusing an empty ref in config (or normalising "" to absent everywhere) closes both this and the check issue above.
+
+2026-09-26 17:03 Worker: source keys are exactly git/ref/url/local (SOURCE_KEYS); per-source vars/path do not exist, top-level vars already errors via asObject. url already errors on a non-string. Plan: git/ref/local present and not a string -> ConfigError '<file>: sources.<name>.<key> <json> must be a string'; ref "" refused ('must not be empty', hint to omit ref) rather than normalised – spec/README give "" no meaning, and add never writes an empty ref (pickDef/spec drop it). Tests first in test/config.test.ts.
+
+2026-09-26 17:05 Also found (not fixed, same area, not type validation): an empty git or local is still accepted. local "" resolves via resolvePath("") to the process cwd – an existing dir – so author mode silently makes the cwd the source and it wins over git/url; git "" beats a url beside it and fails loudly at fetch. commands.ts pickDef (source list) tests fields by truthiness and hides such "" values. Candidate follow-up for this board: refuse empty git/local like the empty ref.
+
+2026-09-26 17:05 Done: src/config.ts parseSources takes git/ref/local whenever present; a non-string value is a ConfigError '<file>: sources.<name>.<key> <json> must be a string' (new stringField); gitField refuses ref "" with 'must not be empty (omit "ref" for the remote's HEAD)' – refused, not normalised (spec/README give "" no meaning; add never writes one), which closes both the every-session 'changed' and the k83 cache/resolver-key split. url unchanged (already errors). Tests: two k88 tests in test/config.test.ts (non-string git/ref/local x 5 JSON types across all three files, exact message; empty ref in user/project/local incl. local over a project pin, no ref stays unpinned) – both red before the fix (config loaded silently). Docs: skills/skilletor/SKILL.md ref bullet carries the plain-ref-name clause; spec §3 one sentence; README unchanged (its trust bullet already states the ref-name rule). dist rebuilt. Verified: typecheck, npm test 634/634, build, check-dist green; hand test with temp HOME: sync exits 2 naming file/source/key, hook session-start exits 0 with the systemMessage.
+
+2026-09-26 17:07 Folded in per coordinator review: an empty git or local is now refused like the empty ref. The emptiness check moved from gitField into stringField: '<file>: sources.<name>.<key> "" must not be empty', and ref keeps the hint '(omit "ref" for the remote's HEAD)'. The k88 empty-value test gained 4 cases (git "" beside a url, git "" alone in local over a project git, local "" beside a git, local "" beside a url); it went red first with 'Missing expected exception'. Spec §3 sentence now: a git, ref or local present must be a non-empty string (url an https:// URL). SKILL.md ref bullet is unchanged and still accurate. pickDef left alone because it only sees non-empty strings now. Verified: typecheck, npm test 634/634, build, check-dist green; hand test with local "" in a temp HOME: sync exits 2 naming the file, source and key; hook exits 0 with the systemMessage. Card stays in review.
+
+2026-09-26 17:08 Committed as 5cc1dcd: config: a source's git, ref or local must be a non-empty string (k88)
