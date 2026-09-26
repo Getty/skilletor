@@ -10,7 +10,7 @@ explicit go-ahead. Everything before step 4 is local and can run anytime.
    `npm run build` (the CLI version is injected from `package.json` at build time).
 2. **Verify** — `npm run typecheck && npm test && npm run build && npm run check-dist`;
    `HOME=$(mktemp -d) bin/skilletor --version` prints the new version.
-3. **Audit** — run the `skilletor-release-checker` agent: versions, dist, CLI reference in
+3. **Audit** — run the `skilletor-release-manager` agent: versions, dist, CLI reference in
    README and the bundled skill, marketplace entries, release notes.
 4. **Push and tag** — `git push origin main`, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
    CI (`.github/workflows/ci.yml`: Linux + macOS, `npm ci`, typecheck, test, check-dist)
