@@ -624,13 +624,15 @@ skilletor sync --force                    # overwrite and adopt unmanaged files 
 skilletor trust <source>
 ```
 
-`check` writes nothing and exits non-zero when a sync is due: a source moved, or what is
-installed no longer matches the config (an item added or removed, a pin changed, a target
-switched, the last sync stopped midway). What the last sync could not install although its
-source was there (an item the source lacks, a conflict) does not count again until a sync
-runs anyway. `--project-dir` goes with every command; any other option a command does not
-list is an error (exit 2, nothing runs). `-h`/`--help` anywhere prints the usage and runs
-nothing (`sync --help` does not sync); `-v`/`--version` only as the first argument.
+`check` writes nothing and exits non-zero when a sync is due: a source moved since the last
+sync read it (or now points at another URL or ref), or what is installed no longer matches
+the config (an item added or removed, a pin changed, a target switched, the last sync
+stopped midway). What the last sync could not install although its source was there (an
+item the source lacks, a conflict) does not count again until a sync runs anyway – also
+when nothing of that source got installed. `--project-dir` goes with every command; any
+other option a command does not list is an error (exit 2, nothing runs). `-h`/`--help`
+anywhere prints the usage and runs nothing (`sync --help` does not sync); `-v`/`--version`
+only as the first argument.
 
 Every command that fetches sources — `sync`, `available`, `install`, and the sync that
 `add`, `uninstall` and `source remove` run — shares one lock with the hooks, so two runs

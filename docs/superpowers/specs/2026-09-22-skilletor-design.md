@@ -216,8 +216,8 @@ name is `skills` everywhere.
 
 | Kind | `resolve` | `check` (cheap) |
 |---|---|---|
-| `git` | Shallow clone/fetch into the cache; auth = the user's git setup | a SHA pin vs. the locked commit, offline when they match; else `git ls-remote <url> <ref>` vs. the locked commit (nothing locked, or nothing named `ref`: changed) |
-| `url` | HTTPS-only, `.tar.gz`, conditional GET with ETag | `HEAD` + ETag comparison |
+| `git` | Shallow clone/fetch into the cache; auth = the user's git setup | a SHA pin vs. the commit the last sync read (§14.3), offline when they match; else `git ls-remote <url> <ref>` vs. that commit (none, or nothing named `ref`: changed) |
+| `url` | HTTPS-only, `.tar.gz`, conditional GET with ETag | `HEAD` + comparison with the ETag the last sync read |
 | `local` | read directly | not applicable – always re-rendered |
 
 A `url` update is extracted into a staging tree and replaces the cache only after a complete
@@ -444,7 +444,9 @@ the block is deleted. Content outside the block is never touched.
 
 `~/.claude/skilletor/`: `cache/` (deletable), `trust.json`, `last-check.json`,
 `pending-report.json`, `unreached.json` (per lock, the drift the last sync could not reach,
-§14.3), `sync.lock/` (mkdir mutex with a stale timeout against parallel sessions).
+§14.3), `sources-read.json` (per lock, the version of each source the last sync read and the
+backend it read it through, §14.3), `sync.lock/` (mkdir mutex with a stale timeout against
+parallel sessions).
 `CLAUDE_PLUGIN_DATA` is not used, so the CLI runs identically without Claude Code.
 
 `sync.lock/` guards the locks, the target dirs and the source cache: every run that resolves
@@ -765,6 +767,20 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
   drift counts until a sync finishes. Drift kept by a source that could not be resolved or
   scanned stays counted, so each session retries it; drift that needs an untrusted source is
   not counted – the trust request stands for it.
+- **A source moved** means: since the last sync read it (k80). Each sync records per lock in
+  `sources-read.json` (§6.5) the version of every source it resolved and scanned, with the
+  backend it read it through (kind, address, and a git source's ref), and `check` compares
+  the source with that – not with the lock, which holds nothing of a source whose items a
+  sync could not install (every one blocked by a conflict, missing from the source, an empty
+  wildcard over it), and can hold an item kept at an older version than the rest of its
+  source (removed upstream, a conflict or template error on an update). Compared with the
+  lock, such a source can read as changed in every session, re-syncing and repeating the
+  warnings the last sync gave. A version read through another backend proves nothing for this one: after
+  a changed URL or ref the source counts as changed and syncs once. A source a sync tried
+  but could not resolve or scan keeps what an earlier sync read of it; a source no sync
+  needs any more leaves the record with the next sync. With no record – before the first
+  sync, or after one that stopped with an error, which clears it with `unreached.json` –
+  `check` compares with the lock's version as before; a malformed record counts as none.
 - **Git hygiene** (§6.4): Codex skills carry their own `.gitignore` like Claude skills, so
   `<project>/.agents` and `~/.agents` get no block (one left by an earlier version is
   removed). `<project>/.codex/.gitignore` and `$CODEX_HOME/.gitignore` hold the fixed block

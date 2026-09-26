@@ -32,7 +32,7 @@ import { scan, type Catalog } from "./catalog.ts";
 import { build, rendersEmpty, type RenderContext } from "./render.ts";
 import { apply, isValidItemName, type PlanItem } from "./apply.ts";
 import { readLock, writeLock, type Lock, type LockEntry, type SkipReason } from "./lock.ts";
-import { State } from "./state.ts";
+import { State, type SourceRead } from "./state.ts";
 import {
   CODEX_ENTRIES, gitTracked, hasBlock, isGitWorkTree, LOCAL_ENTRIES, PROJECT_CLAUDE_ENTRIES, SKILL_GITIGNORE, skillGitignorePath,
   updateGitignore, withSkillGitignore,
@@ -215,6 +215,26 @@ function sourceVersion(lock: Lock, sourceName: string): string | undefined {
   return undefined;
 }
 
+/** A record entry for what a sync read of a source through `backend` (spec §14.3, k80). */
+function sourceRead(backend: ResolvedBackend, version: string): SourceRead {
+  const read: SourceRead = { kind: backend.kind, address: backend.address, version };
+  if (backend.ref !== undefined) read.ref = backend.ref;
+  return read;
+}
+
+/**
+ * The version `check` compares a source with (spec §14.3, k80): the one the last sync read, so
+ * a source with nothing in the lock, or with entries kept at an older version, is not
+ * "changed" every session. A version read through another backend (kind, address, ref)
+ * proves nothing for this one: none, so the source counts as changed. With no record – no
+ * sync since k80, or the last one failed – the lock's, as before.
+ */
+function checkedVersion(read: SourceRead | undefined, backend: ResolvedBackend, lock: Lock, name: string): string | undefined {
+  if (!read) return sourceVersion(lock, name);
+  const same = read.kind === backend.kind && read.address === backend.address && read.ref === backend.ref;
+  return same ? read.version : undefined;
+}
+
 /** Entries of the user `~/.claude` block: the lock, the state dir when it lies under
  *  `~/.claude`, and the agent and rule patterns (spec §6.4). Never `skilletor.json`. */
 function userClaudeEntries(claudeDir: string, stateRoot: string): string[] {
@@ -371,7 +391,9 @@ async function syncScope(
     return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state);
   } catch (err) {
     try {
-      state.putUnreached(join(targetDirOf(ctx, scope), "skilletor.lock.json"), []);
+      const lockPath = join(targetDirOf(ctx, scope), "skilletor.lock.json");
+      state.putUnreached(lockPath, []);
+      state.putSourcesRead(lockPath, {}); // `check` compares with the lock again (k80)
     } catch {
       // the state dir cannot be written: the error that stopped the sync is the one reported
     }
@@ -401,7 +423,7 @@ async function syncScopeRun(
   // check and the fetch use the one resolved backend (spec §3, §4.3).
   const needed = scopeSources(scopeCfg);
   const sources = sourcesOf(config, scope);
-  const resolved = new Map<string, { dir: string; version: string } | null>();
+  const resolved = new Map<string, { dir: string; version: string; backend: ResolvedBackend } | null>();
   const resolveAll = (names: string[]) => Promise.all(
     names.filter((n) => !resolved.has(n)).map(async (name) => {
       const src = sources.get(name);
@@ -419,7 +441,7 @@ async function syncScopeRun(
         }
         const loc = await makeBackend(backend, cacheRoot, ctx.timeoutMs).resolve(sourceVersion(oldLock, name));
         if (loc.warning) rep.warnings.push(loc.warning);
-        resolved.set(name, { dir: loc.dir, version: loc.version });
+        resolved.set(name, { dir: loc.dir, version: loc.version, backend });
       } catch (err) {
         rep.warnings.push(`source ${name}: ${(err as Error).message}`);
         resolved.set(name, null);
@@ -769,6 +791,16 @@ async function syncScopeRun(
   const served = new Map(expansions.map((x) => [x.label, x.foreign.flatMap((f) => (f.served ? [f.served] : []))]));
   state.putUnreached(lockPath, scopeDrift(ctx, scope, scopeCfg, harnesses, finalLock, served)
     .filter((d) => d.sources.every(reachable)).map((d) => d.id));
+  // What this sync read of each source, and through which backend (spec §14.3, k80): `check`
+  // compares the source with it. A source it tried but could not read keeps what an earlier
+  // sync read – drift it keeps stays open above; a source no longer needed leaves the record.
+  const before = state.sourcesRead(lockPath);
+  const read: Record<string, SourceRead> = {};
+  for (const [name, r] of resolved) {
+    if (r && reachable(name)) read[name] = sourceRead(r.backend, r.version);
+    else if (before[name]) read[name] = before[name];
+  }
+  state.putSourcesRead(lockPath, read);
   return rep;
 }
 
@@ -1063,6 +1095,7 @@ export async function check(given: EngineContext, opts: SyncOptions = {}): Promi
     // Drift counts unless the last sync already tried it with its sources at hand, or a
     // source it needs is untrusted – that asks for trust, not for a sync (spec §14.3, k70).
     const unreached = new Set(state.unreached(lockPath));
+    const read = state.sourcesRead(lockPath);
     const open = scopeDrift(ctx, scope, scopeCfg, targets[scope], oldLock)
       .filter((d) => !unreached.has(d.id) && d.sources.every(trusted));
     for (const kind of ["targets", "layout", "declared"] as const) {
@@ -1082,7 +1115,8 @@ export async function check(given: EngineContext, opts: SyncOptions = {}): Promi
           (out.trustRequests ??= []).push({ scope, ...trustRequestOf(name, backend) });
           continue;
         }
-        const changed = await makeBackend(backend, cacheRoot, ctx.timeoutMs).check(sourceVersion(oldLock, name));
+        const version = checkedVersion(read[name], backend, oldLock, name);
+        const changed = await makeBackend(backend, cacheRoot, ctx.timeoutMs).check(version);
         out.sources.push({ name, scope, changed });
         if (changed) out.changed = true;
       } catch (err) {

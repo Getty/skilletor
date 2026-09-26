@@ -17,6 +17,13 @@ export interface TrustCheck extends TrustedBackend {
   origin: "user" | "project";
 }
 
+/** The version of a source a sync read, and the backend it read it through (spec §14.3,
+ *  k80): kind, address and – git only – the ref, which picks the cache (k69). */
+export interface SourceRead extends TrustedBackend {
+  ref?: string;
+  version: string;
+}
+
 export interface WithLockOptions {
   timeoutMs?: number;
   staleMs?: number;
@@ -101,6 +108,40 @@ export class State {
     if (next.length > 0) all[scopeKey] = next;
     else delete all[scopeKey];
     this.writeJson("unreached.json", all);
+  }
+
+  // ---- sources read ---------------------------------------------------------
+
+  /** What the last sync of a scope (keyed by its lock path) read of each source (spec §14.3,
+   *  k80): `check` compares a source with it. A malformed entry counts as none. */
+  sourcesRead(scopeKey: string): Record<string, SourceRead> {
+    const record = this.readJson("sources-read.json")[scopeKey];
+    const out: Record<string, SourceRead> = {};
+    if (record === null || typeof record !== "object" || Array.isArray(record)) return out;
+    for (const [name, value] of Object.entries(record as Record<string, unknown>)) {
+      if (value === null || typeof value !== "object") continue;
+      const v = value as Record<string, unknown>;
+      if ((v.kind !== "git" && v.kind !== "url" && v.kind !== "local") || typeof v.address !== "string" ||
+        typeof v.version !== "string" || (v.ref !== undefined && typeof v.ref !== "string")) continue;
+      out[name] = { kind: v.kind, address: v.address, version: v.version };
+      if (typeof v.ref === "string") out[name].ref = v.ref;
+    }
+    return out;
+  }
+
+  /** Replace a scope's record of sources read; the file is written only when it changes. */
+  putSourcesRead(scopeKey: string, record: Record<string, SourceRead>): void {
+    const all = this.readJson("sources-read.json");
+    const next: Record<string, SourceRead> = {};
+    for (const name of Object.keys(record).sort()) {
+      const r = record[name]!;
+      next[name] = { kind: r.kind, address: r.address, version: r.version };
+      if (r.ref !== undefined) next[name].ref = r.ref;
+    }
+    if (JSON.stringify(all[scopeKey] ?? {}) === JSON.stringify(next)) return;
+    if (Object.keys(next).length > 0) all[scopeKey] = next;
+    else delete all[scopeKey];
+    this.writeJson("sources-read.json", all);
   }
 
   // ---- pending report -------------------------------------------------------

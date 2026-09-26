@@ -8395,6 +8395,36 @@ var State = class {
     else delete all[scopeKey];
     this.writeJson("unreached.json", all);
   }
+  // ---- sources read ---------------------------------------------------------
+  /** What the last sync of a scope (keyed by its lock path) read of each source (spec §14.3,
+   *  k80): `check` compares a source with it. A malformed entry counts as none. */
+  sourcesRead(scopeKey) {
+    const record = this.readJson("sources-read.json")[scopeKey];
+    const out = {};
+    if (record === null || typeof record !== "object" || Array.isArray(record)) return out;
+    for (const [name, value2] of Object.entries(record)) {
+      if (value2 === null || typeof value2 !== "object") continue;
+      const v = value2;
+      if (v.kind !== "git" && v.kind !== "url" && v.kind !== "local" || typeof v.address !== "string" || typeof v.version !== "string" || v.ref !== void 0 && typeof v.ref !== "string") continue;
+      out[name] = { kind: v.kind, address: v.address, version: v.version };
+      if (typeof v.ref === "string") out[name].ref = v.ref;
+    }
+    return out;
+  }
+  /** Replace a scope's record of sources read; the file is written only when it changes. */
+  putSourcesRead(scopeKey, record) {
+    const all = this.readJson("sources-read.json");
+    const next = {};
+    for (const name of Object.keys(record).sort()) {
+      const r = record[name];
+      next[name] = { kind: r.kind, address: r.address, version: r.version };
+      if (r.ref !== void 0) next[name].ref = r.ref;
+    }
+    if (JSON.stringify(all[scopeKey] ?? {}) === JSON.stringify(next)) return;
+    if (Object.keys(next).length > 0) all[scopeKey] = next;
+    else delete all[scopeKey];
+    this.writeJson("sources-read.json", all);
+  }
   // ---- pending report -------------------------------------------------------
   putPendingReport(projectKey, report) {
     const pending = this.readJson("pending-report.json");
@@ -8826,6 +8856,16 @@ function sourceVersion(lock, sourceName) {
   for (const entry of Object.values(lock)) if (entry.source === sourceName) return entry.version;
   return void 0;
 }
+function sourceRead(backend, version) {
+  const read = { kind: backend.kind, address: backend.address, version };
+  if (backend.ref !== void 0) read.ref = backend.ref;
+  return read;
+}
+function checkedVersion(read, backend, lock, name) {
+  if (!read) return sourceVersion(lock, name);
+  const same = read.kind === backend.kind && read.address === backend.address && read.ref === backend.ref;
+  return same ? read.version : void 0;
+}
 function userClaudeEntries(claudeDir, stateRoot) {
   const rel = relative4(claudeDir, stateRoot);
   const under2 = rel !== "" && !rel.startsWith("..") && !isAbsolute2(rel);
@@ -8918,7 +8958,9 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
     return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state);
   } catch (err) {
     try {
-      state.putUnreached(join14(targetDirOf(ctx, scope), "skilletor.lock.json"), []);
+      const lockPath = join14(targetDirOf(ctx, scope), "skilletor.lock.json");
+      state.putUnreached(lockPath, []);
+      state.putSourcesRead(lockPath, {});
     } catch {
     }
     throw err;
@@ -8953,7 +8995,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
         }
         const loc = await makeBackend(backend, cacheRoot, ctx.timeoutMs).resolve(sourceVersion(oldLock, name));
         if (loc.warning) rep.warnings.push(loc.warning);
-        resolved.set(name, { dir: loc.dir, version: loc.version });
+        resolved.set(name, { dir: loc.dir, version: loc.version, backend });
       } catch (err) {
         rep.warnings.push(`source ${name}: ${err.message}`);
         resolved.set(name, null);
@@ -9234,6 +9276,13 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   const reachable = (name) => Boolean(resolved.get(name)) && catalogs.get(name) !== null;
   const served = new Map(expansions.map((x) => [x.label, x.foreign.flatMap((f) => f.served ? [f.served] : [])]));
   state.putUnreached(lockPath, scopeDrift(ctx, scope, scopeCfg, harnesses, finalLock, served).filter((d) => d.sources.every(reachable)).map((d) => d.id));
+  const before = state.sourcesRead(lockPath);
+  const read = {};
+  for (const [name, r] of resolved) {
+    if (r && reachable(name)) read[name] = sourceRead(r.backend, r.version);
+    else if (before[name]) read[name] = before[name];
+  }
+  state.putSourcesRead(lockPath, read);
   return rep;
 }
 function projectInUse(targetDir, lock) {
@@ -9428,6 +9477,7 @@ async function check(given, opts = {}) {
       return trust.get(name);
     };
     const unreached = new Set(state.unreached(lockPath));
+    const read = state.sourcesRead(lockPath);
     const open = scopeDrift(ctx, scope, scopeCfg, targets[scope], oldLock).filter((d) => !unreached.has(d.id) && d.sources.every(trusted));
     for (const kind of ["targets", "layout", "declared"]) {
       if (!open.some((d) => d.kind === kind)) continue;
@@ -9444,7 +9494,8 @@ async function check(given, opts = {}) {
           (out.trustRequests ??= []).push({ scope, ...trustRequestOf(name, backend) });
           continue;
         }
-        const changed = await makeBackend(backend, cacheRoot, ctx.timeoutMs).check(sourceVersion(oldLock, name));
+        const version = checkedVersion(read[name], backend, oldLock, name);
+        const changed = await makeBackend(backend, cacheRoot, ctx.timeoutMs).check(version);
         out.sources.push({ name, scope, changed });
         if (changed) out.changed = true;
       } catch (err) {

@@ -416,3 +416,176 @@ test("k71: a sync that fails midway clears the unreached record; check counts th
     e.tmp.cleanup();
   }
 });
+
+// ---- a source with nothing in the lock, or entries of several versions (k80) ------------
+
+// Asserts: a git source whose only item is blocked by a conflict leaves no lock entry, yet
+// the session after that sync neither syncs nor fetches: `check` compares the source with
+// the version the last sync read, not with an empty lock. An upstream move still syncs, once.
+test("k80: a source with nothing in the lock syncs once; the next session is silent and fetches nothing; a move syncs again", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/foo/SKILL.md": SKILL("foo") });
+    mkdirSync(e.userFile("skills/foo"), { recursive: true });
+    writeFileSync(e.userFile("skills/foo/SKILL.md"), "MINE\n"); // a foreign copy where foo goes
+    e.writeCfg("user", { sources: { g: { git: repo.url } }, install: { skills: ["foo@g"] }, checkInterval: 0 });
+    const first = await e.session();
+    assert.equal(first.systemMessage, "skilletor: 1 warning(s)");
+    assert.match(first.hookSpecificOutput?.additionalContext ?? "", /conflict/);
+    assert.equal(existsSync(e.userFile("skilletor.lock.json")), false, "nothing of g is in the lock");
+
+    const chk = await check(e.ctx);
+    assert.deepEqual([chk.changed, chk.sources], [false, [{ name: "g", scope: "user", changed: false }]]);
+    rmSync(e.ctx.cacheRoot!, { recursive: true });
+    assert.deepEqual(await e.session(), {});
+    assert.equal(e.cacheEmpty(), true, "the second session fetched nothing");
+
+    repo.push({ "skills/foo/SKILL.md": SKILL("foo", "MOVED") });
+    const moved = await e.session();
+    assert.equal(moved.systemMessage, "skilletor: 1 warning(s)"); // synced; foo still conflicts
+    assert.match(moved.hookSpecificOutput?.additionalContext ?? "", /conflict/);
+    assert.equal(e.cacheEmpty(), false, "the move was fetched");
+    assert.deepEqual(await e.session(), {});
+    assert.equal(readFileSync(e.userFile("skills/foo/SKILL.md"), "utf8"), "MINE\n");
+  } finally {
+    e.tmp.cleanup();
+  }
+});
+
+// Asserts: with nothing recorded – before a first sync, or with the record gone – a source
+// with nothing in the lock counts as changed, as before k80: the session syncs, then is quiet.
+test("k80: with no recorded version a source with nothing in the lock counts as changed; one session syncs", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/foo/SKILL.md": SKILL("foo") });
+    mkdirSync(e.userFile("skills/foo"), { recursive: true });
+    writeFileSync(e.userFile("skills/foo/SKILL.md"), "MINE\n");
+    e.writeCfg("user", { sources: { g: { git: repo.url } }, install: { skills: ["foo@g"] }, checkInterval: 0 });
+    assert.deepEqual((await check(e.ctx)).sources, [{ name: "g", scope: "user", changed: true }], "first sync");
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 warning(s)");
+    assert.deepEqual(await e.session(), {});
+
+    rmSync(join(e.ctx.stateRoot, "sources-read.json"));
+    assert.deepEqual((await check(e.ctx)).sources, [{ name: "g", scope: "user", changed: true }], "record gone");
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 warning(s)");
+    assert.deepEqual(await e.session(), {});
+  } finally {
+    e.tmp.cleanup();
+  }
+});
+
+// Asserts: the recorded version is bound to the backend that read it. Pointed at another URL
+// – a mirror at the very same commit – or given a ref, the source counts as changed and syncs
+// once: a version one backend read proves nothing for another. A source removed from the
+// config leaves the record with the next sync.
+test("k80: a recorded version counts only for the backend that read it; a removed source leaves the record", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/foo/SKILL.md": SKILL("foo") });
+    const mirror = join(e.tmp.dir, "mirror.git");
+    execFileSync("git", ["clone", "-q", "--bare", repo.bare, mirror], { env: GIT_ENV });
+    mkdirSync(e.userFile("skills/foo"), { recursive: true });
+    writeFileSync(e.userFile("skills/foo/SKILL.md"), "MINE\n");
+    const declare = (g: unknown) => e.writeCfg("user", { sources: { g }, install: { skills: ["foo@g"] }, checkInterval: 0 });
+    declare({ git: repo.url });
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 warning(s)");
+    assert.deepEqual(await e.session(), {});
+
+    for (const g of [{ git: "file://" + realpathSync(mirror) }, { git: "file://" + realpathSync(mirror), ref: "main" }]) {
+      declare(g);
+      assert.deepEqual((await check(e.ctx)).sources, [{ name: "g", scope: "user", changed: true }], JSON.stringify(g));
+      assert.equal((await e.session()).systemMessage, "skilletor: 1 warning(s)", JSON.stringify(g));
+      assert.deepEqual(await e.session(), {}, JSON.stringify(g));
+    }
+
+    const record = join(e.ctx.stateRoot, "sources-read.json");
+    assert.deepEqual(Object.keys(JSON.parse(readFileSync(record, "utf8"))[e.userFile("skilletor.lock.json")]), ["g"]);
+    e.writeCfg("user", { checkInterval: 0 });
+    assert.deepEqual(await e.session(), {}); // foo was never installed: nothing to remove
+    await sync(e.ctx);
+    assert.deepEqual(JSON.parse(readFileSync(record, "utf8")), {});
+  } finally {
+    e.tmp.cleanup();
+  }
+});
+
+// Asserts: a source whose lock entries carry different versions – an item removed upstream
+// is kept at the version it was installed from, the rest moves on – is compared with the
+// version the last sync read, not with whichever entry comes first: one sync, then quiet.
+test("k80: lock entries of one source at different versions do not make every session sync", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/aaa/SKILL.md": SKILL("aaa"), "skills/zzz/SKILL.md": SKILL("zzz") });
+    e.writeCfg("user", { sources: { g: { git: repo.url } }, install: { skills: ["aaa@g", "zzz@g"] }, checkInterval: 0 });
+    assert.equal((await e.session()).systemMessage, "skilletor: 2 item(s) updated");
+
+    rmSync(join(e.tmp.dir, "g-work", "skills", "aaa"), { recursive: true });
+    repo.push({ "skills/zzz/SKILL.md": SKILL("zzz", "MOVED") });
+    const moved = await e.session();
+    assert.equal(moved.systemMessage, "skilletor: 1 item(s) updated, 1 warning(s)");
+    assert.match(moved.hookSpecificOutput?.additionalContext ?? "", /item not found in source g: skill aaa/);
+    const lock = readLock(e.userFile("skilletor.lock.json"));
+    assert.notEqual(lock["skills/aaa"]!.version, lock["skills/zzz"]!.version, "aaa kept at the version it came from");
+
+    const chk = await check(e.ctx);
+    assert.deepEqual([chk.changed, chk.sources], [false, [{ name: "g", scope: "user", changed: false }]]);
+    assert.deepEqual(await e.session(), {});
+    assert.equal(existsSync(e.userFile("skills/aaa/SKILL.md")), true);
+  } finally {
+    e.tmp.cleanup();
+  }
+});
+
+// Asserts: a sync that stops with an error clears the recorded versions with the unreached
+// record (k71): `check` falls back to the lock, which holds nothing of g – so g counts as
+// changed again, and the next session syncs although no source moved.
+test("k80: a sync that fails midway clears the recorded versions; the source counts as changed again", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/foo/SKILL.md": SKILL("foo"), "rules/r.md": "R\n" });
+    mkdirSync(e.userFile("skills/foo"), { recursive: true });
+    writeFileSync(e.userFile("skills/foo/SKILL.md"), "MINE\n");
+    const declare = (install: unknown) => e.writeCfg("user", { sources: { g: { git: repo.url } }, install, checkInterval: 0 });
+    declare({ skills: ["foo@g"] });
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 warning(s)");
+    assert.deepEqual((await check(e.ctx)).sources, [{ name: "g", scope: "user", changed: false }]);
+
+    declare({ skills: ["foo@g"], rules: ["r@g"] });
+    writeFileSync(e.userFile("rules"), "a file where the rules dir goes");
+    assert.match((await e.session()).systemMessage ?? "", /EEXIST|ENOTDIR/);
+    rmSync(e.userFile("rules"));
+    declare({ skills: ["foo@g"] });
+    assert.deepEqual((await check(e.ctx)).sources, [{ name: "g", scope: "user", changed: true }]);
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 warning(s)");
+    assert.deepEqual(await e.session(), {});
+  } finally {
+    e.tmp.cleanup();
+  }
+});
+
+// Asserts: the record is only a hint – unreadable, malformed, or an entry of the wrong shape,
+// it counts as no record: the hook syncs once as before k80 and the sync writes it anew.
+test("k80: a corrupt sources-read.json counts as no record; session-start syncs once and rewrites it", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/foo/SKILL.md": SKILL("foo") });
+    mkdirSync(e.userFile("skills/foo"), { recursive: true });
+    writeFileSync(e.userFile("skills/foo/SKILL.md"), "MINE\n");
+    e.writeCfg("user", { sources: { g: { git: repo.url } }, install: { skills: ["foo@g"] }, checkInterval: 0 });
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 warning(s)");
+    const record = join(e.ctx.stateRoot, "sources-read.json");
+    const lockPath = e.userFile("skilletor.lock.json");
+    const good = JSON.parse(readFileSync(record, "utf8"));
+    const version: string = good[lockPath]?.g?.version ?? "";
+    assert.equal(version.startsWith("git:") && repo.first.startsWith(version.slice(4)), true, version);
+    assert.deepEqual(good, { [lockPath]: { g: { kind: "git", address: repo.url, version } } });
+    for (const junk of ["{ broken", JSON.stringify({ [lockPath]: ["g"] }), JSON.stringify({ [lockPath]: { g: "git:abc" } })]) {
+      writeFileSync(record, junk);
+      assert.equal((await e.session()).systemMessage, "skilletor: 1 warning(s)", junk); // counted again: one sync
+      assert.deepEqual(await e.session(), {}, junk);
+      assert.deepEqual(JSON.parse(readFileSync(record, "utf8")), good, junk);
+    }
+  } finally {
+    e.tmp.cleanup();
+  }
+});
