@@ -1,0 +1,37 @@
+---
+claimed_at: 2026-09-26T03:59:45Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-26T03:59:34Z
+created: 2026-09-26T02:18:52Z
+depends_on:
+- 62
+id: 64
+priority: low
+started: 2026-09-26T03:48:48Z
+status: done
+tags:
+- gitignore
+- engine
+- hooks
+title: 'check: detect the pre-k62 layout so SessionStart migrates at once'
+updated: 2026-09-26T03:59:45Z
+---
+
+After k62 an existing install moves to the new layout (agents/rules as `.local.<name>`, per-skill `.gitignore`, fixed blocks) only on the next real sync. The SessionStart hook syncs only when `check` sees a change, so a setup with only git sources keeps the old layout – and the old per-path `.gitignore` block that changes with machine state – until the next upstream change or a manual `skilletor sync`.
+
+Fix: `check` (offline, read-only, like the existing lock-vs-targets test in spec §14.3) also reports a change when the lock does not match the current layout: an agent/rule entry (Claude, or a Codex agent) whose files lack the `.local.` prefix, or – with `gitignore` enabled – a skill entry without its `skills/<name>/.gitignore` (and the reverse with `gitignore` disabled). Spec §14.3 gets the sentence.
+
+Done when: a lock from the 0.2.0 layout makes `check` report a change and the hook migrates in one session; a current lock does not; tests cover both harnesses and the gitignore switch; full check chain green.
+
+2026-09-26 03:48 Scope widened by the orchestrator (maintainer: "mach alles fertig"): besides the pre-k62 layout, `check` also reports a change for a project that is not in use (k65) but still holds a skilletor block in one of its roots – the litter 0.2.0 left in every repo a sync ran in – so it is cleaned up in the first session there. Spec §14.3 check bullet rewritten in the working tree.
+
+2026-09-26 03:51 Plan: engine.check gets a per-scope layoutDrift test next to targetDrift, reported as CheckReport.layoutChanged (scopes), same shape as targetsChanged. Lock-only for entries: agent/rule files (Claude, Codex agents) without .local. prefix; skill .gitignore judged by lock hash vs SKILL_GITIGNORE (a source-shipped .gitignore installs as shipped with gitignore:false, so 'has a .gitignore' alone would flag forever). Unused project (shared inUse helper with sync): one .gitignore read per root, same block detection as updateGitignore. No git, no network. Tests hand-built old locks; 0.2.0 dist only for a hand e2e (tags are not in a shallow CI checkout).
+
+2026-09-26 03:57 Verified by hand with the real 0.2.0 dist (git show v0.2.0:dist/skilletor.js) in a temp HOME/CODEX_HOME, both harnesses, unchanged file:// git source: 0.2.0 sync left plain agents/rules, skills without .gitignore and a litter block in an unrelated project; new 'check --json' -> sources changed:false, layoutChanged [user, project]; one 'hook session-start' migrated everything (5 items updated, litter removed); second hook run silent, check 'up to date'. Known cost: an entry that stays off-layout after a sync (skill with a persistent partial conflict, so no .gitignore; entry kept because its source/template fails) is flagged every session, i.e. one sync per SessionStart, as with a local source, and its conflict/warning repeats each session.
+
+2026-09-26 03:57 Also found (not touched, for the orchestrator to judge): reportHook ignores run-level SyncReport.warnings, so the Codex hook-trust warning (spec §14.8 'status and the report warn once') never reaches a SessionStart message, only CLI sync/status. May be intended.
+
+2026-09-26 03:57 Done: check reports CheckReport.layoutChanged (scopes, like targetsChanged) and changed=true when a lock entry is off the §6.4 layout (agent/rule file without .local., Claude or Codex agent; skill .gitignore not skilletor's by lock hash while gitignore on, or skilletor's while off) or an unused project holds a skilletor block in .claude/.agents/.codex (one read per root, same block detection as updateGitignore via new gitignore.hasBlock; in-use test shared with sync as projectInUse). Lock-only otherwise, no git/network. Files: src/engine.ts, src/gitignore.ts, src/targets.ts (lacksLocalPrefix), dist/skilletor.js; tests in engine/codex/hooks/targets/gitignore .test.ts (11 new). typecheck ok; npm test 474/474 pass; build + check-dist up to date. Not committed; spec §14.3 diff in the tree is part of this change.
+
+2026-09-26 03:59 Committed as eb3bfb4: check: report the pre-k62 layout and 0.2.0 litter blocks so SessionStart migrates (k64)
