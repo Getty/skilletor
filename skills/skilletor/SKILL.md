@@ -94,7 +94,8 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
 ```
 
 - Only `skill`, `agent`, `rule` are installable — never hooks, settings or MCP configs.
-- `ref` (git) pins a branch, tag or commit; omit for the remote's HEAD.
+- `ref` (git) pins a branch, tag or commit – a plain ref name (no leading `-`, no whitespace,
+  `~ ^ : ? * [ \`, `..` or `@{`); omit it (never `""`) for the remote's HEAD.
 - `gitignore` (default true): fixed ignore rules that never change with the items. Every
   installed skill dir gets its own `.gitignore` (`*`); a marked block in `.claude/.gitignore`
   lists the lock, `skilletor.local.json`, `agents/**/.local.*`, `rules/**/.local.*`, one in

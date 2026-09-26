@@ -322,6 +322,97 @@ test("k85: a ref with whitespace, control characters or refspec syntax is refuse
   }
 });
 
+/** The config file `setup` writes for `file`. */
+function configPath(file: "user" | "project" | "local", home: string, projectDir: string): string {
+  return file === "user" ? join(home, ".claude", "skilletor.json")
+    : join(projectDir, ".claude", file === "local" ? "skilletor.local.json" : "skilletor.json");
+}
+
+// k88: a source field is taken only as a string, so `ref: 123` dropped the pin (HEAD
+// installed) and `git: 1` next to a `url` fell back to the url, both without a word.
+// Asserts: in each of the three files, a git, ref or local present with any non-string JSON
+// value is a ConfigError naming file, source and key, with the value as JSON.
+test("k88: a git, ref or local that is not a string is refused, naming file, source and key", () => {
+  const others: Record<string, Record<string, string>> = {
+    git: { url: "https://example.com/s.tar.gz" },
+    ref: { git: "https://example.com/s" },
+    local: { git: "https://example.com/s" },
+  };
+  const files = ["user", "project", "local"] as const;
+  const values: unknown[] = [123, true, null, ["main"], { name: "main" }];
+  for (const [i, key] of ["git", "ref", "local"].entries()) {
+    for (const [j, value] of values.entries()) {
+      const file = files[(i + j) % files.length];
+      const { home, projectDir, cleanup } = setup({ [file]: { sources: { team: { ...others[key], [key]: value } } } });
+      try {
+        assert.throws(() => loadConfig({ home, projectDir }), (e: unknown) => {
+          assert.ok(e instanceof ConfigError, String(e));
+          assert.equal((e as Error).message,
+            `${configPath(file, home, projectDir)}: sources.team.${key} ${JSON.stringify(value)} must be a string`);
+          return true;
+        });
+      } finally {
+        cleanup();
+      }
+    }
+  }
+});
+
+// k88: `ref: ""` read as unpinned for the cache dir but was fetched and checked as a ref named
+// "" – reported changed every session, and a cache shared with the unpinned name under another
+// resolver key; `local: ""` resolved to the process cwd, an existing directory, which author
+// mode then took over `git`/`url`; `git: ""` won over a `url` beside it. The spec gives "" no
+// meaning, so each is refused. Asserts: in each file an empty ref is a ConfigError naming
+// file, source and key (a local "" cannot unset a project's pin either), and so is an empty
+// git or local beside a valid backend; a source without `ref` still loads unpinned.
+test('k88: an empty git, ref or local is refused, naming file, source and key; no ref stays unpinned', () => {
+  for (const file of ["user", "project", "local"] as const) {
+    const { home, projectDir, cleanup } = setup({
+      project: { sources: { team: { git: "https://example.com/s", ...(file === "project" ? {} : { ref: "main" }) } } },
+      [file]: { sources: { team: { git: "https://example.com/s", ref: "" } } },
+    });
+    try {
+      assert.throws(() => loadConfig({ home, projectDir }), (e: unknown) => {
+        assert.ok(e instanceof ConfigError, String(e));
+        assert.equal((e as Error).message,
+          `${configPath(file, home, projectDir)}: sources.team.ref "" must not be empty (omit "ref" for the remote's HEAD)`);
+        return true;
+      });
+    } finally {
+      cleanup();
+    }
+  }
+  const beside: [string, "user" | "project" | "local", Record<string, string>][] = [
+    ["git", "project", { url: "https://example.com/s.tar.gz", git: "" }],
+    ["git", "local", { git: "" }],
+    ["local", "user", { git: "https://example.com/s", local: "" }],
+    ["local", "project", { url: "https://example.com/s.tar.gz", local: "" }],
+  ];
+  for (const [key, file, def] of beside) {
+    const { home, projectDir, cleanup } = setup({
+      project: { sources: { team: { git: "https://example.com/s" } } },
+      [file]: { sources: { team: def } },
+    });
+    try {
+      assert.throws(() => loadConfig({ home, projectDir }), (e: unknown) => {
+        assert.ok(e instanceof ConfigError, String(e));
+        assert.equal((e as Error).message, `${configPath(file, home, projectDir)}: sources.team.${key} "" must not be empty`);
+        return true;
+      });
+    } finally {
+      cleanup();
+    }
+  }
+  const { home, projectDir, cleanup } = setup({ user: { sources: { team: { git: "https://example.com/s" } } } });
+  try {
+    const team = loadConfig({ home, projectDir }).sources.get("team");
+    assert.equal(team?.git, "https://example.com/s");
+    assert.equal(team?.ref, undefined);
+  } finally {
+    cleanup();
+  }
+});
+
 test("source with no kind is rejected", () => {
   const { home, projectDir, cleanup } = setup({
     user: { sources: { empty: {} } },

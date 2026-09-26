@@ -70,7 +70,9 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
 }
 ```
 
-- `ref` is optional (default: the remote's HEAD); a tag or commit pins it.
+- `ref` is optional (default: the remote's HEAD); a tag or commit pins it. A `git`, `ref` or
+  `local` present must be a non-empty string (`url` an `https://` URL) – else a config error
+  naming file, source and key, never a field read as absent (k88).
 - `gitignore` (user or project/local, default `true`): see 6.4. In the user config it
   only switches the user-scope blocks off; a project's blocks follow the project/local value.
 - `checkInterval` (user only, seconds, default 1800 = 30 min): throttle for the

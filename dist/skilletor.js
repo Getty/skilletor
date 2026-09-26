@@ -5867,9 +5867,9 @@ function parseSources(obj, path, origin) {
       }
     }
     const src = { name, origins: {} };
-    if (typeof d.git === "string") src.git = gitField(d.git, "git", path, name);
-    if (typeof d.ref === "string") src.ref = gitField(d.ref, "ref", path, name);
-    if (typeof d.local === "string") src.local = d.local;
+    if (d.git !== void 0) src.git = gitField(stringField(d.git, "git", path, name), "git", path, name);
+    if (d.ref !== void 0) src.ref = gitField(stringField(d.ref, "ref", path, name), "ref", path, name);
+    if (d.local !== void 0) src.local = stringField(d.local, "local", path, name);
     if (d.url !== void 0) {
       if (typeof d.url !== "string" || !d.url.startsWith("https://")) {
         throw new ConfigError(`${path}: sources.${name}.url must be an https:// URL`);
@@ -5883,6 +5883,12 @@ function parseSources(obj, path, origin) {
     sources.set(name, src);
   }
   return sources;
+}
+function stringField(value2, key, path, name) {
+  const where = `${path}: sources.${name}.${key} ${JSON.stringify(value2)}`;
+  if (typeof value2 !== "string") throw new ConfigError(`${where} must be a string`);
+  if (value2 === "") throw new ConfigError(`${where} must not be empty${key === "ref" ? ` (omit "ref" for the remote's HEAD)` : ""}`);
+  return value2;
 }
 var NOT_IN_REF = /[\x00-\x20\x7f~^:?*[\\]|\.\.|@\{/;
 function gitField(value2, key, path, name) {

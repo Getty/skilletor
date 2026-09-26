@@ -167,9 +167,9 @@ function parseSources(obj: Json, path: string, origin: Origin): Map<string, Reso
       }
     }
     const src: ResolvedSource = { name, origins: {} };
-    if (typeof d.git === "string") src.git = gitField(d.git, "git", path, name);
-    if (typeof d.ref === "string") src.ref = gitField(d.ref, "ref", path, name);
-    if (typeof d.local === "string") src.local = d.local;
+    if (d.git !== undefined) src.git = gitField(stringField(d.git, "git", path, name), "git", path, name);
+    if (d.ref !== undefined) src.ref = gitField(stringField(d.ref, "ref", path, name), "ref", path, name);
+    if (d.local !== undefined) src.local = stringField(d.local, "local", path, name);
     if (d.url !== undefined) {
       if (typeof d.url !== "string" || !d.url.startsWith("https://")) {
         throw new ConfigError(`${path}: sources.${name}.url must be an https:// URL`);
@@ -183,6 +183,17 @@ function parseSources(obj: Json, path: string, origin: Origin): Map<string, Reso
     sources.set(name, src);
   }
   return sources;
+}
+
+/** A source field as written: present means a non-empty string (k88). Anything else would
+ *  read as absent – a ref's pin lost, a `git` beside a `url` passed over – without a word; an
+ *  empty ref reads as unpinned to the cache dir but as a ref named "" to fetch and check, and
+ *  an empty `local` is the process cwd, a directory author mode would take. */
+function stringField(value: unknown, key: string, path: string, name: string): string {
+  const where = `${path}: sources.${name}.${key} ${JSON.stringify(value)}`;
+  if (typeof value !== "string") throw new ConfigError(`${where} must be a string`);
+  if (value === "") throw new ConfigError(`${where} must not be empty${key === "ref" ? ` (omit "ref" for the remote's HEAD)` : ""}`);
+  return value;
 }
 
 /** What `git check-ref-format` forbids character by character: whitespace and control
