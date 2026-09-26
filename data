@@ -1,0 +1,36 @@
+---
+class: standard
+completed: 2026-09-26T13:57:36Z
+created: 2026-09-26T03:51:23Z
+id: 70
+priority: high
+started: 2026-09-26T13:32:29Z
+status: done
+tags:
+- hooks
+- check
+title: 'check: SessionStart misses desired-state changes'
+updated: 2026-09-26T13:57:58Z
+---
+
+`check` looks at remote changes, not at the whole desired state: a removed declaration stays installed (probe 04); a first SHA pin and a pin change are not installed (probe 09: `check` on a SHA returns false even with nothing installed); a project whose only sources are untrusted gets no trust request at SessionStart (probe 05). With checkInterval 0 nothing recovers it. Code: src/hooks.ts:139-147; src/engine.ts:920-938; src/sources/git.ts:105-109. Related to k64 (layout mismatch in check) but wider: check must compare declared items/pins/trust against the lock.
+
+Repro: probe file by the skilletor-71 audit session, copied to docs-free scratch; reproduced by the orchestrator against exports of e371b13 AND v0.2.0 (pre-existing, not introduced by k62/k63/k65).
+
+2026-09-26 03:58 Input from k64 (orchestrator): since k64 `check` also reports layout drift (§14.3). An entry that stays off-layout after a sync – a skill with a lasting partial conflict never gets its .gitignore, an entry kept because its source or template fails – makes every SessionStart sync and repeat its warning. Accepted for 0.3.0 (a `local` source already syncs every session); when reworking check against the full desired state, consider bounding this (e.g. do not count entries whose last sync reported a conflict/failure).
+
+2026-09-26 13:40 Started (skilletor-worker). Read spec §4.4, §8, §14.3 and probes 04/05/09 (/tmp/skilletor-readiness-probes.jgeYOu/probes.mjs). Causes: (04) check only visits sources still referenced, so a removed declaration is never seen; (05) check skips untrusted sources silently and the hook only reports on a sync; (09) GitSource.check returns false for any SHA-like ref before looking at the cached version. Plan: git check compares a SHA pin with the locked version; check compares declared items/wildcards/bundles with the lock (declaredChanged) and returns trustRequests that SessionStart reports without syncing.
+
+2026-09-26 13:45 Red tests written: test/check.test.ts (probes 04/05/09 black-box via runHook, new item/wildcard/bundle, explicit item moved to another source, bound tests) and two GitSource.check tests in test/git.test.ts; 7 of 8 check tests and both git tests fail on main as predicted (the conflict/empty-wildcard bound test passes on main because main never detects missing items - it guards the bound). Decision on the k64 bound: it fits and is needed - without it the new 'declared wildcard with no entry' test makes a bare type wildcard over a source without that type sync (and fetch) every session. Design: sync records per scope (state unreached.json, keyed by lock path) the drift ids still open after it whose sources were all reachable (resolved, not from a stale cache, scanned); check does not count those. Applies uniformly to target, layout and declared drift. Drift kept by a failing/untrusted source stays open (spec §14.3 sentence changes accordingly).
+
+2026-09-26 13:54 Also found (skilletor board, new card): an annotated-tag ref always reads as changed - GitSource.check compares the first ls-remote line, which for an annotated tag is the tag object, not the commit - so every SessionStart syncs and fetches such a source. Pre-existing, verified with a scratch probe (resolve then check -> true); untouched here.
+
+2026-09-26 13:54 Also found (skilletor board, new card): a change of vars (user/project/local vars, a source's default vars) is not seen by check; it takes effect only at the next sync that runs for another reason (spec §6.1 says 'take effect automatically' - true for sync only). Could ride on the unreached/state record (e.g. a hash of the scope's vars per lock). Not in k70's list (items, pins, trust).
+
+2026-09-26 13:54 For k73 (SKILL.md conflict text): with the k70 bound, a conflict the user resolves by deleting the foreign file is picked up at the next sync that runs anyway (a source moves, other drift) or by 'skilletor sync' - not by the next session on its own. Also: SessionStart now names an untrusted project source in every session until trusted (probe 05 asked for it); a user who never wants to trust a cloned repo's source has no way to quiet it except removing it - maintainer call whether that needs a switch.
+
+2026-09-26 13:54 Not mine: .claude/skills/kanban-issues-karr-coordination/{SKILL.md,references/cards.md,references/claims.md} changed in the working tree at 15:45 during this session (karr claim wording) by someone else; left untouched and not part of k70's commit.
+
+2026-09-26 13:54 Done: check compares the declared state with the lock. (1) GitSource.check: nothing locked -> changed; a SHA pin is compared with the locked commit (offline when they match), otherwise ls-remote as before - a first pin, a pin change and a rollback now sync at SessionStart (probe 09). (2) engine check: declared drift (declaredChanged) - an explicit item an active target lacks or holds from another source, an entry nothing declares any more (probe 04), a wildcard/bundle with nothing installed; untrusted sources come back as trustRequests (scope, name, kind, url) and SessionStart reports them each session without a sync or fetch (probe 05). (3) k64 bound, applied to target, layout and declared drift alike: sync records per lock in state unreached.json the drift still open after it whose sources were all resolved and scanned; check does not count it again (drift kept by a failing source stays open). targetDrift -> targetGaps (per gap); status shares coverOf. Docs: spec §4.3/§4.4/§6.5/§8/§14.3, README, bundled skill check sentence, cli usage line. Verified: 9 new tests in test/check.test.ts (probes 04/05/09 black-box through runHook) + 2 in test/git.test.ts, red on main as stated; mutation runs (bound off, reachability off, trust filter off, orphan/wildcard/bundle/source-mismatch off) each turn a named test red; the audit probes 04/05/09 no longer reproduce; bin/skilletor hook session-start driven in a temp HOME. typecheck, 545/545 tests, build, check-dist green. Not committed.
+
+2026-09-26 13:57 Committed 09c1414: check: compare the declared state with the lock; name untrusted sources at SessionStart; sync once for what cannot be reached (k70)
