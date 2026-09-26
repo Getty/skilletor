@@ -1,13 +1,15 @@
-// Stale git lock files in the git cache (k84): real git, local bare repos, temp dirs.
-// A git killed midway (SIGKILL: a hook timeout, a crash) leaves its `*.lock` files behind;
-// git never removes another process's lock, so every later fetch or reset of that cache
-// failed and fell back to the old cache with a warning, forever. The run that takes the sync
-// lock sweeps them (spec §6.5).
+// What a git killed midway (SIGKILL: a hook timeout, a crash) leaves in the git cache: real
+// git, local bare repos, temp dirs.
+// k84: its `*.lock` files; git never removes another process's lock, so every later fetch or
+// reset of that cache failed and fell back to the old cache with a warning, forever. The run
+// that takes the sync lock sweeps them (spec §6.5).
+// k90: a cache it was creating – a repo without `origin` or without a commit; every fetch
+// failed and there was no commit to fall back to, so the source failed every sync.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve as resolvePath } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative, resolve as resolvePath } from "node:path";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 import { makeTarGz } from "./helpers/tar.ts";
 import { GitSource, sweepGitCache } from "../src/sources/git.ts";
@@ -178,3 +180,149 @@ test("k84: the sweep of a missing root or odd entries is silent", () => {
     tmp.cleanup();
   }
 });
+
+/** Where a run creating the cache `dir` was killed: inside `git init` (a `.git` it never
+ *  finished, here an empty one), after `git init`, or during the first fetch (after `remote add`). */
+const KILLED = ["inside git init", "after git init", "during the first fetch"] as const;
+type Killed = (typeof KILLED)[number];
+
+/** Replace the cache `dir` with what a run killed at `killed` leaves. */
+function plantKilledCache(dir: string, url: string, killed: Killed): void {
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(join(dir, ".git"), { recursive: true });
+  if (killed === "inside git init") return;
+  git(dir, "init", "-q");
+  if (killed === "during the first fetch") git(dir, "remote", "add", "origin", url);
+}
+
+// Asserts: a first sync killed while it created the source's cache – inside `git init`, after
+// it (no `origin`), or during the first fetch (no commit) – does not strand the source: the next
+// sync fetches into that same cache and installs `foo` with no error and no warning, and the
+// cache's `origin` is the source's address.
+for (const killed of KILLED) {
+  test(`k90: a first sync killed ${killed} leaves a cache the next sync installs from`, async (t) => {
+    const tmp = makeTmpDir();
+    t.after(tmp.cleanup);
+    const repo = makeRepo(tmp);
+    repo.commit("FIRST");
+    const home = join(tmp.dir, "home");
+    const stateRoot = join(tmp.dir, "state");
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    writeFileSync(join(home, ".claude/skilletor.json"), JSON.stringify({
+      targets: ["claude"], sources: { g: { git: repo.url } }, install: { skills: ["foo@g"] },
+    }));
+    const ctx: EngineContext = {
+      home, stateRoot, codexHome: join(tmp.dir, "codex"), markers: { claude: [], codex: [] }, isGitWorkTree: () => false,
+    };
+    const cacheRoot = join(stateRoot, "cache");
+    // The dir a sync resolves this source into, then left as the killed run left it.
+    const cache = (await new GitSource({ url: repo.url, cacheRoot }).resolve()).dir;
+    plantKilledCache(cache, repo.url, killed);
+
+    const report = await sync(ctx);
+    assert.equal(report.error, undefined);
+    assert.deepEqual(report.scopes[0]!.warnings, []);
+    assert.deepEqual(report.scopes[0]!.added.map((i) => i.key), ["skills/foo"]);
+    assert.match(readFileSync(join(home, ".claude/skills/foo/SKILL.md"), "utf8"), /FIRST/);
+    assert.deepEqual(readdirSync(cacheRoot), [basename(cache)], "the sync used the planted cache");
+    assert.equal(git(cache, "config", "--local", "--get", "remote.origin.url"), repo.url);
+  });
+}
+
+// Asserts: with the remote unreachable, a cache a killed run left without a commit – with or
+// without `origin`, unpinned or pinned to a SHA – is no cache: resolve fails with the fetch
+// error, never a "using cache" warning over an empty tree, and names no cache it rejected.
+for (const killed of KILLED) {
+  for (const pinned of [false, true]) {
+    test(`k90: a cache killed ${killed}, remote unreachable: ${pinned ? "a pinned" : "an unpinned"} resolve errors, no cache`, async (t) => {
+      const tmp = makeTmpDir();
+      t.after(tmp.cleanup);
+      const repo = makeRepo(tmp);
+      repo.commit("FIRST");
+      const sha = git(tmp.dir, "ls-remote", repo.url, "HEAD").split("\t")[0]!;
+      const src = new GitSource({ url: repo.url, ref: pinned ? sha : undefined, cacheRoot: join(tmp.dir, "cache") });
+      plantKilledCache((await src.resolve()).dir, repo.url, killed);
+      rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+      await assert.rejects(() => src.resolve(), (err: Error) => {
+        assert.match(err.message, /^git source .* failed: git fetch/);
+        assert.doesNotMatch(err.message, /using cache|cache rejected|rev-parse/);
+        return true;
+      });
+    });
+  }
+}
+
+// Asserts: a whole cache is fetched into as it stands – not re-created: an object only it holds
+// survives the next resolve, which takes the new commit with no warning; `origin` is unchanged.
+test("k90: a whole cache is fetched into, not re-created: its objects are kept", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const repo = makeRepo(tmp);
+  repo.commit("FIRST");
+  const src = new GitSource({ url: repo.url, cacheRoot: join(tmp.dir, "cache") });
+  const first = await src.resolve();
+  writeFileSync(join(tmp.dir, "marker"), "k90 marker\n");
+  const marker = git(first.dir, "hash-object", "-w", join(tmp.dir, "marker"));
+
+  repo.commit("SECOND");
+  const second = await src.resolve();
+  assert.equal(second.warning, undefined);
+  assert.notEqual(second.version, first.version);
+  assert.match(readFileSync(join(second.dir, "skills/foo/SKILL.md"), "utf8"), /SECOND/);
+  assert.doesNotThrow(() => git(second.dir, "cat-file", "-e", marker), "the cache was re-created");
+  assert.equal(git(second.dir, "config", "--local", "--get", "remote.origin.url"), repo.url);
+});
+
+// Asserts: a cache whose `origin` names another address is pointed back at the source's before
+// the fetch: resolve takes the source's commit, no warning.
+test("k90: a cache whose origin names another address is pointed back at the source's", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const repo = makeRepo(tmp);
+  repo.commit("FIRST");
+  const src = new GitSource({ url: repo.url, cacheRoot: join(tmp.dir, "cache") });
+  const first = await src.resolve();
+  git(first.dir, "remote", "set-url", "origin", "file://" + join(tmp.dir, "elsewhere.git"));
+  repo.commit("SECOND");
+  const second = await src.resolve();
+  assert.equal(second.warning, undefined);
+  assert.match(readFileSync(join(second.dir, "skills/foo/SKILL.md"), "utf8"), /SECOND/);
+  assert.equal(git(second.dir, "config", "--local", "--get", "remote.origin.url"), repo.url);
+});
+
+// The cache root lies inside another repository (the default `~/.claude/skilletor/cache` under a
+// versioned `~/.claude`). A `.git` a killed `git init` left unfinished is no repository to git,
+// which then looked for one further up and ran the cache's `remote`, `fetch` and `reset --hard`
+// in the enclosing one. Asserts, with and without an `origin` there: resolve completes the
+// cache's own repo and serves the source with no warning; the enclosing repo keeps its remotes,
+// its HEAD and its files.
+for (const outerOrigin of [false, true]) {
+  test(`k90: a cache left inside git init never reaches the enclosing repository (${outerOrigin ? "with" : "without"} origin)`, async (t) => {
+    const tmp = makeTmpDir();
+    t.after(tmp.cleanup);
+    const repo = makeRepo(tmp);
+    repo.commit("FIRST");
+    const outer = join(tmp.dir, "outer");
+    mkdirSync(outer);
+    git(outer, "init", "-q", "-b", "main");
+    writeFileSync(join(outer, "mine.txt"), "mine\n");
+    git(outer, "add", ".");
+    git(outer, "commit", "-qm", "mine");
+    if (outerOrigin) git(outer, "remote", "add", "origin", "file://" + join(tmp.dir, "dotfiles.git"));
+    const remotes = git(outer, "remote", "-v");
+    const head = git(outer, "rev-parse", "HEAD");
+
+    const src = new GitSource({ url: repo.url, cacheRoot: join(outer, "cache") });
+    const dir = (await src.resolve()).dir;
+    plantKilledCache(dir, repo.url, "inside git init");
+    const loc = await src.resolve();
+    assert.equal(git(outer, "remote", "-v"), remotes, "the enclosing repo's remotes changed");
+    assert.equal(git(outer, "rev-parse", "HEAD"), head, "the enclosing repo's HEAD moved");
+    assert.equal(existsSync(join(outer, "mine.txt")) && readFileSync(join(outer, "mine.txt"), "utf8"), "mine\n",
+      "the enclosing repo's files changed");
+    assert.equal(loc.warning, undefined);
+    assert.equal(loc.dir, dir);
+    assert.match(readFileSync(join(dir, "skills/foo/SKILL.md"), "utf8"), /FIRST/);
+    assert.equal(git(dir, "rev-parse", "--absolute-git-dir"), join(realpathSync(dir), ".git"));
+  });
+}

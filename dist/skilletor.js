@@ -5747,7 +5747,7 @@ import { join as join16 } from "node:path";
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname as hostname2, platform, userInfo } from "node:os";
 import { existsSync as existsSync11, readFileSync as readFileSync11, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync4 } from "node:fs";
-import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative4, resolve as resolvePath4, sep as sep4 } from "node:path";
+import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative4, resolve as resolvePath5, sep as sep4 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -7413,7 +7413,7 @@ var LocalSource = class {
 import { execFile } from "node:child_process";
 import { createHash as createHash2 } from "node:crypto";
 import { existsSync as existsSync4, lstatSync as lstatSync3, mkdirSync as mkdirSync2, readdirSync, rmSync as rmSync2 } from "node:fs";
-import { join as join6 } from "node:path";
+import { join as join6, resolve as resolvePath } from "node:path";
 var DEFAULT_TIMEOUT_MS = 6e4;
 var PinMismatch = class extends Error {
 };
@@ -7435,7 +7435,13 @@ var GitSource = class {
         {
           cwd: cwd || void 0,
           timeout: timeoutMs ?? this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-          env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+          // In a cache, git takes its `.git` or no repository (k90): one a killed `git init` left
+          // unfinished is none to git, which would look further up – `~/.claude` may be a repo.
+          env: {
+            ...process.env,
+            GIT_TERMINAL_PROMPT: "0",
+            ...cwd ? { GIT_CEILING_DIRECTORIES: resolvePath(cwd, "..") } : {}
+          },
           maxBuffer: 32 * 1024 * 1024
         },
         (err, stdout, stderr) => {
@@ -7457,8 +7463,7 @@ var GitSource = class {
         await this.run(dir, ["init", "-q"]);
         await this.run(dir, ["remote", "add", "--", "origin", this.opts.url]);
       } else {
-        await this.run(dir, ["remote", "set-url", "--", "origin", this.opts.url]).catch(() => {
-        });
+        await this.repair(dir);
       }
       let resetTarget = "FETCH_HEAD";
       if (ref && isCommitish(ref)) {
@@ -7488,6 +7493,21 @@ var GitSource = class {
         }
       }
       throw new Error(`git source ${this.opts.url} failed: ${err.message}`);
+    }
+  }
+  /**
+   * Make a cache a run killed while creating it left fit to fetch into, keeping what it holds
+   * (k90): a `.git` `git init` never finished is finished – a no-op on a whole repo – and a repo
+   * without `origin` gets it. An `origin` naming another address is pointed at the source's; a
+   * failure there fails the fetch. A whole cache costs one config read and no write.
+   */
+  async repair(dir) {
+    const origin = await this.run(dir, ["config", "--local", "--get", "remote.origin.url"]).then((out) => out.trim(), () => void 0);
+    if (origin === void 0) {
+      await this.run(dir, ["init", "-q"]);
+      await this.run(dir, ["remote", "add", "--", "origin", this.opts.url]);
+    } else if (origin !== this.opts.url) {
+      await this.run(dir, ["remote", "set-url", "--", "origin", this.opts.url]);
     }
   }
   async version(dir) {
@@ -7596,7 +7616,7 @@ function samePrefix(a, b) {
 // src/sources/url.ts
 import { createHash as createHash3 } from "node:crypto";
 import { existsSync as existsSync5, lstatSync as lstatSync4, mkdirSync as mkdirSync3, mkdtempSync, readFileSync as readFileSync3, readdirSync as readdirSync2, renameSync as renameSync2, rmSync as rmSync3, writeFileSync as writeFileSync2 } from "node:fs";
-import { dirname as dirname2, join as join7, resolve as resolvePath, sep } from "node:path";
+import { dirname as dirname2, join as join7, resolve as resolvePath2, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 var TarError = class extends Error {
   name = "TarError";
@@ -7820,9 +7840,9 @@ function isRealDir(path) {
   }
 }
 function writeEntries(dir, entries) {
-  const root = resolvePath(dir);
+  const root = resolvePath2(dir);
   for (const e of entries) {
-    const dest = resolvePath(join7(dir, e.name));
+    const dest = resolvePath2(join7(dir, e.name));
     if (dest !== root && !dest.startsWith(root + sep)) {
       throw new TarError(`unsafe tar entry (escapes target): ${e.name}`);
     }
@@ -8053,16 +8073,16 @@ function readSourceMeta(dir) {
 // src/render.ts
 var import_nunjucks = __toESM(require_nunjucks(), 1);
 import { readFileSync as readFileSync5 } from "node:fs";
-import { join as join9, relative as relative2, resolve as resolvePath2, sep as sep2 } from "node:path";
+import { join as join9, relative as relative2, resolve as resolvePath3, sep as sep2 } from "node:path";
 var RenderError = class extends Error {
   name = "RenderError";
 };
 function makeLoader(root) {
-  const base = resolvePath2(root);
+  const base = resolvePath3(root);
   return {
     async: false,
     getSource(name) {
-      const path = resolvePath2(base, name);
+      const path = resolvePath3(base, name);
       if (path !== base && !path.startsWith(base + sep2)) {
         throw new RenderError(`template escapes source root: ${name}`);
       }
@@ -8116,7 +8136,7 @@ function rendersEmpty(item, output) {
 
 // src/apply.ts
 import { existsSync as existsSync7, lstatSync as lstatSync6, readFileSync as readFileSync7, readdirSync as readdirSync4, rmdirSync, rmSync as rmSync5 } from "node:fs";
-import { dirname as dirname3, join as join10, relative as relative3, resolve as resolvePath3, sep as sep3 } from "node:path";
+import { dirname as dirname3, join as join10, relative as relative3, resolve as resolvePath4, sep as sep3 } from "node:path";
 
 // src/lock.ts
 import { readFileSync as readFileSync6, rmSync as rmSync4 } from "node:fs";
@@ -8169,7 +8189,7 @@ function isValidItemName(name) {
   return NAME_RE.test(name);
 }
 function apply(plan, opts) {
-  const lockPath = join10(resolvePath3(opts.targetDir), "skilletor.lock.json");
+  const lockPath = join10(resolvePath4(opts.targetDir), "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const landed = /* @__PURE__ */ new Map();
   try {
@@ -8180,7 +8200,7 @@ function apply(plan, opts) {
   }
 }
 function applyPlan(plan, opts, lockPath, oldLock, landed) {
-  const targetDir = resolvePath3(opts.targetDir);
+  const targetDir = resolvePath4(opts.targetDir);
   const newLock = {};
   const res = {
     added: [],
@@ -8194,7 +8214,7 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
     leftInPlace: []
   };
   const dirsTouched = /* @__PURE__ */ new Map();
-  const rootFor = (key) => resolvePath3(opts.rootOf ? opts.rootOf(key) : targetDir);
+  const rootFor = (key) => resolvePath4(opts.rootOf ? opts.rootOf(key) : targetDir);
   const touched = (root) => {
     let set = dirsTouched.get(root);
     if (!set) dirsTouched.set(root, set = /* @__PURE__ */ new Set());
@@ -8350,7 +8370,7 @@ function withVia(entry, it) {
   return entry;
 }
 function safeJoin(root, rel) {
-  const abs = resolvePath3(join10(root, rel));
+  const abs = resolvePath4(join10(root, rel));
   if (abs !== root && !abs.startsWith(root + sep3)) {
     throw new ApplyError(`path escapes target: ${rel}`);
   }
@@ -9051,7 +9071,7 @@ function loadWithTargets(ctx) {
   }
 }
 function localDir(path, home) {
-  const abs = resolvePath4(expandHome(path, home));
+  const abs = resolvePath5(expandHome(path, home));
   try {
     if (statSync4(abs).isDirectory()) return { path: realpathSync2(abs), exists: true };
   } catch {

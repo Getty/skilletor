@@ -10,13 +10,16 @@
 // them, so it never reads one as an option (k85; `--`, unlike `--end-of-options`, predates
 // git 2.24); only a SHA pin – hex, never an option – also reaches rev-parse and reset.
 // When the remote is unreachable but a cache exists, resolve reuses it and reports a
-// warning; without a cache, or with one that holds another commit than a SHA pin, it errors.
+// warning; without a cache – a repo without a commit is none – or with one that holds another
+// commit than a SHA pin, it errors.
 // The lock files a git killed midway leaves in a cache, `sweepGitCache` clears – the engine
 // calls it only while it holds the sync lock, under which every resolve runs (spec §6.5).
+// A cache a killed run was creating, resolve completes before it fetches (k90); in a cache,
+// git never looks for a repository above it.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, rmSync, type Dirent } from "node:fs";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import type { Source, SourceLocation } from "./types.ts";
 
 export interface GitSourceOptions {
@@ -52,7 +55,12 @@ export class GitSource implements Source {
         {
           cwd: cwd || undefined,
           timeout: timeoutMs ?? this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-          env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+          // In a cache, git takes its `.git` or no repository (k90): one a killed `git init` left
+          // unfinished is none to git, which would look further up – `~/.claude` may be a repo.
+          env: {
+            ...process.env, GIT_TERMINAL_PROMPT: "0",
+            ...(cwd ? { GIT_CEILING_DIRECTORIES: resolvePath(cwd, "..") } : {}),
+          },
           maxBuffer: 32 * 1024 * 1024,
         },
         (err, stdout, stderr) => {
@@ -76,7 +84,7 @@ export class GitSource implements Source {
         await this.run(dir, ["init", "-q"]);
         await this.run(dir, ["remote", "add", "--", "origin", this.opts.url]);
       } else {
-        await this.run(dir, ["remote", "set-url", "--", "origin", this.opts.url]).catch(() => {});
+        await this.repair(dir);
       }
 
       let resetTarget = "FETCH_HEAD";
@@ -110,6 +118,23 @@ export class GitSource implements Source {
         }
       }
       throw new Error(`git source ${this.opts.url} failed: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Make a cache a run killed while creating it left fit to fetch into, keeping what it holds
+   * (k90): a `.git` `git init` never finished is finished – a no-op on a whole repo – and a repo
+   * without `origin` gets it. An `origin` naming another address is pointed at the source's; a
+   * failure there fails the fetch. A whole cache costs one config read and no write.
+   */
+  private async repair(dir: string): Promise<void> {
+    const origin = await this.run(dir, ["config", "--local", "--get", "remote.origin.url"])
+      .then((out) => out.trim(), () => undefined);
+    if (origin === undefined) {
+      await this.run(dir, ["init", "-q"]);
+      await this.run(dir, ["remote", "add", "--", "origin", this.opts.url]);
+    } else if (origin !== this.opts.url) {
+      await this.run(dir, ["remote", "set-url", "--", "origin", this.opts.url]);
     }
   }
 

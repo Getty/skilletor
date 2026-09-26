@@ -251,6 +251,9 @@ branch named like a date) is taken as a name (k69). Names with one URL and ref s
 cache and a sync's one fetch of it (§6.1, k83). Git gets the address and the ref after `--`,
 never as an option (k85). A git killed midway (a hook timeout, a crash) can leave its lock
 files in the cache; the next run that takes the sync lock removes them once stale (§6.5, k84).
+A cache it was creating – a `.git` that `git init` never finished, a repo without `origin` –
+the next resolve completes before it fetches, keeping its objects; git never takes a
+repository above the cache for it, and one without a commit is no cache to fall back to (k90).
 
 ## 5. Templating
 
