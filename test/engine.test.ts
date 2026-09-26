@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
@@ -313,7 +313,9 @@ test("k62: a hand-written or linked skill of the same name gets no .gitignore; -
     symlinkSync(elsewhere, join(skills, "bar"));
 
     const r = await sync(e.ctx, { scope: "project" });
-    assert.deepEqual(r.scopes[0]!.conflicts.map((c) => c.path).sort(), ["skills/bar/SKILL.md", "skills/foo/SKILL.md"]);
+    // k67: the linked skill's conflict is the link itself (spec §6.3).
+    assert.deepEqual(r.scopes[0]!.conflicts.sort((a, b) => a.path.localeCompare(b.path)),
+      [{ path: "skills/bar", replace: true }, { path: "skills/foo/SKILL.md" }]);
     assert.deepEqual(r.scopes[0]!.added, []);
     assert.equal(existsSync(join(skills, "foo/.gitignore")), false);
     assert.equal(existsSync(join(elsewhere, ".gitignore")), false); // never written through the link
@@ -322,6 +324,55 @@ test("k62: a hand-written or linked skill of the same name gets no .gitignore; -
     await sync(e.ctx, { scope: "project", force: true });
     assert.equal(readFileSync(join(skills, "foo/SKILL.md"), "utf8"), SKILL_MD);
     assert.equal(readFileSync(join(skills, "foo/.gitignore"), "utf8"), SKILL_GITIGNORE);
+    // The link is replaced by a real directory; the linked skill is untouched.
+    assert.equal(lstatSync(join(skills, "bar")).isDirectory(), true);
+    assert.equal(readFileSync(join(skills, "bar/SKILL.md"), "utf8"), SKILL_MD);
+    assert.deepEqual(readdirSync(elsewhere), ["SKILL.md"]);
+    assert.equal(readFileSync(join(elsewhere, "SKILL.md"), "utf8"), "MY OWN BAR\n");
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k67 (audit probe 03): a linked foreign skill in ~/.claude/skills gets nothing written
+// through the link, not even files it does not have yet (spec §6.3).
+test("k67: a linked skill dir in the user scope: conflict at the link, nothing written through it; --force replaces the link", async () => {
+  const e = env();
+  try {
+    const src = filesSource(e.tmp.dir, "k67", { "skills/foo/SKILL.md": SKILL_MD, "skills/foo/reference.md": "NEW SOURCE FILE\n" });
+    const outside = join(e.tmp.dir, "foreign");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "SKILL.md"), "FOREIGN\n");
+    mkdirSync(join(e.home, ".claude/skills"), { recursive: true });
+    const link = join(e.home, ".claude/skills/foo");
+    symlinkSync(outside, link);
+    e.writeCfg("user", { sources: { s: { local: src } }, install: { skills: ["foo@s"] } });
+
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.conflicts, [{ path: "skills/foo", replace: true }]);
+    assert.deepEqual(r.scopes[0]!.added, []);
+    assert.deepEqual(readdirSync(outside), ["SKILL.md"], "no reference.md, no .gitignore through the link");
+    assert.equal(readFileSync(join(outside, "SKILL.md"), "utf8"), "FOREIGN\n");
+    assert.match(reportText(r), /conflict: skills\/foo already exists \(use --force to replace it\)/);
+
+    const forced = await sync(e.ctx, { scope: "user", force: true });
+    assert.deepEqual(forced.scopes[0]!.conflicts, []);
+    assert.equal(lstatSync(link).isDirectory(), true);
+    assert.deepEqual(readdirSync(link).sort(), [".gitignore", "SKILL.md", "reference.md"]);
+    assert.deepEqual(readdirSync(outside), ["SKILL.md"]);
+    assert.equal(readFileSync(join(outside, "SKILL.md"), "utf8"), "FOREIGN\n");
+
+    // The installed skill becomes a link again, then its declaration goes: nothing is
+    // deleted through the link, a warning says so, and the lock lets go of it.
+    rmSync(link, { recursive: true });
+    symlinkSync(outside, link);
+    e.writeCfg("user", { sources: { s: { local: src } } });
+    const gone = await sync(e.ctx, { scope: "user" });
+    assert.ok(gone.scopes[0]!.warnings.some((w) => w === "skills/foo is a symbolic link: files of skills/foo behind it left in place (never deleted through a link)"),
+      gone.scopes[0]!.warnings.join("\n"));
+    assert.deepEqual(readdirSync(outside), ["SKILL.md"]);
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+    assert.equal(existsSync(join(e.home, ".claude/skilletor.lock.json")), false);
   } finally {
     e.cleanup();
   }

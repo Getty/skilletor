@@ -2,7 +2,7 @@
 // one lock per scope with codex:-prefixed keys, per-target render and removal.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, linkSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { check, status, sync, type EngineContext } from "../src/engine.ts";
@@ -372,6 +372,47 @@ test("user agents follow CODEX_HOME, even outside the home directory", async () 
     e.writeCfg("user", { sources: { mine: { local: src } } });
     await sync(ctx, { scope: "user" });
     assert.equal(existsSync(join(codexHome, "agents/.local.helper.toml")), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k67 (spec §6.3): Codex roots follow the same link rules through the same apply.
+test("k67: a linked ~/.agents/skills/<name> is a conflict; a linked managed .local. TOML is replaced as a file", async () => {
+  const e = env(["codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", {
+      "skills/foo/SKILL.md": SKILL("foo"), "skills/foo/ref.md": "REF\n", "agents/helper.md": AGENT("Helps", "B\n"),
+    });
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["helper@mine"] } });
+    await sync(e.ctx, { scope: "user" });
+    const toml = join(e.home, ".codex/agents/.local.helper.toml");
+    const installed = readFileSync(toml, "utf8");
+
+    const outside = join(e.tmp.dir, "foreign");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "SKILL.md"), "FOREIGN\n");
+    writeFileSync(join(outside, "helper.toml"), "THEIRS\n");
+    mkdirSync(join(e.home, ".agents/skills"), { recursive: true });
+    const link = join(e.home, ".agents/skills/foo");
+    symlinkSync(outside, link);
+    rmSync(toml);
+    symlinkSync(join(outside, "helper.toml"), toml);
+    e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"], agents: ["helper@mine"] } });
+
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.conflicts, [{ path: ".agents/skills/foo", replace: true }]);
+    assert.deepEqual(r.scopes[0]!.overwritten, [{ path: ".codex/agents/.local.helper.toml" }]);
+    assert.equal(lstatSync(toml).isSymbolicLink(), false);
+    assert.equal(readFileSync(toml, "utf8"), installed);
+    assert.deepEqual(readdirSync(outside).sort(), ["SKILL.md", "helper.toml"]);
+    assert.equal(readFileSync(join(outside, "helper.toml"), "utf8"), "THEIRS\n");
+
+    await sync(e.ctx, { scope: "user", force: true });
+    assert.equal(lstatSync(link).isDirectory(), true);
+    assert.deepEqual(readdirSync(link).sort(), [".gitignore", "SKILL.md", "ref.md"]);
+    assert.deepEqual(readdirSync(outside).sort(), ["SKILL.md", "helper.toml"]);
+    assert.equal(readFileSync(join(outside, "SKILL.md"), "utf8"), "FOREIGN\n");
   } finally {
     e.cleanup();
   }

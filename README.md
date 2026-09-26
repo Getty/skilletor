@@ -591,6 +591,10 @@ rendered. This is the same trust level as installing a plugin.
   own `local` override (author mode) stays trusted.
 - Fixed target directories per harness; item names, tar entries and includes may not escape the
   source or target root; symlinks in sources are rejected; `url` is HTTPS-only.
+- skilletor never writes or deletes through a linked skill directory or item file: a link
+  there is a conflict, and any conflict blocks the whole item. `--force` replaces the link
+  itself and leaves its target alone. A `~/.claude/skills` or `~/.claude/agents` linked
+  into your dotfiles works as before.
 
 ## Coming from manage-skills
 

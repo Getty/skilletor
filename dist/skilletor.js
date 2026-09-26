@@ -5747,7 +5747,7 @@ import { join as join16 } from "node:path";
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
 import { existsSync as existsSync11, readFileSync as readFileSync10, realpathSync as realpathSync2, rmSync as rmSync7, statSync as statSync3 } from "node:fs";
-import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative3, resolve as resolvePath4, sep as sep4 } from "node:path";
+import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative4, resolve as resolvePath4, sep as sep4 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -7928,8 +7928,8 @@ function rendersEmpty(item, output) {
 }
 
 // src/apply.ts
-import { existsSync as existsSync7, readFileSync as readFileSync6, readdirSync as readdirSync2, rmdirSync, rmSync as rmSync4 } from "node:fs";
-import { dirname as dirname3, join as join10, resolve as resolvePath3, sep as sep3 } from "node:path";
+import { existsSync as existsSync7, lstatSync as lstatSync4, readFileSync as readFileSync6, readdirSync as readdirSync2, rmdirSync, rmSync as rmSync4 } from "node:fs";
+import { dirname as dirname3, join as join10, relative as relative3, resolve as resolvePath3, sep as sep3 } from "node:path";
 
 // src/lock.ts
 import { readFileSync as readFileSync5, rmSync as rmSync3 } from "node:fs";
@@ -7993,7 +7993,8 @@ function apply(plan, opts) {
     skipped: [],
     conflicts: [],
     overwritten: [],
-    written: []
+    written: [],
+    leftInPlace: []
   };
   const dirsTouched = /* @__PURE__ */ new Map();
   const rootFor = (key) => resolvePath3(opts.rootOf ? opts.rootOf(key) : targetDir);
@@ -8012,69 +8013,74 @@ function apply(plan, opts) {
     const root = rootFor(it.key);
     if (it.skipped) {
       const files = Object.keys(oldLock[it.key]?.files ?? {});
-      for (const rel of files) removeFile(safeJoin(root, rel), touched(root));
+      removeItemFiles(it.key, root, files, touched(root), res);
       if (files.length > 0) res.removed.push(it.key);
       res.skipped.push(it.key);
       newLock[it.key] = withVia({ source: it.source, version: it.version, files: {}, skipped: it.skipped }, it);
       continue;
     }
     const existing = oldLock[it.key]?.skipped ? void 0 : oldLock[it.key];
-    const foreign = (it.claims ?? []).filter(
-      (rel) => existing?.files[rel] === void 0 && existsSync7(safeJoin(root, rel))
-    );
-    if (foreign.length > 0 && !opts.force) {
-      for (const rel of foreign) res.conflicts.push({ key: it.key, path: rel, replace: true });
+    const owned = (rel) => existing?.files[rel] !== void 0;
+    const own = ownPath(it.key);
+    const removals = Object.keys(existing?.files ?? {}).filter((rel) => !it.output.has(rel));
+    const found = [];
+    const deleteFirst = [];
+    const conflict = (path, hard, replace) => {
+      if (found.some((f) => f.c.path === path)) return;
+      found.push({ c: replace ? { key: it.key, path, replace: true } : { key: it.key, path }, hard });
+      if (replace && !hard) deleteFirst.push(path);
+    };
+    const claims = new Set(it.claims ?? []);
+    for (const rel of /* @__PURE__ */ new Set([...claims, ...it.output.keys(), ...removals])) {
+      const at = inspect(root, rel, own);
+      const isOutput = it.output.has(rel);
+      if (at.kind === "blocked") {
+        if (at.link || !owned(at.path)) conflict(at.path, false, true);
+        else if (!deleteFirst.includes(at.path)) deleteFirst.push(at.path);
+      } else if (!isOutput && !claims.has(rel)) {
+        continue;
+      } else if (at.kind === "other" && (isOutput || !owned(rel))) {
+        conflict(rel, true, false);
+      } else if ((at.kind === "file" || at.kind === "link") && !owned(rel)) {
+        conflict(rel, false, !isOutput);
+      }
+    }
+    const blocking = found.filter((f) => f.hard || !opts.force).map((f) => f.c);
+    if (blocking.length > 0) {
+      res.conflicts.push(...blocking);
       if (oldLock[it.key]) newLock[it.key] = oldLock[it.key];
       res.unchanged.push(it.key);
       continue;
     }
-    for (const rel of foreign) removeFile(safeJoin(root, rel), touched(root));
+    for (const rel of deleteFirst) removeFile(safeJoin(root, rel), touched(root));
     const entryFiles = {};
     let wrote = false;
     let removedFile = false;
-    let conflicted = false;
-    const attached = new Set(it.attached ?? []);
-    const ordered = [...it.output].sort(([a], [b]) => Number(attached.has(a)) - Number(attached.has(b)));
-    for (const [rel, buf] of ordered) {
+    for (const [rel, buf] of it.output) {
       const abs = safeJoin(root, rel);
       const desired = hashBuffer(buf);
       const locked = existing?.files[rel];
-      if (conflicted && locked === void 0 && attached.has(rel)) continue;
-      const onDisk = existsSync7(abs);
-      if (onDisk) {
+      const st = lstatOrUndefined(abs);
+      if (st?.isFile()) {
         const diskHash = hashBuffer(readFileSync6(abs));
-        if (locked === void 0 && !opts.force) {
-          res.conflicts.push({ key: it.key, path: rel });
-          conflicted = true;
-          continue;
-        }
         if (diskHash === desired) {
           entryFiles[rel] = desired;
           if (locked === void 0) res.written.push({ key: it.key, path: rel });
           continue;
         }
         atomicWrite(abs, buf);
-        wrote = true;
-        entryFiles[rel] = desired;
-        res.written.push({ key: it.key, path: rel });
         if (locked !== void 0 && diskHash !== locked) {
           res.overwritten.push({ key: it.key, path: rel });
         }
       } else {
         atomicWrite(abs, buf);
-        wrote = true;
-        entryFiles[rel] = desired;
-        res.written.push({ key: it.key, path: rel });
+        if (st && locked !== void 0) res.overwritten.push({ key: it.key, path: rel });
       }
+      wrote = true;
+      entryFiles[rel] = desired;
+      res.written.push({ key: it.key, path: rel });
     }
-    if (existing) {
-      for (const rel of Object.keys(existing.files)) {
-        if (!it.output.has(rel)) {
-          removeFile(safeJoin(root, rel), touched(root));
-          removedFile = true;
-        }
-      }
-    }
+    if (removeItemFiles(it.key, root, removals, touched(root), res)) removedFile = true;
     if (Object.keys(entryFiles).length > 0) {
       newLock[it.key] = withVia({ source: it.source, version: it.version, files: entryFiles }, it);
     }
@@ -8096,9 +8102,7 @@ function apply(plan, opts) {
     }
     if (!oldLock[key].block) {
       const root = rootFor(key);
-      for (const rel of Object.keys(oldLock[key].files)) {
-        removeFile(safeJoin(root, rel), touched(root));
-      }
+      removeItemFiles(key, root, Object.keys(oldLock[key].files), touched(root), res);
     }
     if (!oldLock[key].skipped) res.removed.push(key);
   }
@@ -8135,8 +8139,56 @@ function safeJoin(root, rel) {
   }
   return abs;
 }
+function ownPath(key) {
+  const colon = key.indexOf(":");
+  const slash = key.indexOf("/");
+  return colon !== -1 && (slash === -1 || colon < slash) ? key.slice(colon + 1) : key;
+}
+function lstatOrUndefined(abs) {
+  try {
+    return lstatSync4(abs, { throwIfNoEntry: false });
+  } catch (err) {
+    if (err.code === "ENOTDIR") return void 0;
+    throw err;
+  }
+}
+function inspect(root, rel, own) {
+  const parts = relative3(root, safeJoin(root, rel)).split(sep3);
+  const ownParts = own.split("/");
+  const under2 = parts.length > ownParts.length && ownParts.every((p, i) => p === parts[i]);
+  const first = under2 ? ownParts.length - 1 : parts.length - 1;
+  for (let i = first; i < parts.length; i++) {
+    const st = lstatOrUndefined(join10(root, ...parts.slice(0, i + 1)));
+    if (!st) return { kind: "absent" };
+    if (i < parts.length - 1) {
+      if (!st.isDirectory()) return { kind: "blocked", path: parts.slice(0, i + 1).join("/"), link: st.isSymbolicLink() };
+    } else if (st.isSymbolicLink()) {
+      return { kind: "link" };
+    } else {
+      return { kind: st.isFile() ? "file" : "other" };
+    }
+  }
+  return { kind: "absent" };
+}
+function removeItemFiles(key, root, files, dirsTouched, res) {
+  const own = ownPath(key);
+  let removed = false;
+  for (const rel of files) {
+    const at = inspect(root, rel, own);
+    if (at.kind === "blocked") {
+      if (at.link && !res.leftInPlace.some((l) => l.key === key && l.path === at.path)) {
+        res.leftInPlace.push({ key, path: at.path });
+      }
+    } else if (at.kind === "file" || at.kind === "link") {
+      removeFile(safeJoin(root, rel), dirsTouched);
+      removed = true;
+    }
+  }
+  return removed;
+}
 function removeFile(abs, dirsTouched) {
-  if (existsSync7(abs)) {
+  const st = lstatOrUndefined(abs);
+  if (st && !st.isDirectory()) {
     rmSync4(abs, { force: true });
     dirsTouched.add(dirname3(abs));
   }
@@ -8145,7 +8197,8 @@ function pruneEmptyDirs(dirs, root) {
   const sorted = [...dirs].sort((a, b) => b.length - a.length);
   for (let dir of sorted) {
     while (dir !== root && dir.startsWith(root + sep3)) {
-      if (!existsSync7(dir) || readdirSync2(dir).length > 0) break;
+      const st = lstatOrUndefined(dir);
+      if (!st?.isDirectory() || readdirSync2(dir).length > 0) break;
       rmdirSync(dir);
       dir = dirname3(dir);
     }
@@ -8632,7 +8685,7 @@ function sourceVersion(lock, sourceName) {
   return void 0;
 }
 function userClaudeEntries(claudeDir, stateRoot) {
-  const rel = relative3(claudeDir, stateRoot);
+  const rel = relative4(claudeDir, stateRoot);
   const under2 = rel !== "" && !rel.startsWith("..") && !isAbsolute2(rel);
   return ["skilletor.lock.json", ...under2 ? [rel.split(sep4).join("/") + "/"] : [], ...LOCAL_ENTRIES];
 }
@@ -8831,10 +8884,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
         const placed = placeOutput(h, item.type, planItem.output);
         planItem.output = placed.output;
         if (placed.claims.length) planItem.claims = placed.claims;
-        if (item.type === "skill" && gitignoreOn) {
-          planItem.output = withSkillGitignore(planItem.output, item.name);
-          planItem.attached = [skillGitignorePath(item.name)];
-        }
+        if (item.type === "skill" && gitignoreOn) planItem.output = withSkillGitignore(planItem.output, item.name);
       }
       plan.push(planItem);
     }
@@ -8956,7 +9006,7 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
     rep.warnings.push(`bundle vars conflict on ${k} set different values; neither applies to ${items.join(", ")}`);
   }
   const labelOf = (abs) => {
-    const rel = relative3(base, abs);
+    const rel = relative4(base, abs);
     return rel.startsWith("..") || isAbsolute2(rel) ? abs : rel;
   };
   const result = apply(plan, {
@@ -9015,6 +9065,9 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   };
   rep.conflicts = result.conflicts.map((c) => c.replace ? { ...shown(c), replace: c.replace } : shown(c));
   rep.overwritten = [...result.overwritten.map(shown), ...rules.overwritten.map((path) => ({ path }))];
+  for (const l of result.leftInPlace) {
+    rep.warnings.push(`${shown(l).path} is a symbolic link: files of ${l.key} behind it left in place (never deleted through a link)`);
+  }
   const briefing = briefingOf(ctx, scope, readLock(lockPath));
   for (const b of briefing) rep.warnings.push(briefingWarning(parseLockKey(b.key).name, b.harness, b.missing));
   if (briefing.length) rep.briefingMissing = briefing;
@@ -9024,7 +9077,7 @@ function projectInUse(targetDir, lock) {
   return Object.keys(lock).length > 0 || existsSync11(join14(targetDir, "skilletor.json")) || existsSync11(join14(targetDir, "skilletor.local.json"));
 }
 function scopeLabel(scope, base, abs) {
-  const rel = relative3(base, abs);
+  const rel = relative4(base, abs);
   if (rel.startsWith("..") || isAbsolute2(rel)) return abs;
   const shown = rel.split(sep4).join("/");
   return scope === "user" ? `~/${shown}` : shown;

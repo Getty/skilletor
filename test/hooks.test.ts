@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
@@ -37,6 +37,27 @@ function localSkill(root: string, srcName: string, skill: string): string {
   writeFileSync(join(dir, "SKILL.md"), `---\nname: ${skill}\ndescription: ${skill}\n---\nBODY\n`);
   return resolvePath(join(root, srcName));
 }
+
+// k67 (spec §6.3): the hook's sync never writes through a linked skill dir, and says so.
+test("session-start with a linked skill dir of the same name: a conflict warning, nothing written through it", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    writeFileSync(join(src, "skills/foo/reference.md"), "REF\n"); // a file the linked skill lacks
+    const outside = join(e.tmp.dir, "foreign");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "SKILL.md"), "FOREIGN\n");
+    mkdirSync(join(e.home, ".claude/skills"), { recursive: true });
+    symlinkSync(outside, join(e.home, ".claude/skills/foo"));
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    const out = await runHook("session-start", { source: "startup" }, e.ctx);
+    assert.equal(out.systemMessage, "skilletor: 1 warning(s)"); // the conflict; no item installed
+    assert.deepEqual(readdirSync(outside), ["SKILL.md"]);
+    assert.equal(readFileSync(join(outside, "SKILL.md"), "utf8"), "FOREIGN\n");
+  } finally {
+    e.cleanup();
+  }
+});
 
 test("session-start is silent with nothing declared", async () => {
   const e = env();

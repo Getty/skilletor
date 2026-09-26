@@ -484,10 +484,8 @@ async function syncScope(
         const placed = placeOutput(h, item.type, planItem.output);
         planItem.output = placed.output;
         if (placed.claims.length) planItem.claims = placed.claims;
-        if (item.type === "skill" && gitignoreOn) {
-          planItem.output = withSkillGitignore(planItem.output, item.name);
-          planItem.attached = [skillGitignorePath(item.name)];
-        }
+        // A conflict blocks the whole item: this file never lands in a foreign skill dir.
+        if (item.type === "skill" && gitignoreOn) planItem.output = withSkillGitignore(planItem.output, item.name);
       }
       plan.push(planItem);
     }
@@ -712,6 +710,9 @@ async function syncScope(
   };
   rep.conflicts = result.conflicts.map((c) => (c.replace ? { ...shown(c), replace: c.replace } : shown(c)));
   rep.overwritten = [...result.overwritten.map(shown), ...rules.overwritten.map((path) => ({ path }))];
+  for (const l of result.leftInPlace) {
+    rep.warnings.push(`${shown(l).path} is a symbolic link: files of ${l.key} behind it left in place (never deleted through a link)`);
+  }
 
   // Briefing check (spec §6.7): every agent the lock holds now, from its installed file.
   const briefing = briefingOf(ctx, scope, readLock(lockPath));

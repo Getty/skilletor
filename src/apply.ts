@@ -2,19 +2,23 @@
 //
 // Compares each item's built output against disk and the lock, writes only
 // differences (atomically), removes files an item no longer contains, and
-// deletes items no longer declared. Foreign paths (present but not in the lock)
-// are never overwritten without --force; a foreign file at a path an item only
-// claims blocks the whole item (--force deletes it). Managed files that drifted
-// from their lock hash are overwritten and reported. `apply` knows nothing about
-// sources.
-import { existsSync, readFileSync, readdirSync, rmdirSync, rmSync } from "node:fs";
-import { dirname, join, resolve as resolvePath, sep } from "node:path";
+// deletes items no longer declared. Every path of an item is checked before its
+// first write: a foreign path (present but not in the lock) or a symbolic link at
+// or below the item's own path blocks the whole item – nothing of it is written or
+// removed – unless --force adopts the file, replaces the link or deletes the file
+// at a claimed path. Nothing is ever written or deleted through such a link; links
+// above the item's path (a linked `skills` dir) are followed. Managed files that
+// drifted from their lock hash are overwritten and reported. `apply` knows nothing
+// about sources.
+import { existsSync, lstatSync, readFileSync, readdirSync, rmdirSync, rmSync, type Stats } from "node:fs";
+import { dirname, join, relative, resolve as resolvePath, sep } from "node:path";
 import type { ItemType } from "./config.ts";
 import { atomicWrite, hashBuffer } from "./fsutil.ts";
 import { readLock, serializeLock, writeLock, type Lock, type LockEntry, type SkipReason } from "./lock.ts";
 
 export interface PlanItem {
-  /** Lock key: "<typedir>/<name>", e.g. "skills/perl-moo". */
+  /** Lock key: "[<prefix>:]<typedir>/<name>", e.g. "skills/perl-moo". Without the
+   *  prefix it is the item's own path under its root (spec §6.3): a skill's directory. */
   key: string;
   type: ItemType;
   name: string;
@@ -33,13 +37,8 @@ export interface PlanItem {
   via?: string[];
   /** Paths the item claims without writing them (an agent's plain file name next to
    *  its `.local.` file, spec §6.3). A file there that the item's lock entry does not
-   *  own is a conflict: nothing of the item is written and its lock entry stays as it
-   *  was. With `force` that file is deleted instead. */
+   *  own is a conflict like any other; with `force` it is deleted instead of adopted. */
   claims?: string[];
-  /** Output paths written only into a directory that is the item's: when another path
-   *  of the item conflicts, one the lock does not own yet is left out (a skill's own
-   *  `.gitignore` must not land in a hand-written or linked skill, spec §6.4). */
-  attached?: string[];
 }
 
 export interface ApplyOptions {
@@ -63,12 +62,17 @@ export interface ApplyResult {
   unchanged: string[];
   /** Plan items marked skipped (also in `removed` if files were deleted). */
   skipped: string[];
-  /** `replace`: a claimed path, which `force` deletes rather than adopts. */
+  /** A conflict blocks its whole item (spec §6.3). `replace`: a claimed path, or a link
+   *  (or file) where the item needs a directory – `force` deletes it rather than adopts. */
   conflicts: { key: string; path: string; replace?: true }[];
   overwritten: { key: string; path: string }[];
   /** Paths written this run, or adopted into the lock with `force` (spec §6.4: the
    *  tracked-file check looks at these only). */
   written: { key: string; path: string }[];
+  /** Symbolic links at or below the path of an item being removed (no longer declared,
+   *  or skipped): the lock-owned files behind them were not deleted, and the lock lets
+   *  go of them (spec §6.3). One entry per item and link. */
+  leftInPlace: { key: string; path: string }[];
 }
 
 export class ApplyError extends Error {
@@ -89,6 +93,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
   const newLock: Lock = {};
   const res: ApplyResult = {
     added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [], written: [],
+    leftInPlace: [],
   };
   const dirsTouched = new Map<string, Set<string>>(); // root -> dirs deleted from
   const rootFor = (key: string): string => resolvePath(opts.rootOf ? opts.rootOf(key) : targetDir);
@@ -110,7 +115,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
     if (it.skipped) {
       // Owns no paths: delete only what the lock says we installed.
       const files = Object.keys(oldLock[it.key]?.files ?? {});
-      for (const rel of files) removeFile(safeJoin(root, rel), touched(root));
+      removeItemFiles(it.key, root, files, touched(root), res);
       if (files.length > 0) res.removed.push(it.key);
       res.skipped.push(it.key);
       newLock[it.key] = withVia({ source: it.source, version: it.version, files: {}, skipped: it.skipped }, it);
@@ -118,39 +123,60 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
     }
     // A previous skip entry owns nothing: treat the item as not yet installed.
     const existing = oldLock[it.key]?.skipped ? undefined : oldLock[it.key];
-    // Claimed paths: one the lock entry owns (an earlier layout) goes with the diff below.
-    const foreign = (it.claims ?? []).filter(
-      (rel) => existing?.files[rel] === undefined && existsSync(safeJoin(root, rel)),
-    );
-    if (foreign.length > 0 && !opts.force) {
-      for (const rel of foreign) res.conflicts.push({ key: it.key, path: rel, replace: true });
+    const owned = (rel: string): boolean => existing?.files[rel] !== undefined;
+    const own = ownPath(it.key);
+    const removals = Object.keys(existing?.files ?? {}).filter((rel) => !it.output.has(rel));
+
+    // Check every path of the item before its first write (spec §6.3). A soft conflict
+    // blocks the item unless `force`; a hard one (a directory where a file goes, which
+    // is never deleted) blocks it with `force` too.
+    const found: { c: { key: string; path: string; replace?: true }; hard: boolean }[] = [];
+    // Deleted before the writes: the item's own files where it now has a directory, and
+    // with force the links/files in the way and foreign files at claimed paths.
+    const deleteFirst: string[] = [];
+    const conflict = (path: string, hard: boolean, replace: boolean): void => {
+      if (found.some((f) => f.c.path === path)) return;
+      found.push({ c: replace ? { key: it.key, path, replace: true } : { key: it.key, path }, hard });
+      if (replace && !hard) deleteFirst.push(path);
+    };
+    const claims = new Set(it.claims ?? []);
+    for (const rel of new Set([...claims, ...it.output.keys(), ...removals])) {
+      const at = inspect(root, rel, own);
+      const isOutput = it.output.has(rel);
+      if (at.kind === "blocked") {
+        // A link, or a file, where the item needs a directory: a conflict – unless it is
+        // one of the item's own files (the source turned it into a directory).
+        if (at.link || !owned(at.path)) conflict(at.path, false, true);
+        else if (!deleteFirst.includes(at.path)) deleteFirst.push(at.path);
+      } else if (!isOutput && !claims.has(rel)) {
+        continue; // only a removal: done after the writes
+      } else if (at.kind === "other" && (isOutput || !owned(rel))) {
+        conflict(rel, true, false);
+      } else if ((at.kind === "file" || at.kind === "link") && !owned(rel)) {
+        conflict(rel, false, !isOutput);
+      }
+    }
+    const blocking = found.filter((f) => f.hard || !opts.force).map((f) => f.c);
+    if (blocking.length > 0) {
+      res.conflicts.push(...blocking);
       if (oldLock[it.key]) newLock[it.key] = oldLock[it.key]!; // left as it was
       res.unchanged.push(it.key);
       continue;
     }
-    for (const rel of foreign) removeFile(safeJoin(root, rel), touched(root));
+    for (const rel of deleteFirst) removeFile(safeJoin(root, rel), touched(root));
+
     const entryFiles: Record<string, string> = {};
     let wrote = false;
     let removedFile = false;
-    let conflicted = false;
-    const attached = new Set(it.attached ?? []);
-    const ordered = [...it.output].sort(([a], [b]) => Number(attached.has(a)) - Number(attached.has(b)));
 
-    for (const [rel, buf] of ordered) {
+    for (const [rel, buf] of it.output) {
       const abs = safeJoin(root, rel);
       const desired = hashBuffer(buf);
       const locked = existing?.files[rel];
-      if (conflicted && locked === undefined && attached.has(rel)) continue;
-      const onDisk = existsSync(abs);
+      const st = lstatOrUndefined(abs);
 
-      if (onDisk) {
+      if (st?.isFile()) {
         const diskHash = hashBuffer(readFileSync(abs));
-        if (locked === undefined && !opts.force) {
-          // Foreign, unmanaged path: never clobbered.
-          res.conflicts.push({ key: it.key, path: rel });
-          conflicted = true;
-          continue;
-        }
         if (diskHash === desired) {
           // Already correct; adopt into the lock (updates a stale hash silently).
           entryFiles[rel] = desired;
@@ -158,29 +184,22 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
           continue;
         }
         atomicWrite(abs, buf);
-        wrote = true;
-        entryFiles[rel] = desired;
-        res.written.push({ key: it.key, path: rel });
         if (locked !== undefined && diskHash !== locked) {
           res.overwritten.push({ key: it.key, path: rel }); // local drift
         }
       } else {
+        // Missing, or a link the lock owns (or `force` adopts): the rename replaces the
+        // link itself, its target stays untouched.
         atomicWrite(abs, buf);
-        wrote = true;
-        entryFiles[rel] = desired;
-        res.written.push({ key: it.key, path: rel });
+        if (st && locked !== undefined) res.overwritten.push({ key: it.key, path: rel });
       }
+      wrote = true;
+      entryFiles[rel] = desired;
+      res.written.push({ key: it.key, path: rel });
     }
 
     // Files this item no longer contains but the lock still tracks.
-    if (existing) {
-      for (const rel of Object.keys(existing.files)) {
-        if (!it.output.has(rel)) {
-          removeFile(safeJoin(root, rel), touched(root));
-          removedFile = true;
-        }
-      }
-    }
+    if (removeItemFiles(it.key, root, removals, touched(root), res)) removedFile = true;
 
     if (Object.keys(entryFiles).length > 0) {
       newLock[it.key] = withVia({ source: it.source, version: it.version, files: entryFiles }, it);
@@ -206,9 +225,7 @@ export function apply(plan: PlanItem[], opts: ApplyOptions): ApplyResult {
     }
     if (!oldLock[key]!.block) {
       const root = rootFor(key);
-      for (const rel of Object.keys(oldLock[key]!.files)) {
-        removeFile(safeJoin(root, rel), touched(root));
-      }
+      removeItemFiles(key, root, Object.keys(oldLock[key]!.files), touched(root), res);
     }
     if (!oldLock[key]!.skipped) res.removed.push(key); // a skip entry had nothing installed
   }
@@ -255,19 +272,90 @@ function safeJoin(root: string, rel: string): string {
   return abs;
 }
 
+/** The item's own path under its root: the lock key without a `<prefix>:`. */
+function ownPath(key: string): string {
+  const colon = key.indexOf(":");
+  const slash = key.indexOf("/");
+  return colon !== -1 && (slash === -1 || colon < slash) ? key.slice(colon + 1) : key;
+}
+
+/** lstat that answers `undefined` for a missing path (also below a non-directory). */
+function lstatOrUndefined(abs: string): Stats | undefined {
+  try {
+    return lstatSync(abs, { throwIfNoEntry: false });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOTDIR") return undefined;
+    throw err;
+  }
+}
+
+type PathState =
+  | { kind: "absent" | "file" | "link" | "other" }
+  /** A component at or below the item's own path that is a link or no directory. */
+  | { kind: "blocked"; path: string; link: boolean };
+
+/**
+ * What is at `rel` (spec §6.3), looking at every component from the item's own path
+ * down without following links: `skills/foo` and everything under it for a skill, only
+ * the file itself for a file outside that path (an agent). Components above are the
+ * user's setup and followed. `link`: the path itself is a link; `other`: a directory
+ * or special file where a file belongs.
+ */
+function inspect(root: string, rel: string, own: string): PathState {
+  const parts = relative(root, safeJoin(root, rel)).split(sep);
+  const ownParts = own.split("/");
+  const under = parts.length > ownParts.length && ownParts.every((p, i) => p === parts[i]);
+  const first = under ? ownParts.length - 1 : parts.length - 1;
+  for (let i = first; i < parts.length; i++) {
+    const st = lstatOrUndefined(join(root, ...parts.slice(0, i + 1)));
+    if (!st) return { kind: "absent" };
+    if (i < parts.length - 1) {
+      if (!st.isDirectory()) return { kind: "blocked", path: parts.slice(0, i + 1).join("/"), link: st.isSymbolicLink() };
+    } else if (st.isSymbolicLink()) {
+      return { kind: "link" };
+    } else {
+      return { kind: st.isFile() ? "file" : "other" };
+    }
+  }
+  return { kind: "absent" };
+}
+
+/** Delete an item's lock-owned files – a link there itself, never through a link at or
+ *  below the item's path (reported in `leftInPlace`). True if anything was deleted. */
+function removeItemFiles(key: string, root: string, files: string[], dirsTouched: Set<string>, res: ApplyResult): boolean {
+  const own = ownPath(key);
+  let removed = false;
+  for (const rel of files) {
+    const at = inspect(root, rel, own);
+    if (at.kind === "blocked") {
+      if (at.link && !res.leftInPlace.some((l) => l.key === key && l.path === at.path)) {
+        res.leftInPlace.push({ key, path: at.path });
+      }
+    } else if (at.kind === "file" || at.kind === "link") {
+      removeFile(safeJoin(root, rel), dirsTouched);
+      removed = true;
+    }
+  }
+  return removed;
+}
+
+/** Delete a file or link (never a directory, never through the final link). */
 function removeFile(abs: string, dirsTouched: Set<string>): void {
-  if (existsSync(abs)) {
+  const st = lstatOrUndefined(abs);
+  if (st && !st.isDirectory()) {
     rmSync(abs, { force: true });
     dirsTouched.add(dirname(abs));
   }
 }
 
-/** Remove now-empty directories we deleted from, walking up to (not incl.) root. */
+/** Remove now-empty directories we deleted from, walking up to (not incl.) root; a link
+ *  on the way (a linked `skills` dir) ends the walk. */
 function pruneEmptyDirs(dirs: Set<string>, root: string): void {
   const sorted = [...dirs].sort((a, b) => b.length - a.length); // deepest first
   for (let dir of sorted) {
     while (dir !== root && dir.startsWith(root + sep)) {
-      if (!existsSync(dir) || readdirSync(dir).length > 0) break;
+      const st = lstatOrUndefined(dir);
+      if (!st?.isDirectory() || readdirSync(dir).length > 0) break;
       rmdirSync(dir);
       dir = dirname(dir);
     }

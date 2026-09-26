@@ -298,7 +298,20 @@ other entry while its source cannot be resolved.
 
 - If a target path exists that is **not** in the lock (a hand-written skill, a
   manage-skills link), it is never overwritten → conflict in the report; `--force`
-  adopts it.
+  adopts it. A conflict blocks the **whole item** (k67): none of its files is written or
+  removed, and an installed copy stays as it was (files and lock entry) – so a
+  hand-written or linked skill of the same name never gets skilletor files mixed into it.
+- **Links.** skilletor never writes or deletes through a symbolic link at or below the
+  item's own path. A skill directory `skills/<name>` (or a directory inside it) that is a
+  link is a conflict even when the lock owns files in it; `--force` removes the link
+  itself – its target stays untouched – and installs the item as a real directory. A
+  linked file the lock owns is replaced as a file (the link, not its target); one it does
+  not own is an ordinary conflict. Links above the item's path (`~/.claude/skills` or
+  `~/.claude/agents` linked into a dotfiles checkout) are the user's setup and are written
+  through as before. Every path of an item is checked before its first write. A directory
+  where the item has a file is a conflict even with `--force` – skilletor never deletes a
+  directory tree it does not own. Files of an undeclared item that sit behind such a link
+  are left in place with one warning, and the lock drops the entry.
 - Installed agent and rule files carry the prefix `.local.` (§6.4):
   `agents/.local.<name>.md`, `rules/.local.<name>.md`; a nested rule prefixes its file
   name (`rules/lang/.local.perl.md`). Such an item still claims its **plain** path: a
