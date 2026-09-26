@@ -26,12 +26,15 @@ engine.ts     sync / check / status pipeline          hooks.ts     SessionStart 
 report.ts     text / json / hook output               targets.ts   harness detection, LAYOUTS, lock keys
 convert.ts    agent Markdown → Codex TOML             agentsmd.ts  Codex rules file, AGENTS.md pointer, hook trust
 frontmatter.ts  YAML subset reader                    toml.ts      TOML writer (no dependency)
-fsutil.ts     hash, atomicWrite
+fsutil.ts     hash, atomicWrite                       gitenv.ts    gitEnv(): the env of every git run
 ```
 
 - `sources/*` knows nothing about templating; `render` nothing about the
   target filesystem; `apply` nothing about sources. A change that makes one of
   them import the other is a design change — file a ticket, don't sneak it in.
+- Every git run is `execFile*` (no shell) with `env: gitEnv()` — never `{...process.env}`:
+  an exported `GIT_DIR` (a git hook, `rebase -x`) would aim a cache's `reset --hard` at
+  that repository. A user's address or ref goes after `--`.
 - Everything a backend needs (probe, timeout, cache root, `home`, `codexHome`,
   harness `markers`, `isGitWorkTree`) is injected through `EngineContext`; tests rely
   on that to run against temp directories and never look at the real machine. Every
@@ -106,6 +109,7 @@ wording honest when adding item types or changing the report.
 
 ```bash
 npm run typecheck && npm test        # node:test, temp dirs
+node --test --import ./test/setup.ts test/<file>.test.ts   # one file; setup.ts drops GIT_DIR & co.
 npm run build && npm run check-dist  # dist/skilletor.js is committed; CI diffs it
 ```
 
