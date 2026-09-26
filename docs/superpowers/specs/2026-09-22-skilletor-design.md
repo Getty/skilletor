@@ -236,10 +236,10 @@ of one URL never share a checkout, and caches written before 0.3.1 are not reuse
 explicit ref (the first resolve fetches again; offline, that source counts as unresolvable
 and keeps its items, §6.1). Offline, a SHA pin is served from cache only if the cached
 commit is the pin; a ref shorter than a full SHA that names no other commit there (a tag or
-branch named like a date) is taken as a name (k69). Git gets the address and the ref after
-`--`, never as an option (k85). A git killed midway (a hook timeout, a crash) can leave its
-lock files in the cache; the next run that takes the sync lock removes them once stale
-(§6.5, k84).
+branch named like a date) is taken as a name (k69). Names with one URL and ref share the
+cache and a sync's one fetch of it (§6.1, k83). Git gets the address and the ref after `--`,
+never as an option (k85). A git killed midway (a hook timeout, a crash) can leave its lock
+files in the cache; the next run that takes the sync lock removes them once stale (§6.5, k84).
 
 ## 5. Templating
 
@@ -281,7 +281,9 @@ can therefore switch individual items on and off per user, project or local conf
 ### 6.1 `sync` pipeline (per scope, user before project)
 
 1. Load, merge, validate config.
-2. Resolve sources (in parallel) → local directory + version per source.
+2. Resolve sources (in parallel) → local directory + version per source. A run resolves each
+   backend once, for every name and scope that uses it, so two gits never work one cache at
+   once; a `url` download is shared only by names that send the same ETag (k83).
 3. Expand wildcards against each resolved source's catalog (overlap rules in §3), then
    **build each declared item in memory** (render or copy). An item whose main template
    renders empty (§5) is marked skipped instead; its installed files are removed in step 4.

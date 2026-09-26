@@ -27,7 +27,7 @@ import { convertForTarget } from "./convert.ts";
 import { expandHome, LocalSource } from "./sources/local.ts";
 import { GitSource, sweepGitCache } from "./sources/git.ts";
 import { sweepUrlCache, UrlSource } from "./sources/url.ts";
-import type { Source } from "./sources/types.ts";
+import type { Source, SourceLocation } from "./sources/types.ts";
 import { scan, type Catalog } from "./catalog.ts";
 import { build, rendersEmpty, type RenderContext } from "./render.ts";
 import { apply, isValidItemName, type PlanItem } from "./apply.ts";
@@ -185,6 +185,32 @@ export function makeBackend(backend: ResolvedBackend, cacheRoot: string, timeout
     case "url":
       return new UrlSource({ url: backend.address, cacheRoot, timeoutMs });
   }
+}
+
+/** Resolve a backend, sending `version` (the lock's) to it. */
+type Resolver = (backend: ResolvedBackend, version: string | undefined) => Promise<SourceLocation>;
+
+/**
+ * A sync's resolver (spec §6.1, k83): each backend is resolved once per run, and every source
+ * name that uses it – in either scope – gets that one result. Names with one git URL and ref
+ * share one cache dir (§4.4), and a sync resolves in parallel: two gits must never work one
+ * cache at once. The key is the backend identity, which names one cache; for `url` also the
+ * version handed in – its `If-None-Match`, and what a fallback to the cache reports – so a 304
+ * only ever answers an ETag every sharer holds (git and local ignore the version). Made per
+ * run under the sync lock, never kept: a later run fetches again.
+ */
+function runResolver(cacheRoot: string, timeoutMs?: number): Resolver {
+  const runs = new Map<string, Promise<SourceLocation>>();
+  return (backend, version) => {
+    const sent = backend.kind === "url" ? version ?? null : null;
+    const key = JSON.stringify([backend.kind, backend.address, backend.ref ?? null, sent]);
+    let run = runs.get(key);
+    if (!run) {
+      run = makeBackend(backend, cacheRoot, timeoutMs).resolve(version);
+      runs.set(key, run);
+    }
+    return run;
+  };
 }
 
 /** The sources a scope resolves against (spec §3): the user config's alone for the user
@@ -350,11 +376,12 @@ async function syncInner(ctx: EngineContext, opts: SyncOptions, state: State): P
   const { config, targets } = loaded;
   const sel = opts.scope ?? "all";
   const report: SyncReport = { scopes: [] };
+  const resolveSource = runResolver(cacheRootOf(ctx), ctx.timeoutMs);
   if (sel === "user" || sel === "all") {
-    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state));
+    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, resolveSource));
   }
   if ((sel === "project" || sel === "all") && config.project) {
-    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state);
+    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, resolveSource);
     rep.warnings.unshift(...targets.warnings);
     report.scopes.push(rep);
   }
@@ -389,9 +416,10 @@ async function syncScope(
   harnesses: Harness[],
   opts: SyncOptions,
   state: State,
+  resolveSource: Resolver,
 ): Promise<ScopeReport> {
   try {
-    return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state);
+    return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource);
   } catch (err) {
     try {
       const lockPath = join(targetDirOf(ctx, scope), "skilletor.lock.json");
@@ -412,18 +440,19 @@ async function syncScopeRun(
   harnesses: Harness[],
   opts: SyncOptions,
   state: State,
+  resolveSource: Resolver,
 ): Promise<ScopeReport> {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
   const base = baseOf(ctx, scope);
   const rc: RootContext = { base, scope, codexHome: codexHomeOf(ctx) };
-  const cacheRoot = cacheRootOf(ctx);
   const lockPath = join(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const gitignoreOn = scopeCfg.gitignore !== false;
 
   // Resolve every needed source in parallel (skip untrusted, warn on failure). The trust
-  // check and the fetch use the one resolved backend (spec §3, §4.3).
+  // check and the fetch use the one resolved backend (spec §3, §4.3); names that share a
+  // backend share the run's one resolve of it (k83).
   const needed = scopeSources(scopeCfg);
   const sources = sourcesOf(config, scope);
   const resolved = new Map<string, { dir: string; version: string; backend: ResolvedBackend } | null>();
@@ -442,8 +471,9 @@ async function syncScopeRun(
           resolved.set(name, null);
           return;
         }
-        const loc = await makeBackend(backend, cacheRoot, ctx.timeoutMs).resolve(sourceVersion(oldLock, name));
-        if (loc.warning) rep.warnings.push(loc.warning);
+        const loc = await resolveSource(backend, sourceVersion(oldLock, name));
+        // A shared resolve's warning (a fetch that fell back to the cache) is named once.
+        if (loc.warning && !rep.warnings.includes(loc.warning)) rep.warnings.push(loc.warning);
         resolved.set(name, { dir: loc.dir, version: loc.version, backend });
       } catch (err) {
         rep.warnings.push(`source ${name}: ${(err as Error).message}`);

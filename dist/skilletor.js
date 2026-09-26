@@ -9071,6 +9071,19 @@ function makeBackend(backend, cacheRoot, timeoutMs) {
       return new UrlSource({ url: backend.address, cacheRoot, timeoutMs });
   }
 }
+function runResolver(cacheRoot, timeoutMs) {
+  const runs = /* @__PURE__ */ new Map();
+  return (backend, version) => {
+    const sent = backend.kind === "url" ? version ?? null : null;
+    const key = JSON.stringify([backend.kind, backend.address, backend.ref ?? null, sent]);
+    let run2 = runs.get(key);
+    if (!run2) {
+      run2 = makeBackend(backend, cacheRoot, timeoutMs).resolve(version);
+      runs.set(key, run2);
+    }
+    return run2;
+  };
+}
 function sourcesOf(config, scope) {
   return scope === "user" ? config.userSources : config.sources;
 }
@@ -9169,11 +9182,12 @@ async function syncInner(ctx, opts, state) {
   const { config, targets } = loaded;
   const sel = opts.scope ?? "all";
   const report = { scopes: [] };
+  const resolveSource = runResolver(cacheRootOf(ctx), ctx.timeoutMs);
   if (sel === "user" || sel === "all") {
-    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state));
+    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, resolveSource));
   }
   if ((sel === "project" || sel === "all") && config.project) {
-    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state);
+    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, resolveSource);
     rep.warnings.unshift(...targets.warnings);
     report.scopes.push(rep);
   }
@@ -9187,9 +9201,9 @@ function hookTrustWarning(ctx, targets) {
   if (codexHookTrusted(codexHome)) return void 0;
   return `Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${join14(codexHome, "config.toml")}); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules`;
 }
-async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
+async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource) {
   try {
-    return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state);
+    return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource);
   } catch (err) {
     try {
       const lockPath = join14(targetDirOf(ctx, scope), "skilletor.lock.json");
@@ -9200,12 +9214,11 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
     throw err;
   }
 }
-async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state) {
+async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource) {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
   const base = baseOf(ctx, scope);
   const rc = { base, scope, codexHome: codexHomeOf(ctx) };
-  const cacheRoot = cacheRootOf(ctx);
   const lockPath = join14(targetDir, "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const gitignoreOn = scopeCfg.gitignore !== false;
@@ -9227,8 +9240,8 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
           resolved.set(name, null);
           return;
         }
-        const loc = await makeBackend(backend, cacheRoot, ctx.timeoutMs).resolve(sourceVersion(oldLock, name));
-        if (loc.warning) rep.warnings.push(loc.warning);
+        const loc = await resolveSource(backend, sourceVersion(oldLock, name));
+        if (loc.warning && !rep.warnings.includes(loc.warning)) rep.warnings.push(loc.warning);
         resolved.set(name, { dir: loc.dir, version: loc.version, backend });
       } catch (err) {
         rep.warnings.push(`source ${name}: ${err.message}`);
