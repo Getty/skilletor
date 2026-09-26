@@ -33,11 +33,16 @@ Where items land, under `~` (user scope) or the project root (project scope):
 
 `$CODEX_HOME` defaults to `~/.codex`. A file is managed when its path is in
 `<scope>/.claude/skilletor.lock.json` (Codex keys `codex:skills/<name>` etc.) — check the
-lock before editing; files not in it are yours. An agent or rule still claims its plain
-name: your own `agents/<name>.md` / `rules/<name>.md` (Codex: `agents/<name>.toml`) for a
-declared item is a conflict, the item is not installed, and `sync --force` deletes your
-file. In `AGENTS.md` only the pointer block between `<!-- skilletor:begin -->` and
-`<!-- skilletor:end -->` is managed.
+lock before editing; files not in it are yours. A conflict blocks the whole item (nothing
+of it is written or removed); `sync --force` adopts a file not in the lock, replaces a
+linked skill directory or item file (the link itself, never its target: nothing is written
+or deleted through it) and deletes your own `agents/<name>.md` / `rules/<name>.md`
+(Codex: `agents/<name>.toml`), as an agent or rule still claims its plain name. A directory
+where the item has a file (`is not a file`) stays a conflict even with `--force`: move or
+remove it yourself. Fixed by hand? `skilletor sync` installs the item now. A sync that
+stopped midway (a write error) keeps what it wrote; `status` marks the item `(partial: the
+last sync stopped midway)` and the next session resumes it. In `AGENTS.md` only the
+pointer block between `<!-- skilletor:begin -->` and `<!-- skilletor:end -->` is managed.
 
 ## Commands
 
@@ -54,10 +59,10 @@ skilletor trust <source>                  # confirm a project-declared source (s
 ```
 
 `add`, `install`, `uninstall` only edit `skilletor.json` (the single source of truth), then
-sync; `check` writes nothing, exits non-zero when a sync is due (a source moved, or the
-config no longer matches the lock; what the last sync could not install although its source
-was there counts once). `uninstall` edits one
-config; no explicit entry there → exit 1, config untouched, the error names what covers it.
+sync; `check` writes nothing, exits non-zero when a sync is due (a source moved, the config
+no longer matches the lock, the last sync stopped midway; what the last sync could not
+install although its source was there counts once). `uninstall` edits one config; no
+explicit entry there → exit 1, config untouched, the error names what covers it.
 An option a command does not list (`--project-dir` goes with all) → exit 2, nothing runs;
 `-h`/`--help` anywhere only prints usage; `-v`/`--version` only as the first argument.
 
