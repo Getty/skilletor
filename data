@@ -1,0 +1,26 @@
+---
+class: standard
+completed: 2026-09-26T15:56:15Z
+created: 2026-09-26T14:45:37Z
+id: 81
+priority: medium
+started: 2026-09-26T15:33:07Z
+status: done
+tags:
+- state
+- concurrency
+title: 'state: sync.lock can be broken while live (no owner yet, no heartbeat)'
+updated: 2026-09-26T15:56:24Z
+---
+
+Found during k74 (worker). src/state.ts withLock: isStale() treats a lock dir without owner.json as stale, so a run caught between mkdirSync and writeFileSync(owner.json) can be broken into and two runs hold the lock. No heartbeat either: a sync running longer than the stale age (300 s) can be joined by a second run. Since k74 every source-cache write and the url-cache sweep depend on this lock. Fix: treat a missing owner.json as stale only when the dir is older than a grace period (mtime), and refresh the owner/mtime periodically while held (or on each scope). Tests with a planted owner-less lock dir (fresh vs old) and a long-running holder.
+
+2026-09-26 15:44 Worker start. Read state.ts withLock, its tests (test/state.test.ts), commands.test.ts k74 lock tests, spec §6.5. Also found today: breaking is not race-free — two waiters that judged the same lock stale both rmSync; the later one removes the lock the earlier one just took. And release rmSync's unconditionally, so a holder whose lock was broken removes the new holder's lock. Plan: owner-record arbiter + heartbeat + identity-keyed tombstone break; details follow.
+
+2026-09-26 15:46 Tests first (test/state.test.ts mutex section, 7 new + 1 fixture change). Red on HEAD: owner-less fresh dir broken; long holder joined; late second breaker removes the new holder's lock (shown red with only the beforeBreak seam added to the old algorithm: A entered while B held); broken holder's release removes the replacing lock; dead owner not broken early; no tombstone. Design chosen: keep mkdir (rename-to-create is not exclusive: rename(2) onto an existing EMPTY dir replaces it on Linux and macOS, so it would replace an older skilletor's owner-less lock), make the owner.json write O_EXCL ('wx') the arbiter, heartbeat via utimes, staleness by owner.json mtime, break = rename to a tombstone named after the owner record's ino+mtime (a second breaker's rename onto the non-empty tombstone fails), release = token check then rename away.
+
+2026-09-26 15:53 Also found (not fixed, outside the card): (1) a holder stalled past the stale age (laptop sleep > 5 min) is still breakable by design; it could notice the loss (heartbeat sees a foreign token) and abort, which is not done. (2) SIGHUP/SIGTERM mid-sync skip finally and leave the lock; now cleared by the dead-owner rule after two missed refreshes (~20 s) instead of 5 min, with no signal handler. (3) skilletor <= 0.3.0 running alongside still judges by 'at' and breaks owner-less dirs at once (documented in spec 6.5). (4) Windows rename/rmdir semantics are unverified (not in CI).
+
+2026-09-26 15:53 Done: src/state.ts withLock rewritten. mkdir kept; owner.json created O_EXCL ('wx') as the arbiter; heartbeat utimes owner.json every 10 s (unref'd timer); stale = owner.json mtime unrefreshed > 300 s, or dead pid on this host after 2 missed refreshes; owner-less dir stale after 2 s grace (dir mtime), broken by rmdir; owned stale lock broken by rename to sync.lock.broken-<ino>-<mtime> (a second breaker's rename fails on the non-empty tombstone); release only on token match, renamed away first; holder sweeps sync.lock.* leftovers older than stale age. Test seams beforeBreak/afterMkdir in WithLockOptions. Tests: 8 new + 1 fixture change in test/state.test.ts, each mutation-checked (disable mechanism, matching test goes red); multi-process stress run 8x25, 0 overlaps (old code: 61-109). Spec 6.5 updated. dist rebuilt. Verify: typecheck, npm test 595/595, build, check-dist green.
+
+2026-09-26 15:56 Committed 25b2ac7: withLock rewritten with exclusive owner record, heartbeat refresh, grace period, dead-owner detection, tombstone break, leftover sweep. Spec §6.5 updated. typecheck/test/build/check-dist all green.
