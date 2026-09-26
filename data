@@ -1,0 +1,26 @@
+---
+class: standard
+completed: 2026-09-26T16:23:06Z
+created: 2026-09-26T14:45:47Z
+id: 83
+priority: low
+started: 2026-09-26T16:12:58Z
+status: done
+tags:
+- sources
+- cache
+- concurrency
+title: 'sources/git: two source names with the same URL and ref run git in one cache
+  at once'
+updated: 2026-09-26T16:23:20Z
+---
+
+Found during k74 (worker). Since k69 the git cache is keyed by URL and ref, so two source names declaring the same URL+ref share one cache dir. One sync resolves sources in parallel, so two git fetch/reset commands can run in the same repo concurrently (index.lock races, torn reset). url sources are safe because their publish step is synchronous. Fix: dedupe resolves per cache dir inside a sync (memoize the promise by cache path). Test: two names, same URL/ref, one sync → one fetch, both resolved.
+
+2026-09-26 16:16 Findings: syncScopeRun resolveAll runs resolves in parallel (Promise.all) - two names on one git URL+ref race in one cache. syncInner runs user then project scope sequentially (await), so no cross-scope race; available/install (commands.ts) resolve in sequential for-await loops, no race. check() never touches the cache (ls-remote/HEAD). Plan: per-run resolve memo created in syncInner (under the sync lock), keyed by backend identity (kind, address, ref) - plus, for url only, the version sent as If-None-Match, so a shared 304 only ever answers an ETag every sharer holds. Shared across scopes of one run too; a later run fetches again.
+
+2026-09-26 16:21 Also found (skilletor board, not fixed here): config accepts sources.X.ref = "" (gitField/NOT_IN_REF lets the empty string through). GitSource.cacheDir treats "" as unpinned (URL-only cache dir) while resolve fetches the empty ref (fetch -- origin ""), so an unpinned name and a ref:"" name on one URL share a cache dir but not a run resolve key (ref null vs "") - the k83 race survives for that odd config. Fix belongs in config (refuse an empty ref) or GitSource (treat "" consistently).
+
+2026-09-26 16:21 Done: src/engine.ts runResolver() - a per-run resolve memo made in syncInner (under the sync lock) and threaded through syncScope/syncScopeRun; key = JSON [kind, address, ref, url ? version : null]. git/local share one resolve per cache per run, across both scopes; url shares only among names handing in the same version (If-None-Match and fallback version), so a 304 never answers an ETag a name does not hold. A shared resolve's fallback warning is pushed once per scope. Scopes are sequential (no cross-scope race); available/install loops are sequential (untouched). Spec 4.4 + 6.1 step 2 one sentence each. Tests: test/shared-resolve.test.ts (4 cases, each failed before the fix - reproduced 'remote origin already exists' and shallow.lock races; mutation-checked the warning dedupe and the url version key). Verify: typecheck ok, npm test 603/603 pass, build + check-dist up to date.
+
+2026-09-26 16:23 Committed as 3989f59: engine: names sharing a source cache share one resolve per sync (k83)
