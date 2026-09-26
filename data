@@ -1,0 +1,24 @@
+---
+class: standard
+completed: 2026-09-26T14:27:12Z
+created: 2026-09-26T04:33:26Z
+id: 72
+priority: low
+started: 2026-09-26T14:21:05Z
+status: done
+tags:
+- report
+- hooks
+title: 'report: hook context does not list conflict paths'
+updated: 2026-09-26T14:27:22Z
+---
+
+Found during k67 (worker): the SessionStart hook's `systemMessage` counts conflicts among its warnings, but `additionalContext` never lists the conflicting paths (old behaviour in src/report.ts, reportHook). The model sees "1 warning(s)" and nothing to act on. Fix: add one context line per conflict (path + the --force hint, or the directory-at-file hint from k71), like trust requests and gitignore hints. Tests in test/report.test.ts and test/hooks.test.ts.
+
+2026-09-26 14:22 Cause confirmed in src/report.ts reportHook: systemMessage counts warnings + conflicts + trustRequests + overwritten, but the context loop emits only trustRequests, gitignore hints and warnings. overwritten has the same gap (counted, never listed) - covering it in this change. UserPromptSubmit: syncBackground -> toOutput -> reportHook, so the pending report goes through the same function. Plan: per scope, one context line per overwritten file and per conflict (path + conflictHint(c)), tagged with the scope since Claude paths are relative to .claude and ambiguous without it.
+
+2026-09-26 14:25 Also found (not fixed, outside the card): check counts a declared source as changed whenever the lock holds no entry for it - sourceVersion(oldLock, name) is undefined, backend.check(undefined) -> changed (src/engine.ts check loop ~L1071). So a local source whose only item is blocked by a lasting conflict makes every SessionStart sync again and repeat the conflict warning, although unreached.json holds missing:skills/foo@mine. Contradicts README 'a conflict ... does not count again until a sync runs anyway' (k70). Reproduced by hand: sync with a hand-written ~/.claude/skills/foo/SKILL.md, then 'check --json' -> sources[mine].changed: true, exit 1. Candidate ticket for the skilletor board.
+
+2026-09-26 14:25 Done: reportHook (src/report.ts) now adds one additionalContext line per overwritten file ('- overwrote local change in <scope> scope: <path>') and per conflict ('- conflict in <scope> scope: <path> <conflictHint(c)>'), before trust/gitignore/warning lines; the scope is named because Claude paths are relative to .claude. overwritten had the same gap and is covered. UserPromptSubmit pending report goes through the same toOutput->reportHook path (black-box test). Tests: 3 in test/report.test.ts, 2 black-box runHook tests in test/hooks.test.ts (real conflicts on disk incl. notFile; background sync -> pending report with overwritten + conflict). Spec §8 updated; README has no hook-output text that needed changing; SKILL.md untouched (k73). dist rebuilt. Verified: typecheck, npm test 558/558, build, check-dist green; real bin/skilletor hook session-start in a temp HOME prints the conflict line and exits 0.
+
+2026-09-26 14:27 Committed 2a893fe: report: name each conflict and overwritten change in the hook context (k72)
