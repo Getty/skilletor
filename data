@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-09-26T17:22:30Z
+created: 2026-09-26T13:56:35Z
+id: 76
+priority: low
+started: 2026-09-26T17:09:56Z
+status: done
+tags:
+- check
+title: 'check: a change to vars is not seen until another sync runs'
+updated: 2026-09-26T17:22:37Z
+---
+
+Found during k70 (worker): `check` compares sources, targets, layout and declarations with the lock, but not `vars`. A changed var only takes effect at the next sync that runs for another reason (or `skilletor sync`). Fix: record the vars a sync rendered with (e.g. a hash per scope in the lock or state) and count a difference as drift in check; decide whether per-item render inputs are needed or a scope hash suffices.
+
+2026-09-26 17:13 Design (worker): render inputs from config/project, not from the source: merged scope vars (user<project<local) + project {dir,name,git_remote}. Source defaults and bundle vars move with the source version (source check covers them); harness = targets check; scope/item fixed per lock key; target.dir derives from the lock's base and $CODEX_HOME (environment of whichever harness ran the hook - could flip-flop); host/user are machine identity (a home shared across hosts would sync at every switch). One sha256 per scope over canonical JSON (key order irrelevant) in state render-inputs.json keyed by lock path, like unreached/sources-read. Over-trigger on an unused var = one sync, accepted: per-item precision needs the vars each template reads, which Nunjucks does not report. No record = changed (one sync per in-use scope after upgrade): pairs with clear-on-failure, which is only correct if a missing record counts. Scope in use = declares something or lock non-empty; else no record, no drift (no sync per fresh directory). A sync where a needed trusted source could not be read keeps the earlier record (its items were not re-rendered), like sources-read. git_remote computed once per scope in sync (was per item x harness) and in check only for an in-use project scope: one local git spawn, no network.
+
+2026-09-26 17:19 Also decided: vars drift counts only while a trusted source has items to render (probe 05 caught it: a project whose only source is untrusted must not sync; the trust request stands for it). Consequence, matching k70's policy for drift a failing source keeps: a trusted source that cannot be resolved and has no cache keeps the earlier record, so a var change (or the missing record right after upgrade) syncs each session until the source reads again. Also found (not examined, no change): target.dir is not hashed because $CODEX_HOME may differ between Claude- and Codex-started hooks; whether such a difference already misplaces Codex items outside this card is untested.
+
+2026-09-26 17:19 Done: check counts a change to what a sync rendered with. src/state.ts renderInputs/putRenderInputs (render-inputs.json, per lock path). src/engine.ts: RenderInputs = merged scope vars + project {dir,name,git_remote}; sha256 over canonical JSON; sync computes it once per scope (git_remote was spawned per item x harness), records it at the end when every needed trusted source was read, drops it when the scope renders nothing, clears it on a failed sync; check adds varsChanged when a trusted render source exists and the hash differs or is missing. Spec 6.5 + 14.3, README check paragraph, skills/skilletor/SKILL.md check clause updated. Tests: 5 new k76 black-box tests in test/check.test.ts (var change re-renders + key order silent; local var and git remote in project scope; no/corrupt record syncs once silently, unused scope records nothing; failed sync clears; unreadable source keeps the record). Verified: typecheck, npm test 639/639, build, check-dist up to date; hand run of bin/skilletor check/hook in a temp HOME.
+
+2026-09-26 17:22 Committed 5a42c11: engine: check counts vars changed since the last sync rendered with them (k76)
