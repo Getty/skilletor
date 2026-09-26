@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-09-26T17:01:22Z
+created: 2026-09-26T16:47:31Z
+id: 91
+priority: high
+started: 2026-09-26T16:49:12Z
+status: done
+tags:
+- sources
+- cache
+- security
+title: 'sources/git: GIT_DIR/GIT_WORK_TREE from the environment reach git in the cache'
+updated: 2026-09-26T17:01:31Z
+---
+
+Found during k90 (worker), reproduced with GitSource directly. GitSource.run passes {...process.env} to git, including GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE (and the other repo-local vars). With GIT_DIR exported (skilletor run from a git hook, `git rebase -x`, tooling that exports it), a first resolve added `origin` to THAT repository and moved its HEAD to the source commit (fetch + reset --hard in the wrong repo). The k90 GIT_CEILING_DIRECTORIES does not help. Also check probe.ts (ls-remote) and any other git spawn (hooks.ts/engine.ts `-C` calls, gitignore.ts ls-files – those run in the user project on purpose; decide whether they should honour GIT_DIR or not). Fix: for cache runs, drop every variable `git rev-parse --local-env-vars` lists (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_COMMON_DIR, GIT_PREFIX, GIT_NAMESPACE, GIT_CONFIG, GIT_CONFIG_PARAMETERS, GIT_CONFIG_COUNT/KEY_n/VALUE_n, GIT_SHALLOW_FILE, GIT_GRAFT_FILE, GIT_REPLACE_REF_BASE, GIT_IMPLICIT_WORK_TREE, GIT_INTERNAL_SUPER_PREFIX …); decide about GIT_CONFIG_PARAMETERS/GIT_CONFIG_COUNT (may carry auth/proxy settings the user relies on for fetch) and say why. Tests: GIT_DIR/GIT_WORK_TREE pointing at a victim repo during resolve → victim untouched (remotes, HEAD, files), cache resolved normally.
+
+2026-09-26 16:52 Reproduced on git 2.47.3 (scratch): (1) GIT_WORK_TREE+GIT_INDEX_FILE alone (no GIT_DIR) make the cache's reset --hard overwrite the victim's files and index; (2) ls-remote with GIT_DIR=victim is steered by the victim's config (url.insteadOf) -> check/probe answer about another remote (git itself strips GIT_DIR for the local upload-pack, so config is the vector); (3) git -C sub with GIT_DIR set: --show-toplevel returns sub, ls-files reads the victim's index -> projectRootOf/isGitWorkTree/gitTracked/git_remote answer about the wrong repo. Plan: one helper src/gitenv.ts (drop git's local_repo_env list, keep GIT_CONFIG_PARAMETERS/COUNT like git's own prepare_other_repo_env), used by every git spawn incl. the project-side ones.
+
+2026-09-26 16:58 Decisions: (a) new src/gitenv.ts gitEnv(extra): process.env minus git 2.47.3's --local-env-vars list, GIT_TERMINAL_PROMPT=0, then extra; all 6 git spawns use it (sources/git.ts run, probe.ts ls-remote, gitignore.ts ls-files + is-inside-work-tree, hooks.ts projectRootOf, engine.ts gitRemote). (b) GIT_CONFIG_PARAMETERS / GIT_CONFIG_COUNT(+KEY_n/VALUE_n) KEPT: git itself keeps them when it runs in another repo (verified: git -c / GIT_CONFIG_COUNT reach 'submodule foreach'); user-level like ~/.gitconfig; carry fetch auth/proxy/insteadOf; verified -c core.worktree cannot redirect the work tree. (c) Project-side calls also scrubbed: skilletor's question is about the repo found from <dir>; with GIT_DIR set, git -C <dir> answers for GIT_DIR's repo with <dir> as work tree (show-toplevel=cwd, ls-files=victim index).
+
+2026-09-26 16:58 Also found (not changed): (1) skilletor-core SKILL.md module map lacks gitenv.ts (skill text, skill-author lane; spec §10 list updated). (2) test fixtures everywhere run git with {...process.env}: npm test from a git hook (GIT_DIR exported) would build fixtures in the hook's repo – same bug class, test side. (3) GIT_NAMESPACE / GIT_QUARANTINE_PATH are not in git's list and pass through (filter refs a file:// upload-pack serves / refuse ref updates inside a server pre-receive hook) – no wrong-repo write, left alone. (4) The new guard test fails on a git whose --local-env-vars list grows – intended signal to extend the list.
+
+2026-09-26 16:58 Done: every git spawn gets gitEnv() (src/gitenv.ts): git's repository-local vars dropped, command-line config kept; cache runs keep GIT_CEILING_DIRECTORIES. 10 tests in test/gitenv.test.ts (resolve first/update x GIT_DIR+GIT_WORK_TREE / GIT_WORK_TREE+GIT_INDEX_FILE: victim untouched, cache clean at source commit; check + probe with GIT_DIR whose insteadOf redirects; gitTracked/isGitWorkTree; runHook from project/sub finds the root; project.git_remote; guard vs installed git's --local-env-vars) – all 9 behaviour tests red before, green after. Spec §4.4 sentence, §10 lists gitenv.ts. Verified: typecheck, npm test 632/632, build, check-dist up to date; bin/skilletor hook smoke from project/sub with GIT_DIR exported: exit 0, root found, victim untouched. Uncommitted, dist rebuilt.
+
+2026-09-26 17:01 Committed as d2bb9fb: git: no git run takes a repository an exported GIT_DIR names (k91).
