@@ -1,0 +1,31 @@
+---
+class: standard
+completed: 2026-09-26T14:16:22Z
+created: 2026-09-26T03:51:27Z
+id: 71
+priority: medium
+started: 2026-09-26T13:58:21Z
+status: done
+tags:
+- apply
+title: 'apply: partial failure loses ownership of written files'
+updated: 2026-09-26T14:20:54Z
+---
+
+First item written, then the second item hits a directory where SKILL.md should be → EISDIR aborts before the lock is persisted. After the obstacle is removed, the retry reports conflicts on skilletor's own earlier output (probe 07). Code: src/apply.ts:144-168, 218-222. Fix: pre-check file types, persist ownership so a retry can resume.
+
+Repro: probe file by the skilletor-71 audit session, copied to docs-free scratch; reproduced by the orchestrator against exports of e371b13 AND v0.2.0 (pre-existing, not introduced by k62/k63/k65).
+
+2026-09-26 04:33 Update from k67 (orchestrator): a directory where an item has a file is now a conflict up front (no EISDIR abort), which fixes probe 07 as written. Left for this card: any other error thrown inside apply after writes (EACCES, ENOSPC, …) still leaves written files without a lock entry, so a retry conflicts on skilletor's own output. Also: the conflict hint says "use --force to adopt" for a directory-at-file conflict, which --force does not resolve (skilletor never deletes a directory tree) – give that case its own hint.
+
+2026-09-26 14:03 Plan (worker): (1) apply persists ownership on the error path – any throw after the first write writes a salvage lock: the old lock plus every landed/adopted file under its item, the item flagged partial:true; check counts a partial entry as declared drift so the next session retries (versions alone cannot signal it: an item added from an unchanged source). (2) hard conflicts (a directory or special file where the item has a file) carry notFile:true in ApplyResult and ScopeReport; text hint says to move or remove it, --force does not; conflictHint() exported from report.ts for k72.
+
+2026-09-26 14:08 Implemented: apply() wraps the run; on a throw after the first write/adoption it writes a salvage lock (old lock + landed files per item, entry partial:true; best effort, original error rethrown). Nothing landed → lock untouched. check: a partial entry is declared drift 'partial:<key>' (sources [entry.source]) so the next SessionStart retries even when no source moved. A partial entry reports as updated when completed (its run's report never arrived). Conflicts: ApplyResult/ScopeReport carry notFile:true for a directory/non-file where a file goes; conflictHint() in report.ts. Verified: without the salvage write, the new runHook test's retry says '1 item(s) updated, 2 warning(s)' (conflicts on own SKILL.md + .gitignore); with it '2 item(s) updated'.
+
+2026-09-26 14:10 Also found (not in scope, for the dispatcher): (a) status reports a partial entry as installed:true – could say partial; (b) edge: if a successful sync leaves a partial entry blocked (conflict/template error), k70 records partial:<key> in unreached.json; a later sync that fails midway on the same key leaves that record, so check stays quiet for it until a sync runs anyway. Clearing the unreached record when apply throws would close it (engine, ~4 lines + test). (c) k73: SKILL.md should mirror the new hint and may name 'the last sync stopped midway' among check's reasons.
+
+2026-09-26 14:10 Done: apply persists ownership on failure – a throw after the first write/adoption writes the old lock plus every landed file under its item marked partial:true (best effort; original error rethrown; nothing landed → lock untouched). check counts a partial entry as declared drift (partial:<key>) so the next SessionStart retries; the completing apply drops the marker and reports the item as updated. Directory/non-file conflicts carry notFile:true (ApplyResult, ScopeReport/JSON); text: 'conflict: <path> is not a file (move or remove it yourself; --force leaves it)'; conflictHint() exported from report.ts for k72. Spec §6.2/§6.3/§6.6/§14.3 and README updated; SKILL.md untouched (k73). Tests: 3 apply (cross-item failure root-proof via rules-dir-is-a-file, mid-item EACCES chmod skipped as root, fail-before-write leaves lock byte-identical), 2 check through runHook (partial drift isolated; failed session-start sync then clean resume – without the fix the resume reports 2 conflict warnings), 1 report (hint). Verified: typecheck, npm test 551/551 (0 skipped), build, check-dist up to date.
+
+2026-09-26 14:14 Review follow-up (coordinator), both open items closed: (1) syncScope is now a wrapper: any throw clears that scope's unreached.json record (best effort, original error rethrown), so check counts partial:<key> again. Clears on any throw in syncScope, not only after apply: before apply only a corrupt lock throws in practice, and check throws on that too, so no extra syncs result. Regression test in check.test.ts (blocked partial recorded, then a second midway failure) was red at the check assertion before the change. (2) status: declared rows carry partial:true for a partial entry (explicit and via rows), statusText adds '(partial: the last sync stopped midway)'; tests in check.test.ts (engine) and cli.test.ts (built binary, text + --json). Spec §6.2/§14.3 and README updated. Verified: typecheck, npm test 553/553 (0 skipped), build, check-dist up to date.
+
+2026-09-26 14:16 Committed as 624afbb: apply persists partial ownership on a failed write (salvage lock, marked partial:true); check counts partial:<key> as drift and clears unreached.json on sync failure; status/statusText show '(partial: the last sync stopped midway)'; notFile conflicts and conflictHint() exported. Spec, README, tests updated in the same commit.
