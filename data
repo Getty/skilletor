@@ -1,0 +1,30 @@
+---
+class: standard
+completed: 2026-09-26T17:49:43Z
+created: 2026-09-26T15:24:43Z
+id: 87
+priority: low
+started: 2026-09-26T17:33:13Z
+status: done
+tags:
+- hooks
+- report
+- security
+title: 'hooks: config values reach hook output unsanitized (control chars, terminal
+  escapes)'
+updated: 2026-09-26T17:49:50Z
+---
+
+Found during k85 (worker). Trust requests and warnings copy source names/addresses from the (possibly cloned, untrusted) project config and git's stderr into systemMessage/additionalContext and CLI text unchanged, so control characters or terminal escape sequences could reach the terminal or the model context. Fix: one sanitizer for untrusted strings in report output (escape C0/C1 controls and ESC, e.g. JSON-style \u001b), applied in report.ts where config/stderr text is interpolated. Tests in test/report.test.ts.
+
+2026-09-26 17:37 Started (worker). Plan: one display-safe escaper in report.ts (C0 but tab, DEL, C1, Unicode Bidi_Control, U+2028/2029, ZWSP/WJ/BOM -> JSON-style escapes), applied where report lines are built (reportText, reportHook, hooks warn, cli text builders) plus one CLI writer that escapes per line as the catch-all. Test-first.
+
+2026-09-26 17:41 Red first: test/report.test.ts (displaySafe unit, reportText, reportHook) and test/hooks.test.ts (untrusted project source with ESC/BEL/U+202E/newline in name+path, config error naming it via warn + pending report, git's multi-line stderr, Codex rules-file problem in an evil project dir) fail for the claimed reason: raw ESC/BEL/U+202E/newline reach systemMessage/additionalContext. Also confirmed: a git failure's stderr splits one warning into 6 context lines today (k72's one-line-per-warning claim only held for one-line messages).
+
+2026-09-26 17:45 Also found (for the skilletor board, not fixed here): (1) sources/git.ts run() passes git's stderr untrimmed, so every git failure warning now ends in a literal '\n' (before: a raw trailing newline that split the context line) - trimming stderr there would drop it. (2) config.ts accepts any source name (control characters included) while the bundle-source prompt enforces ^[A-Za-z0-9][A-Za-z0-9._-]*$; restricting names at load would reject such configs outright - a design decision. Limits left: a CLI error message is escaped per line, so a newline inside a value there stays a line break (ESC/bidi/C1 are escaped); the ttyPrompter escape is untested (needs a pty); pending reports stored by an older version are delivered as stored, once.
+
+2026-09-26 17:45 Done: displaySafe() in src/report.ts escapes C0 but tab (JSON.stringify's form: \n, \u001b), DEL, C1, Bidi_Control, U+2028/2029, ZWSP/WJ/BOM as \uXXXX; ZWJ/ZWNJ, tab, backslashes kept. Applied per display line: reportText, reportHook (systemMessage + each context line), hooks.ts warn() and the Codex rules-file problem line, cli.ts status/available/source list/trust/add/errors via printLines (escaped whole) and printText (per line; errors and --json - lossless, JSON's own escapes). 10 new tests (report 3, hooks 4 through runHook, cli 3 through the built bundle) red first for the claimed reason; k48 CLI test pins that an error's own line breaks stay. Spec §8 bullet added. Verified: npm run typecheck && npm test (653/653) && npm run build && npm run check-dist green; hand test of dist with an evil project source in a temp HOME: status and hook show escapes, hook exit 0.
+
+2026-09-26 17:48 Folded in open item 1 (coordinator): src/sources/git.ts run() trims git's stderr, and Node's 'Command failed: ...\n' message used when git wrote none (a check killed by its timeout), before building the error - git failure warnings no longer end in a visible '\n'. Checked the rest: url backend messages come from fetch/zlib/tar/fs errors (no process output, no trailing newline); probe.ts ignores git's stdio and returns booleans; engine gitRemote, gitignore and hooks projectRootOf trim or parse stdout and never put it in a message. Tests red first: test/git.test.ts k87 (fallback warning, no-cache error, ls-remote error, ls-remote killed by a 1 ms timeout - each ends in a word) and the hooks k87 git test now asserts no trailing escaped newline. Verified: typecheck && npm test (654/654) && build && check-dist green; the timeout test passed 5/5 reruns. Items 2 and 3 stay open. Card stays in review.
+
+2026-09-26 17:49 Committed d5bf394: displaySafe() in report.ts escapes control/bidi/separator/invisible characters in reportText, reportHook, hooks.ts warn(), and cli.ts printLines/printText output; sources/git.ts trims git stderr in failure messages. Regression tests in report/hooks/cli/git test files. Spec §8 updated. Verified: typecheck, 654/654 tests, build, check-dist all green.
