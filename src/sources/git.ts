@@ -1,10 +1,12 @@
 // Git source backend (spec §4.4).
 //
-// resolve(): shallow clone/fetch into cache/<hash-of-url>/, hard reset to ref.
+// resolve(): shallow clone/fetch into a URL/ref-specific cache, hard reset to ref.
+//   The unpinned source retains its legacy URL-only cache; explicit refs never share it.
 // check():   `git ls-remote` vs the cached commit (a pinned commit never moves).
 // Git runs via execFile (no shell), with GIT_TERMINAL_PROMPT=0 so a hook never
 // blocks on a credential prompt. When the remote is unreachable but a cache
-// exists, resolve reuses it and reports a warning; without a cache it errors.
+// exists, resolve reuses it and reports a warning; without a cache, or with one
+// that holds another commit than a SHA pin, it errors.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
@@ -20,6 +22,9 @@ export interface GitSourceOptions {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+/** The cache holds another commit than the SHA pin asks for. */
+class PinMismatch extends Error {}
+
 export class GitSource implements Source {
   private readonly opts: GitSourceOptions;
 
@@ -28,7 +33,8 @@ export class GitSource implements Source {
   }
 
   private cacheDir(): string {
-    const hash = createHash("sha256").update(this.opts.url).digest("hex").slice(0, 16);
+    const identity = this.opts.ref ? JSON.stringify([this.opts.url, this.opts.ref]) : this.opts.url;
+    const hash = createHash("sha256").update(identity).digest("hex").slice(0, 16);
     return join(this.opts.cacheRoot, hash);
   }
 
@@ -89,8 +95,12 @@ export class GitSource implements Source {
             version: await this.version(dir),
             warning: `git fetch failed for ${this.opts.url}, using cache (${(err as Error).message})`,
           };
-        } catch {
-          // fall through
+        } catch (cacheError) {
+          // A repo without a commit is no cache; only a refused pin is worth naming.
+          if (cacheError instanceof PinMismatch) {
+            throw new Error(`git source ${this.opts.url} failed: ${(err as Error).message}; ` +
+              `cache rejected (${cacheError.message})`);
+          }
         }
       }
       throw new Error(`git source ${this.opts.url} failed: ${(err as Error).message}`);
@@ -98,6 +108,21 @@ export class GitSource implements Source {
   }
 
   private async version(dir: string): Promise<string> {
+    const ref = this.opts.ref;
+    if (ref && isCommitish(ref)) {
+      // Validate even on fallback: a repo's existence is no proof it holds this pin.
+      const head = (await this.run(dir, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
+      // What the pin names in this cache; "" for nothing: ambiguous, absent, or a tag or
+      // branch named like a SHA prefix (a date) that the fetch resolved by name.
+      const pin = await this.run(dir, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])
+        .then((out) => out.trim(), () => "");
+      // A prefix of HEAD must resolve to HEAD unambiguously. Any other ref counts as such a
+      // name unless it names another commit here – or is a full SHA, which git fetch only
+      // ever reads as an object id.
+      const byName = ref.length < 40 && (pin === "" || pin === head);
+      const held = head.startsWith(ref.toLowerCase()) ? pin === head : byName;
+      if (!held) throw new PinMismatch(`cached commit ${head} does not match requested pin ${ref}`);
+    }
     const sha = (await this.run(dir, ["rev-parse", "--short", "HEAD"])).trim();
     return `git:${sha}`;
   }

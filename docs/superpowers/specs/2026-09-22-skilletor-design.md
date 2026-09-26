@@ -223,6 +223,13 @@ extraction; a failed download, decompression or extraction keeps the last good c
 its version, with one warning (k68). An unsafe archive is rejected; the source then counts
 as unresolvable and keeps its items (§6.1).
 
+The git cache is kept per URL and ref; an unpinned source uses the URL alone, so two pins
+of one URL never share a checkout, and caches written before 0.3.1 are not reused for an
+explicit ref (the first resolve fetches again; offline, that source counts as unresolvable
+and keeps its items, §6.1). Offline, a SHA pin is served from cache only if the cached
+commit is the pin; a ref shorter than a full SHA that names no other commit there (a tag or
+branch named like a date) is taken as a name (k69).
+
 ## 5. Templating
 
 - **Opt-in by extension:** `X.njk` is rendered by Nunjucks and installed as `X`.

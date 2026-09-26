@@ -11,6 +11,7 @@ import { reportHook, reportText } from "../src/report.ts";
 import { readLock } from "../src/lock.ts";
 import { SKILL_GITIGNORE } from "../src/gitignore.ts";
 import { hashBuffer } from "../src/fsutil.ts";
+import { GitSource } from "../src/sources/git.ts";
 
 function env() {
   const tmp = makeTmpDir();
@@ -1014,6 +1015,48 @@ test("offline git source falls back to the cache and keeps the item", async () =
   } finally {
     e.cleanup();
   }
+});
+
+test("k69: a pinned git source offline with only a URL-wide cache keeps its item at the pin", async (t) => {
+  const e = env();
+  t.after(e.cleanup);
+  const bare = join(e.tmp.dir, "repo.git");
+  const work = join(e.tmp.dir, "work");
+  const G = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: work, env: G, encoding: "utf8" }).trim();
+  execFileSync("git", ["init", "-q", "-b", "main", "--bare", bare]);
+  mkdirSync(join(work, "skills", "foo"), { recursive: true });
+  git("init", "-q", "-b", "main");
+  const url = "file://" + resolvePath(bare);
+  const commit = (body: string) => {
+    writeFileSync(join(work, "skills/foo/SKILL.md"), `---\ndescription: foo\n---\n${body}\n`);
+    git("add", ".");
+    git("commit", "-qm", body);
+    git("push", "-q", url, "main");
+    return git("rev-parse", "HEAD");
+  };
+  const first = commit("FIRST");
+  e.writeCfg("user", { sources: { g: { git: url, ref: first } }, install: { skills: ["foo@g"] } });
+  await sync(e.ctx, { scope: "user" });
+  const target = join(e.home, ".claude/skills/foo/SKILL.md");
+  assert.match(readFileSync(target, "utf8"), /FIRST/);
+
+  // What an upgrade from <= 0.3.0 can leave: no cache for this pin, only the URL-wide
+  // one, moved on by an unpinned resolve of the same URL.
+  commit("SECOND");
+  const cacheRoot = join(e.stateRoot, "cache");
+  rmSync(cacheRoot, { recursive: true, force: true });
+  await new GitSource({ url, cacheRoot }).resolve();
+  const lockPath = join(e.home, ".claude/skilletor.lock.json");
+  const lockBefore = readFileSync(lockPath, "utf8");
+
+  rmSync(bare, { recursive: true, force: true }); // go offline
+  const report = await sync(e.ctx, { scope: "user" });
+  const warnings = report.scopes[0]!.warnings;
+  assert.equal(warnings.some((w) => /^source g: git source .* failed/.test(w)), true, warnings.join("\n"));
+  assert.equal(warnings.some((w) => /using cache/.test(w)), false);
+  assert.match(readFileSync(target, "utf8"), /FIRST/); // kept at the pin, not replaced or removed
+  assert.equal(readFileSync(lockPath, "utf8"), lockBefore);
 });
 
 test("reportText renders a fresh install with the activation hint", async () => {

@@ -7398,13 +7398,16 @@ import { createHash as createHash2 } from "node:crypto";
 import { existsSync as existsSync4, mkdirSync as mkdirSync2 } from "node:fs";
 import { join as join6 } from "node:path";
 var DEFAULT_TIMEOUT_MS = 6e4;
+var PinMismatch = class extends Error {
+};
 var GitSource = class {
   opts;
   constructor(opts) {
     this.opts = opts;
   }
   cacheDir() {
-    const hash = createHash2("sha256").update(this.opts.url).digest("hex").slice(0, 16);
+    const identity = this.opts.ref ? JSON.stringify([this.opts.url, this.opts.ref]) : this.opts.url;
+    const hash = createHash2("sha256").update(identity).digest("hex").slice(0, 16);
     return join6(this.opts.cacheRoot, hash);
   }
   run(cwd, args, timeoutMs) {
@@ -7461,13 +7464,24 @@ var GitSource = class {
             version: await this.version(dir),
             warning: `git fetch failed for ${this.opts.url}, using cache (${err.message})`
           };
-        } catch {
+        } catch (cacheError) {
+          if (cacheError instanceof PinMismatch) {
+            throw new Error(`git source ${this.opts.url} failed: ${err.message}; cache rejected (${cacheError.message})`);
+          }
         }
       }
       throw new Error(`git source ${this.opts.url} failed: ${err.message}`);
     }
   }
   async version(dir) {
+    const ref = this.opts.ref;
+    if (ref && isCommitish(ref)) {
+      const head = (await this.run(dir, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
+      const pin = await this.run(dir, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).then((out) => out.trim(), () => "");
+      const byName = ref.length < 40 && (pin === "" || pin === head);
+      const held = head.startsWith(ref.toLowerCase()) ? pin === head : byName;
+      if (!held) throw new PinMismatch(`cached commit ${head} does not match requested pin ${ref}`);
+    }
     const sha = (await this.run(dir, ["rev-parse", "--short", "HEAD"])).trim();
     return `git:${sha}`;
   }
