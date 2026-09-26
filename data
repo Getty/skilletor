@@ -1,0 +1,39 @@
+---
+claimed_at: 2026-09-26T02:38:19Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-26T02:38:19Z
+created: 2026-09-26T01:58:55Z
+depends_on:
+- 62
+id: 63
+priority: medium
+started: 2026-09-26T02:22:26Z
+status: done
+tags:
+- gitignore
+- engine
+title: 'gitignore: warn when git tracks a managed path'
+updated: 2026-09-26T02:38:19Z
+---
+
+Problem: `.gitignore` never untracks a file git already tracks. A skill the user committed by hand and then adopted with `--force`, or files committed while `"gitignore": false`, stay tracked after skilletor takes them over — every upstream change then shows up as a diff in the user's repo, and skilletor says nothing (no git check anywhere in src/).
+
+Fix (spec §6.4 "Tracked managed files", as rewritten for k62):
+- When sync writes or adopts a managed path inside a git work tree and git tracks it, the report warns once per item: `skills/foo is tracked by git although skilletor manages it — untrack it: git rm -r --cached .claude/skills/foo` (path as seen from the repo, file path for agents/rules).
+- Only with `gitignore` enabled; both scopes (a dotfiles repo at `~` counts); never touches the index itself.
+- The tracked test is injectable through `EngineContext` (like `isGitWorkTree`), one `git ls-files` call per sync over the written/adopted paths, skipped when nothing was written or adopted (hook path stays fast).
+
+Done when: tests cover tracked + written → warning, tracked + unchanged → no warning, untracked → none, `gitignore: false` → none, not a work tree → none; dist rebuilt; `npm run typecheck && npm test && npm run build && npm run check-dist` green.
+
+2026-09-26 02:27 Plan: apply.ts returns ApplyResult.written (paths written, or adopted with --force); syncCodexRules reports whether it wrote the rules file; engine runs one injectable EngineContext.gitTracked(root, paths) per root over those paths (default gitignore.ts gitTracked: git -C root --literal-pathspecs ls-files -z; failure/outside work tree -> none), only with gitignore on and only when something was written; one warning per item in rep.warnings. No separate isGitWorkTree gate: ls-files failing outside a work tree covers it, and an extra rev-parse would break the existing 'project blocks do not depend on the work-tree test' assertion.
+
+2026-09-26 02:35 Decisions: (1) Command form. Project: relative to the project root, 'git rm -r --cached .claude/skills/foo'. User: names the root so it runs from any cwd, 'git -C ~/.claude rm -r --cached skills/foo' (~/ form; absolute and single-quoted when needed for a CODEX_HOME outside ~). The ~/-path form 'git rm --cached ~/.claude/...' only works with the cwd inside the dotfiles repo, and a hook context is read from a project cwd. (2) A skill is untracked as its dir (-r); an agent/rule as its file, without -r ('git rm --cached .claude/agents/.local.a.md'). (3) The Codex rules file (written by syncCodexRules, not apply) counts as a managed path: one warning for the file, labelled '.codex/skilletor-rules.md' / '~/.codex/skilletor-rules.md', not one per rule. (4) No isGitWorkTree gate: ls-files fails outside a work tree, so that already means none. Spec §6.4 paragraph amended to match.
+
+2026-09-26 02:35 Spec reading, open question: the check covers the written/adopted paths only, as the spec says. So switching gitignore false->true does not warn by itself: that sync writes only the new, untracked per-skill .gitignore. The warning comes with the next write of a tracked file (the brief's typical case). Warning at the switch itself would mean asking about the whole item (e.g. the skill dir) whenever any of its paths is written. That is a spec change, not done.
+
+2026-09-26 02:35 Also found (for this board, not in scope): (a) skilletor.lock.json and skilletor.local.json committed under gitignore:false stay tracked after the switch. No warning, because they are not items, so every lock change shows as a diff. Seen in the hand test. (b) Project scope exists for every project dir, even without a project config (config.ts loadConfig). A sync there writes <dir>/.claude/.gitignore (that predates k62), and since k62 the report and hook say '.claude/.gitignore updated — commit it' in repos that never used skilletor. My hand test's hook run with cwd /tmp created /tmp/.claude/.gitignore (removed). (c) .claude/skills/skilletor-core/SKILL.md lists the EngineContext injectables and the fixture rule (isGitWorkTree: () => false); gitTracked could join that list (skill-author lane). Existing fixtures do not inject it: the default git ls-files then runs over freshly written temp files, which no repo can track, so results are deterministic and suite time is unchanged. (d) README 'Git & your own skills' could take the same sentence; that is the orchestrator's file.
+
+2026-09-26 02:35 Done, not committed. What changed: apply.ts ApplyResult.written (paths written, or adopted with --force). gitignore.ts gitTracked(dir, paths) = git -C dir --literal-pathspecs ls-files -z, batches of 500, none on failure. engine.ts: EngineContext.gitTracked; syncCodexRules now reports 'written'; trackedWarnings() makes one call per target root, only with gitignore on and only when something was written, and adds one warning per item to rep.warnings (CLI report + hook context). Also: spec §6.4 paragraph amended, SKILL.md gitignore bullet +1 sentence, dist rebuilt. Tests: tracked+written, tracked+adopted via --force (incl. identical content, adopted without a write), tracked+unchanged, untracked, gitignore false (project and user), not a work tree (real git, .git moved away under GIT_CEILING_DIRECTORIES), git failing (throwing fake), one warning per item with several files, Codex roots and the rules file, user -C form incl. a quoted absolute CODEX_HOME, runHook black box, gitTracked unit (literal pathspecs, relative to dir, .git dir, outside a repo). Real-repo test runs the printed command and checks the skill is quiet afterwards. Mutations checked: dropping --literal-pathspecs, the adopt case, the gitignore gate or the rules file each turns a test red. Verified: typecheck 0; npm test 450/450 pass (441 before, 9 new), 0 skipped; build + check-dist up to date. Hand test via bin/skilletor with temp HOME/CODEX_HOME: user dotfiles repo and a project with both harnesses; every printed command ran as shown. Proposed subject: 'gitignore: warn when git tracks a managed path (k63)'.
+
+2026-09-26 02:38 Committed as 9b793bc: gitignore: warn when git tracks a managed path (k63).
