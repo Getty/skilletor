@@ -40,8 +40,12 @@ fsutil.ts     hash, atomicWrite                       gitenv.ts    gitEnv(): the
   on that to run against temp directories and never look at the real machine. Every
   new `EngineContext` fixture sets `isGitWorkTree: () => false` — the temp dir's real
   location must not decide whether user-scope `.gitignore` blocks appear.
-- A catalog item may carry `dir` (a skill found via a nested `plugin.json` path);
-  `render` maps its files to `skills/<name>/…`, so targets never see the source layout.
+- A catalog item may carry `dir`, its place in the source: a skill via a nested
+  `plugin.json` path, or any item from the source's `.claude/{skills,agents,rules}`
+  (read last, so a name already found wins; best effort — a symlink there skips that
+  directory or item, never the scan; skilletor's own installed copies are not offered).
+  `render` (`installPath`) maps its files to `skills/<name>/…`, `agents/<file>` or
+  `rules/<file>`, so targets never see the source layout.
 - `briefing.ts` reads installed agent files (never renders) — a warning source, not a
   pipeline stage; it must not block a sync.
 - `apply` knows nothing about harnesses: it gets a lock key → root function.
