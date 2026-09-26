@@ -699,3 +699,41 @@ test("k87: available shows a source's descriptions escaped, ordinary text as wri
     `  skill foo@shared — Grüße 🍳\tok ${SHOWN.replace("\\n", " ")}`,
   ].sort());
 });
+
+// k101: `add` never replaces a source, through the real binary. Two local directories both
+// named `tools` derive the same name. Asserts: the same address again exits 0, says the entry
+// is kept and leaves the file byte-identical; the other address exits 1 with the existing
+// address and the fix on stderr, nothing on stdout, and the file byte-identical.
+test("k101: add of a taken name: same address kept (exit 0), another address refused (exit 1)", () => {
+  const home = join(tmp.dir, "k101-home");
+  const proj = join(tmp.dir, "k101-proj");
+  const a = join(tmp.dir, "k101-a", "tools");
+  const b = join(tmp.dir, "k101-b", "tools");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(proj, { recursive: true });
+  for (const d of [a, b]) {
+    mkdirSync(join(d, "skills", "foo"), { recursive: true });
+    writeFileSync(join(d, "skills", "foo", "SKILL.md"), "---\nname: foo\ndescription: foo\n---\nFOO\n");
+  }
+  const env = claudeOnlyEnv(home);
+  const common = ["--project-dir", proj];
+  const cfg = join(home, ".claude", "skilletor.json");
+
+  const first = runCli(["add", a, ...common], env);
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /^added source tools /m);
+  const written = readFileSync(cfg);
+
+  const again = runCli(["add", a, ...common], env);
+  assert.equal(again.status, 0, again.stderr);
+  assert.ok(again.stdout.includes(`source tools already added (${JSON.stringify({ local: a })}), kept as is`), again.stdout);
+  assert.deepEqual(readFileSync(cfg), written, "same address: config byte-identical");
+
+  const other = runCli(["add", b, ...common], env);
+  assert.equal(other.status, 1, other.stderr);
+  assert.equal(other.stdout, "");
+  assert.ok(other.stderr.startsWith(`skilletor: source "tools" in ${cfg} is local ${a}`), other.stderr);
+  assert.ok(other.stderr.includes(`skilletor add <name> ${b}`), other.stderr);
+  assert.ok(other.stderr.includes("skilletor source remove tools"), other.stderr);
+  assert.deepEqual(readFileSync(cfg), written, "another address: config byte-identical");
+});

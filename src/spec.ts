@@ -59,16 +59,32 @@ function isTarball(url: string): boolean {
   return url.endsWith(".tar.gz") || url.endsWith(".tgz");
 }
 
+/** The name of a git repo `owner/repo` (k101): the repo's, unless it is the default repo
+ *  (or empty) – then the owner's, so `Getty/karr` is "karr" and `Getty` "getty". */
+function repoName(owner: string, repo: string | undefined): string {
+  const name = repo === undefined ? "" : normalizeName(repo);
+  return name && name !== DEFAULT_REPO ? name : normalizeName(owner);
+}
+
+/** A git address's path segments: the repo is the last one (as `git clone` names its
+ *  directory), the owner the first; a single segment names both. */
+function nameFromPath(path: string): string {
+  const segs = path.split("/").filter(Boolean);
+  if (segs.length === 0) return normalizeName(path);
+  return repoName(segs[0]!, segs.length > 1 ? segs[segs.length - 1] : undefined);
+}
+
 /** derivedName for an explicit URL or scp-like address. */
 function nameFromUrl(spec: string, kind: SourceKind): string {
   if (isScpLike(spec)) {
     const path = spec.slice(spec.indexOf(":") + 1);
+    if (kind === "git") return nameFromPath(path);
     return normalizeName(basename(path.split("/")[0] ?? path));
   }
   try {
     const u = new URL(spec);
     const segs = u.pathname.split("/").filter(Boolean);
-    if (kind === "git" && segs.length > 0) return normalizeName(segs[0]!);
+    if (kind === "git" && segs.length > 0) return nameFromPath(u.pathname);
     return normalizeName(u.hostname);
   } catch {
     return normalizeName(spec);
@@ -100,7 +116,7 @@ export function resolveSpec(spec: string, probe: Probe): ResolvedSpec {
     return {
       kind: "git",
       value: `https://github.com/${owner}/${repo ?? DEFAULT_REPO}`,
-      derivedName: normalizeName(owner),
+      derivedName: repoName(owner, repo),
     };
   }
 
@@ -117,7 +133,7 @@ export function resolveSpec(spec: string, probe: Probe): ResolvedSpec {
     return {
       kind: "git",
       value: `https://${firstSeg.toLowerCase()}/${owner}/${repo}`,
-      derivedName: normalizeName(owner),
+      derivedName: repoName(owner, repo),
     };
   }
 
@@ -142,7 +158,7 @@ export function resolveSpec(spec: string, probe: Probe): ResolvedSpec {
     return {
       kind: "git",
       value: `https://github.com/${firstSeg}/${repo}`,
-      derivedName: normalizeName(firstSeg),
+      derivedName: repoName(firstSeg, repo),
     };
   }
 

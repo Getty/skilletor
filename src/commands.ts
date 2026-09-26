@@ -4,11 +4,11 @@
 import { dirname, join } from "node:path";
 import {
   addBundleEntry, addInstallEntry, addSource, bundleEntries, findInstallEntries, findWildcardEntries, loadConfig,
-  removeBundleEntries, removeInstallEntries, removeSource, WILDCARD, type BackendKind, type ItemType, type LoadedConfig,
-  type Origin, type SourceDef,
+  removeBundleEntries, removeInstallEntries, removeSource, sourceEntry, WILDCARD, type BackendKind, type ItemType,
+  type LoadedConfig, type Origin, type SourceDef,
 } from "./config.ts";
 import { BundleError, expandBundle, matchesPattern, sameIdentity, type ForeignEntry } from "./bundles.ts";
-import { resolveSpec, type Probe } from "./spec.ts";
+import { resolveSpec, type Probe, type ResolvedSpec } from "./spec.ts";
 import { makeProbe } from "./probe.ts";
 import {
   bundleLabel, servingSource, cacheRootOf, makeBackend, projectDirOf, resolveBackend, sourcesOf, sync, withSyncLock,
@@ -61,22 +61,67 @@ const TYPE_DIR: Record<ItemType, string> = { skill: "skills", agent: "agents", r
 
 // ---- add --------------------------------------------------------------------
 
+/**
+ * Add a source to one config, trust it, sync. Never replaces a source (k101): a name that
+ * config already has keeps its entry untouched (ref, local override and all) when the entry
+ * has the same backend and address – still trusted and synced, `kept` set – and is an error,
+ * before anything is written or trusted, when it has another one. Only that file counts.
+ */
 export async function cmdAdd(
   ctx: CommandContext,
   args: { name?: string; spec: string; project?: boolean },
-): Promise<{ name: string; def: SourceDef; report: SyncReport }> {
+): Promise<{ name: string; def: SourceDef; kept: boolean; report: SyncReport }> {
   const path = configPath(ctx, Boolean(args.project));
   const resolved = resolveSpec(args.spec, ctx.probe ?? makeProbe());
   const name = args.name ?? resolved.derivedName;
-  const def: SourceDef =
+  let def: SourceDef =
     resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };
 
-  addSource(path, name, def);
+  const existing = sourceEntry(path, name);
+  const kept = existing !== undefined;
+  if (kept) {
+    if (!sameAddress(ctx, name, existing, resolved)) {
+      const flag = args.project ? " --project" : "";
+      throw new CommandError(
+        `source "${name}" in ${path} is ${addressText(existing)}, not ${resolved.kind} ${resolved.value}; ` +
+          `nothing was changed. Add it under another name (skilletor add <name> ${args.spec}${flag}) ` +
+          `or remove the source first (skilletor source remove ${name}${flag}).`,
+      );
+    }
+    def = entryDef(existing as Record<string, unknown>);
+  } else {
+    addSource(path, name, def);
+  }
   // add is the trust act.
   trustDef(ctx, name, def);
 
   const report = await sync(ctx);
-  return { name, def, report };
+  return { name, def, kept, report };
+}
+
+const DEF_KEYS = ["git", "ref", "url", "local"];
+
+/** Does a config entry name the backend and address a spec resolved to? git/url compare as
+ *  source identities (§15.6), a local path as the directory it names. */
+function sameAddress(ctx: CommandContext, name: string, entry: unknown, resolved: ResolvedSpec): boolean {
+  if (entry === null || typeof entry !== "object") return false;
+  const field = (entry as Record<string, unknown>)[resolved.kind];
+  if (typeof field !== "string") return false;
+  if (resolved.kind !== "local") return sameIdentity(field, resolved.value);
+  const dir = (local: string) => resolveBackend({ name, local, origins: {} }, ctx.home).address;
+  return dir(field) === dir(resolved.value);
+}
+
+/** An entry's backends as written (`git https://…, local ~/dev/x`), else the entry as JSON. */
+function addressText(entry: unknown): string {
+  const e = entry !== null && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+  const parts = Object.entries(e).filter(([k, v]) => k !== "ref" && DEF_KEYS.includes(k) && typeof v === "string");
+  return parts.length ? parts.map(([k, v]) => `${k} ${v}`).join(", ") : JSON.stringify(entry);
+}
+
+/** The source fields of an entry as written, in its key order. */
+function entryDef(entry: Record<string, unknown>): SourceDef {
+  return Object.fromEntries(Object.entries(entry).filter(([k, v]) => DEF_KEYS.includes(k) && typeof v === "string"));
 }
 
 // ---- source list / remove ---------------------------------------------------

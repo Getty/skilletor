@@ -84,6 +84,83 @@ test("add derives the source name when omitted", async () => {
   }
 });
 
+// k101: `add` never replaces a source. The same backend and address again keeps the entry
+// exactly as written (a ref pin, a local override stay; the file is not rewritten), and it is
+// still trusted and synced. Asserts: bytes unchanged, returned def is the file's entry,
+// the backend it names is trusted, the sync installed from it.
+test("k101: re-adding a source's own address keeps its entry as is, trusts and syncs it", async () => {
+  const e = env();
+  try {
+    const url = gitRepo(e.tmp.dir, "tools", ["t-one"]);
+    const projPath = join(e.projectDir, ".claude/skilletor.json");
+    const raw = `{"sources": {"tools": {"git": "${url}", "ref": "main", "local": "~/no/such/dir"}},\n` +
+      ` "install": {"rules": ["t-one@tools"]}}\n`;
+    writeFileSync(projPath, raw);
+    // The same identity written without `.git`.
+    const res = await cmdAdd(e.ctx, { name: "tools", spec: url.replace(/\.git$/, ""), project: true });
+    assert.equal(readFileSync(projPath, "utf8"), raw, "config byte-identical");
+    assert.equal(res.kept, true);
+    assert.deepEqual(res.def, { git: url, ref: "main", local: "~/no/such/dir" });
+    assert.equal(new State(e.ctx.stateRoot).isTrusted("tools", { kind: "git", address: url, origin: "project" }), true);
+    const proj = res.report.scopes.find((s) => s.scope === "project")!;
+    assert.deepEqual(proj.added.map((i) => `${i.key}@${i.source}`), ["rules/t-one@tools"]);
+
+    // A local path is the same address however it is written (~ or absolute).
+    const src = makeSource(e.home, "team", (d) => skill(d, "foo"));
+    const userRaw = `{ "sources": { "team": { "local": "~/team" } } }\n`;
+    writeFileSync(e.userCfgPath, userRaw);
+    const again = await cmdAdd(e.ctx, { name: "team", spec: src });
+    assert.equal(again.kept, true);
+    assert.deepEqual(again.def, { local: "~/team" });
+    assert.equal(readFileSync(e.userCfgPath, "utf8"), userRaw);
+    const fresh = await cmdAdd(e.ctx, { name: "other", spec: src });
+    assert.equal(fresh.kept, false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k101: a name the target config already gives another address is an error before anything is
+// written or trusted. Asserts: CommandError naming the existing address and both ways out
+// (with --project when editing the project config), file bytes unchanged, no trust entry.
+test("k101: add with a name another address holds fails, config byte-identical, nothing trusted", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "karr", (d) => skill(d, "foo"));
+    const raw = `{ "sources": { "karr": { "git": "https://example.invalid/Getty/karr", "ref": "v1" } } }\n`;
+    writeFileSync(e.userCfgPath, raw);
+    await assert.rejects(() => cmdAdd(e.ctx, { spec: src }), (err: unknown) => {
+      assert.ok(err instanceof CommandError, String(err));
+      const msg = (err as Error).message;
+      assert.ok(msg.includes(`source "karr" in ${e.userCfgPath} is git https://example.invalid/Getty/karr`), msg);
+      assert.ok(msg.includes("nothing was changed"), msg);
+      assert.ok(msg.includes(`skilletor add <name> ${src}`), msg);
+      assert.ok(msg.includes("skilletor source remove karr"), msg);
+      assert.doesNotMatch(msg, /--project/);
+      return true;
+    });
+    assert.equal(readFileSync(e.userCfgPath, "utf8"), raw, "user config byte-identical");
+    assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+
+    // Another local path is another address; the hints carry --project.
+    const projPath = join(e.projectDir, ".claude/skilletor.json");
+    const praw = `{"sources":{"karr":{"local":"~/dev/karr"}}}`;
+    writeFileSync(projPath, praw);
+    await assert.rejects(() => cmdAdd(e.ctx, { name: "karr", spec: src, project: true }), (err: unknown) => {
+      assert.ok(err instanceof CommandError, String(err));
+      const msg = (err as Error).message;
+      assert.ok(msg.includes(`source "karr" in ${projPath} is local ~/dev/karr`), msg);
+      assert.ok(msg.includes(`skilletor add <name> ${src} --project`), msg);
+      assert.ok(msg.includes("skilletor source remove karr --project"), msg);
+      return true;
+    });
+    assert.equal(readFileSync(projPath, "utf8"), praw, "project config byte-identical");
+    assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("install adds the entry with an auto-detected type and syncs", async () => {
   const e = env();
   try {
@@ -808,14 +885,15 @@ test("install bundle: without a TTY fails before editing anything and prints the
       rule(d, "r1");
       bundleFile(d, "perl", "description: P\nrules: [r1, x@gitlab.com/peter, y@gitlab.com/peter, z@Getty/repo]\n");
     });
-    const cfg = { sources: { mine: { local: src }, getty: { git: "https://example.com/other" } } };
+    const cfg = { sources: { mine: { local: src }, repo: { git: "https://example.com/other" } } };
     e.writeUserCfg(cfg);
     await assert.rejects(() => cmdInstall(e.ctx, { items: ["bundle:perl@mine"] }), (err: unknown) => {
       assert.ok(err instanceof CommandError);
       const msg = (err as Error).message;
       assert.match(msg, /bundle perl needs sources you don't have yet/);
       assert.match(msg, /^  skilletor add peter gitlab\.com\/peter$/m);
-      assert.match(msg, /^  skilletor add getty-2 Getty\/repo$/m); // "getty" is taken by another identity
+      // Getty/repo derives its repo's name (k101), and "repo" is taken by another identity.
+      assert.match(msg, /^  skilletor add repo-2 Getty\/repo$/m);
       assert.equal(msg.match(/skilletor add peter /g)!.length, 1); // once per source
       return true;
     });

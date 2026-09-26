@@ -6152,6 +6152,11 @@ function loadRaw(path) {
 function saveRaw(path, cfg) {
   atomicWrite(path, JSON.stringify(cfg, null, 2) + "\n");
 }
+function sourceEntry(path, name) {
+  const sources = loadRaw(path).sources;
+  if (sources === null || typeof sources !== "object" || !Object.hasOwn(sources, name)) return void 0;
+  return sources[name];
+}
 function addSource(path, name, def) {
   const cfg = loadRaw(path);
   const sources = cfg.sources ?? {};
@@ -6643,15 +6648,25 @@ function isScpLike(spec) {
 function isTarball(url) {
   return url.endsWith(".tar.gz") || url.endsWith(".tgz");
 }
+function repoName(owner, repo) {
+  const name = repo === void 0 ? "" : normalizeName(repo);
+  return name && name !== DEFAULT_REPO ? name : normalizeName(owner);
+}
+function nameFromPath(path) {
+  const segs = path.split("/").filter(Boolean);
+  if (segs.length === 0) return normalizeName(path);
+  return repoName(segs[0], segs.length > 1 ? segs[segs.length - 1] : void 0);
+}
 function nameFromUrl(spec, kind) {
   if (isScpLike(spec)) {
     const path = spec.slice(spec.indexOf(":") + 1);
+    if (kind === "git") return nameFromPath(path);
     return normalizeName(basename2(path.split("/")[0] ?? path));
   }
   try {
     const u = new URL(spec);
     const segs = u.pathname.split("/").filter(Boolean);
-    if (kind === "git" && segs.length > 0) return normalizeName(segs[0]);
+    if (kind === "git" && segs.length > 0) return nameFromPath(u.pathname);
     return normalizeName(u.hostname);
   } catch {
     return normalizeName(spec);
@@ -6674,7 +6689,7 @@ function resolveSpec(spec, probe) {
     return {
       kind: "git",
       value: `https://github.com/${owner}/${repo ?? DEFAULT_REPO}`,
-      derivedName: normalizeName(owner)
+      derivedName: repoName(owner, repo)
     };
   }
   const slash = s.indexOf("/");
@@ -6688,7 +6703,7 @@ function resolveSpec(spec, probe) {
     return {
       kind: "git",
       value: `https://${firstSeg.toLowerCase()}/${owner}/${repo}`,
-      derivedName: normalizeName(owner)
+      derivedName: repoName(owner, repo)
     };
   }
   if (slash === -1) {
@@ -6707,7 +6722,7 @@ function resolveSpec(spec, probe) {
     return {
       kind: "git",
       value: `https://github.com/${firstSeg}/${repo}`,
-      derivedName: normalizeName(firstSeg)
+      derivedName: repoName(firstSeg, repo)
     };
   }
   const path = rest.replace(/\/+$/, "");
@@ -10164,11 +10179,40 @@ async function cmdAdd(ctx, args) {
   const path = configPath(ctx, Boolean(args.project));
   const resolved = resolveSpec(args.spec, ctx.probe ?? makeProbe());
   const name = args.name ?? resolved.derivedName;
-  const def = resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };
-  addSource(path, name, def);
+  let def = resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };
+  const existing = sourceEntry(path, name);
+  const kept = existing !== void 0;
+  if (kept) {
+    if (!sameAddress(ctx, name, existing, resolved)) {
+      const flag = args.project ? " --project" : "";
+      throw new CommandError(
+        `source "${name}" in ${path} is ${addressText(existing)}, not ${resolved.kind} ${resolved.value}; nothing was changed. Add it under another name (skilletor add <name> ${args.spec}${flag}) or remove the source first (skilletor source remove ${name}${flag}).`
+      );
+    }
+    def = entryDef(existing);
+  } else {
+    addSource(path, name, def);
+  }
   trustDef(ctx, name, def);
   const report = await sync(ctx);
-  return { name, def, report };
+  return { name, def, kept, report };
+}
+var DEF_KEYS = ["git", "ref", "url", "local"];
+function sameAddress(ctx, name, entry, resolved) {
+  if (entry === null || typeof entry !== "object") return false;
+  const field = entry[resolved.kind];
+  if (typeof field !== "string") return false;
+  if (resolved.kind !== "local") return sameIdentity(field, resolved.value);
+  const dir = (local) => resolveBackend({ name, local, origins: {} }, ctx.home).address;
+  return dir(field) === dir(resolved.value);
+}
+function addressText(entry) {
+  const e = entry !== null && typeof entry === "object" ? entry : {};
+  const parts = Object.entries(e).filter(([k, v]) => k !== "ref" && DEF_KEYS.includes(k) && typeof v === "string");
+  return parts.length ? parts.map(([k, v]) => `${k} ${v}`).join(", ") : JSON.stringify(entry);
+}
+function entryDef(entry) {
+  return Object.fromEntries(Object.entries(entry).filter(([k, v]) => DEF_KEYS.includes(k) && typeof v === "string"));
 }
 function cmdSourceList(ctx) {
   const config = load(ctx);
@@ -10889,7 +10933,8 @@ async function run(argv) {
         const name = flags.rest.length >= 2 ? flags.rest[0] : void 0;
         const spec = flags.rest.length >= 2 ? flags.rest[1] : flags.rest[0];
         const r = await cmdAdd(ctx, { name, spec, project: flags.project });
-        printLines(process.stdout, [`added source ${r.name} (${JSON.stringify(r.def)})`]);
+        const def = JSON.stringify(r.def);
+        printLines(process.stdout, [r.kept ? `source ${r.name} already added (${def}), kept as is` : `added source ${r.name} (${def})`]);
         printText(process.stdout, syncText(r.report));
         return 0;
       }

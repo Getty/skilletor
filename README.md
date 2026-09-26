@@ -49,17 +49,25 @@ restart — the report says so per item.
 ## Sources
 
 A source is a git repo, an HTTPS `.tar.gz`, or a local directory. `skilletor add`
-resolves a shorthand once and stores the explicit form:
+resolves a shorthand once and stores the explicit form, under the name you pass or the one
+shown here:
 
-| `<spec>` | resolves to |
-|---|---|
-| `Getty` | `git: https://github.com/Getty/skills` |
-| `Getty/repo` | `git: https://github.com/Getty/repo` |
-| `hf.co/user` | `git: https://hf.co/user/skills` |
-| `gitlab.com/u/r` | `git: https://gitlab.com/u/r` |
-| `host.tld/` | `https://host.tld/skills` (probed: git, then `.tar.gz`) |
-| `https://…/x.tar.gz` | `url` (HTTPS tarball) |
-| `~/dev/skills`, `./path`, `/abs` | `local` |
+| `<spec>` | resolves to | name |
+|---|---|---|
+| `Getty` | `git: https://github.com/Getty/skills` | `getty` |
+| `Getty/repo` | `git: https://github.com/Getty/repo` | `repo` |
+| `hf.co/user` | `git: https://hf.co/user/skills` | `user` |
+| `gitlab.com/u/r` | `git: https://gitlab.com/u/r` | `r` |
+| `host.tld/` | `https://host.tld/skills` (probed: git, then `.tar.gz`) | `host-tld` |
+| `https://…/x.tar.gz` | `url` (HTTPS tarball) | the host |
+| `~/dev/skills`, `./path`, `/abs` | `local` | the directory name |
+
+A git repo other than `skills` is named after the repo, explicit URLs too
+(`https://github.com/Getty/karr.git`, `git@github.com:Getty/karr.git` → `karr`); the
+default repo after its owner. `add` never replaces a source: the same address again keeps
+the entry as it is (a `ref` or `local` you set stays) and syncs; a name the config already
+gives another address fails (exit 1, nothing changed) — pass a name (`skilletor add <name>
+<spec>`) or `skilletor source remove <name>` first.
 
 A source's layout (convention, no manifest):
 
@@ -84,10 +92,10 @@ symlink there, or a copy skilletor itself installed there, is skipped, never an 
 example:
 
 ```bash
-skilletor add anthropics          # → anthropics/skills
-skilletor add obra/superpowers
+skilletor add anthropics          # → anthropics/skills, source "anthropics"
+skilletor add obra/superpowers    # source "superpowers"
 skilletor add mattpocock          # → mattpocock/skills, skills listed in its plugin.json
-skilletor add Getty/karr          # a project: its .claude/ skills, agents and rules
+skilletor add Getty/karr          # source "karr", a project: its .claude/ skills, agents and rules
 ```
 
 ## Declaring what you want

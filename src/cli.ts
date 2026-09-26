@@ -244,7 +244,8 @@ export async function run(argv: string[]): Promise<number> {
         const name = flags.rest.length >= 2 ? flags.rest[0] : undefined;
         const spec = flags.rest.length >= 2 ? flags.rest[1]! : flags.rest[0]!;
         const r = await cmdAdd(ctx, { name, spec, project: flags.project });
-        printLines(process.stdout, [`added source ${r.name} (${JSON.stringify(r.def)})`]);
+        const def = JSON.stringify(r.def);
+        printLines(process.stdout, [r.kept ? `source ${r.name} already added (${def}), kept as is` : `added source ${r.name} (${def})`]);
         printText(process.stdout, syncText(r.report));
         return 0;
       }

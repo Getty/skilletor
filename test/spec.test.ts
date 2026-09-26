@@ -26,18 +26,51 @@ const rows: Row[] = [
   { spec: "https://example.com/s.tgz", kind: "url", value: "https://example.com/s.tgz", name: "example-com" },
   { spec: "git@github.com:Getty/skills.git", kind: "git", value: "git@github.com:Getty/skills.git", name: "getty" },
   { spec: "ssh://git@example.com/Getty/skills", kind: "git", value: "ssh://git@example.com/Getty/skills", name: "getty" },
-  { spec: "github:Getty/repo", kind: "git", value: "https://github.com/Getty/repo", name: "getty" },
+  { spec: "github:Getty/repo", kind: "git", value: "https://github.com/Getty/repo", name: "repo" },
   { spec: "Getty", kind: "git", value: "https://github.com/Getty/skills", name: "getty" },
   { spec: "GETTY", kind: "git", value: "https://github.com/GETTY/skills", name: "getty" },
-  { spec: "Getty/repo", kind: "git", value: "https://github.com/Getty/repo", name: "getty" },
+  { spec: "Getty/repo", kind: "git", value: "https://github.com/Getty/repo", name: "repo" },
   { spec: "hf.co/user", kind: "git", value: "https://hf.co/user/skills", name: "user" },
-  { spec: "hf.co/user/repo", kind: "git", value: "https://hf.co/user/repo", name: "user" },
+  { spec: "hf.co/user/repo", kind: "git", value: "https://hf.co/user/repo", name: "repo" },
   { spec: "huggingface.co/user", kind: "git", value: "https://huggingface.co/user/skills", name: "user" },
   { spec: "codeberg.org/u", kind: "git", value: "https://codeberg.org/u/skills", name: "u" },
-  { spec: "gitlab.com/u/r", kind: "git", value: "https://gitlab.com/u/r", name: "u" },
+  { spec: "gitlab.com/u/r", kind: "git", value: "https://gitlab.com/u/r", name: "r" },
 ];
 
-for (const row of rows) {
+// k101: a git spec naming a repo other than the default `skills` derives the repo's name
+// (normalized, `.git` stripped), so `Getty/karr` and `Getty` no longer both become "getty".
+// A default-repo spec, a generic probed host, a url and a local path keep their names.
+const k101Rows: Row[] = [
+  { spec: "Getty/karr", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "obra/superpowers", kind: "git", value: "https://github.com/obra/superpowers", name: "superpowers" },
+  { spec: "github:Getty/karr", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "gitlab.com/u/tools", kind: "git", value: "https://gitlab.com/u/tools", name: "tools" },
+  { spec: "Getty/My_Repo.git", kind: "git", value: "https://github.com/Getty/My_Repo.git", name: "my-repo" },
+  { spec: "https://github.com/Getty/karr", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "https://github.com/Getty/karr.git", kind: "git", value: "https://github.com/Getty/karr.git", name: "karr" },
+  { spec: "https://github.com/Getty/karr/", kind: "git", value: "https://github.com/Getty/karr/", name: "karr" },
+  { spec: "git@github.com:Getty/karr.git", kind: "git", value: "git@github.com:Getty/karr.git", name: "karr" },
+  { spec: "ssh://git@example.com/Getty/karr.git", kind: "git", value: "ssh://git@example.com/Getty/karr.git", name: "karr" },
+  // The repo is the last path segment, as `git clone` names its directory.
+  { spec: "https://gitlab.com/group/sub/Tools.git", kind: "git", value: "https://gitlab.com/group/sub/Tools.git", name: "tools" },
+  // Default repo: the owner, as before.
+  { spec: "anthropics", kind: "git", value: "https://github.com/anthropics/skills", name: "anthropics" },
+  { spec: "github:Getty", kind: "git", value: "https://github.com/Getty/skills", name: "getty" },
+  { spec: "Getty/skills", kind: "git", value: "https://github.com/Getty/skills", name: "getty" },
+  { spec: "Getty/Skills.git", kind: "git", value: "https://github.com/Getty/Skills.git", name: "getty" },
+  { spec: "github.com/u", kind: "git", value: "https://github.com/u/skills", name: "u" },
+  { spec: "gitlab.com/u/skills", kind: "git", value: "https://gitlab.com/u/skills", name: "u" },
+  { spec: "https://github.com/Getty/skills.git", kind: "git", value: "https://github.com/Getty/skills.git", name: "getty" },
+  { spec: "https://gitlab.com/group/sub/skills", kind: "git", value: "https://gitlab.com/group/sub/skills", name: "group" },
+  // One path segment: that segment, as before.
+  { spec: "https://example.com/Tools.git", kind: "git", value: "https://example.com/Tools.git", name: "tools" },
+  { spec: "git@example.com:tools.git", kind: "git", value: "git@example.com:tools.git", name: "tools" },
+  // url and local: unchanged.
+  { spec: "https://example.com/org/pack.tar.gz", kind: "url", value: "https://example.com/org/pack.tar.gz", name: "example-com" },
+  { spec: "~/dev/karr", kind: "local", value: "~/dev/karr", name: "karr" },
+];
+
+for (const row of [...rows, ...k101Rows]) {
   test(`resolves ${row.spec}`, () => {
     const r = resolveSpec(row.spec, noProbe);
     assert.equal(r.kind, row.kind, "kind");
@@ -60,6 +93,11 @@ test("generic host, probe says git", () => {
 test("generic host with trailing slash defaults to /skills", () => {
   const r = resolveSpec("host.tld/", () => ({ git: true }));
   assert.equal(r.value, "https://host.tld/skills");
+});
+
+test("k101: a probed generic host keeps the host's name, whatever its path", () => {
+  const r = resolveSpec("mydir.com/team/tools", () => ({ git: true }));
+  assert.deepEqual(r, { kind: "git", value: "https://mydir.com/team/tools", derivedName: "mydir-com" });
 });
 
 test("generic host with a path, probe says tarball", () => {

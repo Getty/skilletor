@@ -63,6 +63,11 @@ sync; `check` writes nothing, exits non-zero when a sync is due (a source moved,
 no longer matches the lock, vars changed, the last sync stopped midway; what the last sync
 could not install although its source was there counts once). `uninstall` edits one config;
 no explicit entry there → exit 1, config untouched, the error names what covers it.
+`add` without a name takes the repo's for a git repo other than `skills` (`Getty/karr`,
+`https://github.com/Getty/karr.git` → `karr`), else the owner's (`Getty` → `getty`), the
+host's or the directory's. It never replaces a source: the same address again keeps the
+entry as written (`ref`, `local` stay) and syncs; another address under that name → exit 1,
+config untouched (pass a name, or `source remove <name>` first).
 An option a command does not list (`--project-dir` goes with all) → exit 2, nothing runs;
 `-h`/`--help` anywhere only prints usage; `-v`/`--version` only as the first argument.
 

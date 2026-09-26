@@ -216,8 +216,23 @@ Hooks never guess or probe.
 `HEAD <url>.tar.gz`. The first hit decides `git` vs. `url`; no hit → error listing both
 attempted addresses.
 
-If `[name]` is omitted, it is derived (owner or hostname, lowercased). The default repo
-name is `skills` everywhere.
+If `[name]` is omitted, it is derived, lowercased and reduced to `a-z0-9-` (k101): a git spec
+naming a repo other than the default gives the repo's name, `.git` stripped (`Getty/karr`,
+`github:Getty/karr`, `https://github.com/Getty/karr.git`, `git@github.com:Getty/karr.git` →
+`karr`; `gitlab.com/u/tools` → `tools`; in an explicit URL the repo is the last path
+segment); a default-repo spec gives the owner (`Getty`, `Getty/skills`,
+`https://github.com/Getty/skills` → `getty`; `gitlab.com/u/skills` → `u`); a probed generic
+host and a `url` give the hostname, a local path its directory name. The default repo name
+is `skills` everywhere. Names are stored, so an existing config keeps its names.
+
+**`add` never replaces a source** (k101). Only the config `add` writes to is checked. If it
+already has a source by that name with the same backend and address (`git`/`url` compared as
+identities, §15.6; `local` as the directory it names), the entry stays as written – `ref`, a
+`local` override and every other field kept, the file not rewritten – and `add` still trusts
+it and syncs (`source karr already added (…), kept as is`). Another backend or address is an
+error before anything is written or trusted (exit 1, config byte-identical) naming the
+existing address and the ways out: another name (`skilletor add <name> <spec>`) or
+`skilletor source remove <name>` first.
 
 ### 4.3 Trust
 

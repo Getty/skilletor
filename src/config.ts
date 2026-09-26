@@ -532,6 +532,13 @@ function saveRaw(path: string, cfg: RawConfig): void {
   atomicWrite(path, JSON.stringify(cfg, null, 2) + "\n");
 }
 
+/** Source `name` as one config file writes it (not validated); undefined when it has none. */
+export function sourceEntry(path: string, name: string): unknown {
+  const sources = loadRaw(path).sources;
+  if (sources === null || typeof sources !== "object" || !Object.hasOwn(sources, name)) return undefined;
+  return (sources as Record<string, unknown>)[name];
+}
+
 export function addSource(path: string, name: string, def: SourceDef): void {
   const cfg = loadRaw(path);
   const sources = (cfg.sources as Record<string, unknown>) ?? {};
