@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-09-26T14:47:06Z
+created: 2026-09-26T04:48:10Z
+id: 74
+priority: low
+started: 2026-09-26T14:33:32Z
+status: done
+tags:
+- sources
+- cache
+- concurrency
+title: 'commands: available/install fetch sources outside the sync lock'
+updated: 2026-09-26T14:47:15Z
+---
+
+Found during the k68 integration (worker): only `sync` holds the `sync.lock/` mutex (spec §6.5). `cmdAvailable` (src/commands.ts ~150) and `cmdInstall` (~197, before it calls sync) resolve sources outside it. Run concurrently with a hook sync, the worst case since k68 is an old version label over new cache files plus a leaked `.backup-*` dir; before k68 it could leave a half-written cache. Also: `.stage-*` / `.backup-*` dirs left by a failed cleanup or a crash between the two renames are never swept. Fix: take the lock (or a per-source cache lock) around every resolve; sweep stale stage/backup dirs under the lock.
+
+2026-09-26 14:38 Started (skilletor-worker). Callers of resolve in src/: engine sync (under sync.lock), commands cmdAvailable (l.150) and cmdInstall catalogOf (l.197) — both outside. cmdAdd only probes (ls-remote/HEAD, no cache write) then syncs; check() only ls-remote/HEAD; status reads locks only. Design: reuse sync.lock/ (not a per-source lock): sync reads the resolved trees (scan/render) long after resolve returns, so a per-source lock would have to be held through the whole sync for every source = the global lock plus N-lock ordering/stale handling, and sources/* would need state.ts's mutex. withLock waits up to 5 s (25 ms poll), then throws 'timed out acquiring sync lock'; hooks catch it into one warning line. install holds the lock only for its planning pass (resolve+scan+bundle expansion), releases it before prompting and before its sync (non-reentrant mutex, and a user at a prompt must not hold what hooks wait for). Sweep runs at the start of every hold, before any resolve of that run.
+
+2026-09-26 14:43 Implemented. engine.ts: withSyncLock(ctx, fn) = State.withLock + sweepUrlCache(cacheRoot) before fn; sync uses it. commands.ts: cmdAvailable resolves+scans inside withSyncLock (loop moved to listAvailable, body unchanged); cmdInstall's planning loop became planItem() run inside withSyncLock, released before missingSources (prompts) and before sync (no reentrancy). sources/url.ts: sweepUrlCache — <hash16>.stage-XXXXXX removed; <hash16>.backup-XXXXXX removed, except when <hash> is missing and backup/tree is a real dir: then tree is renamed back (it is the last good cache a killed run or a failed restore left; deleting it would undo k68). Never throws. Guarantee: stage/backup dirs are only made inside UrlSource.resolve, every resolve now runs under sync.lock, the sweep runs under it before any resolve of that run -> no live run's dirs can exist while sweeping. Residual: exactly as strong as the mutex (see Also found). Hook path: unchanged except the sweep inside sync; SessionStart output identical (black-box test). Hand test with temp HOME: hook swept a stage dir and restored a backup; 'available' with a held lock exits 1 after 5.1 s with 'timed out acquiring sync lock', then lists once free.
+
+2026-09-26 14:43 Also found (for new cards, not fixed here): (1) state.ts withLock: isStale() treats a lock dir without owner.json as stale, so a run between mkdirSync and writeFileSync can be broken into and both runs hold the lock; there is also no heartbeat, so a sync running >300 s can be joined by a second holder. The sweep and every cache write rely on this mutex. (2) available/install replace the url cache without recording its version; the next sync's If-None-Match uses the lock's older etag: offline the newer tree is labelled with the old etag, and if the server reverts to that etag a 304 keeps the newer tree under the old label. Fix idea: keep the version with the cache, not only in the lock. (3) One sync resolves sources in parallel; two source names with the same git URL+ref share one cache dir -> concurrent git commands in one repo (url is safe: publishEntries is synchronous). (4) A git fetch/reset killed mid-way can leave .git/index.lock or shallow.lock in a git cache; every later resolve then fails and falls back to the stale cache with a warning, forever. The k74 sweep could clear those under the same lock.
+
+2026-09-26 14:44 Done: every resolve now runs under sync.lock/ (withSyncLock in engine.ts: sync, available, install's planning pass; install releases before prompting and before its sync), and each holder first sweeps url stage/backup leftovers (sweepUrlCache in sources/url.ts; a backup that holds the only last good cache is moved back, not deleted). Tests: 3 in url-cache (restore after double rename failure + offline resolve, what is/isn't swept, silent on missing/file root), 2 in commands (available and install wait for a held lock with no cache write/config edit/sweep, then complete; lock free during the bundle prompt), 1 black-box runHook SessionStart (leftovers swept, output identical; file as cache root changes nothing). Mutations (sweep outside the lock, no restore) turn tests red. Spec 4.4 + 6.5 and README CLI reference updated. typecheck, npm test (564/564), build, check-dist green; dist rebuilt. Not committed.
+
+2026-09-26 14:47 Committed as bc1d11f: commands: resolve sources under the sync lock; sweep url cache leftovers (k74)
