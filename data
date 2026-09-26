@@ -1,0 +1,40 @@
+---
+claimed_at: 2026-09-26T02:20:54Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-26T02:20:22Z
+created: 2026-09-26T01:58:46Z
+id: 62
+priority: high
+started: 2026-09-26T02:00:03Z
+status: done
+tags:
+- gitignore
+- engine
+- spec
+title: 'gitignore: fixed ignore rules — per-skill .gitignore, .local. agents/rules'
+updated: 2026-09-26T02:20:54Z
+---
+
+Problem: the managed .gitignore block lists every managed file path. `.claude/.gitignore` is normally committed (`git add .claude` takes it), but its block changes with machine state: an upstream skill gains a file, a wildcard gains an item, `skilletor.local.json` adds items, `vars` make an item render empty, auto-detected targets differ. Result: a committed file shows as modified after SessionStart syncs, with no project change behind it.
+
+Fix (spec §6.3, §6.4, §14.2, §14.3 as rewritten for this card):
+- Skills keep their directory name. Every installed skill dir gets a `.gitignore` containing `*` (plus a one-line comment), as a regular managed file of the item (in the lock, removed with the item). A source-shipped `.gitignore` at the skill root is replaced. Written whenever `gitignore` is enabled, both scopes, both harness roots (`.claude/skills`, `.agents/skills`); removed when disabled.
+- Agents and rules install as `.local.<name>.md` (Claude) / `.local.<name>.toml` (Codex agents); a nested rule prefixes its file name (`rules/lang/.local.perl.md`). The prefix is part of the layout, independent of `gitignore`. Lock keys stay (`agents/foo`); only file paths change, so the first sync after the upgrade moves installed files by the normal diff (write new, delete old lock-owned path).
+- Conflicts: an agent/rule item also claims its plain path; a foreign file at `agents/<name>.md` / `rules/<name>.md` is a conflict; `--force` removes it and installs the prefixed file.
+- Blocks hold fixed entries only: `.claude` (project) = `skilletor.lock.json`, `skilletor.local.json`, `agents/**/.local.*`, `rules/**/.local.*`; `~/.claude` (in a work tree) = lock, state dir, same two patterns; `.codex` / `$CODEX_HOME` = `agents/**/.local.*`, `skilletor-rules.md`, only while that root holds managed Codex agents or the rules file; `.agents` = no block (an old per-path block there is removed).
+- Commit hint: when sync creates a block or changes its content, the report says `<root>/.gitignore updated — commit it`.
+
+Measured (2026-09-26): Claude Code 2.1.283 names a skill after its directory even with a frontmatter `name` (`.local.x/` → `/.local.x`), loads `agents/.local.x.md` and `rules/.local.x.md` (agent name from frontmatter; an agent without `name:` never loads, prefix or not); a skill dir with its own `*` .gitignore loads normally. Codex 0.153.4 skips a dot-prefixed skill dir, loads `.codex/agents/.local.x.toml`, loads a skill dir with its own .gitignore. `git status` check: the fixed patterns leave only own files, `skilletor.json` and the `.gitignore` visible.
+
+Done when: the spec behaviour holds, tests cover layout, migration from the old layout/block, the plain-path conflict, `--force`, `gitignore: false`, the commit hint, the per-skill .gitignore on both harnesses; README-level docs are the orchestrator's; the bundled skill text (`skills/skilletor/SKILL.md` line ~88, `references/codex.md` ~75) is updated; dist rebuilt; `npm run typecheck && npm test && npm run build && npm run check-dist` green.
+
+2026-09-26 02:03 Started. Baseline: 424 tests pass. Plan: prefix mapping + plain-path claims as layout functions in targets.ts, applied in the engine after convert; apply gets a generic PlanItem.claims (foreign file there = item-level conflict, --force deletes it); per-skill .gitignore added to skill output in the engine per scope gitignore switch; gitignore.ts takes fixed entries only and returns whether the block was created/changed; ScopeReport.gitignoreUpdated drives the commit hint in reportText and reportHook.
+
+2026-09-26 02:09 Implementation in place (targets.ts placeOutput/localTypes, apply.ts claims, gitignore.ts fixed entries + SKILL_GITIGNORE, engine wiring, report gitignoreUpdated). Existing 424 tests adapted to the new layout and pass. Decisions: (1) a plain-path conflict leaves an already installed item as it was (lock entry kept, nothing written), like a template error; (2) user-scope commit hint is labelled ~/.claude/.gitignore (the hook context carries no scope, a bare .claude/.gitignore would point the model at the project); (3) no hint when a block is only removed (spec says create/change). Next: dedicated k62 tests.
+
+2026-09-26 02:17 Added a guard beyond the spec: a skill's own .gitignore is withheld while another path of the item conflicts and the lock does not own it yet (PlanItem.attached). Without it a same-named hand-written skill got a '*' .gitignore, and a manage-skills symlink got one written through the link into its target (red test first, then fix). Hand-tested with HOME/CODEX_HOME in a temp dir: fresh project sync -> git status shows only .claude/.gitignore and skilletor.json; SessionStart through bin/skilletor carries the hint in systemMessage and additionalContext, second run silent; the committed 0.2.0 dist followed by the new build migrates both harnesses (files move, .agents/.gitignore deleted, .claude and .codex blocks replaced, both hints shown).
+
+2026-09-26 02:17 Done: fixed ignore rules per spec §6.3/§6.4/§14.2/§14.3. src: targets.ts (LAYOUTS.localTypes + placeOutput: .local. prefix, plain-path claims), apply.ts (PlanItem.claims: foreign plain file = item-level conflict with replace:true, --force deletes it, lock-owned old path migrates via the diff; PlanItem.attached), gitignore.ts (fixed entries, BlockChange result, SKILL_GITIGNORE/withSkillGitignore), engine.ts (layout after convert, per-skill .gitignore per scope switch, fixed blocks per root, .agents block removal, commit hint), report.ts (gitignoreUpdated in text + hook, conflict wording). Bundled skill text updated (SKILL.md layout table, plain-name claim, gitignore bullet; references/codex.md Git bullet). dist rebuilt. Verified: typecheck ok; npm test 441/441 pass (was 424); build ok; check-dist up to date. Open for the dispatcher: (1) nested rules cannot occur today (catalog scans rules/<name>.md only, names have no '/'), placeOutput prefixes the basename generically; (2) plain-path conflict on an already installed item leaves it as it was (not removed); (3) user-scope hint reads ~/.claude/.gitignore (hook context names no scope); (4) no hint when a block is only removed; (5) with gitignore:false a source-shipped skill-root .gitignore installs as shipped; (6) the attached guard is not in the spec yet, §6.4 may want a sentence; (7) SessionStart syncs only when check sees a change, so a git-only setup migrates on the next upstream change or manual sync; a layout-drift test in check would be its own card; (8) first sync after the upgrade reports every skill as updated (new .gitignore file); (9) --force usage text (README, SKILL.md, cli.ts) still says 'adopt'; the conflict line says 'replace it'; if README changes, SKILL.md and cli.ts change with it. k63 not touched; README not touched.
+
+2026-09-26 02:20 Committed 9732b1f: gitignore: fixed ignore rules — per-skill .gitignore, .local. agents/rules (k62)
