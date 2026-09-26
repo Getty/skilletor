@@ -1,0 +1,41 @@
+---
+claimed_at: 2026-09-26T02:52:59Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-26T02:52:59Z
+created: 2026-09-26T02:37:12Z
+id: 65
+priority: high
+started: 2026-09-26T02:38:45Z
+status: done
+tags:
+- gitignore
+- engine
+- bug
+title: 'gitignore: no project block where skilletor is not used'
+updated: 2026-09-26T02:52:59Z
+---
+
+Bug (pre-existing since at least 0.2.0, made loud by k62): every sync – CLI `skilletor sync`, or the SessionStart hook whenever the user scope has a change – also runs the project scope in whatever directory it starts in. With no project `skilletor.json`/`skilletor.local.json` and no project lock, the project scope still writes `<dir>/.claude/.gitignore` with the fixed entries. Since k62 the report and the hook also say `.claude/.gitignore updated — commit it`, in repos that never used skilletor.
+
+Repro (orchestrator, 2026-09-26, HOME/CODEX_HOME in temp dirs, `~/.claude/settings.json` = `{}`, user config installing one skill from a local source): `cd <git repo without .claude/>; bin/skilletor sync` → `skilletor: project scope / .claude/.gitignore updated — commit it`, `git status` shows `?? .claude/.gitignore`. Same in a plain non-git dir. The committed pre-k62 dist (c3a4191) writes the same file (entries `skilletor.local.json`, `skilletor.lock.json`), without the hint.
+
+Fix (spec §6.4, orchestrator adds the sentence): project blocks are written only while the project scope is in use – a project `skilletor.json` or `skilletor.local.json` exists, or the project lock does (items to clean up). Otherwise nothing is written, and a skilletor block found there (litter from earlier versions) is removed – the file deleted if only the block remained. No commit hint for that cleanup. The `.agents`/`.codex` project roots follow the same rule.
+
+Done when: tests cover no config + no lock → no file created, no hint; litter block removed (file deleted when only the block, kept otherwise); config present → block as today; lock present but config gone → block kept until the lock is empty; hook path included; full check chain green.
+
+2026-09-26 02:40 Reproduced with HEAD bin/skilletor (HOME/CODEX_HOME temp, settings.json {} marker, user config installing foo from a local source): in a fresh git repo and in a plain dir, sync prints 'project scope / .claude/.gitignore updated — commit it' and creates <dir>/.claude/.gitignore. Cause: engine.ts syncScope always runs the gitignore block loop for the project scope with PROJECT_CLAUDE_ENTRIES for the .claude root, no in-use check (config.project exists whenever projectDir is set).
+
+2026-09-26 02:46 Decision: 'in use' = project skilletor.json or skilletor.local.json exists (existence, so an empty {} config counts), OR the project lock holds at least one entry after this sync's apply/rules step. Evaluated on the new lock, so the sync that removes the last item removes the block in the same run ('removed with the last one'). The {} lock that sync leaves behind does NOT count. Spec text says 'or the project lock does [exist]'; followed the brief's 'while the lock has entries' reading. Orchestrator may want to tighten the spec wording to 'holds entries'.
+
+2026-09-26 02:46 Also found (follow-up, not fixed, board: skilletor): once a project drops skilletor (config removed), apply writes the lock as '{}' instead of deleting it, and with the block now gone that file is no longer ignored. Hand-verified in a committed repo: after rm skilletor.json + sync, git status shows ' D .claude/.gitignore', ' D .claude/skilletor.json', '?? .claude/skilletor.lock.json' (content {}). Before k65 the block stayed forever and hid it. Options: apply deletes an empty lock (both scopes), or the in-use rule counts an existing lock file (then the block and the {} lock stay for good). Needs a decision/ticket.
+
+2026-09-26 02:46 Also checked, no change needed: per-skill .gitignore is only written for installed skills, and apply removes it with the item (it is in the lock's files), so nothing is written into an unused project. apply writes no lock when old and new are both {}. The one other touch: syncCodexRules runs when <project>/.codex/skilletor-rules.md exists even without lock entries and deletes it (a file owned by name, i.e. litter cleanup); left as is. status/--json unchanged (status never touched gitignore); sync --json still carries the project ScopeReport, just without gitignoreUpdated. Bundled skills/skilletor text does not claim blocks are written into every project, so left untouched. README could add 'only in projects that use skilletor' (orchestrator's file, optional).
+
+2026-09-26 02:46 Done: src/engine.ts syncScope computes inUse (user scope always; project: lock has entries after apply, or .claude/skilletor.json / skilletor.local.json exists) and gives no block entries to any project root when not in use, so updateGitignore writes nothing or removes a found block (file deleted when only the block remained). 'removed' never reaches gitignoreUpdated, so there is no hint. dist rebuilt. Tests (all red before, green after): engine x5 (no config+no lock, nothing in the project dir and no hint; litter removed with own lines kept; empty skilletor.json and lone skilletor.local.json count; config removed, block goes with the last item; kept lock entries hold the block and the emptied lock releases it), codex x1 (.codex block goes with config/agent/rule, .codex litter removed; the .codex half already held before the fix, the .claude assertion was the red part), hooks x1 through runHook (pristine project: 'skilletor: 1 item(s) updated' exactly, dir stays empty; litter removed silently), cli x1 on the built bundle (real git repo: porcelain clean, no .claude; plain dir stays empty). Mutations: dropping the local.json check or using existsSync(lock) each turn tests red. typecheck ok; npm test 458/458 pass, 0 skipped; build + check-dist up to date. Hand test via bin/skilletor, temp HOME/CODEX_HOME: repo and plain dir untouched; hook in repo silent on gitignore. Open: the {} lock left unignored after a project drops skilletor (see note). Not committed.
+
+2026-09-26 02:51 Follow-up (coordinator decision: option 1, delete an empty lock, both scopes): src/lock.ts writeLock deletes the file when the lock has no entries (never writes {}, never creates one), which covers every writer (apply, and the Codex rules migration in engine.ts, the only two). src/apply.ts also calls it when the new lock is empty and a lock file exists, so a {} left by an earlier version goes on the next sync. Readers audited: every one goes through readLock (ENOENT reads as {}) and none checks the file exists (check, status and --json, hooks via check/sync, uninstall, available/source remove installedSet, syncCodexRules, briefingOf). Skip and block entries are entries, so they keep a non-empty lock; trust lives in state, not the lock. New tests (red before, green after, except the zero-items stability guard and the reader checks, which already held): lock unit; apply (last removal, old {}, skip entry); engine (zero items: block but no lock, stable across two syncs; k65 config-removed and kept-entries tests now also assert no lock); commands (user: uninstalling the last item deletes ~/.claude/skilletor.lock.json, then status/check/available/sync/source remove without --force behave as with no lock); codex (block entries removed, no lock); cli on the bundle (committed repo drops skilletor, porcelain is exactly ' D .claude/.gitignore',' D .claude/skilletor.json' with no ?? lock, .claude empty, status --json fine). Mutation: without the old-{} clause, apply and engine tests go red. typecheck ok; npm test 463/463 pass, 0 skipped; build + check-dist up to date. Hand test via bin/skilletor: same porcelain; old {} lock deleted; user uninstall removes the lock, status/sync fine. Spec wording in §6.4 matches the code. Not committed.
+
+2026-09-26 02:51 Follow-up done (empty lock deleted, both scopes): see the last note. Chain green, 463/463. Not committed.
+
+2026-09-26 02:52 Committed as e371b13: gitignore: no project block where skilletor is not used (k65)
