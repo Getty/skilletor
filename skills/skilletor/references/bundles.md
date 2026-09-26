@@ -83,7 +83,8 @@ shorthand, restricted to forms that resolve without a network probe:
 | `Getty`, `Getty/repo`, `gitlab.com/peter`, `hf.co/user`, `https://…`, `https://….tar.gz` | generic host `example.org/foo` (write `https://example.org/foo`), local paths `~/…`, `./…`, `/…` |
 
 - **Matching is by URL, not config name.** The entry is served by whichever configured
-  source (visible to the bundle's scope) has the same resolved `git`/`url`; case of host,
+  source (visible to the bundle's scope; a user bundle sees your user config's definitions
+  only, never a project's) has the same resolved `git`/`url`; case of host,
   trailing `/` and `.git` are ignored. Calling it `pete` instead of `peter` is fine; a
   `local`-only source never matches. A `local` override of a matched source (author mode)
   still applies.

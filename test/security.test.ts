@@ -185,7 +185,7 @@ test("an untrusted project source is never fetched — not by sync, not by check
 test("trust lapses when a project source's URL changes", async () => {
   const e = engineEnv();
   try {
-    new State(e.ectx.stateRoot).trust("team", "https://github.com/Getty/skills");
+    new State(e.ectx.stateRoot).trust("team", { kind: "git", address: "https://github.com/Getty/skills" });
     writeFileSync(
       join(e.projectDir, ".claude/skilletor.json"),
       JSON.stringify({ sources: { team: { git: "https://evil.example/skills" } }, install: { skills: ["x@team"] } }),

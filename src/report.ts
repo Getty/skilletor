@@ -3,7 +3,7 @@
 // Per-item activation hints come from the spike (design §12): skills are active
 // immediately; agents and rules need /reload-plugins or a restart. Codex items
 // (lock key `codex:…`, spec §14.4) carry their own, unmeasured-so-conservative hint.
-import type { ItemType } from "./config.ts";
+import type { BackendKind, ItemType } from "./config.ts";
 import { parseLockKey } from "./targets.ts";
 import { briefingWarning, type BriefingMissing } from "./briefing.ts";
 
@@ -27,6 +27,19 @@ export interface ItemChange {
   source: string;
 }
 
+/** A source whose backend is not trusted (spec §4.3): `kind` and `url` (its address; a
+ *  `local` path for a local backend) name the backend that would be used. */
+export interface TrustRequest {
+  name: string;
+  kind: BackendKind;
+  url: string;
+}
+
+/** How a backend is named in trust requests and `skilletor trust`: `local /path`, `git https://…`. */
+export function backendLabel(b: { kind: BackendKind; url: string }): string {
+  return `${b.kind} ${b.url}`;
+}
+
 export interface ScopeReport {
   scope: "user" | "project";
   added: ItemChange[];
@@ -40,7 +53,7 @@ export interface ScopeReport {
   conflicts: { path: string; replace?: true }[];
   overwritten: { path: string }[];
   warnings: string[];
-  trustRequests: { name: string; url: string }[];
+  trustRequests: TrustRequest[];
   /** Installed agents whose briefing skills do not resolve (spec §6.7); each also has
    *  its line in `warnings`. Absent when empty. */
   briefingMissing?: BriefingMissing[];
@@ -109,7 +122,7 @@ export function reportText(r: SyncReport): string {
     for (const c of s.conflicts) {
       lines.push(`  conflict: ${c.path} already exists (use --force to ${c.replace ? "replace it" : "adopt"})`);
     }
-    for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${t.url}) — run: skilletor trust ${t.name}`);
+    for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${backendLabel(t)}) — run: skilletor trust ${t.name}`);
     for (const g of s.gitignoreUpdated ?? []) lines.push(`  ${commitHint(g)}`);
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
@@ -165,7 +178,7 @@ export function reportHook(report: SyncReport): { systemMessage?: string; additi
     }
   }
   for (const s of r.scopes) {
-    for (const t of s.trustRequests) ctx.push(`- untrusted source ${t.name} (${t.url}); run: skilletor trust ${t.name}`);
+    for (const t of s.trustRequests) ctx.push(`- untrusted source ${t.name} (${backendLabel(t)}); run: skilletor trust ${t.name}`);
     for (const g of s.gitignoreUpdated ?? []) ctx.push(`- ${commitHint(g)}`);
     for (const w of s.warnings) ctx.push(`- warning: ${w}`);
   }

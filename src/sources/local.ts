@@ -16,8 +16,9 @@ export function expandHome(path: string, home: string): string {
 export class LocalSource implements Source {
   readonly dir: string;
 
-  constructor(localPath: string, home: string) {
-    this.dir = expandHome(localPath, home);
+  /** Without `home` the path is taken as is (an already resolved absolute path). */
+  constructor(localPath: string, home?: string) {
+    this.dir = home === undefined ? localPath : expandHome(localPath, home);
   }
 
   exists(): boolean {

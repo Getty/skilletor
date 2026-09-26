@@ -5737,7 +5737,7 @@ var require_nunjucks = __commonJS({
 });
 
 // src/cli.ts
-import { realpathSync as realpathSync2 } from "node:fs";
+import { realpathSync as realpathSync3 } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -5746,8 +5746,8 @@ import { join as join16 } from "node:path";
 // src/engine.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
-import { existsSync as existsSync11, readFileSync as readFileSync10, rmSync as rmSync7 } from "node:fs";
-import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative3, sep as sep4 } from "node:path";
+import { existsSync as existsSync11, readFileSync as readFileSync10, realpathSync as realpathSync2, rmSync as rmSync7, statSync as statSync3 } from "node:fs";
+import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative3, resolve as resolvePath4, sep as sep4 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -5817,6 +5817,7 @@ var WILDCARD = "*";
 var ConfigError = class extends Error {
   name = "ConfigError";
 };
+var BACKEND_KINDS = ["git", "url", "local"];
 var ALLOWED_KEYS = /* @__PURE__ */ new Set(["sources", "install", "vars", "gitignore", "checkInterval", "targets"]);
 var SOURCE_KEYS = /* @__PURE__ */ new Set(["git", "ref", "url", "local"]);
 function readConfigFile(path) {
@@ -5855,7 +5856,7 @@ function asObject(value2, path, where) {
   }
   return value2;
 }
-function parseSources(obj, path) {
+function parseSources(obj, path, origin) {
   const sources = /* @__PURE__ */ new Map();
   const raw = asObject(obj.sources, path, "sources");
   for (const [name, def] of Object.entries(raw)) {
@@ -5865,7 +5866,7 @@ function parseSources(obj, path) {
         throw new ConfigError(`${path}: sources.${name}: unknown key "${key}"`);
       }
     }
-    const src = { name, origin: "project" };
+    const src = { name, origins: {} };
     if (typeof d.git === "string") src.git = d.git;
     if (typeof d.ref === "string") src.ref = d.ref;
     if (typeof d.local === "string") src.local = d.local;
@@ -5878,13 +5879,19 @@ function parseSources(obj, path) {
     if (src.git === void 0 && src.url === void 0 && src.local === void 0) {
       throw new ConfigError(`${path}: sources.${name} needs one of "git", "url" or "local"`);
     }
+    for (const kind of BACKEND_KINDS) if (src[kind] !== void 0) src.origins[kind] = origin;
     sources.set(name, src);
   }
   return sources;
 }
-function mergeSource(base, incoming, origin) {
-  const merged = { ...base ?? { name: incoming.name, origin }, ...incoming };
-  merged.origin = base?.origin === "user" || origin === "user" ? "user" : "project";
+function mergeSource(base, incoming) {
+  const merged = { ...base ?? incoming, origins: { ...base?.origins } };
+  if (incoming.ref !== void 0) merged.ref = incoming.ref;
+  for (const kind of BACKEND_KINDS) {
+    if (incoming[kind] === void 0) continue;
+    merged[kind] = incoming[kind];
+    merged.origins[kind] = incoming.origins[kind];
+  }
   return merged;
 }
 var BUNDLES_KEY = "bundles";
@@ -6016,13 +6023,13 @@ function loadConfig(opts) {
       throw new ConfigError(`${p}: "checkInterval" is user-only`);
     }
   }
-  const userSources = parseSources(user, userPath);
-  const projectSources = hasProject ? parseSources(project, projectPath) : /* @__PURE__ */ new Map();
-  const localSources = hasProject ? parseSources(local, localPath) : /* @__PURE__ */ new Map();
+  const userSources = parseSources(user, userPath, "user");
+  const projectSources = hasProject ? parseSources(project, projectPath, "project") : /* @__PURE__ */ new Map();
+  const localSources = hasProject ? parseSources(local, localPath, "user") : /* @__PURE__ */ new Map();
   const sources = /* @__PURE__ */ new Map();
-  for (const [name, s] of projectSources) sources.set(name, { ...s, origin: "project" });
-  for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s, "user"));
-  for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s, "user"));
+  for (const [name, s] of projectSources) sources.set(name, mergeSource(void 0, s));
+  for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s));
+  for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s));
   const checkInterval = numberOr(user.checkInterval, 1800, userPath, "checkInterval");
   const userInstall = parseInstall(user, userPath, "user", userSources);
   const userScope = {
@@ -6055,7 +6062,7 @@ function loadConfig(opts) {
     const localTargets = targetsOf(local.targets, localPath);
     if (localTargets ?? projectTargets) projectScope.targets = localTargets ?? projectTargets;
   }
-  return { sources, checkInterval, user: userScope, project: projectScope, userSources: new Set(userSources.keys()) };
+  return { sources, checkInterval, user: userScope, project: projectScope, userSources };
 }
 function dedupeAcross(a, b, path) {
   const seen = /* @__PURE__ */ new Map();
@@ -7363,8 +7370,9 @@ function expandHome(path, home) {
 }
 var LocalSource = class {
   dir;
+  /** Without `home` the path is taken as is (an already resolved absolute path). */
   constructor(localPath, home) {
-    this.dir = expandHome(localPath, home);
+    this.dir = home === void 0 ? localPath : expandHome(localPath, home);
   }
   exists() {
     try {
@@ -8169,14 +8177,21 @@ var State = class {
     atomicWrite(this.path(name), JSON.stringify(value2, null, 2) + "\n");
   }
   // ---- trust ----------------------------------------------------------------
-  trust(name, resolved) {
+  /** Trust source `name` for exactly this backend; replaces an earlier entry of the name. */
+  trust(name, backend) {
     const trust = this.readJson("trust.json");
-    trust[name] = resolved;
+    trust[name] = { kind: backend.kind, address: backend.address };
     this.writeJson("trust.json", trust);
   }
-  isTrusted(source) {
-    if (source.origin === "user") return true;
-    return this.readJson("trust.json")[source.name] === source.resolved;
+  /** Is source `name` trusted with this backend? An entry written before k66 is the URL
+   *  alone: it counts for a git or url backend at exactly that URL, never for a local one. */
+  isTrusted(name, backend) {
+    if (backend.origin === "user") return true;
+    const entry = this.readJson("trust.json")[name];
+    if (typeof entry === "string") return backend.kind !== "local" && entry === backend.address;
+    if (entry === null || typeof entry !== "object") return false;
+    const e = entry;
+    return e.kind === backend.kind && e.address === backend.address;
   }
   // ---- last-check -----------------------------------------------------------
   isDue(scopeKey, intervalSeconds) {
@@ -8423,6 +8438,9 @@ var CODEX_ACTIVATION = "active from the next Codex session";
 function activationOf(it) {
   return parseLockKey(it.key).harness === "codex" ? CODEX_ACTIVATION : ACTIVATION[it.type];
 }
+function backendLabel(b) {
+  return `${b.kind} ${b.url}`;
+}
 function emptyScopeReport(scope) {
   return {
     scope,
@@ -8471,7 +8489,7 @@ function reportText(r) {
     for (const c of s.conflicts) {
       lines.push(`  conflict: ${c.path} already exists (use --force to ${c.replace ? "replace it" : "adopt"})`);
     }
-    for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${t.url}) \u2014 run: skilletor trust ${t.name}`);
+    for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${backendLabel(t)}) \u2014 run: skilletor trust ${t.name}`);
     for (const g of s.gitignoreUpdated ?? []) lines.push(`  ${commitHint(g)}`);
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
@@ -8518,7 +8536,7 @@ function reportHook(report) {
     }
   }
   for (const s of r.scopes) {
-    for (const t of s.trustRequests) ctx.push(`- untrusted source ${t.name} (${t.url}); run: skilletor trust ${t.name}`);
+    for (const t of s.trustRequests) ctx.push(`- untrusted source ${t.name} (${backendLabel(t)}); run: skilletor trust ${t.name}`);
     for (const g of s.gitignoreUpdated ?? []) ctx.push(`- ${commitHint(g)}`);
     for (const w of s.warnings) ctx.push(`- warning: ${w}`);
   }
@@ -8564,18 +8582,43 @@ function loadWithTargets(ctx) {
     return { error: err.message };
   }
 }
-function identityOf(src) {
-  return src.git ?? src.url ?? src.local ?? "";
-}
-function makeBackend(src, home, cacheRoot, timeoutMs) {
-  if (src.local) {
-    const ls = new LocalSource(src.local, home);
-    if (ls.exists()) return ls;
+function localDir(path, home) {
+  const abs = resolvePath4(expandHome(path, home));
+  try {
+    if (statSync3(abs).isDirectory()) return { path: realpathSync2(abs), exists: true };
+  } catch {
   }
-  if (src.git) return new GitSource({ url: src.git, ref: src.ref, cacheRoot, timeoutMs });
-  if (src.url) return new UrlSource({ url: src.url, cacheRoot, timeoutMs });
-  if (src.local) return new LocalSource(src.local, home);
+  return { path: abs, exists: false };
+}
+function resolveBackend(src, home) {
+  const origin = (kind) => src.origins[kind] ?? "project";
+  const local = src.local === void 0 ? void 0 : localDir(src.local, home);
+  if (local?.exists) return { kind: "local", address: local.path, origin: origin("local") };
+  if (src.git !== void 0) {
+    const b = { kind: "git", address: src.git, origin: origin("git") };
+    if (src.ref !== void 0) b.ref = src.ref;
+    return b;
+  }
+  if (src.url !== void 0) return { kind: "url", address: src.url, origin: origin("url") };
+  if (local) return { kind: "local", address: local.path, origin: origin("local") };
   throw new Error(`source ${src.name} has no backend`);
+}
+function makeBackend(backend, cacheRoot, timeoutMs) {
+  switch (backend.kind) {
+    case "local":
+      return new LocalSource(backend.address);
+    // missing dir -> resolve errors
+    case "git":
+      return new GitSource({ url: backend.address, ref: backend.ref, cacheRoot, timeoutMs });
+    case "url":
+      return new UrlSource({ url: backend.address, cacheRoot, timeoutMs });
+  }
+}
+function sourcesOf(config, scope) {
+  return scope === "user" ? config.userSources : config.sources;
+}
+function trustRequestOf(name, backend) {
+  return { name, kind: backend.kind, url: backend.address };
 }
 function scopeSources(scopeCfg) {
   return [...new Set([...scopeCfg.install, ...scopeCfg.wildcards, ...scopeCfg.bundles].map((i) => i.source))];
@@ -8617,8 +8660,7 @@ function makeContext(ctx, scope, harness, targetDir, item, scopeVars, sourceVars
   };
 }
 function servingSource(config, scope, url) {
-  for (const src of config.sources.values()) {
-    if (scope === "user" && !config.userSources.has(src.name)) continue;
+  for (const src of sourcesOf(config, scope).values()) {
     const id = src.git ?? src.url;
     if (id !== void 0 && sameIdentity(id, url)) return src.name;
   }
@@ -8680,22 +8722,24 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state) {
   const oldLock = readLock(lockPath);
   const gitignoreOn = scopeCfg.gitignore !== false;
   const needed = scopeSources(scopeCfg);
+  const sources = sourcesOf(config, scope);
   const resolved = /* @__PURE__ */ new Map();
   const resolveAll = (names) => Promise.all(
     names.filter((n) => !resolved.has(n)).map(async (name) => {
-      const src = config.sources.get(name);
+      const src = sources.get(name);
       if (!src) {
         rep.warnings.push(`unknown source: ${name}`);
         resolved.set(name, null);
         return;
       }
-      if (!state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) {
-        rep.trustRequests.push({ name, url: identityOf(src) });
-        resolved.set(name, null);
-        return;
-      }
       try {
-        const loc = await makeBackend(src, ctx.home, cacheRoot, ctx.timeoutMs).resolve(sourceVersion(oldLock, name));
+        const backend = resolveBackend(src, ctx.home);
+        if (!state.isTrusted(name, backend)) {
+          rep.trustRequests.push(trustRequestOf(name, backend));
+          resolved.set(name, null);
+          return;
+        }
+        const loc = await makeBackend(backend, cacheRoot, ctx.timeoutMs).resolve(sourceVersion(oldLock, name));
         if (loc.warning) rep.warnings.push(loc.warning);
         resolved.set(name, { dir: loc.dir, version: loc.version });
       } catch (err) {
@@ -9160,11 +9204,14 @@ async function check(given, opts = {}) {
       (out.layoutChanged ??= []).push(scope);
     }
     const viaSources = Object.values(oldLock).flatMap((e) => e.via?.length ? [e.source] : []);
+    const sources = sourcesOf(config, scope);
     for (const name of /* @__PURE__ */ new Set([...scopeSources(scopeCfg), ...viaSources])) {
-      const src = config.sources.get(name);
-      if (!src || !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
+      const src = sources.get(name);
+      if (!src) continue;
       try {
-        const changed = await makeBackend(src, ctx.home, cacheRoot, ctx.timeoutMs).check(sourceVersion(oldLock, name));
+        const backend = resolveBackend(src, ctx.home);
+        if (!state.isTrusted(name, backend)) continue;
+        const changed = await makeBackend(backend, cacheRoot, ctx.timeoutMs).check(sourceVersion(oldLock, name));
         out.sources.push({ name, scope, changed });
         if (changed) out.changed = true;
       } catch (err) {
@@ -9207,11 +9254,12 @@ function status(given, opts = {}) {
     const sourceVersions = {};
     for (const entry of Object.values(lock)) sourceVersions[entry.source] = entry.version;
     const trustRequests = [];
+    const sources = sourcesOf(config, scope);
     for (const name of scopeSources(scopeCfg)) {
-      const src = config.sources.get(name);
-      if (src && !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) {
-        trustRequests.push({ name, url: identityOf(src) });
-      }
+      const src = sources.get(name);
+      if (!src) continue;
+      const backend = resolveBackend(src, ctx.home);
+      if (!state.isTrusted(name, backend)) trustRequests.push(trustRequestOf(name, backend));
     }
     const declared = rows.map((i) => {
       const entry = lock[i.key];
@@ -9330,7 +9378,7 @@ async function cmdAdd(ctx, args) {
   const name = args.name ?? resolved.derivedName;
   const def = resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };
   addSource(path, name, def);
-  new State(ctx.stateRoot).trust(name, resolved.value);
+  trustDef(ctx, name, def);
   const report = await sync(ctx);
   return { name, def, report };
 }
@@ -9339,7 +9387,7 @@ function cmdSourceList(ctx) {
   return [...config.sources.values()].map((s) => ({
     name: s.name,
     def: pickDef(s),
-    origin: s.origin
+    origin: resolveBackend(s, ctx.home).origin
   }));
 }
 function pickDef(s) {
@@ -9368,10 +9416,11 @@ async function cmdAvailable(ctx, args = {}) {
   const names = args.source ? [args.source] : [...config.sources.keys()];
   const out = [];
   for (const name of names) {
-    const src = config.sources.get(name);
+    const src = config.userSources.get(name) ?? config.sources.get(name);
     if (!src) throw new CommandError(`unknown source: ${name}`);
-    if (!state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
-    const loc = await makeBackend(src, ctx.home, cacheRootOf(ctx)).resolve();
+    const backend = resolveBackend(src, ctx.home);
+    if (!state.isTrusted(name, backend)) continue;
+    const loc = await makeBackend(backend, cacheRootOf(ctx)).resolve();
     const cat = scan(loc.dir);
     for (const item of cat.items) {
       out.push({
@@ -9408,10 +9457,11 @@ async function cmdInstall(ctx, args) {
   const config = load(ctx);
   const state = new State(ctx.stateRoot);
   const catalogs = /* @__PURE__ */ new Map();
-  const catalogOf = async (source, src) => {
+  const sources = sourcesOf(config, args.project ? "project" : "user");
+  const catalogOf = async (source, backend) => {
     let cat = catalogs.get(source);
     if (!cat) {
-      cat = scan((await makeBackend(src, ctx.home, cacheRootOf(ctx)).resolve()).dir);
+      cat = scan((await makeBackend(backend, cacheRootOf(ctx)).resolve()).dir);
       catalogs.set(source, cat);
     }
     return cat;
@@ -9420,16 +9470,20 @@ async function cmdInstall(ctx, args) {
   const bundles = [];
   for (const spec of args.items) {
     const { type: explicitType, bundle, name, source } = parseItemSpec(spec);
-    const src = config.sources.get(source);
-    if (!src) throw new CommandError(`unknown source: ${source}`);
-    if (!state.isTrusted({ name: source, resolved: identityOf(src), origin: src.origin })) {
+    const src = sources.get(source);
+    if (!src) {
+      const hint = !args.project && config.sources.has(source) ? " in the user config (a project declares it: use --project)" : "";
+      throw new CommandError(`unknown source: ${source}${hint}`);
+    }
+    const backend = resolveBackend(src, ctx.home);
+    if (!state.isTrusted(source, backend)) {
       throw new CommandError(`source "${source}" is not trusted; run: skilletor trust ${source}`);
     }
     if (name.includes(WILDCARD)) {
       edits.push(() => addInstallEntry(path, explicitType, `${name}@${source}`));
       continue;
     }
-    const cat = await catalogOf(source, src);
+    const cat = await catalogOf(source, backend);
     const hasBundle = cat.bundles.some((b) => b.name === name);
     const matches = bundle ? [] : cat.items.filter((i) => i.name === name && (!explicitType || i.type === explicitType));
     if (bundle || !explicitType && hasBundle && matches.length === 0) {
@@ -9453,7 +9507,7 @@ async function cmdInstall(ctx, args) {
   for (const a of additions) {
     edits.push(() => {
       addSource(path, a.name, a.def);
-      new State(ctx.stateRoot).trust(a.name, a.url);
+      trustDef(ctx, a.name, a.def);
     });
   }
   for (const edit of edits) edit();
@@ -9629,9 +9683,12 @@ function cmdTrust(ctx, args) {
   const config = load(ctx);
   const src = config.sources.get(args.name);
   if (!src) throw new CommandError(`unknown source: ${args.name}`);
-  const url = identityOf(src);
-  new State(ctx.stateRoot).trust(args.name, url);
-  return { name: args.name, url };
+  const backend = resolveBackend(src, ctx.home);
+  new State(ctx.stateRoot).trust(args.name, backend);
+  return { name: args.name, kind: backend.kind, url: backend.address };
+}
+function trustDef(ctx, name, def) {
+  new State(ctx.stateRoot).trust(name, resolveBackend({ name, ...def, origins: {} }, ctx.home));
 }
 function parseItemSpec(spec) {
   const at = spec.lastIndexOf("@");
@@ -9934,7 +9991,7 @@ function statusText(report) {
     }
     for (const b of s.bundles) lines.push(`  * bundle:${b.name}@${b.source} (${b.installed} installed)`);
     for (const o of s.orphans) lines.push(`  ? ${o} (in lock, not declared)`);
-    for (const t of s.trustRequests) lines.push(`  trust: ${t.name} (${t.url})`);
+    for (const t of s.trustRequests) lines.push(`  trust: ${t.name} (${backendLabel(t)})`);
   }
   if (report.projectIsHome) lines.push("project scope: none (the project directory is the home directory)");
   for (const w of report.warnings ?? []) lines.push(`warning: ${w}`);
@@ -10080,7 +10137,7 @@ async function run(argv) {
           return 2;
         }
         const r = cmdTrust(ctx, { name });
-        process.stdout.write(`trusted source ${r.name} (${r.url})
+        process.stdout.write(`trusted source ${r.name} (${backendLabel(r)})
 `);
         return 0;
       }
@@ -10145,7 +10202,7 @@ function isEntryPoint() {
   if (!argv1) return false;
   const self = fileURLToPath(import.meta.url);
   try {
-    return realpathSync2(argv1) === realpathSync2(self);
+    return realpathSync3(argv1) === realpathSync3(self);
   } catch {
     return argv1 === self;
   }

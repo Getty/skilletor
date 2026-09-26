@@ -841,7 +841,7 @@ test("install bundle: on a TTY asks per missing source; accepting adds and trust
     const cfg = e.readUserCfg();
     assert.deepEqual(cfg.sources[derived], { git: url });
     assert.deepEqual(cfg.install, { bundles: ["perl@mine"] });
-    assert.equal(new State(e.ctx.stateRoot).isTrusted({ name: derived, resolved: url, origin: "user" }), true);
+    assert.equal(new State(e.ctx.stateRoot).isTrusted(derived, { kind: "git", address: url, origin: "project" }), true);
     assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`), [`rules/p-one@${derived}`]);
   } finally {
     e.cleanup();

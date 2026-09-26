@@ -5,10 +5,15 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { atomicWrite } from "./fsutil.ts";
 
-export interface TrustCheck {
-  name: string;
-  /** The source's resolved URL or path. */
-  resolved: string;
+/** What trust is stored for (spec §4.3): the backend in use – its kind and its effective
+ *  address (a `local` path as an absolute real path). */
+export interface TrustedBackend {
+  kind: "git" | "url" | "local";
+  address: string;
+}
+
+/** A backend to check: `user` origin is trusted as is, `project` origin needs an entry. */
+export interface TrustCheck extends TrustedBackend {
   origin: "user" | "project";
 }
 
@@ -47,15 +52,22 @@ export class State {
 
   // ---- trust ----------------------------------------------------------------
 
-  trust(name: string, resolved: string): void {
+  /** Trust source `name` for exactly this backend; replaces an earlier entry of the name. */
+  trust(name: string, backend: TrustedBackend): void {
     const trust = this.readJson("trust.json");
-    trust[name] = resolved;
+    trust[name] = { kind: backend.kind, address: backend.address };
     this.writeJson("trust.json", trust);
   }
 
-  isTrusted(source: TrustCheck): boolean {
-    if (source.origin === "user") return true;
-    return this.readJson("trust.json")[source.name] === source.resolved;
+  /** Is source `name` trusted with this backend? An entry written before k66 is the URL
+   *  alone: it counts for a git or url backend at exactly that URL, never for a local one. */
+  isTrusted(name: string, backend: TrustCheck): boolean {
+    if (backend.origin === "user") return true;
+    const entry = this.readJson("trust.json")[name];
+    if (typeof entry === "string") return backend.kind !== "local" && entry === backend.address;
+    if (entry === null || typeof entry !== "object") return false;
+    const e = entry as Record<string, unknown>;
+    return e.kind === backend.kind && e.address === backend.address;
   }
 
   // ---- last-check -----------------------------------------------------------

@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { sync, check, status, type EngineContext } from "./engine.ts";
-import { reportJson, reportText, type SyncReport } from "./report.ts";
+import { backendLabel, reportJson, reportText, type SyncReport } from "./report.ts";
 import {
   cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall, type Prompter,
 } from "./commands.ts";
@@ -151,7 +151,7 @@ function statusText(report: ReturnType<typeof status>): string {
     }
     for (const b of s.bundles) lines.push(`  * bundle:${b.name}@${b.source} (${b.installed} installed)`);
     for (const o of s.orphans) lines.push(`  ? ${o} (in lock, not declared)`);
-    for (const t of s.trustRequests) lines.push(`  trust: ${t.name} (${t.url})`);
+    for (const t of s.trustRequests) lines.push(`  trust: ${t.name} (${backendLabel(t)})`);
   }
   if (report.projectIsHome) lines.push("project scope: none (the project directory is the home directory)");
   for (const w of report.warnings ?? []) lines.push(`warning: ${w}`);
@@ -298,7 +298,7 @@ export async function run(argv: string[]): Promise<number> {
           return 2;
         }
         const r = cmdTrust(ctx, { name });
-        process.stdout.write(`trusted source ${r.name} (${r.url})\n`);
+        process.stdout.write(`trusted source ${r.name} (${backendLabel(r)})\n`);
         return 0;
       }
       case "hook":

@@ -50,7 +50,7 @@ skilletor install 'rule:*@shared' 'skill:perl-*@shared'   # wildcard/pattern: ty
 skilletor uninstall <item>... [--project] # [type:]name@source (no type: every list); wildcards, bundle: as written
 skilletor sync | check | status           # --scope user|project|all, --json, --project-dir <dir>
 skilletor sync --force                    # overwrite and adopt unmanaged files reported as conflicts
-skilletor trust <source>                  # confirm a project-declared source (shows the resolved URL)
+skilletor trust <source>                  # confirm a project-declared source (shows the backend it trusts)
 ```
 
 `add`, `install`, `uninstall` only edit `skilletor.json` (the single source of truth), then
@@ -156,6 +156,11 @@ context variables, the on/off pattern with vars, the `{%-` example.
 
 ## Trust
 
-`skilletor add` (or your own user config) trusts a source. One declared **only** in a
-project config (a cloned repo) is not fetched until `skilletor trust <name>`; a changed URL
-lapses trust. Trust means code execution — the same level as installing a plugin.
+`skilletor add` (or your own user config or `skilletor.local.json`) trusts a source. A
+backend taken from a project's committed `skilletor.json` (a cloned repo) – a source only it
+declares, or a `local`/`git`/`url` it adds to one of yours that ends up used – is neither
+fetched nor rendered until `skilletor trust <name>`, which trusts exactly the backend in
+use (`git <url>`, `url <url>`, `local <real path>`). A changed address, or a switch of the
+backend in use (a `local` dir appearing or vanishing), lapses trust. A project never changes
+what your user-scope items are built from. Trust means code execution — the same level as
+installing a plugin.

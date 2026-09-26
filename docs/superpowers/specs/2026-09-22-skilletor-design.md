@@ -104,7 +104,32 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
     a warning (an already installed copy stays as it is); all other items proceed.
 
 **Merging sources:** user sources are usable in project configs. Same name: fields from
-the user or local config merge *over* the project definition.
+the user or local config merge *over* the project definition – but a project can never
+change what a user-scope item is built from, and every backend field keeps its origin
+(k66):
+
+- **Per scope.** The user scope resolves its items – explicit, wildcard and bundle
+  entries, and the sources a user bundle names – against the user config's sources
+  alone; neither a project's `skilletor.json` nor `skilletor.local.json` can change the
+  backend or `ref` of a user-scope item. The project scope uses the merged map
+  (project < user < local).
+- **Per field.** In the merged map each backend field (`git`, `url`, `local`) remembers
+  the file it came from: `user` for the user config and `skilletor.local.json` (both
+  written by the user), `project` for the project's `skilletor.json`. `ref` merges as
+  before and is not part of the identity.
+- **One resolved backend.** Choosing the backend and checking trust work on one value:
+  kind (`git`, `url`, `local`), effective address (a `local` path normalized to an
+  absolute real path), and the origin of that field. The choice is author mode's (below):
+  `local` if that directory exists, else `git`, else `url`. `sync`, `check`, `status`,
+  `trust`, bundle resolution and every other consumer use this one resolver.
+- **Trust follows the backend that is used** (§4.3): a backend of user origin is trusted;
+  one of project origin needs a trust entry for exactly its kind and address. So a project
+  that adds `local` to a user source, or to a project source the user trusted by its `git`
+  URL, gets a trust request for the local path instead of silently switching the
+  backend; and when a user's `local` directory is missing and the project's `git` is the
+  fallback, that fallback needs trust of its own. Trust never carries over when the
+  chosen backend switches (a `local` directory appearing or disappearing). An untrusted
+  backend is neither fetched nor rendered.
 
 **Author mode:** if a source has a `local` field and the directory exists, it is read
 directly from there (no fetch, no cache); otherwise `git`/`url` applies. Typical setup:
@@ -175,9 +200,13 @@ name is `skills` everywhere.
 - Sources the user adds themselves (`skilletor add`, their own user config) are trusted
   – `add` is the act of trust.
 - Sources that only appear in a project config (a cloned repo) are **not** pulled
-  automatically. The hook reports "project wants source X (<url>) – `skilletor trust X`".
-  The confirmation (name + resolved URL) lives in `~/.claude/skilletor/trust.json`; if
-  the project changes the URL, it lapses.
+  automatically. The report and the hook name the source and the backend that would be
+  used (§3, merging sources) – `untrusted source X (local /path)`, with `skilletor trust X`
+  as the fix; `--json` carries `kind` and the address. The
+  confirmation (name + backend kind + address) lives in `~/.claude/skilletor/trust.json`;
+  if the project changes the address – or the backend in use switches to another one of
+  project origin – it lapses. Entries written before k66 (name + URL) keep counting for a
+  `git` or `url` backend with exactly that URL, never for a `local` one.
 - Trust means code execution: Nunjucks is not a sandbox. This is the same trust level as
   installing a plugin, and the README says so.
 

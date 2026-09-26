@@ -301,7 +301,7 @@ test("commands see codex lock keys: available marks the item installed, wildcard
     e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["*@mine"] } });
     await sync(e.ctx, { scope: "user" });
     const ctx = e.ctx; // no probe needed: available and uninstall never resolve a spec
-    new State(e.ctx.stateRoot).trust("mine", src);
+    new State(e.ctx.stateRoot).trust("mine", { kind: "local", address: src });
     const items = await cmdAvailable(ctx);
     assert.deepEqual(items.map((i) => [i.name, i.installed]), [["foo", true]]);
     await assert.rejects(cmdUninstall(ctx, { items: ["foo@mine"] }), /installed by the wildcard skill:\*@mine/);

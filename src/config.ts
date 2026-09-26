@@ -26,14 +26,23 @@ export class ConfigError extends Error {
   override name = "ConfigError";
 }
 
+/** Which config file a source field came from: `user` for the user config and
+ *  `skilletor.local.json` (both written by the user), `project` for the project's
+ *  committed `skilletor.json` (spec §3, merging sources). */
+export type Origin = "user" | "project";
+/** A source's backend fields; which one is used is `resolveBackend`'s choice (engine.ts). */
+export type BackendKind = "git" | "url" | "local";
+const BACKEND_KINDS: readonly BackendKind[] = ["git", "url", "local"];
+
 export interface ResolvedSource {
   name: string;
   git?: string;
   ref?: string;
   url?: string;
   local?: string;
-  /** "user" = declared in the user or local config (trusted); "project" = only in the committed project config. */
-  origin: "user" | "project";
+  /** The origin of each backend field present. Trust follows the origin of the field the
+   *  chosen backend comes from, never the source as a whole (spec §3, §4.3). */
+  origins: Partial<Record<BackendKind, Origin>>;
 }
 
 export interface InstallItem {
@@ -79,6 +88,7 @@ export interface ScopeConfig {
 }
 
 export interface LoadedConfig {
+  /** The project scope's sources: project < user < local, merged per field (spec §3). */
   sources: Map<string, ResolvedSource>;
   /**
    * User-level throttle for the in-session check, in seconds (default 1800).
@@ -87,9 +97,10 @@ export interface LoadedConfig {
   checkInterval: number;
   user: ScopeConfig;
   project?: ScopeConfig;
-  /** Sources the user config declares: the ones visible to the user scope (spec §15.6).
-   *  The project scope sees every source. */
-  userSources: Set<string>;
+  /** The user scope's sources: the user config's alone (spec §3, §15.6). Neither the
+   *  project's `skilletor.json` nor `skilletor.local.json` changes what a user-scope item
+   *  (or a source a user bundle names) is built from. */
+  userSources: Map<string, ResolvedSource>;
 }
 
 export interface LoadOptions {
@@ -144,8 +155,8 @@ function asObject(value: unknown, path: string, where: string): Json {
   return value as Json;
 }
 
-/** Parse and validate the `sources` object of one file. */
-function parseSources(obj: Json, path: string): Map<string, ResolvedSource> {
+/** Parse and validate the `sources` object of one file; every backend field gets `origin`. */
+function parseSources(obj: Json, path: string, origin: Origin): Map<string, ResolvedSource> {
   const sources = new Map<string, ResolvedSource>();
   const raw = asObject(obj.sources, path, "sources");
   for (const [name, def] of Object.entries(raw)) {
@@ -155,7 +166,7 @@ function parseSources(obj: Json, path: string): Map<string, ResolvedSource> {
         throw new ConfigError(`${path}: sources.${name}: unknown key "${key}"`);
       }
     }
-    const src: ResolvedSource = { name, origin: "project" };
+    const src: ResolvedSource = { name, origins: {} };
     if (typeof d.git === "string") src.git = d.git;
     if (typeof d.ref === "string") src.ref = d.ref;
     if (typeof d.local === "string") src.local = d.local;
@@ -168,15 +179,22 @@ function parseSources(obj: Json, path: string): Map<string, ResolvedSource> {
     if (src.git === undefined && src.url === undefined && src.local === undefined) {
       throw new ConfigError(`${path}: sources.${name} needs one of "git", "url" or "local"`);
     }
+    for (const kind of BACKEND_KINDS) if (src[kind] !== undefined) src.origins[kind] = origin;
     sources.set(name, src);
   }
   return sources;
 }
 
-/** Merge `incoming` source fields over `base`, keeping the higher-precedence origin. */
-function mergeSource(base: ResolvedSource | undefined, incoming: ResolvedSource, origin: "user" | "project"): ResolvedSource {
-  const merged: ResolvedSource = { ...(base ?? { name: incoming.name, origin }), ...incoming };
-  merged.origin = base?.origin === "user" || origin === "user" ? "user" : "project";
+/** Merge `incoming` source fields over `base`, field by field: each backend field keeps
+ *  the origin of the file it came from (spec §3). */
+function mergeSource(base: ResolvedSource | undefined, incoming: ResolvedSource): ResolvedSource {
+  const merged: ResolvedSource = { ...(base ?? incoming), origins: { ...base?.origins } };
+  if (incoming.ref !== undefined) merged.ref = incoming.ref;
+  for (const kind of BACKEND_KINDS) {
+    if (incoming[kind] === undefined) continue;
+    merged[kind] = incoming[kind];
+    merged.origins[kind] = incoming.origins[kind];
+  }
   return merged;
 }
 
@@ -338,15 +356,16 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
     }
   }
 
-  // Build the merged source map: project (base) < user < local.
-  const userSources = parseSources(user, userPath);
-  const projectSources = hasProject ? parseSources(project, projectPath) : new Map();
-  const localSources = hasProject ? parseSources(local, localPath) : new Map();
+  // The user scope reads the user config's sources alone; the project scope the merged
+  // map: project (base) < user < local, per field (spec §3).
+  const userSources = parseSources(user, userPath, "user");
+  const projectSources = hasProject ? parseSources(project, projectPath, "project") : new Map<string, ResolvedSource>();
+  const localSources = hasProject ? parseSources(local, localPath, "user") : new Map<string, ResolvedSource>();
 
   const sources = new Map<string, ResolvedSource>();
-  for (const [name, s] of projectSources) sources.set(name, { ...s, origin: "project" });
-  for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s, "user"));
-  for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s, "user"));
+  for (const [name, s] of projectSources) sources.set(name, mergeSource(undefined, s));
+  for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s));
+  for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s));
 
   // Default 30 min. 0 (or negative) disables the in-session check; SessionStart still syncs.
   const checkInterval = numberOr(user.checkInterval, 1800, userPath, "checkInterval");
@@ -385,7 +404,7 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
     if (localTargets ?? projectTargets) projectScope.targets = localTargets ?? projectTargets;
   }
 
-  return { sources, checkInterval, user: userScope, project: projectScope, userSources: new Set(userSources.keys()) };
+  return { sources, checkInterval, user: userScope, project: projectScope, userSources };
 }
 
 /** Concatenate two install lists, rejecting duplicate targets across them. */

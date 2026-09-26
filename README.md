@@ -581,8 +581,14 @@ rendered. This is the same trust level as installing a plugin.
 
 - Adding a source with `skilletor add` (or your own user config) trusts it.
 - A source that appears **only** in a project config (a cloned repo) is never fetched
-  until you run `skilletor trust <name>`; if the project later changes the URL, trust
-  lapses.
+  until you run `skilletor trust <name>`. Trust is stored for the backend actually used
+  — kind and address, a `local` path as its real path — so it lapses when the project
+  changes the address or the backend in use switches (say, a project adds a `local`
+  directory to a source you trusted by its git URL).
+- A project cannot change what your user-scope items are built from: those resolve
+  against your user config's sources alone. A project field merged into one of your
+  sources (a `local` path, say) counts as the project's and needs its own trust; your
+  own `local` override (author mode) stays trusted.
 - Fixed target directories per harness; item names, tar entries and includes may not escape the
   source or target root; symlinks in sources are rejected; `url` is HTTPS-only.
 

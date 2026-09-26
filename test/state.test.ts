@@ -1,7 +1,7 @@
 // Tests for state: trust, mutex, last-check, pending-report (spec §4.3, §6.5).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { State } from "../src/state.ts";
@@ -9,39 +9,65 @@ import { State } from "../src/state.ts";
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ---- trust ------------------------------------------------------------------
+// Trust is stored for the backend in use: kind + address (spec §4.3, k66).
 
-test("user-origin sources are always trusted", () => {
+const GIT = "https://github.com/Getty/skills";
+
+test("user-origin backends are always trusted", () => {
   const tmp = makeTmpDir();
   try {
     const state = new State(tmp.dir);
-    assert.equal(state.isTrusted({ name: "mine", resolved: "https://x", origin: "user" }), true);
+    assert.equal(state.isTrusted("mine", { kind: "git", address: "https://x", origin: "user" }), true);
+    assert.equal(state.isTrusted("mine", { kind: "local", address: "/x", origin: "user" }), true);
   } finally {
     tmp.cleanup();
   }
 });
 
-test("project-only sources need a matching trust entry", () => {
+test("project-origin backends need an entry for exactly their kind and address", () => {
   const tmp = makeTmpDir();
   try {
     const state = new State(tmp.dir);
-    const src = { name: "team", resolved: "https://github.com/Getty/skills", origin: "project" as const };
-    assert.equal(state.isTrusted(src), false);
-    state.trust("team", "https://github.com/Getty/skills");
-    assert.equal(state.isTrusted(src), true);
+    const git = { kind: "git" as const, address: GIT, origin: "project" as const };
+    assert.equal(state.isTrusted("team", git), false);
+    state.trust("team", git);
+    assert.deepEqual(JSON.parse(readFileSync(join(tmp.dir, "trust.json"), "utf8")), { team: { kind: "git", address: GIT } });
+    assert.equal(state.isTrusted("team", git), true);
+    assert.equal(state.isTrusted("team", { ...git, kind: "url" }), false); // same address, other kind
+    assert.equal(state.isTrusted("team", { ...git, address: "https://evil.example/skills" }), false);
+    assert.equal(state.isTrusted("other", git), false); // per name
+    // A new trust replaces the entry: the git backend is no longer trusted.
+    state.trust("team", { kind: "local", address: "/src/team" });
+    assert.equal(state.isTrusted("team", { kind: "local", address: "/src/team", origin: "project" }), true);
+    assert.equal(state.isTrusted("team", git), false);
   } finally {
     tmp.cleanup();
   }
 });
 
-test("trust lapses when the resolved URL changes", () => {
+test("a pre-k66 entry (name -> URL) counts for git and url at exactly that URL, never for local", () => {
   const tmp = makeTmpDir();
   try {
+    writeFileSync(join(tmp.dir, "trust.json"), JSON.stringify({ team: GIT, path: "/src/team" }));
     const state = new State(tmp.dir);
-    state.trust("team", "https://github.com/Getty/skills");
-    assert.equal(
-      state.isTrusted({ name: "team", resolved: "https://evil.example/skills", origin: "project" }),
-      false,
-    );
+    assert.equal(state.isTrusted("team", { kind: "git", address: GIT, origin: "project" }), true);
+    assert.equal(state.isTrusted("team", { kind: "url", address: GIT, origin: "project" }), true);
+    assert.equal(state.isTrusted("team", { kind: "git", address: GIT + "x", origin: "project" }), false);
+    assert.equal(state.isTrusted("team", { kind: "local", address: GIT, origin: "project" }), false);
+    assert.equal(state.isTrusted("path", { kind: "local", address: "/src/team", origin: "project" }), false);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("a malformed trust entry trusts nothing", () => {
+  const tmp = makeTmpDir();
+  try {
+    writeFileSync(join(tmp.dir, "trust.json"), JSON.stringify({ a: null, b: 7, c: { kind: "git" }, d: [GIT] }));
+    const state = new State(tmp.dir);
+    for (const name of ["a", "b", "c", "d"]) {
+      assert.equal(state.isTrusted(name, { kind: "git", address: GIT, origin: "project" }), false, name);
+    }
   } finally {
     tmp.cleanup();
   }
@@ -50,8 +76,8 @@ test("trust lapses when the resolved URL changes", () => {
 test("trust survives a reload from disk", () => {
   const tmp = makeTmpDir();
   try {
-    new State(tmp.dir).trust("team", "https://x");
-    assert.equal(new State(tmp.dir).isTrusted({ name: "team", resolved: "https://x", origin: "project" }), true);
+    new State(tmp.dir).trust("team", { kind: "url", address: "https://x" });
+    assert.equal(new State(tmp.dir).isTrusted("team", { kind: "url", address: "https://x", origin: "project" }), true);
   } finally {
     tmp.cleanup();
   }

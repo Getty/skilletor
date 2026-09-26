@@ -5,11 +5,11 @@
 // as it was.
 import { execFileSync } from "node:child_process";
 import { hostname, platform, userInfo } from "node:os";
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import {
-  loadConfig, WILDCARD, type BundleItem, type Harness, type ItemType, type LoadedConfig, type ResolvedSource, type ScopeConfig,
-  type WildcardItem,
+  loadConfig, WILDCARD, type BackendKind, type BundleItem, type Harness, type ItemType, type LoadedConfig, type Origin,
+  type ResolvedSource, type ScopeConfig, type WildcardItem,
 } from "./config.ts";
 import {
   BundleError, entryMiss, expandBundle, matchEntry, matchesPattern, sameIdentity, type Chain,
@@ -24,7 +24,7 @@ import {
 } from "./agentsmd.ts";
 import { atomicWrite, hashBuffer, sameFile, samePath } from "./fsutil.ts";
 import { convertForTarget } from "./convert.ts";
-import { LocalSource } from "./sources/local.ts";
+import { expandHome, LocalSource } from "./sources/local.ts";
 import { GitSource } from "./sources/git.ts";
 import { UrlSource } from "./sources/url.ts";
 import type { Source } from "./sources/types.ts";
@@ -39,7 +39,7 @@ import {
 } from "./gitignore.ts";
 import { briefingWarning, missingSkills, skillRoots, type BriefingMissing } from "./briefing.ts";
 import {
-  emptyScopeReport, keyToTypeName, type ItemChange, type ScopeReport, type SyncReport,
+  emptyScopeReport, keyToTypeName, type ItemChange, type ScopeReport, type SyncReport, type TrustRequest,
 } from "./report.ts";
 
 export interface EngineContext {
@@ -130,19 +130,72 @@ function loadWithTargets(ctx: EngineContext): { config: LoadedConfig; targets: T
   }
 }
 
-export function identityOf(src: ResolvedSource): string {
-  return src.git ?? src.url ?? src.local ?? "";
+/**
+ * The backend a source is built from – the one value both the trust check and backend
+ * construction consume, so they cannot disagree (spec §3, §4.3).
+ */
+export interface ResolvedBackend {
+  kind: BackendKind;
+  /** git/url: as configured. local: absolute and normalized – the real path when the
+   *  directory exists. */
+  address: string;
+  /** The config file the chosen field came from. */
+  origin: Origin;
+  /** git only: the ref to check out (not part of the identity). */
+  ref?: string;
 }
 
-export function makeBackend(src: ResolvedSource, home: string, cacheRoot: string, timeoutMs?: number): Source {
-  if (src.local) {
-    const ls = new LocalSource(src.local, home);
-    if (ls.exists()) return ls; // author mode overrides git/url
+/** A `local` field as an absolute path: the real path when it is an existing directory. */
+function localDir(path: string, home: string): { path: string; exists: boolean } {
+  const abs = resolvePath(expandHome(path, home));
+  try {
+    if (statSync(abs).isDirectory()) return { path: realpathSync(abs), exists: true };
+  } catch {
+    // missing or unreadable: not there
   }
-  if (src.git) return new GitSource({ url: src.git, ref: src.ref, cacheRoot, timeoutMs });
-  if (src.url) return new UrlSource({ url: src.url, cacheRoot, timeoutMs });
-  if (src.local) return new LocalSource(src.local, home); // missing dir -> resolve errors
+  return { path: abs, exists: false };
+}
+
+/**
+ * Choose a source's backend (spec §3, author mode): `local` if that directory exists, else
+ * `git`, else `url`; a `local` alone whose directory is missing stays `local` (resolving
+ * it errors). The origin is the chosen field's; a field without one counts as `project`.
+ */
+export function resolveBackend(src: ResolvedSource, home: string): ResolvedBackend {
+  const origin = (kind: BackendKind): Origin => src.origins[kind] ?? "project";
+  const local = src.local === undefined ? undefined : localDir(src.local, home);
+  if (local?.exists) return { kind: "local", address: local.path, origin: origin("local") };
+  if (src.git !== undefined) {
+    const b: ResolvedBackend = { kind: "git", address: src.git, origin: origin("git") };
+    if (src.ref !== undefined) b.ref = src.ref;
+    return b;
+  }
+  if (src.url !== undefined) return { kind: "url", address: src.url, origin: origin("url") };
+  if (local) return { kind: "local", address: local.path, origin: origin("local") };
   throw new Error(`source ${src.name} has no backend`);
+}
+
+/** The backend object for a resolved backend – nothing else is consulted. */
+export function makeBackend(backend: ResolvedBackend, cacheRoot: string, timeoutMs?: number): Source {
+  switch (backend.kind) {
+    case "local":
+      return new LocalSource(backend.address); // missing dir -> resolve errors
+    case "git":
+      return new GitSource({ url: backend.address, ref: backend.ref, cacheRoot, timeoutMs });
+    case "url":
+      return new UrlSource({ url: backend.address, cacheRoot, timeoutMs });
+  }
+}
+
+/** The sources a scope resolves against (spec §3): the user config's alone for the user
+ *  scope, the merged map for the project scope. */
+export function sourcesOf(config: LoadedConfig, scope: ScopeName): Map<string, ResolvedSource> {
+  return scope === "user" ? config.userSources : config.sources;
+}
+
+/** A trust request for source `name`, naming the backend that would be used (spec §4.3). */
+export function trustRequestOf(name: string, backend: ResolvedBackend): TrustRequest {
+  return { name, kind: backend.kind, url: backend.address };
 }
 
 /** Every source a scope references, through explicit entries, wildcards or bundles. */
@@ -209,13 +262,12 @@ function makeContext(
 
 /**
  * The configured source that serves a bundle entry of another source (spec §15.6): the one
- * whose `git`/`url` identity is `url`, among the sources visible to the scope (the user
- * scope sees the user config's sources, the project scope all). Config names do not
- * matter; with several matches the first in config order serves.
+ * whose `git`/`url` identity is `url`, among the scope's sources (`sourcesOf`: the user
+ * scope sees the user config's alone, the project scope the merged map). Config names do
+ * not matter; with several matches the first in config order serves.
  */
 export function servingSource(config: LoadedConfig, scope: ScopeName, url: string): string | undefined {
-  for (const src of config.sources.values()) {
-    if (scope === "user" && !config.userSources.has(src.name)) continue;
+  for (const src of sourcesOf(config, scope).values()) {
     const id = src.git ?? src.url;
     if (id !== undefined && sameIdentity(id, url)) return src.name;
   }
@@ -305,24 +357,27 @@ async function syncScope(
   const oldLock = readLock(lockPath);
   const gitignoreOn = scopeCfg.gitignore !== false;
 
-  // Resolve every needed source in parallel (skip untrusted, warn on failure).
+  // Resolve every needed source in parallel (skip untrusted, warn on failure). The trust
+  // check and the fetch use the one resolved backend (spec §3, §4.3).
   const needed = scopeSources(scopeCfg);
+  const sources = sourcesOf(config, scope);
   const resolved = new Map<string, { dir: string; version: string } | null>();
   const resolveAll = (names: string[]) => Promise.all(
     names.filter((n) => !resolved.has(n)).map(async (name) => {
-      const src = config.sources.get(name);
+      const src = sources.get(name);
       if (!src) {
         rep.warnings.push(`unknown source: ${name}`);
         resolved.set(name, null);
         return;
       }
-      if (!state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) {
-        rep.trustRequests.push({ name, url: identityOf(src) });
-        resolved.set(name, null);
-        return;
-      }
       try {
-        const loc = await makeBackend(src, ctx.home, cacheRoot, ctx.timeoutMs).resolve(sourceVersion(oldLock, name));
+        const backend = resolveBackend(src, ctx.home);
+        if (!state.isTrusted(name, backend)) {
+          rep.trustRequests.push(trustRequestOf(name, backend));
+          resolved.set(name, null);
+          return;
+        }
+        const loc = await makeBackend(backend, cacheRoot, ctx.timeoutMs).resolve(sourceVersion(oldLock, name));
         if (loc.warning) rep.warnings.push(loc.warning);
         resolved.set(name, { dir: loc.dir, version: loc.version });
       } catch (err) {
@@ -937,11 +992,14 @@ export async function check(given: EngineContext, opts: SyncOptions = {}): Promi
     }
     // Sources a bundle pulled items from (spec §15.6) are not declared here; the lock names them.
     const viaSources = Object.values(oldLock).flatMap((e) => (e.via?.length ? [e.source] : []));
+    const sources = sourcesOf(config, scope);
     for (const name of new Set([...scopeSources(scopeCfg), ...viaSources])) {
-      const src = config.sources.get(name);
-      if (!src || !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue;
+      const src = sources.get(name);
+      if (!src) continue;
       try {
-        const changed = await makeBackend(src, ctx.home, cacheRoot, ctx.timeoutMs).check(sourceVersion(oldLock, name));
+        const backend = resolveBackend(src, ctx.home);
+        if (!state.isTrusted(name, backend)) continue;
+        const changed = await makeBackend(backend, cacheRoot, ctx.timeoutMs).check(sourceVersion(oldLock, name));
         out.sources.push({ name, scope, changed });
         if (changed) out.changed = true;
       } catch (err) {
@@ -994,7 +1052,7 @@ export interface StatusReport {
     wildcards: { type: ItemType; source: string; entry: string; installed: number }[];
     /** Each bundle entry with the number of items currently installed through it (spec §15.5). */
     bundles: { name: string; source: string; entry: string; installed: number }[];
-    trustRequests: { name: string; url: string }[];
+    trustRequests: TrustRequest[];
     sourceVersions: Record<string, string>;
   }[];
   /** The project dir is the home dir, so there is no project scope. Absent otherwise. */
@@ -1026,12 +1084,13 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
     const declaredKeys = new Set(rows.map((r) => r.key));
     const sourceVersions: Record<string, string> = {};
     for (const entry of Object.values(lock)) sourceVersions[entry.source] = entry.version;
-    const trustRequests: { name: string; url: string }[] = [];
+    const trustRequests: TrustRequest[] = [];
+    const sources = sourcesOf(config, scope);
     for (const name of scopeSources(scopeCfg)) {
-      const src = config.sources.get(name);
-      if (src && !state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) {
-        trustRequests.push({ name, url: identityOf(src) });
-      }
+      const src = sources.get(name);
+      if (!src) continue;
+      const backend = resolveBackend(src, ctx.home);
+      if (!state.isTrusted(name, backend)) trustRequests.push(trustRequestOf(name, backend));
     }
     // A skip entry (spec §6.2) is declared but deliberately not installed.
     const declared: StatusReport["scopes"][number]["declared"] = rows.map((i) => {

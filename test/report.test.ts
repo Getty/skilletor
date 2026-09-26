@@ -8,7 +8,7 @@ function sample(): SyncReport {
   s.added = [{ key: "skills/foo", type: "skill", name: "foo", source: "shared" }];
   s.updated = [{ key: "agents/bar", type: "agent", name: "bar", source: "shared" }];
   s.warnings = ["source team offline"];
-  s.trustRequests = [{ name: "team", url: "https://github.com/Getty/skills" }];
+  s.trustRequests = [{ name: "team", kind: "local", url: "/src/team" }];
   return { scopes: [s] };
 }
 
@@ -23,7 +23,7 @@ test("text lists items with the right activation hint per type", () => {
   const text = reportText(sample());
   assert.match(text, /\+ skills\/foo \(active now\)/);
   assert.match(text, /~ agents\/bar \(active after \/reload-plugins or restart\)/);
-  assert.match(text, /trust: source "team"/);
+  assert.match(text, /trust: source "team" \(local \/src\/team\) — run: skilletor trust team/);
   assert.match(text, /warning: source team offline/);
 });
 
@@ -32,7 +32,7 @@ test("hook output has a one-line systemMessage and a per-item additionalContext"
   assert.equal(hook.systemMessage?.split("\n").length, 1);
   assert.match(hook.additionalContext ?? "", /skill foo@shared: active now/);
   assert.match(hook.additionalContext ?? "", /agent bar@shared: active after \/reload-plugins/);
-  assert.match(hook.additionalContext ?? "", /untrusted source team/);
+  assert.match(hook.additionalContext ?? "", /untrusted source team \(local \/src\/team\); run: skilletor trust team/);
 });
 
 test("a config error is notable and reported", () => {

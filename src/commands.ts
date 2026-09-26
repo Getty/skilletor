@@ -4,12 +4,16 @@
 import { dirname, join } from "node:path";
 import {
   addBundleEntry, addInstallEntry, addSource, bundleEntries, findInstallEntries, findWildcardEntries, loadConfig,
-  removeBundleEntries, removeInstallEntries, removeSource, WILDCARD, type ItemType, type LoadedConfig, type SourceDef,
+  removeBundleEntries, removeInstallEntries, removeSource, WILDCARD, type BackendKind, type ItemType, type LoadedConfig,
+  type Origin, type SourceDef,
 } from "./config.ts";
 import { BundleError, expandBundle, matchesPattern, sameIdentity, type ForeignEntry } from "./bundles.ts";
 import { resolveSpec, type Probe } from "./spec.ts";
 import { makeProbe } from "./probe.ts";
-import { bundleLabel, servingSource, cacheRootOf, identityOf, makeBackend, projectDirOf, sync, type EngineContext } from "./engine.ts";
+import {
+  bundleLabel, servingSource, cacheRootOf, makeBackend, projectDirOf, resolveBackend, sourcesOf, sync, type EngineContext,
+  type ResolvedBackend,
+} from "./engine.ts";
 import type { SyncReport } from "./report.ts";
 import { scan, type Catalog } from "./catalog.ts";
 import { State } from "./state.ts";
@@ -69,7 +73,7 @@ export async function cmdAdd(
 
   addSource(path, name, def);
   // add is the trust act.
-  new State(ctx.stateRoot).trust(name, resolved.value);
+  trustDef(ctx, name, def);
 
   const report = await sync(ctx);
   return { name, def, report };
@@ -77,12 +81,13 @@ export async function cmdAdd(
 
 // ---- source list / remove ---------------------------------------------------
 
-export function cmdSourceList(ctx: CommandContext): { name: string; def: SourceDef; origin: "user" | "project" }[] {
+/** Every source as the project scope sees it; `origin` is that of the backend it would use. */
+export function cmdSourceList(ctx: CommandContext): { name: string; def: SourceDef; origin: Origin }[] {
   const config = load(ctx);
   return [...config.sources.values()].map((s) => ({
     name: s.name,
     def: pickDef(s),
-    origin: s.origin,
+    origin: resolveBackend(s, ctx.home).origin,
   }));
 }
 
@@ -136,10 +141,13 @@ export async function cmdAvailable(ctx: CommandContext, args: { source?: string 
 
   const out: AvailableItem[] = [];
   for (const name of names) {
-    const src = config.sources.get(name);
+    // What `install` would read: the user config's definition for a user source (the user
+    // scope's, spec §3), the merged one for a source only a project declares.
+    const src = config.userSources.get(name) ?? config.sources.get(name);
     if (!src) throw new CommandError(`unknown source: ${name}`);
-    if (!state.isTrusted({ name, resolved: identityOf(src), origin: src.origin })) continue; // only trusted
-    const loc = await makeBackend(src, ctx.home, cacheRootOf(ctx)).resolve();
+    const backend = resolveBackend(src, ctx.home);
+    if (!state.isTrusted(name, backend)) continue; // only trusted
+    const loc = await makeBackend(backend, cacheRootOf(ctx)).resolve();
     const cat = scan(loc.dir);
     for (const item of cat.items) {
       out.push({
@@ -180,11 +188,13 @@ export async function cmdInstall(
   const config = load(ctx);
   const state = new State(ctx.stateRoot);
   const catalogs = new Map<string, ReturnType<typeof scan>>();
+  // The sources the target scope's sync resolves against (spec §3).
+  const sources = sourcesOf(config, args.project ? "project" : "user");
 
-  const catalogOf = async (source: string, src: Parameters<typeof makeBackend>[0]): Promise<Catalog> => {
+  const catalogOf = async (source: string, backend: ResolvedBackend): Promise<Catalog> => {
     let cat = catalogs.get(source);
     if (!cat) {
-      cat = scan((await makeBackend(src, ctx.home, cacheRootOf(ctx)).resolve()).dir);
+      cat = scan((await makeBackend(backend, cacheRootOf(ctx)).resolve()).dir);
       catalogs.set(source, cat);
     }
     return cat;
@@ -195,9 +205,13 @@ export async function cmdInstall(
   const bundles: { name: string; foreign: ForeignEntry[] }[] = [];
   for (const spec of args.items) {
     const { type: explicitType, bundle, name, source } = parseItemSpec(spec);
-    const src = config.sources.get(source);
-    if (!src) throw new CommandError(`unknown source: ${source}`);
-    if (!state.isTrusted({ name: source, resolved: identityOf(src), origin: src.origin })) {
+    const src = sources.get(source);
+    if (!src) {
+      const hint = !args.project && config.sources.has(source) ? " in the user config (a project declares it: use --project)" : "";
+      throw new CommandError(`unknown source: ${source}${hint}`);
+    }
+    const backend = resolveBackend(src, ctx.home);
+    if (!state.isTrusted(source, backend)) {
       throw new CommandError(`source "${source}" is not trusted; run: skilletor trust ${source}`);
     }
     if (name.includes(WILDCARD)) {
@@ -205,7 +219,7 @@ export async function cmdInstall(
       edits.push(() => addInstallEntry(path, explicitType!, `${name}@${source}`));
       continue;
     }
-    const cat = await catalogOf(source, src);
+    const cat = await catalogOf(source, backend);
     const hasBundle = cat.bundles.some((b) => b.name === name);
     const matches = bundle ? [] : cat.items.filter((i) => i.name === name && (!explicitType || i.type === explicitType));
     // Without a prefix, a name only a bundle has is that bundle (spec §15.5).
@@ -230,7 +244,7 @@ export async function cmdInstall(
   for (const a of additions) {
     edits.push(() => {
       addSource(path, a.name, a.def);
-      new State(ctx.stateRoot).trust(a.name, a.url); // as `add`: adding is the act of trust (§4.3)
+      trustDef(ctx, a.name, a.def); // as `add`: adding is the act of trust (§4.3)
     });
   }
   for (const edit of edits) edit();
@@ -483,13 +497,24 @@ function declaredElsewhere(
 
 // ---- trust ------------------------------------------------------------------
 
-export function cmdTrust(ctx: CommandContext, args: { name: string }): { name: string; url: string } {
+/**
+ * Trust a source for the backend the project scope would use now (spec §3, §4.3): its kind
+ * and address (`url`; a local path for a local backend). Replaces an earlier entry, so trust
+ * does not carry over when the chosen backend switches.
+ */
+export function cmdTrust(ctx: CommandContext, args: { name: string }): { name: string; kind: BackendKind; url: string } {
   const config = load(ctx);
   const src = config.sources.get(args.name);
   if (!src) throw new CommandError(`unknown source: ${args.name}`);
-  const url = identityOf(src);
-  new State(ctx.stateRoot).trust(args.name, url);
-  return { name: args.name, url };
+  const backend = resolveBackend(src, ctx.home);
+  new State(ctx.stateRoot).trust(args.name, backend);
+  return { name: args.name, kind: backend.kind, url: backend.address };
+}
+
+/** Trust a source definition just written by `add` (or a bundle's missing source): the
+ *  backend it names, normalized by the one resolver (spec §4.3). */
+function trustDef(ctx: CommandContext, name: string, def: SourceDef): void {
+  new State(ctx.stateRoot).trust(name, resolveBackend({ name, ...def, origins: {} }, ctx.home));
 }
 
 // ---- helpers ----------------------------------------------------------------

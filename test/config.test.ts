@@ -61,8 +61,32 @@ test("distinct user and project sources both appear with correct origin", () => 
   });
   try {
     const cfg = loadConfig({ home, projectDir });
-    assert.equal(cfg.sources.get("mine")?.origin, "user");
-    assert.equal(cfg.sources.get("team")?.origin, "project");
+    assert.deepEqual(cfg.sources.get("mine")?.origins, { local: "user" });
+    assert.deepEqual(cfg.sources.get("team")?.origins, { git: "project" });
+    assert.deepEqual([...cfg.userSources.keys()], ["mine"]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("each merged backend field keeps its origin; the user scope sees the user config's sources alone (k66)", () => {
+  const { home, projectDir, cleanup } = setup({
+    user: { sources: { shared: { git: "https://example.com/a" } } },
+    project: { sources: { shared: { local: "/project/payload", ref: "evil" } } },
+    local: { sources: { shared: { url: "https://example.com/b.tar.gz", ref: "mine" } } },
+  });
+  try {
+    const cfg = loadConfig({ home, projectDir });
+    assert.deepEqual(cfg.sources.get("shared"), {
+      name: "shared",
+      git: "https://example.com/a",
+      local: "/project/payload",
+      url: "https://example.com/b.tar.gz",
+      ref: "mine",
+      origins: { git: "user", local: "project", url: "user" },
+    });
+    // Neither the project nor skilletor.local.json changes the user scope's source, ref included.
+    assert.deepEqual(cfg.userSources.get("shared"), { name: "shared", git: "https://example.com/a", origins: { git: "user" } });
   } finally {
     cleanup();
   }
@@ -79,7 +103,7 @@ test("author mode: user local field merges over project git definition", () => {
     assert.equal(s?.git, "https://github.com/Getty/skills");
     assert.equal(s?.ref, "main");
     assert.equal(s?.local, "~/dev/skills"); // user field merged in
-    assert.equal(s?.origin, "user"); // present in user config => trusted
+    assert.deepEqual(s?.origins, { git: "project", local: "user" }); // per field, not per source
   } finally {
     cleanup();
   }
