@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-09-26T18:05:17Z
+created: 2026-09-26T16:47:36Z
+id: 92
+priority: low
+started: 2026-09-26T17:50:13Z
+status: done
+tags:
+- sources
+- cache
+title: 'sources/git: an offline fallback can serve a worktree a killed reset left
+  half-updated'
+updated: 2026-09-26T18:05:25Z
+---
+
+Found during k90 (worker), unverified. A run killed inside `git reset --hard` can leave the worktree mixing new files with HEAD (and index) still at the old commit. The next online resolve repairs it (reset --hard restores exactly – verified in k84), but an offline fallback serves the dir as is, labelled with the old version (rev-parse HEAD). Fix idea: before serving a fallback, verify the worktree matches HEAD (`git status --porcelain --untracked-files=no` empty, plus untracked check if cheap) and otherwise `reset --hard HEAD` locally (no network) under the sync lock. Also micro-edge from k90: a run killed inside `remote add` between its two config writes leaves remote.origin.url without a fetch refspec; repair() sees the matching URL and leaves it, only the abbreviated-SHA fallback `git fetch origin` is affected – check `remote.origin.fetch` in repair() too if cheap. Test: plant a mixed worktree, remote unreachable → fallback serves HEAD content exactly.
+
+2026-09-26 17:53 Started: reproducing reset --hard write order and the untracked-leftover case before touching code.
+
+2026-09-26 17:56 Reproduced (git 2.47.3, real git, not constructed): builtin/reset.c order is checkout (unpack_trees) -> write index -> ORIG_HEAD -> HEAD. (1) A held branch ref lock makes reset --hard B fail at the ref update: checkout+index at B, HEAD at A, rev-parse --short HEAD = A. (2) A checkout write failing midway: a.txt already B, old.txt already deleted, index+HEAD at A. A SIGKILL leaves the same states (plus index.lock in (2)). Also found: reset --hard never removes untracked/ignored files, so a killed reset's new file (skills/new/SKILL.md) survives the NEXT ONLINE reset --hard to a commit without it (k84's 'restores exactly' holds only for tracked files) - git clean -ffdx removes it. Plan: fallback checks git status --porcelain --ignored -uall (GIT_OPTIONAL_LOCKS=0, no writes) and only when dirty runs reset --hard HEAD + clean -ffdx; a restore failure rejects the cache; online path adds clean -ffdx after its reset; repair() reads url+fetch in one config call and sets the default refspec when missing.
+
+2026-09-26 18:03 Design: fallback = version() (commit/pin check) then restore(): git status --porcelain --ignored -unormal with GIT_OPTIONAL_LOCKS=0 (clean: ~3 ms, no write); dirty or status failing -> reset --hard HEAD + clean -ffdxq; failure (e.g. the killed run's fresh index.lock, < sweep age) -> CacheRejected, named as 'cache rejected (...)', source keeps its items. Chose check-first over always-reset: 1 process and no write vs 2 processes writing index/ORIG_HEAD/reflog each offline sync. Online: clean -ffdxq after reset (~2 ms vs the fetch). repair(): one 'config -z --get-regexp ^remote\.origin\.(url|fetch)$' read, sets +refs/heads/*:refs/remotes/origin/* when fetch is missing. PinMismatch renamed CacheRejected. Behaviour change to flag: within 5 min of a kill mid-checkout, a source now errors (items kept) instead of installing the half-updated tree. No Changes file exists in the repo.
+
+2026-09-26 18:03 Done: src/sources/git.ts (restore() before a fallback, clean after every reset, refspec repair), test/git-cache.test.ts (+7 k92 tests, KILLED + 'inside remote add', refspec and config-unchanged asserts), spec 4.4, dist rebuilt. Reproduced both reset --hard kill windows with real git; old dist installs SECOND's files + a new skill under FIRST's version, new dist serves FIRST. Mutation-checked: each of 7 mutations fails its intended test. typecheck + 664/664 tests + build + check-dist green. Not committed.
+
+2026-09-26 18:05 Committed 0f4118c: sources/git: a cache fallback serves exactly HEAD's checkout, no killed reset's files outlive it (k92)
