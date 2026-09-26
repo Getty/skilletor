@@ -253,9 +253,14 @@ branch named like a date) is taken as a name (k69). Names with one URL and ref s
 cache and a sync's one fetch of it (§6.1, k83). Git gets the address and the ref after `--`,
 never as an option (k85). A git killed midway (a hook timeout, a crash) can leave its lock
 files in the cache; the next run that takes the sync lock removes them once stale (§6.5, k84).
-A cache it was creating – a `.git` that `git init` never finished, a repo without `origin` –
-the next resolve completes before it fetches, keeping its objects; git never takes a
-repository above the cache for it, and one without a commit is no cache to fall back to (k90).
+A cache it was creating – a `.git` that `git init` never finished, a repo without `origin` or
+without its fetch refspec (k92) – the next resolve completes before it fetches, keeping its
+objects; git never takes a repository above the cache for it, and one without a commit is no
+cache to fall back to (k90). A git killed inside `reset --hard` leaves the checkout partly at
+the next commit while HEAD, and so the version, names the old one: a fallback brings the
+checkout back to exactly HEAD's files without the network, or refuses the cache when it
+cannot, and every resolve removes after its reset each file the commit does not track, so
+nothing the killed run wrote outlives it (k92).
 Every git skilletor runs – in a cache, `ls-remote`, a question about the project (§6.4) – drops
 git's repository-local variables (`git rev-parse --local-env-vars`: `GIT_DIR`, `GIT_WORK_TREE`,
 `GIT_INDEX_FILE`, …) but the command-line config, as git does for a submodule, so it acts on the

@@ -11,11 +11,12 @@
 // git 2.24); only a SHA pin – hex, never an option – also reaches rev-parse and reset.
 // When the remote is unreachable but a cache exists, resolve reuses it and reports a
 // warning; without a cache – a repo without a commit is none – or with one that holds another
-// commit than a SHA pin, it errors.
+// commit than a SHA pin, it errors. A reused cache's checkout is its HEAD commit's, exactly (k92).
 // The lock files a git killed midway leaves in a cache, `sweepGitCache` clears – the engine
 // calls it only while it holds the sync lock, under which every resolve runs (spec §6.5).
 // A cache a killed run was creating, resolve completes before it fetches (k90); in a cache,
 // git never looks for a repository above it, nor takes one an exported GIT_DIR names (k91).
+// What a run killed inside `reset --hard` left in the checkout, no served cache keeps (k92).
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, rmSync, type Dirent } from "node:fs";
@@ -32,8 +33,12 @@ export interface GitSourceOptions {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
-/** The cache holds another commit than the SHA pin asks for. */
-class PinMismatch extends Error {}
+/** The fetch refspec `git remote add` gives `origin`. */
+const ORIGIN_REFSPEC = "+refs/heads/*:refs/remotes/origin/*";
+
+/** The cache is not served: it holds another commit than the SHA pin asks for, or a checkout
+ *  that cannot be brought back to its commit. */
+class CacheRejected extends Error {}
 
 export class GitSource implements Source {
   private readonly opts: GitSourceOptions;
@@ -48,7 +53,7 @@ export class GitSource implements Source {
     return join(this.opts.cacheRoot, hash);
   }
 
-  private run(cwd: string, args: string[], timeoutMs?: number): Promise<string> {
+  private run(cwd: string, args: string[], timeoutMs?: number, env: Record<string, string> = {}): Promise<string> {
     return new Promise((resolvePromise, reject) => {
       execFile(
         "git",
@@ -59,7 +64,7 @@ export class GitSource implements Source {
           // In a cache, git takes its `.git` or no repository (k90): one a killed `git init` left
           // unfinished is none to git, which would look further up – `~/.claude` may be a repo.
           // Never one an exported GIT_DIR or GIT_WORK_TREE names (k91).
-          env: gitEnv(cwd ? { GIT_CEILING_DIRECTORIES: resolvePath(cwd, "..") } : {}),
+          env: gitEnv({ ...(cwd ? { GIT_CEILING_DIRECTORIES: resolvePath(cwd, "..") } : {}), ...env }),
           maxBuffer: 32 * 1024 * 1024,
         },
         (err, stdout, stderr) => {
@@ -100,19 +105,20 @@ export class GitSource implements Source {
         await this.run(dir, ["fetch", "--depth", "1", "--", "origin", ref ?? "HEAD"]);
       }
       await this.run(dir, ["reset", "--hard", resetTarget]);
+      // reset --hard leaves every file its index does not track: what a killed reset wrote for a
+      // commit upstream has dropped since would stay in every checkout after (k92).
+      await this.run(dir, ["clean", "-ffdxq"]);
 
       return { dir, version: await this.version(dir) };
     } catch (err) {
       if (this.isRepo(dir)) {
         try {
-          return {
-            dir,
-            version: await this.version(dir),
-            warning: `git fetch failed for ${this.opts.url}, using cache (${(err as Error).message})`,
-          };
+          const version = await this.version(dir);
+          await this.restore(dir);
+          return { dir, version, warning: `git fetch failed for ${this.opts.url}, using cache (${(err as Error).message})` };
         } catch (cacheError) {
-          // A repo without a commit is no cache; only a refused pin is worth naming.
-          if (cacheError instanceof PinMismatch) {
+          // A repo without a commit is no cache; only a refused pin or checkout is worth naming.
+          if (cacheError instanceof CacheRejected) {
             throw new Error(`git source ${this.opts.url} failed: ${(err as Error).message}; ` +
               `cache rejected (${cacheError.message})`);
           }
@@ -125,17 +131,41 @@ export class GitSource implements Source {
   /**
    * Make a cache a run killed while creating it left fit to fetch into, keeping what it holds
    * (k90): a `.git` `git init` never finished is finished – a no-op on a whole repo – and a repo
-   * without `origin` gets it. An `origin` naming another address is pointed at the source's; a
-   * failure there fails the fetch. A whole cache costs one config read and no write.
+   * without `origin` gets it. An `origin` naming another address is pointed at the source's, one
+   * without a fetch refspec – `remote add` killed between its two config writes, whose fallback
+   * `git fetch origin` would take only the remote's HEAD – gets `remote add`'s (k92); a failure
+   * there fails the fetch. A whole cache costs one config read and no write.
    */
   private async repair(dir: string): Promise<void> {
-    const origin = await this.run(dir, ["config", "--local", "--get", "remote.origin.url"])
-      .then((out) => out.trim(), () => undefined);
-    if (origin === undefined) {
+    const origin = await this.run(dir, ["config", "--local", "-z", "--get-regexp", "^remote\\.origin\\.(url|fetch)$"])
+      .then(configEntries, () => new Map<string, string>());
+    const url = origin.get("remote.origin.url");
+    if (url === undefined) {
       await this.run(dir, ["init", "-q"]);
       await this.run(dir, ["remote", "add", "--", "origin", this.opts.url]);
-    } else if (origin !== this.opts.url) {
-      await this.run(dir, ["remote", "set-url", "--", "origin", this.opts.url]);
+      return;
+    }
+    if (url !== this.opts.url) await this.run(dir, ["remote", "set-url", "--", "origin", this.opts.url]);
+    if (!origin.has("remote.origin.fetch")) await this.run(dir, ["config", "--local", "remote.origin.fetch", ORIGIN_REFSPEC]);
+  }
+
+  /**
+   * Bring the checkout of a cache about to be served offline back to exactly its HEAD commit,
+   * without the network (k92). `reset --hard` writes the checkout, then the index, then moves
+   * HEAD: a run killed inside it leaves the new commit's files – changed, deleted, added, even
+   * ignored ones – under the old commit's HEAD, and so its version. A clean checkout costs one
+   * `git status` and no write (it takes no optional lock to refresh the index); any other is
+   * reset to HEAD and cleaned of every file HEAD does not track, or rejected when it cannot be.
+   */
+  private async restore(dir: string): Promise<void> {
+    const status = ["status", "--porcelain", "--ignored", "--untracked-files=normal"];
+    const clean = await this.run(dir, status, undefined, { GIT_OPTIONAL_LOCKS: "0" }).then((out) => out === "", () => false);
+    if (clean) return;
+    try {
+      await this.run(dir, ["reset", "--hard", "HEAD"]);
+      await this.run(dir, ["clean", "-ffdxq"]);
+    } catch (err) {
+      throw new CacheRejected(`its checkout cannot be brought back to HEAD: ${(err as Error).message}`);
     }
   }
 
@@ -153,7 +183,7 @@ export class GitSource implements Source {
       // ever reads as an object id.
       const byName = ref.length < 40 && (pin === "" || pin === head);
       const held = head.startsWith(ref.toLowerCase()) ? pin === head : byName;
-      if (!held) throw new PinMismatch(`cached commit ${head} does not match requested pin ${ref}`);
+      if (!held) throw new CacheRejected(`cached commit ${head} does not match requested pin ${ref}`);
     }
     const sha = (await this.run(dir, ["rev-parse", "--short", "HEAD"])).trim();
     return `git:${sha}`;
@@ -277,6 +307,17 @@ function refLocks(dir: string): string[] {
     else if (e.isFile() && e.name.endsWith(".lock")) out.push(path);
   }
   return out;
+}
+
+/** `git config -z` output – `key\nvalue\0` per entry, a key alone for one without a value – as key → last value. */
+function configEntries(out: string): Map<string, string> {
+  const entries = new Map<string, string>();
+  for (const entry of out.split("\0")) {
+    if (entry === "") continue;
+    const nl = entry.indexOf("\n");
+    entries.set(nl < 0 ? entry : entry.slice(0, nl), nl < 0 ? "" : entry.slice(nl + 1));
+  }
+  return entries;
 }
 
 /** A full or abbreviated commit SHA. */

@@ -5,10 +5,12 @@
 // that takes the sync lock sweeps them (spec §6.5).
 // k90: a cache it was creating – a repo without `origin` or without a commit; every fetch
 // failed and there was no commit to fall back to, so the source failed every sync.
+// k92: a checkout `reset --hard` left between two commits, HEAD at the old one; a fallback
+// served it under the old commit's version, and what it added outlived every later reset.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve as resolvePath } from "node:path";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 import { makeTarGz } from "./helpers/tar.ts";
@@ -19,7 +21,8 @@ import { sync, type EngineContext } from "../src/engine.ts";
 const G = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, env: G, encoding: "utf8" }).trim();
 
-/** A bare repo with one skill; `commit(body)` pushes a new version of it. */
+/** A bare repo with one skill; `commit(body)` pushes a new version of it to `branch`, with
+ *  `files` besides (added even if ignored; null: deleted), and returns its SHA. */
 function makeRepo(tmp: TmpDir) {
   const bare = join(tmp.dir, "repo.git");
   const work = join(tmp.dir, "work");
@@ -27,11 +30,16 @@ function makeRepo(tmp: TmpDir) {
   mkdirSync(join(work, "skills/foo"), { recursive: true });
   git(work, "init", "-q", "-b", "main");
   const url = "file://" + resolvePath(bare);
-  const commit = (body: string) => {
+  const commit = (body: string, files: Record<string, string | null> = {}, branch = "main") => {
     writeFileSync(join(work, "skills/foo/SKILL.md"), `---\ndescription: foo\n---\n${body}\n`);
-    git(work, "add", ".");
+    for (const [rel, data] of Object.entries(files)) {
+      if (data === null) rmSync(join(work, rel));
+      else plant(join(work, rel), false, data);
+    }
+    git(work, "add", "-A", "-f", "--", "skills/foo/SKILL.md", ...Object.keys(files));
     git(work, "commit", "-qm", body);
-    git(work, "push", "-q", url, "main");
+    git(work, "push", "-q", url, `HEAD:refs/heads/${branch}`);
+    return git(work, "rev-parse", "HEAD");
   };
   return { url, commit };
 }
@@ -39,9 +47,9 @@ function makeRepo(tmp: TmpDir) {
 const TEN_MINUTES_AGO = () => new Date(Date.now() - 10 * 60_000);
 
 /** Write `path` (parents made); `stale` backdates it past the sweep's age. */
-function plant(path: string, stale = true): string {
+function plant(path: string, stale = true, data = ""): string {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, "");
+  writeFileSync(path, data);
   if (stale) utimesSync(path, TEN_MINUTES_AGO(), TEN_MINUTES_AGO());
   return path;
 }
@@ -182,9 +190,13 @@ test("k84: the sweep of a missing root or odd entries is silent", () => {
 });
 
 /** Where a run creating the cache `dir` was killed: inside `git init` (a `.git` it never
- *  finished, here an empty one), after `git init`, or during the first fetch (after `remote add`). */
-const KILLED = ["inside git init", "after git init", "during the first fetch"] as const;
+ *  finished, here an empty one), after `git init`, inside `remote add` (between its two config
+ *  writes: the address, no fetch refspec), or during the first fetch (after `remote add`). */
+const KILLED = ["inside git init", "after git init", "inside remote add", "during the first fetch"] as const;
 type Killed = (typeof KILLED)[number];
+
+/** The fetch refspec `git remote add` gives `origin`. */
+const ORIGIN_REFSPEC = "+refs/heads/*:refs/remotes/origin/*";
 
 /** Replace the cache `dir` with what a run killed at `killed` leaves. */
 function plantKilledCache(dir: string, url: string, killed: Killed): void {
@@ -192,13 +204,15 @@ function plantKilledCache(dir: string, url: string, killed: Killed): void {
   mkdirSync(join(dir, ".git"), { recursive: true });
   if (killed === "inside git init") return;
   git(dir, "init", "-q");
+  if (killed === "inside remote add") git(dir, "config", "remote.origin.url", url);
   if (killed === "during the first fetch") git(dir, "remote", "add", "origin", url);
 }
 
 // Asserts: a first sync killed while it created the source's cache – inside `git init`, after
-// it (no `origin`), or during the first fetch (no commit) – does not strand the source: the next
-// sync fetches into that same cache and installs `foo` with no error and no warning, and the
-// cache's `origin` is the source's address.
+// it (no `origin`), inside `remote add` (no fetch refspec), or during the first fetch (no
+// commit) – does not strand the source: the next sync fetches into that same cache and installs
+// `foo` with no error and no warning, and the cache's `origin` is the source's address with
+// `remote add`'s fetch refspec.
 for (const killed of KILLED) {
   test(`k90: a first sync killed ${killed} leaves a cache the next sync installs from`, async (t) => {
     const tmp = makeTmpDir();
@@ -226,6 +240,7 @@ for (const killed of KILLED) {
     assert.match(readFileSync(join(home, ".claude/skills/foo/SKILL.md"), "utf8"), /FIRST/);
     assert.deepEqual(readdirSync(cacheRoot), [basename(cache)], "the sync used the planted cache");
     assert.equal(git(cache, "config", "--local", "--get", "remote.origin.url"), repo.url);
+    assert.equal(git(cache, "config", "--local", "--get-all", "remote.origin.fetch"), ORIGIN_REFSPEC);
   });
 }
 
@@ -253,7 +268,7 @@ for (const killed of KILLED) {
 }
 
 // Asserts: a whole cache is fetched into as it stands – not re-created: an object only it holds
-// survives the next resolve, which takes the new commit with no warning; `origin` is unchanged.
+// survives the next resolve, which takes the new commit with no warning; its config is unchanged.
 test("k90: a whole cache is fetched into, not re-created: its objects are kept", async (t) => {
   const tmp = makeTmpDir();
   t.after(tmp.cleanup);
@@ -261,6 +276,7 @@ test("k90: a whole cache is fetched into, not re-created: its objects are kept",
   repo.commit("FIRST");
   const src = new GitSource({ url: repo.url, cacheRoot: join(tmp.dir, "cache") });
   const first = await src.resolve();
+  const config = readFileSync(join(first.dir, ".git/config"), "utf8");
   writeFileSync(join(tmp.dir, "marker"), "k90 marker\n");
   const marker = git(first.dir, "hash-object", "-w", join(tmp.dir, "marker"));
 
@@ -270,7 +286,7 @@ test("k90: a whole cache is fetched into, not re-created: its objects are kept",
   assert.notEqual(second.version, first.version);
   assert.match(readFileSync(join(second.dir, "skills/foo/SKILL.md"), "utf8"), /SECOND/);
   assert.doesNotThrow(() => git(second.dir, "cat-file", "-e", marker), "the cache was re-created");
-  assert.equal(git(second.dir, "config", "--local", "--get", "remote.origin.url"), repo.url);
+  assert.equal(readFileSync(join(second.dir, ".git/config"), "utf8"), config);
 });
 
 // Asserts: a cache whose `origin` names another address is pointed back at the source's before
@@ -326,3 +342,194 @@ for (const outerOrigin of [false, true]) {
     assert.equal(git(dir, "rev-parse", "--absolute-git-dir"), join(realpathSync(dir), ".git"));
   });
 }
+
+// k92: `git reset --hard` writes the checkout, then the index, then moves HEAD (builtin/reset.c).
+// A run killed inside it leaves the checkout at the new commit while HEAD – and the version a
+// fallback reports – names the old one; and a file the new commit adds is one no later
+// `reset --hard` removes, since the index it resets from never tracked it.
+
+/** The first commit: a skill, a second file in it, a `.gitignore`. */
+const FIRST_FILES = { ".gitignore": "*.log\n", "skills/foo/old.md": "old\n" };
+/** The next: one file changed (SKILL.md), one deleted, a new skill, a new file `.gitignore` ignores. */
+const SECOND_FILES = {
+  "skills/foo/old.md": null, "skills/bar/SKILL.md": "---\ndescription: bar\n---\nbar\n", "skills/foo/notes.log": "notes\n",
+};
+
+/** Where a run moving a cache to the next commit was killed inside `git reset --hard`: while it
+ *  wrote the checkout (index and HEAD old), or once it wrote the index (HEAD old). */
+const KILLED_RESET = ["while it wrote the checkout", "before it moved HEAD"] as const;
+
+/** Leave the cache `dir` as a run moving it to upstream's `main` and killed at `killed` leaves it. */
+function plantKilledReset(dir: string, killed: (typeof KILLED_RESET)[number]): void {
+  git(dir, "fetch", "-q", "origin", "main");
+  // With HEAD's branch locked, git writes the checkout and the index, then fails to move HEAD.
+  const refLock = join(dir, ".git", `${git(dir, "symbolic-ref", "HEAD")}.lock`);
+  writeFileSync(refLock, "");
+  assert.throws(() => execFileSync("git", ["reset", "-q", "--hard", "FETCH_HEAD"], { cwd: dir, env: G, stdio: "pipe" }));
+  rmSync(refLock); // a stale one is the sweep's (k84)
+  if (killed === "while it wrote the checkout") git(dir, "read-tree", "HEAD"); // the index git had not written yet
+}
+
+/** Every file of the checkout `dir`, `.git` aside: relative path → content. */
+function checkout(dir: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const walk = (d: string) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const path = join(d, e.name);
+      if (path === join(dir, ".git")) continue;
+      if (e.isDirectory()) walk(path);
+      else out[relative(dir, path)] = readFileSync(path, "utf8");
+    }
+  };
+  walk(dir);
+  return out;
+}
+
+/** Every file of the commit `dir`'s HEAD names: relative path → content. */
+function headFiles(dir: string): Record<string, string> {
+  const show = (path: string) => execFileSync("git", ["show", `HEAD:${path}`], { cwd: dir, env: G, encoding: "utf8" });
+  const paths = execFileSync("git", ["ls-tree", "-r", "-z", "--name-only", "HEAD"], { cwd: dir, env: G, encoding: "utf8" });
+  return Object.fromEntries(paths.split("\0").filter(Boolean).map((p) => [p, show(p)]));
+}
+
+// Asserts, for a run killed while it wrote the checkout and one killed before it moved HEAD, the
+// remote unreachable: the fallback serves exactly HEAD's files – the cache as the first resolve
+// left it: nothing changed, deleted, added or ignored by the new commit, no new skill dir – under
+// HEAD's version, with the "using cache" warning.
+for (const killed of KILLED_RESET) {
+  test(`k92: a reset killed ${killed}, remote unreachable: the fallback serves exactly HEAD's files`, async (t) => {
+    const tmp = makeTmpDir();
+    t.after(tmp.cleanup);
+    const repo = makeRepo(tmp);
+    repo.commit("FIRST", FIRST_FILES);
+    const src = new GitSource({ url: repo.url, cacheRoot: join(tmp.dir, "cache") });
+    const first = await src.resolve();
+    const served = checkout(first.dir);
+    repo.commit("SECOND", SECOND_FILES);
+    plantKilledReset(first.dir, killed);
+    assert.equal(`git:${git(first.dir, "rev-parse", "--short", "HEAD")}`, first.version, "fixture: HEAD is the old commit");
+    assert.match(readFileSync(join(first.dir, "skills/foo/SKILL.md"), "utf8"), /SECOND/, "fixture: the checkout is the new one's");
+    rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+
+    const offline = await src.resolve();
+    assert.match(offline.warning ?? "", /using cache/);
+    assert.equal(offline.version, first.version);
+    assert.deepEqual(checkout(offline.dir), served);
+    assert.deepEqual(checkout(offline.dir), headFiles(offline.dir));
+    assert.equal(existsSync(join(offline.dir, "skills/bar")), false, "the new commit's skill dir is left");
+  });
+}
+
+// Asserts: a checkout whose only difference from HEAD is a file `.gitignore` covers – a reset
+// killed once it wrote the one file the next commit adds, force-added past `.gitignore` – is
+// brought back to HEAD offline too: the file is gone, the version is HEAD's.
+test("k92: a killed reset's leftover that .gitignore covers is not served offline", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const repo = makeRepo(tmp);
+  repo.commit("FIRST", FIRST_FILES);
+  const src = new GitSource({ url: repo.url, cacheRoot: join(tmp.dir, "cache") });
+  const first = await src.resolve();
+  const served = checkout(first.dir);
+  repo.commit("FIRST", { "skills/foo/notes.log": "notes\n" }); // adds that one file, nothing else
+  plantKilledReset(first.dir, "while it wrote the checkout");
+  assert.equal(git(first.dir, "status", "--porcelain"), "", "fixture: only an ignored file differs");
+  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+
+  const offline = await src.resolve();
+  assert.match(offline.warning ?? "", /using cache/);
+  assert.equal(offline.version, first.version);
+  assert.deepEqual(checkout(offline.dir), served);
+});
+
+// Asserts: a clean cache, remote unreachable, is served as it stands – its files under HEAD's
+// version – and the fallback writes nothing into it: the index, HEAD, ORIG_HEAD, the branch and
+// their reflogs keep their bytes and mtimes. They are backdated first, so any write shows, and
+// so every index entry is racily clean – a `git status` free to refresh the index rewrites it.
+test("k92: a clean cache, remote unreachable, is served without a git write", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const repo = makeRepo(tmp);
+  repo.commit("FIRST", FIRST_FILES);
+  const src = new GitSource({ url: repo.url, cacheRoot: join(tmp.dir, "cache") });
+  await src.resolve();
+  const first = await src.resolve(); // a reset from a commit: ORIG_HEAD exists
+  const served = checkout(first.dir);
+  const gitDir = join(first.dir, ".git");
+  const branch = git(first.dir, "symbolic-ref", "HEAD");
+  const paths = ["index", "HEAD", "ORIG_HEAD", branch, "logs/HEAD", `logs/${branch}`].map((rel) => join(gitDir, rel));
+  for (const p of paths) utimesSync(p, TEN_MINUTES_AGO(), TEN_MINUTES_AGO());
+  const snapshot = () => paths.map((p) => [relative(gitDir, p), readFileSync(p, "latin1"), statSync(p).mtimeMs]);
+  const before = snapshot();
+  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+
+  const offline = await src.resolve();
+  assert.match(offline.warning ?? "", /using cache/);
+  assert.equal(offline.version, first.version);
+  assert.deepEqual(checkout(offline.dir), served);
+  assert.deepEqual(snapshot(), before);
+});
+
+// Asserts: after a run killed while it wrote the checkout of a commit that adds a skill and an
+// ignored file, with upstream moved on to a commit without them, the next online resolve serves
+// exactly that commit's files – no leftover of the killed run, no empty dir – with no warning.
+test("k92: an online resolve leaves nothing a killed reset added and upstream dropped", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const repo = makeRepo(tmp);
+  repo.commit("FIRST", FIRST_FILES);
+  const src = new GitSource({ url: repo.url, cacheRoot: join(tmp.dir, "cache") });
+  const first = await src.resolve();
+  repo.commit("SECOND", SECOND_FILES);
+  plantKilledReset(first.dir, "while it wrote the checkout");
+  const third = repo.commit("THIRD", { "skills/bar/SKILL.md": null, "skills/foo/notes.log": null });
+
+  const loc = await src.resolve();
+  assert.equal(loc.warning, undefined);
+  assert.equal(git(loc.dir, "rev-parse", "HEAD"), third);
+  assert.deepEqual(checkout(loc.dir), headFiles(loc.dir));
+  assert.equal(existsSync(join(loc.dir, "skills/bar")), false, "the killed run's skill dir is left");
+});
+
+// Asserts: a checkout the fallback cannot bring back to HEAD – the killed run's `index.lock` is
+// younger than the sweep's age, so still there – is refused, never served: with the remote
+// unreachable, resolve fails with the fetch error and names the rejected cache and the lock.
+test("k92: a checkout the fallback cannot bring back to HEAD is refused, not served", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const repo = makeRepo(tmp);
+  repo.commit("FIRST", FIRST_FILES);
+  const src = new GitSource({ url: repo.url, cacheRoot: join(tmp.dir, "cache") });
+  const first = await src.resolve();
+  repo.commit("SECOND", SECOND_FILES);
+  plantKilledReset(first.dir, "while it wrote the checkout");
+  plant(join(first.dir, ".git/index.lock"), false);
+  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+
+  await assert.rejects(() => src.resolve(), (err: Error) => {
+    assert.match(err.message, /^git source .* failed: git fetch [^]*; cache rejected \([^]*index\.lock/);
+    assert.doesNotMatch(err.message, /using cache/);
+    return true;
+  });
+});
+
+// A run killed inside `remote add`, between its two config writes, leaves `origin`'s address
+// without a fetch refspec: a plain `git fetch origin` then takes only the remote's HEAD. An
+// abbreviated SHA pin falls back to that fetch (no remote serves an abbreviated SHA). Asserts,
+// for a pin on a commit only another branch holds: resolve serves the pinned commit with no
+// warning, and `origin` has `remote add`'s fetch refspec.
+test("k92: a cache killed inside remote add gets its fetch refspec; an abbreviated pin off the default branch resolves", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const repo = makeRepo(tmp);
+  repo.commit("FIRST");
+  const side = repo.commit("SIDE", {}, "side");
+  const src = new GitSource({ url: repo.url, ref: side.slice(0, 7), cacheRoot: join(tmp.dir, "cache") });
+  plantKilledCache((await src.resolve()).dir, repo.url, "inside remote add");
+
+  const loc = await src.resolve();
+  assert.equal(loc.warning, undefined);
+  assert.equal(git(loc.dir, "rev-parse", "HEAD"), side);
+  assert.match(readFileSync(join(loc.dir, "skills/foo/SKILL.md"), "utf8"), /SIDE/);
+  assert.equal(git(loc.dir, "config", "--local", "--get-all", "remote.origin.fetch"), ORIGIN_REFSPEC);
+});

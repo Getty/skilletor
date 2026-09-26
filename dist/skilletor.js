@@ -7443,7 +7443,8 @@ import { createHash as createHash2 } from "node:crypto";
 import { existsSync as existsSync4, lstatSync as lstatSync3, mkdirSync as mkdirSync2, readdirSync, rmSync as rmSync2 } from "node:fs";
 import { join as join6, resolve as resolvePath } from "node:path";
 var DEFAULT_TIMEOUT_MS = 6e4;
-var PinMismatch = class extends Error {
+var ORIGIN_REFSPEC = "+refs/heads/*:refs/remotes/origin/*";
+var CacheRejected = class extends Error {
 };
 var GitSource = class {
   opts;
@@ -7455,7 +7456,7 @@ var GitSource = class {
     const hash = createHash2("sha256").update(identity).digest("hex").slice(0, 16);
     return join6(this.opts.cacheRoot, hash);
   }
-  run(cwd, args, timeoutMs) {
+  run(cwd, args, timeoutMs, env = {}) {
     return new Promise((resolvePromise, reject) => {
       execFile(
         "git",
@@ -7466,7 +7467,7 @@ var GitSource = class {
           // In a cache, git takes its `.git` or no repository (k90): one a killed `git init` left
           // unfinished is none to git, which would look further up – `~/.claude` may be a repo.
           // Never one an exported GIT_DIR or GIT_WORK_TREE names (k91).
-          env: gitEnv(cwd ? { GIT_CEILING_DIRECTORIES: resolvePath(cwd, "..") } : {}),
+          env: gitEnv({ ...cwd ? { GIT_CEILING_DIRECTORIES: resolvePath(cwd, "..") } : {}, ...env }),
           maxBuffer: 32 * 1024 * 1024
         },
         (err, stdout, stderr) => {
@@ -7502,17 +7503,16 @@ var GitSource = class {
         await this.run(dir, ["fetch", "--depth", "1", "--", "origin", ref ?? "HEAD"]);
       }
       await this.run(dir, ["reset", "--hard", resetTarget]);
+      await this.run(dir, ["clean", "-ffdxq"]);
       return { dir, version: await this.version(dir) };
     } catch (err) {
       if (this.isRepo(dir)) {
         try {
-          return {
-            dir,
-            version: await this.version(dir),
-            warning: `git fetch failed for ${this.opts.url}, using cache (${err.message})`
-          };
+          const version = await this.version(dir);
+          await this.restore(dir);
+          return { dir, version, warning: `git fetch failed for ${this.opts.url}, using cache (${err.message})` };
         } catch (cacheError) {
-          if (cacheError instanceof PinMismatch) {
+          if (cacheError instanceof CacheRejected) {
             throw new Error(`git source ${this.opts.url} failed: ${err.message}; cache rejected (${cacheError.message})`);
           }
         }
@@ -7523,16 +7523,39 @@ var GitSource = class {
   /**
    * Make a cache a run killed while creating it left fit to fetch into, keeping what it holds
    * (k90): a `.git` `git init` never finished is finished – a no-op on a whole repo – and a repo
-   * without `origin` gets it. An `origin` naming another address is pointed at the source's; a
-   * failure there fails the fetch. A whole cache costs one config read and no write.
+   * without `origin` gets it. An `origin` naming another address is pointed at the source's, one
+   * without a fetch refspec – `remote add` killed between its two config writes, whose fallback
+   * `git fetch origin` would take only the remote's HEAD – gets `remote add`'s (k92); a failure
+   * there fails the fetch. A whole cache costs one config read and no write.
    */
   async repair(dir) {
-    const origin = await this.run(dir, ["config", "--local", "--get", "remote.origin.url"]).then((out) => out.trim(), () => void 0);
-    if (origin === void 0) {
+    const origin = await this.run(dir, ["config", "--local", "-z", "--get-regexp", "^remote\\.origin\\.(url|fetch)$"]).then(configEntries, () => /* @__PURE__ */ new Map());
+    const url = origin.get("remote.origin.url");
+    if (url === void 0) {
       await this.run(dir, ["init", "-q"]);
       await this.run(dir, ["remote", "add", "--", "origin", this.opts.url]);
-    } else if (origin !== this.opts.url) {
-      await this.run(dir, ["remote", "set-url", "--", "origin", this.opts.url]);
+      return;
+    }
+    if (url !== this.opts.url) await this.run(dir, ["remote", "set-url", "--", "origin", this.opts.url]);
+    if (!origin.has("remote.origin.fetch")) await this.run(dir, ["config", "--local", "remote.origin.fetch", ORIGIN_REFSPEC]);
+  }
+  /**
+   * Bring the checkout of a cache about to be served offline back to exactly its HEAD commit,
+   * without the network (k92). `reset --hard` writes the checkout, then the index, then moves
+   * HEAD: a run killed inside it leaves the new commit's files – changed, deleted, added, even
+   * ignored ones – under the old commit's HEAD, and so its version. A clean checkout costs one
+   * `git status` and no write (it takes no optional lock to refresh the index); any other is
+   * reset to HEAD and cleaned of every file HEAD does not track, or rejected when it cannot be.
+   */
+  async restore(dir) {
+    const status2 = ["status", "--porcelain", "--ignored", "--untracked-files=normal"];
+    const clean = await this.run(dir, status2, void 0, { GIT_OPTIONAL_LOCKS: "0" }).then((out) => out === "", () => false);
+    if (clean) return;
+    try {
+      await this.run(dir, ["reset", "--hard", "HEAD"]);
+      await this.run(dir, ["clean", "-ffdxq"]);
+    } catch (err) {
+      throw new CacheRejected(`its checkout cannot be brought back to HEAD: ${err.message}`);
     }
   }
   async version(dir) {
@@ -7542,7 +7565,7 @@ var GitSource = class {
       const pin = await this.run(dir, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).then((out) => out.trim(), () => "");
       const byName = ref.length < 40 && (pin === "" || pin === head);
       const held = head.startsWith(ref.toLowerCase()) ? pin === head : byName;
-      if (!held) throw new PinMismatch(`cached commit ${head} does not match requested pin ${ref}`);
+      if (!held) throw new CacheRejected(`cached commit ${head} does not match requested pin ${ref}`);
     }
     const sha = (await this.run(dir, ["rev-parse", "--short", "HEAD"])).trim();
     return `git:${sha}`;
@@ -7630,6 +7653,15 @@ function refLocks(dir) {
     else if (e.isFile() && e.name.endsWith(".lock")) out.push(path);
   }
   return out;
+}
+function configEntries(out) {
+  const entries = /* @__PURE__ */ new Map();
+  for (const entry of out.split("\0")) {
+    if (entry === "") continue;
+    const nl = entry.indexOf("\n");
+    entries.set(nl < 0 ? entry : entry.slice(0, nl), nl < 0 ? "" : entry.slice(nl + 1));
+  }
+  return entries;
 }
 function isCommitish(ref) {
   return /^[0-9a-f]{7,40}$/i.test(ref);
