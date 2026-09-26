@@ -3,7 +3,8 @@
 // resolve(): shallow clone/fetch into a URL/ref-specific cache, hard reset to ref.
 //   The unpinned source retains its legacy URL-only cache; explicit refs never share it.
 // check():   a SHA pin against the locked commit, without the remote when they match;
-//            otherwise `git ls-remote` vs the locked commit.
+//            otherwise the commit the ref names per `git ls-remote` – the ref `git fetch`
+//            would take, an annotated tag peeled – vs the locked commit.
 // Git runs via execFile (no shell), with GIT_TERMINAL_PROMPT=0 so a hook never
 // blocks on a credential prompt. When the remote is unreachable but a cache
 // exists, resolve reuses it and reports a warning; without a cache, or with one
@@ -135,12 +136,40 @@ export class GitSource implements Source {
     // A SHA pin the lock already holds never moves: decided without the remote.
     if (ref && isCommitish(ref) && samePrefix(cached, ref.toLowerCase())) return false;
 
-    // What the ref names upstream. Nothing – a SHA pin the lock does not hold, or a ref
-    // that is gone – counts as changed; a tag named like a SHA (a date) compares by name.
-    const out = await this.run("", ["ls-remote", this.opts.url, ref ?? "HEAD"], this.opts.timeoutMs);
-    const remote = out.split(/\s+/)[0] ?? "";
+    // The commit the ref names upstream. Nothing – a SHA pin the lock does not hold, or a
+    // ref that is gone – counts as changed; a tag named like a SHA (a date) compares by name.
+    // ls-remote lists every ref ending in `/<pattern>`, a tag's peeled line only when asked
+    // for; these patterns cover each name in REF_RULES, and remoteCommit picks among them.
+    const name = ref ?? "HEAD";
+    const patterns = [name, `${name}/HEAD`].flatMap((p) => [p, `${p}^{}`]);
+    const out = await this.run("", ["ls-remote", this.opts.url, ...patterns], this.opts.timeoutMs);
+    const remote = remoteCommit(out, name);
     return !(cached.length > 0 && remote.startsWith(cached));
   }
+}
+
+/** git's order for a short ref name (`ref_rev_parse_rules`): the ref `git fetch` takes. */
+const REF_RULES: ((ref: string) => string)[] = [
+  (r) => r, (r) => `refs/${r}`, (r) => `refs/tags/${r}`, (r) => `refs/heads/${r}`,
+  (r) => `refs/remotes/${r}`, (r) => `refs/remotes/${r}/HEAD`,
+];
+
+/**
+ * The commit `ref` names in `git ls-remote` output: of the refs listed, the one git ranks
+ * first, through its peeled `^{}` line when it is a tag object. "" when none is listed.
+ */
+function remoteCommit(lsRemote: string, ref: string): string {
+  const shas = new Map<string, string>();
+  for (const line of lsRemote.split("\n")) {
+    const [sha, name] = line.split("\t");
+    if (sha && name) shas.set(name, sha.toLowerCase());
+  }
+  for (const rule of REF_RULES) {
+    const name = rule(ref);
+    const sha = shas.get(`${name}^{}`) ?? shas.get(name);
+    if (sha) return sha;
+  }
+  return "";
 }
 
 /** A full or abbreviated commit SHA. */

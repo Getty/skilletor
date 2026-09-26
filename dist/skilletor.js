@@ -7497,11 +7497,34 @@ var GitSource = class {
     const ref = this.opts.ref;
     const cached = cachedVersion.replace(/^git:/, "").toLowerCase();
     if (ref && isCommitish(ref) && samePrefix(cached, ref.toLowerCase())) return false;
-    const out = await this.run("", ["ls-remote", this.opts.url, ref ?? "HEAD"], this.opts.timeoutMs);
-    const remote = out.split(/\s+/)[0] ?? "";
+    const name = ref ?? "HEAD";
+    const patterns = [name, `${name}/HEAD`].flatMap((p) => [p, `${p}^{}`]);
+    const out = await this.run("", ["ls-remote", this.opts.url, ...patterns], this.opts.timeoutMs);
+    const remote = remoteCommit(out, name);
     return !(cached.length > 0 && remote.startsWith(cached));
   }
 };
+var REF_RULES = [
+  (r) => r,
+  (r) => `refs/${r}`,
+  (r) => `refs/tags/${r}`,
+  (r) => `refs/heads/${r}`,
+  (r) => `refs/remotes/${r}`,
+  (r) => `refs/remotes/${r}/HEAD`
+];
+function remoteCommit(lsRemote, ref) {
+  const shas = /* @__PURE__ */ new Map();
+  for (const line of lsRemote.split("\n")) {
+    const [sha, name] = line.split("	");
+    if (sha && name) shas.set(name, sha.toLowerCase());
+  }
+  for (const rule of REF_RULES) {
+    const name = rule(ref);
+    const sha = shas.get(`${name}^{}`) ?? shas.get(name);
+    if (sha) return sha;
+  }
+  return "";
+}
 function isCommitish(ref) {
   return /^[0-9a-f]{7,40}$/i.test(ref);
 }

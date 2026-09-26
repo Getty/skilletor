@@ -216,7 +216,7 @@ name is `skills` everywhere.
 
 | Kind | `resolve` | `check` (cheap) |
 |---|---|---|
-| `git` | Shallow clone/fetch into the cache; auth = the user's git setup | a SHA pin vs. the commit the last sync read (§14.3), offline when they match; else `git ls-remote <url> <ref>` vs. that commit (none, or nothing named `ref`: changed) |
+| `git` | Shallow clone/fetch into the cache; auth = the user's git setup | a SHA pin vs. the commit the last sync read (§14.3), offline when they match; else the commit `git ls-remote <url>` lists for `ref` vs. that commit – the ref `git fetch` takes (git's rev-parse order: a tag before a branch of the name), an annotated tag peeled to its commit (k75); none, or nothing named `ref`: changed |
 | `url` | HTTPS-only, `.tar.gz`, conditional GET with ETag | `HEAD` + comparison with the ETag the last sync read |
 | `local` | read directly | not applicable – always re-rendered |
 

@@ -33,15 +33,17 @@ function makeRepo(tmp: TmpDir) {
     git(work, "push", "-q", url, "main");
     return git(work, "rev-parse", "HEAD").trim();
   };
-  const tag = (name: string) => {
-    git(work, "tag", name);
+  const tag = (name: string, annotated = false) => {
+    git(work, "tag", ...(annotated ? ["-a", "-m", name] : []), name);
     git(work, "push", "-q", url, name);
   };
   const branch = (name: string) => {
     git(work, "branch", name);
     git(work, "push", "-q", url, name);
   };
-  return { url, commit, tag, branch };
+  /** Runs git in the bare repo itself, to move refs upstream. */
+  const upstream = (...args: string[]) => git(tmp.dir, "--git-dir", bare, ...args);
+  return { url, commit, tag, branch, upstream };
 }
 
 test("first resolve clones and checks out the source", async () => {
@@ -330,6 +332,66 @@ test("check on a tag named like a SHA prefix compares by name, like any other re
   git(tmp.dir, "--git-dir", new URL(repo.url).pathname, "tag", "-f", "20260926", b);
   assert.equal(await src.check(loc.version), true);
 });
+
+/** Does a `git:<sha>` version name this full commit SHA? */
+const names = (version: string, sha: string) => version.startsWith("git:") && sha.startsWith(version.slice(4));
+
+// k75: upstream, an annotated tag names a tag object; the commit is its peeled `^{}` line.
+// Asserts: resolve records the tagged commit, not the tag object; check is false while the
+// tag stays put (the branch has moved on), true once it moves; the next resolve takes the
+// new commit and check is false again. A lightweight tag behaves the same.
+for (const annotated of [true, false]) {
+  test(`check on ${annotated ? "an annotated" : "a lightweight"} tag compares the commit it names`, async (t) => {
+    const tmp = makeTmpDir();
+    t.after(tmp.cleanup);
+    const repo = makeRepo(tmp);
+    const a = repo.commit("A", "first");
+    repo.tag("v1", annotated);
+    const b = repo.commit("B", "second");
+    const src = new GitSource({ url: repo.url, ref: "v1", cacheRoot: join(tmp.dir, "cache") });
+    const loc = await src.resolve();
+    assert.equal(names(loc.version, a), true, `${loc.version} is the tagged commit ${a}`);
+    assert.equal(await src.check(loc.version), false, "the tag did not move");
+    repo.upstream("tag", "-f", ...(annotated ? ["-a", "-m", "moved"] : []), "v1", b);
+    assert.equal(await src.check(loc.version), true, "the tag moved");
+    const moved = await src.resolve(loc.version);
+    assert.equal(names(moved.version, b), true, `${moved.version} is the new commit ${b}`);
+    assert.equal(readFileSync(join(moved.dir, "file.txt"), "utf8"), "B");
+    assert.equal(await src.check(moved.version), false, "the moved tag is held");
+  });
+}
+
+// k75: `git ls-remote <url> <ref>` lists every ref that ends in `/<ref>`, sorted by name;
+// `git fetch` takes the one git's rev-parse rules rank first (exact, refs/, refs/tags/,
+// refs/heads/, refs/remotes/, refs/remotes/<ref>/HEAD). Upstream here: main at C, a
+// branch feature/main at A (listed before refs/heads/main), a branch x at A, a tag x at B.
+// Asserts: resolve installs what fetch picks; check is false for it although a namesake
+// names another commit, true once the ref resolve read moves, false after the next resolve.
+for (const [ref, own, installs, movesTo] of [
+  ["main", "refs/heads/main", "C", "A"],
+  ["x", "refs/tags/x", "B", "C"],
+  ["refs/heads/x", "refs/heads/x", "A", "C"],
+] as const) {
+  test(`check on "${ref}" follows ${own}, the ref git fetch picks among its namesakes`, async (t) => {
+    const tmp = makeTmpDir();
+    t.after(tmp.cleanup);
+    const repo = makeRepo(tmp);
+    const sha = { A: repo.commit("A", "first"), B: repo.commit("B", "second"), C: repo.commit("C", "third") };
+    repo.upstream("update-ref", "refs/heads/feature/main", sha.A);
+    repo.upstream("update-ref", "refs/heads/x", sha.A);
+    repo.upstream("tag", "-a", "-m", "x", "x", sha.B);
+    const src = new GitSource({ url: repo.url, ref, cacheRoot: join(tmp.dir, "cache") });
+    const loc = await src.resolve();
+    assert.equal(names(loc.version, sha[installs]), true, `fetch installs ${own} (${installs}), got ${loc.version}`);
+    assert.equal(await src.check(loc.version), false, `${own} did not move`);
+    if (own.startsWith("refs/tags/")) repo.upstream("tag", "-f", "-a", "-m", "moved", "x", sha[movesTo]);
+    else repo.upstream("update-ref", own, sha[movesTo]);
+    assert.equal(await src.check(loc.version), true, `${own} moved`);
+    const moved = await src.resolve(loc.version);
+    assert.equal(names(moved.version, sha[movesTo]), true, `${moved.version} is ${movesTo}`);
+    assert.equal(await src.check(moved.version), false, "the moved ref is held");
+  });
+}
 
 for (const ref of [undefined, "0123456789abcdef0123456789abcdef01234567"]) {
   test(`without a cache, an unreachable ${ref ? "pinned" : "unpinned"} remote names the fetch error, no cache`, async (t) => {

@@ -589,3 +589,33 @@ test("k80: a corrupt sources-read.json counts as no record; session-start syncs 
     e.tmp.cleanup();
   }
 });
+
+// ---- a source pinned to an annotated tag (k75) ------------------------------------------
+
+// Asserts: the session after syncing a source pinned to an annotated tag is silent and
+// fetches nothing – check compares the commit the tag names, not the tag object – also when
+// the branch moves on; moving the tag syncs once, and the session after that is silent again.
+test("k75: a source pinned to an annotated tag: the next session is silent and fetches nothing; moving the tag syncs once", async () => {
+  const e = env();
+  try {
+    const repo = gitSource(e.tmp.dir, "g", { "skills/foo/SKILL.md": SKILL("foo", "FIRST") });
+    const upstream = (...args: string[]) => execFileSync("git", ["--git-dir", repo.bare, ...args], { env: GIT_ENV });
+    upstream("tag", "-a", "-m", "v1", "v1", repo.first);
+    e.writeCfg("user", { sources: { g: { git: repo.url, ref: "v1" } }, install: { skills: ["foo@g"] }, checkInterval: 0 });
+    const foo = () => readFileSync(e.userFile("skills/foo/SKILL.md"), "utf8");
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    assert.match(foo(), /FIRST/);
+
+    const second = repo.push({ "skills/foo/SKILL.md": SKILL("foo", "SECOND") }); // main moves on, v1 stays
+    rmSync(e.ctx.cacheRoot!, { recursive: true });
+    assert.deepEqual(await e.session(), {});
+    assert.equal(e.cacheEmpty(), true, "the second session fetched nothing");
+
+    upstream("tag", "-f", "-a", "-m", "v1 moved", "v1", second);
+    assert.equal((await e.session()).systemMessage, "skilletor: 1 item(s) updated");
+    assert.match(foo(), /SECOND/);
+    assert.deepEqual(await e.session(), {});
+  } finally {
+    e.tmp.cleanup();
+  }
+});
