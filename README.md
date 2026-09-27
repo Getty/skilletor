@@ -667,7 +667,10 @@ also its git remote; the first check after upgrading counts once). What the last
 not install although its source was there (an item the source lacks, a conflict) does not
 count again until a sync runs anyway – also when nothing of that source got installed.
 `--project-dir` goes with every command; any other option a command does not list is an
-error (exit 2, nothing runs). `-h`/`--help` anywhere prints the usage and runs nothing
+error (exit 2, nothing runs). A config error (no harness detected, say) stops `sync` with
+exit 2, nothing changed; `add`, `install`, `uninstall` and `source remove` exit 2 too when
+the sync they run after their edit hits one — the edit itself is saved and stays, and the
+message names the config file. `-h`/`--help` anywhere prints the usage and runs nothing
 (`sync --help` does not sync); `-v`/`--version` only as the first argument.
 
 Every command that fetches sources — `sync`, `available`, `install`, and the sync that

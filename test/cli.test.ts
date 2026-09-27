@@ -780,3 +780,54 @@ test("k101: add of a taken name: same address kept (exit 0), another address ref
   assert.ok(other.stderr.includes("skilletor source remove tools"), other.stderr);
   assert.deepEqual(readFileSync(cfg), written, "another address: config byte-identical");
 });
+
+// k103: the sync that add, install, uninstall and source remove run after their edit stops at
+// a config error (here: no harness on the machine). Asserts, per command: exit 2 as `sync`;
+// the error on stderr, not stdout; stderr says the edit was saved and names the config file,
+// never "nothing changed"; the file keeps the edit (no rollback). An `add` that keeps an
+// existing entry writes nothing: exit 2 with sync's own message, config byte-identical.
+test("k103: a config error in the sync after add, install, uninstall, source remove: exit 2, edit kept and named", () => {
+  const src = join(tmp.dir, "k103-src");
+  mkdirSync(join(src, "skills", "foo"), { recursive: true });
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), "---\nname: foo\ndescription: foo\n---\nFOO\n");
+  const shared = { shared: { local: src } };
+  const cases: { label: string; config: object; args: string[]; trust?: true; saved: boolean; after: (cfg: any) => void }[] = [
+    { label: "add", config: {}, args: ["add", "shared", src], saved: true,
+      after: (cfg) => assert.deepEqual(cfg.sources, shared) },
+    { label: "add (kept)", config: { sources: shared }, args: ["add", "shared", src], saved: false,
+      after: (cfg) => assert.deepEqual(cfg, { sources: shared }) },
+    { label: "install", config: { sources: shared }, args: ["install", "foo@shared"], trust: true, saved: true,
+      after: (cfg) => assert.deepEqual(cfg.install, { skills: ["foo@shared"] }) },
+    { label: "uninstall", config: { sources: shared, install: { skills: ["foo@shared"] } }, args: ["uninstall", "foo@shared"],
+      saved: true, after: (cfg) => assert.deepEqual(cfg, { sources: shared }) },
+    { label: "source remove", config: { sources: shared }, args: ["source", "remove", "shared"], saved: true,
+      after: (cfg) => assert.equal(cfg.sources, undefined) },
+  ];
+  for (const [i, c] of cases.entries()) {
+    const home = join(tmp.dir, `k103-home-${i}`);
+    const proj = join(tmp.dir, `k103-proj-${i}`);
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    mkdirSync(proj, { recursive: true });
+    const cfg = join(home, ".claude", "skilletor.json");
+    writeFileSync(cfg, JSON.stringify(c.config, null, 2) + "\n");
+    // No harness marker in this HOME: every sync stops at a config error.
+    const env = { ...process.env, HOME: home, CODEX_HOME: join(home, ".no-codex") };
+    const common = ["--project-dir", proj];
+    if (c.trust) assert.equal(runCli(["trust", "shared", ...common], env).status, 0, `${c.label}: trust`);
+    const before = readFileSync(cfg);
+
+    const r = runCli([...c.args, ...common], env);
+    assert.equal(r.status, 2, `${c.label}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /^skilletor: config error, .*no agent harness detected/m, `${c.label}: ${r.stderr}`);
+    assert.doesNotMatch(r.stdout, /config error/, `${c.label}: ${r.stdout}`);
+    if (c.saved) {
+      assert.ok(r.stderr.includes(`the config edit itself was saved in ${cfg}`), `${c.label}: ${r.stderr}`);
+      assert.doesNotMatch(r.stderr, /nothing changed/, `${c.label}: ${r.stderr}`);
+    } else {
+      assert.match(r.stderr, /^skilletor: config error, nothing changed — /m, `${c.label}: ${r.stderr}`);
+      assert.doesNotMatch(r.stderr, /saved/, `${c.label}: ${r.stderr}`);
+      assert.deepEqual(readFileSync(cfg), before, `${c.label}: config byte-identical`);
+    }
+    c.after(JSON.parse(readFileSync(cfg, "utf8")));
+  }
+});

@@ -673,6 +673,15 @@ skilletor hook <event>                    # for hooks.json only
 `add`/`install`/`uninstall` edit only the config (default: the user config) and then run
 `sync`. The declarative config stays the single source of truth.
 
+`sync` exits 2 on a config error (§6.6: nothing touched; no harness detected, say, or a
+source the config refuses). `add`, `install`, `uninstall` and `source remove` exit 2 as
+well when the sync they run after their edit stops at one (k103). Their edit is saved and
+not rolled back – the config stays what the user asked for, and the next `sync` after the
+fix applies it – so the error on stderr says plainly that the config edit itself was saved
+and names the file, instead of `sync`'s "nothing changed". An `add` that keeps an existing
+entry writes nothing and reports the error as `sync` does. Exit 1 stays a command error
+before the edit (nothing changed); exit 2 a usage error or a config error.
+
 The project root is `--project-dir`, else the git top level of the current directory, else
 the current directory – the resolution the hooks use without `CLAUDE_PROJECT_DIR` (§14.5),
 so the CLI run from a subdirectory sees the same project as the session. A root that is

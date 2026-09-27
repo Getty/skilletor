@@ -47,7 +47,8 @@ function projectRoot(ctx: CommandContext): string {
   );
 }
 
-function configPath(ctx: CommandContext, project: boolean): string {
+/** The config file an edit command writes: the user config, or the project config with --project. */
+export function configPath(ctx: CommandContext, project: boolean): string {
   const root = project ? projectRoot(ctx) : ctx.home;
   return join(root, ".claude", "skilletor.json");
 }

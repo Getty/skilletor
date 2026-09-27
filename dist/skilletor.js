@@ -10924,6 +10924,17 @@ function syncText(r) {
 ${text}`;
   return text || "skilletor: up to date";
 }
+function syncFailed(r, opts = {}) {
+  if (opts.saved === void 0) {
+    printText(process.stderr, opts.json ? reportJson(r) : reportText(r));
+  } else {
+    printLines(process.stderr, [
+      `skilletor: config error, nothing synced \u2014 ${r.error}`,
+      `skilletor: the config edit itself was saved in ${opts.saved} (not rolled back); fix the error, then run skilletor sync`
+    ]);
+  }
+  return 2;
+}
 async function run(argv) {
   if (argv[0] === "--version" || argv[0] === "-v") {
     process.stdout.write(VERSION + "\n");
@@ -10954,10 +10965,7 @@ async function run(argv) {
     switch (cmd) {
       case "sync": {
         const r = await sync(ctx, { scope: flags.scope, force: flags.force });
-        if (r.error) {
-          printText(process.stderr, flags.json ? reportJson(r) : reportText(r));
-          return 2;
-        }
+        if (r.error) return syncFailed(r, { json: flags.json });
         printText(process.stdout, flags.json ? reportJson(r) : syncText(r));
         return 0;
       }
@@ -10985,6 +10993,7 @@ async function run(argv) {
         const r = await cmdAdd(ctx, { name, spec, project: flags.project });
         const def = JSON.stringify(r.def);
         printLines(process.stdout, [r.kept ? `source ${r.name} already added (${def}), kept as is` : `added source ${r.name} (${def})`]);
+        if (r.report.error) return syncFailed(r.report, { saved: r.kept ? void 0 : configPath(ctx, flags.project) });
         printText(process.stdout, syncText(r.report));
         return 0;
       }
@@ -11003,6 +11012,7 @@ async function run(argv) {
             return 2;
           }
           const r = await cmdSourceRemove(ctx, { name, project: flags.project, force: flags.force });
+          if (r.error) return syncFailed(r, { saved: configPath(ctx, flags.project) });
           printText(process.stdout, reportText(r) || displaySafe(`removed source ${name}`));
           return 0;
         }
@@ -11029,6 +11039,7 @@ async function run(argv) {
           return 2;
         }
         const r = await cmdInstall({ ...ctx, prompt: ttyPrompter() }, { items: flags.rest, project: flags.project });
+        if (r.error) return syncFailed(r, { saved: configPath(ctx, flags.project) });
         printText(process.stdout, syncText(r));
         return 0;
       }
@@ -11039,6 +11050,7 @@ async function run(argv) {
         }
         const r = await cmdUninstall(ctx, { items: flags.rest, project: flags.project });
         for (const h of r.hints) printLines(process.stderr, [`skilletor: warning: ${h}`]);
+        if (r.report.error) return syncFailed(r.report, { saved: configPath(ctx, flags.project) });
         printText(process.stdout, syncText(r.report));
         return 0;
       }

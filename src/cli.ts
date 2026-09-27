@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { sync, check, status, type EngineContext } from "./engine.ts";
 import { backendLabel, displaySafe, reportJson, reportText, type SyncReport } from "./report.ts";
 import {
-  cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall, type Prompter,
+  cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall, configPath, type Prompter,
 } from "./commands.ts";
 import { projectRootOf, runHook, type HookContext, type HookInput } from "./hooks.ts";
 
@@ -181,6 +181,22 @@ function syncText(r: SyncReport): string {
   return text || "skilletor: up to date";
 }
 
+/** A sync that stopped at a config error (spec §7): its report on stderr, exit 2. The one
+ *  exit for `sync` and for the sync `add`, `install`, `uninstall` and `source remove` run after
+ *  their edit; `saved` is the config file that edit wrote – it stays, and the message says so
+ *  instead of "nothing changed" (k103). */
+function syncFailed(r: SyncReport, opts: { json?: boolean; saved?: string } = {}): number {
+  if (opts.saved === undefined) {
+    printText(process.stderr, opts.json ? reportJson(r) : reportText(r));
+  } else {
+    printLines(process.stderr, [
+      `skilletor: config error, nothing synced — ${r.error}`,
+      `skilletor: the config edit itself was saved in ${opts.saved} (not rolled back); fix the error, then run skilletor sync`,
+    ]);
+  }
+  return 2;
+}
+
 export async function run(argv: string[]): Promise<number> {
   // Argument hygiene (spec §7): --version only first, --help anywhere and alone.
   if (argv[0] === "--version" || argv[0] === "-v") {
@@ -215,10 +231,7 @@ export async function run(argv: string[]): Promise<number> {
     switch (cmd) {
       case "sync": {
         const r = await sync(ctx, { scope: flags.scope, force: flags.force });
-        if (r.error) {
-          printText(process.stderr, flags.json ? reportJson(r) : reportText(r));
-          return 2;
-        }
+        if (r.error) return syncFailed(r, { json: flags.json });
         printText(process.stdout, flags.json ? reportJson(r) : syncText(r));
         return 0;
       }
@@ -246,6 +259,8 @@ export async function run(argv: string[]): Promise<number> {
         const r = await cmdAdd(ctx, { name, spec, project: flags.project });
         const def = JSON.stringify(r.def);
         printLines(process.stdout, [r.kept ? `source ${r.name} already added (${def}), kept as is` : `added source ${r.name} (${def})`]);
+        // A kept entry wrote nothing to the config: sync's own message holds.
+        if (r.report.error) return syncFailed(r.report, { saved: r.kept ? undefined : configPath(ctx, flags.project) });
         printText(process.stdout, syncText(r.report));
         return 0;
       }
@@ -264,6 +279,7 @@ export async function run(argv: string[]): Promise<number> {
             return 2;
           }
           const r = await cmdSourceRemove(ctx, { name, project: flags.project, force: flags.force });
+          if (r.error) return syncFailed(r, { saved: configPath(ctx, flags.project) });
           printText(process.stdout, reportText(r) || displaySafe(`removed source ${name}`));
           return 0;
         }
@@ -292,6 +308,7 @@ export async function run(argv: string[]): Promise<number> {
           return 2;
         }
         const r = await cmdInstall({ ...ctx, prompt: ttyPrompter() }, { items: flags.rest, project: flags.project });
+        if (r.error) return syncFailed(r, { saved: configPath(ctx, flags.project) });
         printText(process.stdout, syncText(r));
         return 0;
       }
@@ -302,6 +319,7 @@ export async function run(argv: string[]): Promise<number> {
         }
         const r = await cmdUninstall(ctx, { items: flags.rest, project: flags.project });
         for (const h of r.hints) printLines(process.stderr, [`skilletor: warning: ${h}`]);
+        if (r.report.error) return syncFailed(r.report, { saved: configPath(ctx, flags.project) });
         printText(process.stdout, syncText(r.report));
         return 0;
       }
