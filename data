@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-27T01:20:58Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T01:20:52Z
+created: 2026-09-26T22:24:36Z
+id: 100
+priority: low
+started: 2026-09-27T00:29:08Z
+status: done
+tags:
+- catalog
+- bug
+title: 'catalog: agents/x.md and agents/x.md.njk give two items named x'
+updated: 2026-09-27T01:20:58Z
+---
+
+Found during k96 (worker). In the published layout, an agents/ or rules/ dir holding both x.md and x.md.njk yields two catalog items named x (skills cannot: one dir per name). The .claude/ scan dedupes (sorted, x.md wins). Expected: one item, or a clear catalog error naming both files – decide which, consistent with bundles (both .yaml and .yml is an error of that bundle).
+
+2026-09-27 00:28 Decision (maintainer, 2026-09-27): catalog error naming both files, consistent with bundles (.yaml + .yml). The .claude/ scan keeps its dedupe.
+
+2026-09-27 01:13 Scope decision: the error belongs to that one item (type + name), never to the scan – mirroring the bundle clash (scanBundles keeps the bundle in cat.bundles with error instead of def; spec §15.4 'affect only the bundle concerned'). Shape: the item stays in cat.items once, with files = both paths and error = 'both agents/x.md and agents/x.md.njk exist' (same wording as the bundle's). Consequences: scan never throws for it; every other item (incl. a same-named item of another type) is unaffected; a .claude/ item of that name is still skipped (the published layout found the name first); sync (explicit, wildcard, bundle) warns naming both files and keeps an installed copy, like a template error / unresolvable item; install fails before editing, like checkBundle; available lists it once with its error (text: an 'error:' line, --json: an error field, as bundles). The .claude/ scan dedupe is unchanged.
+
+2026-09-27 01:17 Progress: 4 regression tests written first, all red for the stated reason (scan gave two agent:x/rule:y items; sync silently installed agents/n from x.md; install said '"x" is ambiguous in mine; use one of: agent:x@mine, agent:x@mine'; available printed x twice). Fix in catalog.ts (per-name grouping for agents/rules, error item), engine.ts buildItem (warn + keepIfLocked), commands.ts (install throws, available carries error), cli.ts (error: line). All 4 green in isolation; typecheck green. Full npm test waiting on loadguard (memory pressure).
+
+2026-09-27 01:19 Done. Scope: error of that one item (type+name), never of the scan, mirroring the bundle .yaml/.yml clash (§15.4) – see the decision note above. Changed: src/catalog.ts (agents/rules grouped per name; a pair yields one item with files=both, no description, error='both agents/x.md and agents/x.md.njk exist'; .claude/ dedupe untouched, and a .claude/ item of that name is still skipped), src/engine.ts (buildItem: warning '<type> <name>@<source>: <error>; an installed copy stays' + keepIfLocked – explicit, wildcard and bundle entries alike), src/commands.ts (install throws CommandError '<source>: <type> <name>: <error>' before any edit, like checkBundle; available sets AvailableItem.error), src/cli.ts (available prints an 'error:' line under the item, as for bundles), dist/skilletor.js rebuilt, spec §4.1 (new paragraph) and §6.6 (error behavior). Regression tests: test/catalog.test.ts, test/engine.test.ts, test/commands.test.ts, test/cli.test.ts (all 'k100: …'), each red before the fix. Verified: typecheck exit 0; npm test 728 tests, 728 pass, 0 fail, 0 skipped; build exit 0; check-dist 'dist/skilletor.js is up to date'. Hand run of bin/skilletor with temp HOME/CODEX_HOME: available shows the error line, install exits 1, sync exits 0 installing the other agent with the warning. Proposed subject: 'catalog: x.md beside x.md.njk is an error of that agent or rule (k100)'.
+
+2026-09-27 01:19 Also found (for this board, not fixed): inside a skill, SKILL.md beside SKILL.md.njk (or any companion f beside f.njk) both map to one install path; render.build's Map.set lets the later .njk silently win, while catalog.skillFile takes SKILL.md for the description and rendersEmpty returns false because the plain file exists. Reproduced: scan gives description 'plain', build writes the template's text to skills/x/SKILL.md, no warning. Same class as k100, one level down. Also: README.md's layout (lists agents/<name>.md[.njk]) and skills/skilletor/SKILL.md do not state the 'not both' rule, while README does for bundles ('or .yml — not both'); README is plain docs, SKILL.md is skill-author lane, so left untouched.
+
+2026-09-27 01:20 Committed 5050ec876aa9fb0c7ee37f8b8457669865602424: catalog: x.md beside x.md.njk is an error of that agent or rule (k100).
