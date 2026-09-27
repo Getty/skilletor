@@ -8,6 +8,8 @@ export interface TarInput {
   typeflag?: string;
   data?: string;
   linkname?: string;
+  /** Permission bits in the header; default 0o644. */
+  mode?: number;
 }
 
 function octal(n: number, len: number): string {
@@ -17,7 +19,7 @@ function octal(n: number, len: number): string {
 function header(entry: TarInput, size: number): Buffer {
   const h = Buffer.alloc(512);
   h.write(entry.name, 0, 100, "utf8");
-  h.write("0000644\0", 100, "ascii"); // mode
+  h.write(octal(entry.mode ?? 0o644, 8), 100, "ascii"); // mode
   h.write("0000000\0", 108, "ascii"); // uid
   h.write("0000000\0", 116, "ascii"); // gid
   h.write(octal(size, 12), 124, "ascii"); // size

@@ -5746,7 +5746,7 @@ import { join as join16 } from "node:path";
 // src/engine.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname as hostname2, platform, userInfo } from "node:os";
-import { existsSync as existsSync11, readFileSync as readFileSync11, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync4 } from "node:fs";
+import { existsSync as existsSync11, readFileSync as readFileSync11, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync5 } from "node:fs";
 import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative4, resolve as resolvePath5, sep as sep4 } from "node:path";
 
 // src/config.ts
@@ -5760,12 +5760,15 @@ import { basename, dirname, join, resolve } from "node:path";
 function hashBuffer(buf) {
   return "sha256:" + createHash("sha256").update(buf).digest("hex");
 }
-function atomicWrite(path, data) {
+function isExecutable(mode) {
+  return (mode & 64) !== 0;
+}
+function atomicWrite(path, data, executable = false) {
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true });
   const tmp = join(dir, `.skilletor-tmp-${process.pid}-${Math.random().toString(36).slice(2)}`);
   try {
-    writeFileSync(tmp, data);
+    writeFileSync(tmp, data, { mode: executable ? 511 : 438 });
     renameSync(tmp, path);
   } catch (err) {
     rmSync(tmp, { force: true });
@@ -7776,6 +7779,7 @@ function parseTar(buf) {
     const block = buf.subarray(offset, offset + 512);
     if (block.every((b) => b === 0)) break;
     const rawName = readString(block, 0, 100);
+    const mode = readOctal(block, 100, 8);
     const prefix = readString(block, 345, 155);
     const size = readOctal(block, 124, 12);
     const typeflag = String.fromCharCode(block[156] ?? 0);
@@ -7799,9 +7803,9 @@ function parseTar(buf) {
     if (typeflag !== "0" && typeflag !== "\0" && typeflag !== "5") continue;
     assertSafe(name);
     if (typeflag === "5" || name.endsWith("/")) {
-      entries.push({ name: name.replace(/\/+$/, ""), type: "dir", data: Buffer.alloc(0) });
+      entries.push({ name: name.replace(/\/+$/, ""), type: "dir", data: Buffer.alloc(0), executable: false });
     } else {
-      entries.push({ name, type: "file", data });
+      entries.push({ name, type: "file", data, executable: isExecutable(mode) });
     }
   }
   return entries;
@@ -7922,7 +7926,7 @@ function writeEntries(dir, entries) {
       mkdirSync3(dest, { recursive: true });
     } else {
       mkdirSync3(dirname2(dest), { recursive: true });
-      writeFileSync2(dest, e.data);
+      writeFileSync2(dest, e.data, { mode: e.executable ? 511 : 438 });
     }
   }
 }
@@ -8298,7 +8302,7 @@ function readSourceMeta(dir) {
 
 // src/render.ts
 var import_nunjucks = __toESM(require_nunjucks(), 1);
-import { readFileSync as readFileSync6 } from "node:fs";
+import { readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
 import { join as join10, relative as relative2, resolve as resolvePath3, sep as sep2 } from "node:path";
 var RenderError = class extends Error {
   name = "RenderError";
@@ -8344,6 +8348,14 @@ function build(item, sourceDir, context) {
     } else {
       out.set(installPath(item, file), readFileSync6(join10(sourceDir, file)));
     }
+  }
+  return out;
+}
+function executables(item, sourceDir) {
+  const out = /* @__PURE__ */ new Set();
+  for (const file of item.files) {
+    if (!isExecutable(statSync3(join10(sourceDir, file)).mode)) continue;
+    out.add(installPath(item, file.endsWith(".njk") ? file.slice(0, -".njk".length) : file));
   }
   return out;
 }
@@ -8512,21 +8524,22 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
     for (const [rel, buf] of it.output) {
       const abs = safeJoin(root, rel);
       const desired = hashBuffer(buf);
+      const executable = it.executable?.has(rel) ?? false;
       const locked = existing?.files[rel];
       const st = lstatOrUndefined(abs);
       if (st?.isFile()) {
         const diskHash = hashBuffer(readFileSync8(abs));
-        if (diskHash === desired) {
+        if (diskHash === desired && isExecutable(st.mode) === executable) {
           entryFiles[rel] = desired;
           if (locked === void 0) land(rel, desired);
           continue;
         }
-        atomicWrite(abs, buf);
-        if (locked !== void 0 && diskHash !== locked) {
+        atomicWrite(abs, buf, executable);
+        if (locked !== void 0 && diskHash !== desired && diskHash !== locked) {
           res.overwritten.push({ key: it.key, path: rel });
         }
       } else {
-        atomicWrite(abs, buf);
+        atomicWrite(abs, buf, executable);
         if (st && locked !== void 0) res.overwritten.push({ key: it.key, path: rel });
       }
       wrote = true;
@@ -8680,7 +8693,7 @@ import {
   renameSync as renameSync3,
   rmdirSync as rmdirSync2,
   rmSync as rmSync7,
-  statSync as statSync3,
+  statSync as statSync4,
   utimesSync,
   writeFileSync as writeFileSync3
 } from "node:fs";
@@ -8956,11 +8969,11 @@ function acquire(lockDir, ownerFile, token, refreshMs, afterMkdir) {
 function judge(lockDir, ownerFile, staleMs, graceMs) {
   let owner;
   try {
-    owner = statSync3(ownerFile);
+    owner = statSync4(ownerFile);
   } catch {
     let dir;
     try {
-      dir = statSync3(lockDir);
+      dir = statSync4(lockDir);
     } catch {
       return void 0;
     }
@@ -9234,7 +9247,7 @@ function loadWithTargets(ctx) {
 function localDir(path, home) {
   const abs = resolvePath5(expandHome(path, home));
   try {
-    if (statSync4(abs).isDirectory()) return { path: realpathSync2(abs), exists: true };
+    if (statSync5(abs).isDirectory()) return { path: realpathSync2(abs), exists: true };
   } catch {
   }
   return { path: abs, exists: false };
@@ -9512,12 +9525,14 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
       const key = lockKey(h, item.target);
       const root = rootOf(rc, h, item.type);
       let output;
+      let executable;
       try {
         output = build(
           catItem,
           r.dir,
           makeContext(ctx, inputsOf(), scope, h, root, item, cat.meta.vars ?? {}, extra.bundleVars)
         );
+        executable = item.type === "skill" ? executables(catItem, r.dir) : /* @__PURE__ */ new Set();
       } catch (err) {
         const where = harnesses.length > 1 ? ` (${h})` : "";
         rep.warnings.push(`template error in ${item.type} ${item.name}${where}: ${err.message}`);
@@ -9546,7 +9561,11 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
         const placed = placeOutput(h, item.type, planItem.output);
         planItem.output = placed.output;
         if (placed.claims.length) planItem.claims = placed.claims;
-        if (item.type === "skill" && gitignoreOn) planItem.output = withSkillGitignore(planItem.output, item.name);
+        if (item.type === "skill" && gitignoreOn) {
+          planItem.output = withSkillGitignore(planItem.output, item.name);
+          executable.delete(skillGitignorePath(item.name));
+        }
+        if (executable.size > 0) planItem.executable = executable;
       }
       plan.push(planItem);
     }

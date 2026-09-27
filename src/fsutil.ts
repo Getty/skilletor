@@ -8,13 +8,20 @@ export function hashBuffer(buf: Buffer): string {
   return "sha256:" + createHash("sha256").update(buf).digest("hex");
 }
 
-/** Write atomically: temp file in the same directory, then rename. */
-export function atomicWrite(path: string, data: string | Buffer): void {
+/** The owner's executable bit of a file mode: the one bit of a mode skilletor carries from a
+ *  source to its install, as git records no other (k99). */
+export function isExecutable(mode: number): boolean {
+  return (mode & 0o100) !== 0;
+}
+
+/** Write atomically: temp file in the same directory, then rename. An `executable` file is
+ *  created with mode 0777 instead of 0666, both less the umask. */
+export function atomicWrite(path: string, data: string | Buffer, executable = false): void {
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true });
   const tmp = join(dir, `.skilletor-tmp-${process.pid}-${Math.random().toString(36).slice(2)}`);
   try {
-    writeFileSync(tmp, data);
+    writeFileSync(tmp, data, { mode: executable ? 0o777 : 0o666 });
     renameSync(tmp, path);
   } catch (err) {
     rmSync(tmp, { force: true });

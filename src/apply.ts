@@ -1,7 +1,7 @@
 // Apply a build plan to disk (spec §6.1–6.3).
 //
-// Compares each item's built output against disk and the lock, writes only
-// differences (atomically), removes files an item no longer contains, and
+// Compares each item's built output – bytes and executable bit – against disk and the lock,
+// writes only differences (atomically), removes files an item no longer contains, and
 // deletes items no longer declared. Every path of an item is checked before its
 // first write: a foreign path (present but not in the lock) or a symbolic link at
 // or below the item's own path blocks the whole item – nothing of it is written or
@@ -15,7 +15,7 @@
 import { existsSync, lstatSync, readFileSync, readdirSync, rmdirSync, rmSync, type Stats } from "node:fs";
 import { dirname, join, relative, resolve as resolvePath, sep } from "node:path";
 import type { ItemType } from "./config.ts";
-import { atomicWrite, hashBuffer } from "./fsutil.ts";
+import { atomicWrite, hashBuffer, isExecutable } from "./fsutil.ts";
 import { readLock, serializeLock, writeLock, type Lock, type LockEntry, type SkipReason } from "./lock.ts";
 
 export interface PlanItem {
@@ -28,6 +28,10 @@ export interface PlanItem {
   version: string;
   /** Install-relative path -> bytes. */
   output: Map<string, Buffer>;
+  /** Paths of `output` written executable (k99); every other file is written without the
+   *  bit. The lock hashes bytes only (spec §6.2): a file whose bytes match but whose bit
+   *  does not is rewritten, never reported as overwritten. */
+  executable?: ReadonlySet<string>;
   /** Not applicable in this scope: write nothing, remove an installed copy,
    *  keep a file-less lock entry carrying the reason. `output` is ignored. */
   skipped?: SkipReason;
@@ -208,25 +212,26 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
     for (const [rel, buf] of it.output) {
       const abs = safeJoin(root, rel);
       const desired = hashBuffer(buf);
+      const executable = it.executable?.has(rel) ?? false;
       const locked = existing?.files[rel];
       const st = lstatOrUndefined(abs);
 
       if (st?.isFile()) {
         const diskHash = hashBuffer(readFileSync(abs));
-        if (diskHash === desired) {
+        if (diskHash === desired && isExecutable(st.mode) === executable) {
           // Already correct; adopt into the lock (updates a stale hash silently).
           entryFiles[rel] = desired;
           if (locked === undefined) land(rel, desired); // adopted (force)
           continue;
         }
-        atomicWrite(abs, buf);
-        if (locked !== undefined && diskHash !== locked) {
-          res.overwritten.push({ key: it.key, path: rel }); // local drift
+        atomicWrite(abs, buf, executable);
+        if (locked !== undefined && diskHash !== desired && diskHash !== locked) {
+          res.overwritten.push({ key: it.key, path: rel }); // local drift; the bit alone is none
         }
       } else {
         // Missing, or a link the lock owns (or `force` adopts): the rename replaces the
         // link itself, its target stays untouched.
-        atomicWrite(abs, buf);
+        atomicWrite(abs, buf, executable);
         if (st && locked !== undefined) res.overwritten.push({ key: it.key, path: rel });
       }
       wrote = true;

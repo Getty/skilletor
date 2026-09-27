@@ -308,6 +308,14 @@ repository at its directory, never on one an exported `GIT_DIR` names (a git hoo
 - **Opt-in by extension:** `X.njk` is rendered by Nunjucks and installed as `X`.
   Everything else is copied byte for byte (skills with their own `{{ }}`/`{% %}` stay
   intact).
+- **Executable bit** (k99): a skill's file installs executable when its source file is –
+  `run.sh` and `run.sh.njk` alike – so a skill can tell the model to run `scripts/x.sh`.
+  Only the owner's bit counts, the one git records (for a `url` source the archive entry's
+  mode, for a `local` one the file's); the file is created `0777` or `0666` less the umask,
+  so its other bits are the user's, not the source's. An agent or rule is one Markdown file
+  its harness reads, never runs: it installs without the bit, as does every file skilletor
+  generates (a Codex agent's TOML, the rules file, a skill's `.gitignore`). How a sync and
+  `check` treat the bit: §6.2.
 - Autoescape off (Markdown). Undefined variables are an error (`throwOnUndefined`), so
   typos do not silently produce empty skills.
 - Includes/imports/macros resolve relative to the root of their source and may not
@@ -390,6 +398,19 @@ reporting it as a conflict; `check` counts a partial entry as drift (§14.3), so
 session retries, and `status` marks the item `(partial: the last sync stopped midway)`
 (`partial` in `--json`). The first complete apply of the item drops the marker and reports
 it as updated. A run that fails before its first write leaves the lock untouched.
+
+**The executable bit (§5) is no lock state** (k99): a file's hash is of its bytes only, and
+`check` counts no mode. A sync compares the bit like the bytes (render-and-compare, §6.1):
+a file whose bytes match but whose bit does not is rewritten and its item reported as
+updated – never as an overwritten local edit, since no bytes of the user's are lost. A mode
+change in a source moves its version (a commit, a new archive; a `local` source is always
+re-rendered), so the source test of §14.3 sees it; a `chmod` of an installed file is like
+a local edit, which `check` does not see either – it never reads installed files – and the
+next sync that runs undoes it. A hash over bytes and mode would have made every file an
+earlier version installed read as locally edited in the first sync. A script an earlier
+version installed without its bit gets it from the next sync that runs (a source moving, or
+`skilletor sync`); a `url` cache an earlier version extracted holds no bits until its
+archive changes.
 
 ### 6.3 Ownership and coexistence with your own files
 

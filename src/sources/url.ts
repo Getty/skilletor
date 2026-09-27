@@ -13,9 +13,10 @@
 //
 // Unpacking is dependency-free: zlib gunzip + a minimal tar reader (no external
 // tar). Entries with `..`, absolute paths, symlinks or hardlinks are rejected; a
-// single GitHub-style top-level directory is stripped. Offline with a cache
-// reuses it and warns; without a cache it errors. Production is https-only;
-// `allowHttp` (tests only) permits http://127.0.0.1.
+// single GitHub-style top-level directory is stripped; of an entry's mode only the
+// owner's executable bit is kept (k99). Offline with a cache reuses it and warns;
+// without a cache it errors. Production is https-only; `allowHttp` (tests only)
+// permits http://127.0.0.1.
 //
 // An update is extracted into `<hash>.stage-*` and swapped in through `<hash>.backup-*`;
 // what a run that died leaves of these, `sweepUrlCache` clears – the engine calls it only
@@ -24,6 +25,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve as resolvePath, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
+import { isExecutable } from "../fsutil.ts";
 import type { Source, SourceLocation } from "./types.ts";
 
 export interface UrlSourceOptions {
@@ -120,6 +122,8 @@ interface TarEntry {
   name: string;
   type: "file" | "dir";
   data: Buffer;
+  /** A file whose mode has the owner's executable bit. */
+  executable: boolean;
 }
 
 function readString(block: Buffer, offset: number, length: number): string {
@@ -145,6 +149,7 @@ function parseTar(buf: Buffer): TarEntry[] {
     if (block.every((b) => b === 0)) break; // end of archive
 
     const rawName = readString(block, 0, 100);
+    const mode = readOctal(block, 100, 8);
     const prefix = readString(block, 345, 155);
     const size = readOctal(block, 124, 12);
     const typeflag = String.fromCharCode(block[156] ?? 0);
@@ -172,9 +177,9 @@ function parseTar(buf: Buffer): TarEntry[] {
 
     assertSafe(name);
     if (typeflag === "5" || name.endsWith("/")) {
-      entries.push({ name: name.replace(/\/+$/, ""), type: "dir", data: Buffer.alloc(0) });
+      entries.push({ name: name.replace(/\/+$/, ""), type: "dir", data: Buffer.alloc(0), executable: false });
     } else {
-      entries.push({ name, type: "file", data });
+      entries.push({ name, type: "file", data, executable: isExecutable(mode) });
     }
   }
   return entries;
@@ -330,7 +335,7 @@ function writeEntries(dir: string, entries: TarEntry[]): void {
       mkdirSync(dest, { recursive: true });
     } else {
       mkdirSync(dirname(dest), { recursive: true });
-      writeFileSync(dest, e.data);
+      writeFileSync(dest, e.data, { mode: e.executable ? 0o777 : 0o666 });
     }
   }
 }

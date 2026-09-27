@@ -30,7 +30,7 @@ import { GitSource, sweepGitCache } from "./sources/git.ts";
 import { sweepUrlCache, UrlSource } from "./sources/url.ts";
 import type { Source, SourceLocation } from "./sources/types.ts";
 import { scan, type Catalog } from "./catalog.ts";
-import { build, rendersEmpty, type RenderContext } from "./render.ts";
+import { build, executables, rendersEmpty, type RenderContext } from "./render.ts";
 import { apply, isValidItemName, type PlanItem } from "./apply.ts";
 import { readLock, writeLock, type Lock, type LockEntry, type SkipReason } from "./lock.ts";
 import { State, type SourceRead } from "./state.ts";
@@ -590,10 +590,14 @@ async function syncScopeRun(
       const key = lockKey(h, item.target);
       const root = rootOf(rc, h, item.type)!;
       let output: Map<string, Buffer>;
+      let executable: Set<string>;
       try {
         output = build(
           catItem, r.dir, makeContext(ctx, inputsOf(), scope, h, root, item, cat.meta.vars ?? {}, extra.bundleVars),
         );
+        // A skill's scripts keep their source's executable bit (k99); an agent or rule is one
+        // Markdown file its harness reads, never runs.
+        executable = item.type === "skill" ? executables(catItem, r.dir) : new Set();
       } catch (err) {
         const where = harnesses.length > 1 ? ` (${h})` : "";
         rep.warnings.push(`template error in ${item.type} ${item.name}${where}: ${(err as Error).message}`);
@@ -628,7 +632,11 @@ async function syncScopeRun(
         planItem.output = placed.output;
         if (placed.claims.length) planItem.claims = placed.claims;
         // A conflict blocks the whole item: this file never lands in a foreign skill dir.
-        if (item.type === "skill" && gitignoreOn) planItem.output = withSkillGitignore(planItem.output, item.name);
+        if (item.type === "skill" && gitignoreOn) {
+          planItem.output = withSkillGitignore(planItem.output, item.name);
+          executable.delete(skillGitignorePath(item.name)); // skilletor's own, not the source's
+        }
+        if (executable.size > 0) planItem.executable = executable;
       }
       plan.push(planItem);
     }

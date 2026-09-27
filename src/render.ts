@@ -2,18 +2,20 @@
 //
 // `X.njk` is rendered by Nunjucks and emitted as `X`; every other file is
 // copied byte for byte, so skills that use `{{ }}`/`{% %}` themselves stay
-// intact. The Nunjucks environment has autoescape off (Markdown) and
-// throwOnUndefined on (a typo must not silently produce an empty skill).
+// intact; `executables` names the files whose source is executable (k99). The
+// Nunjucks environment has autoescape off (Markdown) and throwOnUndefined on (a
+// typo must not silently produce an empty skill).
 // Includes/imports/macros resolve against the source root via a custom loader
 // that rejects any path leaving it. `render` knows nothing of the target
 // filesystem — it returns install paths (with `.njk` stripped): a skill's files land
 // under `skills/<name>/`, an agent's or rule's file under `agents/` or `rules/`,
 // wherever the item sits in the source (spec §4.1).
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join, relative, resolve as resolvePath, sep } from "node:path";
 import nunjucks from "nunjucks";
 import type { Harness, ItemType } from "./config.ts";
 import type { CatalogItem } from "./catalog.ts";
+import { isExecutable } from "./fsutil.ts";
 
 export class RenderError extends Error {
   override name = "RenderError";
@@ -84,6 +86,17 @@ export function build(
     }
   }
 
+  return out;
+}
+
+/** The install paths, as `build` names them, of the item's files whose source file is
+ *  executable (k99): a template passes its bit to what it renders. */
+export function executables(item: CatalogItem, sourceDir: string): Set<string> {
+  const out = new Set<string>();
+  for (const file of item.files) {
+    if (!isExecutable(statSync(join(sourceDir, file)).mode)) continue;
+    out.add(installPath(item, file.endsWith(".njk") ? file.slice(0, -".njk".length) : file));
+  }
   return out;
 }
 
