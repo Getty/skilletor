@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-27T04:52:17Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T04:52:09Z
+created: 2026-09-27T01:19:53Z
+id: 113
+priority: low
+started: 2026-09-27T03:02:27Z
+status: done
+tags:
+- catalog
+- bug
+title: 'catalog: a skill with both f and f.njk installs one silently over the other'
+updated: 2026-09-27T04:52:17Z
+---
+
+Found during k100 (worker, reproduced). Inside a skill directory, SKILL.md beside SKILL.md.njk (or any companion f beside f.njk) both render to the same install path: the template silently wins, while the catalog shows the plain file's description; no warning. Expected: consistent with k100 – an error of that skill (available shows it, install refuses, sync warns and keeps an installed copy), naming both files. Document in spec §4.1 next to the k100 paragraph.
+
+2026-09-27 04:35 Reproduced (worker): skills/x/{SKILL.md,SKILL.md.njk,scripts/x.sh,scripts/x.sh.njk} scans as one skill, description 'plain' (SKILL.md, skillFile() tries it first), no error; render.build() iterates the sorted files, so the .njk (later) overwrites the plain file at the same install path for both SKILL.md and scripts/x.sh. Cause: scan/pluginSkills/claudeItem build a skill item from walkFiles() without checking for install-path collisions.
+
+2026-09-27 04:38 Decisions (worker): (1) every clashing pair is named, in sorted order, joined by '; ' (e.g. 'both skills/x/SKILL.md and skills/x/SKILL.md.njk exist; both skills/x/a.sh and skills/x/a.sh.njk exist'), paths relative to the source like k100 – one fix round for the author. (2) A clash is by install path: plain f beside f.njk; f.njk beside f.njk.njk is NOT a clash (they install as f and f.njk). (3) Description: omitted while SKILL.md itself is in a pair (ambiguous, as k100's agent/rule); kept when only a companion clashes (SKILL.md is unambiguous). (4) .claude/: a skill's inner clash IS an error there too (maintainer's lean) – inside one skill dir there is no 'which item wins' question, only an ambiguous file; it stays best effort in that it never fails the scan. k100's silent first-wins for .claude/ agents/rules is unchanged. A broken published skill still counts as found, so a .claude/ skill of that name does not step in. Fix is one helper skillItem() in src/catalog.ts used by scan (skills/), pluginSkills and claudeItem; engine/commands/cli unchanged (k100 wiring). Red tests confirmed first (4/4 failed for the card's reason).
+
+2026-09-27 04:50 Done (worker), uncommitted, tree commit-ready. Files: src/catalog.ts (new skillItem(): a skill holding plain f beside f.njk carries CatalogItem.error naming every pair in sorted order, joined by '; '; no description while SKILL.md is in a pair; used by scan skills/, pluginSkills and claudeItem), dist/skilletor.js (rebuilt), docs/superpowers/specs/2026-09-22-skilletor-design.md (§4.1: new k113 paragraph after k100's; §6.6: broken-item line names the skill case), README.md (Templates: the k100 sentence now covers a skill's f beside f.njk), test/catalog.test.ts, test/engine.test.ts, test/commands.test.ts, test/cli.test.ts (k113 regression tests: scan in all three layouts incl. .claude/ and the f.njk/f.njk.njk non-clash; sync warn-and-keep for SKILL.md and companion pairs, explicit and wildcard; install refuses typed/bare and edits nothing; available shows the error; CLI black-box). .claude/ decision: an error there too. Verified: typecheck 0; npm test 800/800 pass, 0 fail; build 0; check-dist 'up to date'. No engine/commands/cli code change needed (k100 wiring). Drift: skills/skilletor/SKILL.md never mentioned k100's pair error either – pre-existing gap, not new. Note for review: a project that installs its own .claude/skills/x/SKILL.md.njk into itself with gitignore off gets a rendered SKILL.md beside the template, and from the next sync on that is now a warning (an installed copy stays) instead of a silent re-render; with gitignore on (the default) that setup already fails, because the installed copy is skipped.
+
+2026-09-27 04:52 Committed 0dbe0db43c40efc2d39c6a033d2268e6c4aeb256: catalog: f beside f.njk in a skill is an error of that skill (k113)
