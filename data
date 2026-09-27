@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-27T04:31:08Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T04:31:01Z
+created: 2026-09-27T03:23:25Z
+id: 115
+priority: low
+started: 2026-09-27T03:25:08Z
+status: done
+tags:
+- bundles
+- bug
+title: 'bundles: a bundle naming a non-https tarball warns "run install bundle:…",
+  which refuses'
+updated: 2026-09-27T04:31:08Z
+---
+
+Found during k110 (worker). A declared bundle whose entry names a non-https tarball (x@http://host/x.tar.gz – hand edit, or the bundle changes upstream after install) makes sync warn "run skilletor install bundle:…"; since k110 that install refuses the source. Expected: such an address is a bundle error per §15.4 (as a generic host without https:// already is), so available/sync show the real reason.
+
+2026-09-27 04:25 Reproduced red (3 tests): parseBundle accepts x@http://host/x.tar.gz (foreignEntry in src/bundles.ts only refuses probe-needing and local specs); available lists the bundle with members and no error; sync of a declared bundle warns 'bundle perl@shared needs http://host/x.tar.gz (...): run skilletor install bundle:perl@shared'. Plan: foreignEntry runs config's sourceFields on the {git|url} def add would write and makes a refusal a BundleError; the k110 loadRefusal loop in missingSources (commands.ts) then becomes unreachable and goes, so the rule is checked in one place.
+
+2026-09-27 04:29 Done. src/bundles.ts: foreignEntry runs config's sourceFields on the {git|url} def add would write (at sources.<derivedName>); a ConfigError becomes the BundleError 'rules: "x@http://host/x.tar.gz" cannot be added as a source: sources.host.url "http://host/x.tar.gz" must be an https:// URL' (the catalog prefixes bundles/<file>: as for every bundle error). git addresses load takes (http://, ssh://, scp-like) still parse. src/commands.ts: the k110 loadRefusal loop in missingSources removed (now unreachable, every ForeignEntry passed the same check), doc updated; cmdAdd keeps loadRefusal. src/config.ts: sourceFields doc comment only. dist/skilletor.js rebuilt. Spec: new §15.4 bullet; §15.6 and §4.2 k110 sentences now point at §15.4. Tests: test/bundles.test.ts (k115 parse: http/file/scp tarball refused with exact message; http/ssh/scp git accepted), test/commands.test.ts (k110 install test rewritten as k115: available shows the error and no members; install bundle: refuses with/without TTY, no question, config byte-identical, nothing trusted), test/engine.test.ts (k115: declared bundle gains the entry upstream -> one bundle-error warning, no install hint, r1 and its via kept, nothing added/removed). Verified: typecheck 0; npm test 796/796 pass; build ok; check-dist up to date; real binary in temp HOME/CODEX_HOME: sync/available/install/hook session-start all show the bundle error, install exits 1, hook exits 0. Behavior note: while such an entry is present the whole bundle is frozen (new upstream members not installed), as for any §15.4 error. Drift for skill-author: skills/skilletor/references/bundles.md 'Refused (bundle error)' table lacks the non-https tarball; README bundle-prompt sentence (k110) now slightly off.
+
+2026-09-27 04:30 Committed 39d76d55a2b1e081eab6b52c670563c3d21503e2
