@@ -80,7 +80,7 @@ shorthand, restricted to forms that resolve without a network probe:
 
 | Allowed | Refused (bundle error) |
 |---|---|
-| `Getty`, `Getty/repo`, `gitlab.com/peter`, `hf.co/user`, `https://…`, `https://….tar.gz` | generic host `example.org/foo` (write `https://example.org/foo`), local paths `~/…`, `./…`, `/…` |
+| `Getty`, `Getty/repo`, `gitlab.com/peter`, `hf.co/user`, `https://…`, `https://….tar.gz` | generic host `example.org/foo` (write `https://example.org/foo`), local paths `~/…`, `./…`, `/…`, an address config load refuses as a source (a tarball not `https://`: `x@http://host/x.tar.gz`) |
 
 - **Matching is by URL, not config name.** The entry is served by whichever configured
   source (visible to the bundle's scope; a user bundle sees your user config's definitions
@@ -103,9 +103,10 @@ shorthand, restricted to forms that resolve without a network probe:
 
 ## Errors
 
-A broken bundle affects only itself; other entries sync and items it installed before
-stay. Broken = not in the catalog, unparseable, unknown key, no `description`, both `.yaml`
-and `.yml`, a refused `@<spec>`, a cycle. `available` shows the error under the bundle.
+A broken bundle affects only itself; other entries sync and items it installed before stay;
+new members wait. Broken = not in the catalog, unparseable, unknown key, no `description`,
+both `.yaml` and `.yml`, a refused `@<spec>` (never a missing source to add), a cycle.
+`available` shows the error under the bundle, `sync` warns with it, `install` refuses it.
 
 ## Seeing it
 

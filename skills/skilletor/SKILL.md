@@ -58,16 +58,19 @@ skilletor sync --force                    # overwrite and adopt unmanaged files 
 skilletor trust <source>                  # confirm a project-declared source (shows the backend it trusts)
 ```
 
-`add`, `install`, `uninstall` only edit `skilletor.json` (the single source of truth), then
-sync; `check` writes nothing, exits non-zero when a sync is due (a source moved, the config
-no longer matches the lock, vars changed, the last sync stopped midway; what the last sync
-could not install although its source was there counts once). `uninstall` edits one config;
-no explicit entry there → exit 1, config untouched, the error names what covers it.
-`add` without a name takes the repo's for a git repo other than `skills` (`Getty/karr`,
-`https://github.com/Getty/karr.git` → `karr`), else the owner's (`Getty` → `getty`), the
-host's or the directory's. It never replaces a source: the same address again keeps the
-entry as written (`ref`, `local` stay) and syncs; another address under that name → exit 1,
-config untouched (pass a name, or `source remove <name>` first).
+`add`, `install`, `uninstall`, `source remove` only edit `skilletor.json` (the single source
+of truth), then sync (a config error there → exit 2, the edit stays saved); `check` writes
+nothing, exits non-zero when a sync is due (a source moved, the config no longer matches the
+lock, vars changed, the last sync stopped midway; what the last sync could not install
+although its source was there counts once). `uninstall` and `source remove` edit one config;
+an entry or source not there → exit 1, config untouched even with `--force`, the error names
+what covers it or where else the source is declared. `add` without a name takes the repo's
+for a git repo other than `skills` (`Getty/karr`, `https://github.com/Getty/karr.git` →
+`karr`), else the owner's (`Getty` → `getty`), the host's or the directory's. It never
+replaces a source: the same address again keeps the entry as written (`ref`, `local` stay)
+and syncs — unless config load refuses that entry (a hand-written `"ref": ""`): exit 1,
+nothing trusted, until you fix it by hand; another address under that name → exit 1, config
+untouched (pass a name, or `source remove <name>` first).
 An option a command does not list (`--project-dir` goes with all) → exit 2, nothing runs;
 `-h`/`--help` anywhere only prints usage; `-v`/`--version` only as the first argument.
 
@@ -103,9 +106,12 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
 ```
 
 - Only `skill`, `agent`, `rule` are installable — never hooks, settings or MCP configs.
-- `git` and `local`, when present, are non-empty strings; `ref` (git) pins a branch, tag or
-  commit – a plain ref name (no leading `-`, no whitespace, `~ ^ : ? * [ \`, `..` or `@{`);
-  omit it (never `""`) for the remote's HEAD.
+- A source name (its key) is ASCII letters, digits, `.`, `_`, `-`, starting with a letter or
+  digit. `git` and `local`, when present, are non-empty strings; `url` is `https://`; `ref`
+  (git) pins a branch, tag or commit – a plain ref name (no leading `-`, no whitespace,
+  `~ ^ : ? * [ \`, `..` or `@{`); omit it (never `""`) for the remote's HEAD. Anything else
+  is a config error; `add` refuses such a name or address (`http://…`/`file://…` tarball)
+  before writing anything – exit 1.
 - `gitignore` (default true): fixed ignore rules that never change with the items. Every
   installed skill dir gets its own `.gitignore` (`*`); a marked block in `.claude/.gitignore`
   lists the lock, `skilletor.local.json`, `agents/**/.local.*`, `rules/**/.local.*`, one in
@@ -164,13 +170,16 @@ vars: { perl_version: "5.40" }
 ## Templates
 
 A source file ending in `.njk` is rendered with Nunjucks (installed with `.njk` stripped);
-every other file is copied byte for byte. Printing an undefined variable (`{{ vars.x }}`)
-is an error; testing one (`{% if vars.x %}`) is just false. A `.njk` main file that renders
-empty (after its frontmatter) switches the item off in that scope and target — nothing
-written, installed copy removed. A `{% if %}` tag inside frontmatter opens with `{%-`, or
-the blank line it leaves silently truncates a `briefing:` block. Read
-[references/templates.md](references/templates.md) when writing or debugging a template:
-context variables, the on/off pattern with vars, the `{%-` example.
+every other file is copied byte for byte (a skill's executable bit included; a `.njk` passes
+its own on). `f` beside `f.njk` in one item (`SKILL.md` + `SKILL.md.njk`, `scripts/x.sh` +
+`scripts/x.sh.njk`, `agents/x.md` + `agents/x.md.njk`) is an error of that item: `available`
+shows it, `install` refuses it, `sync` warns and keeps an installed copy. Printing an
+undefined variable (`{{ vars.x }}`) is an error; testing one (`{% if vars.x %}`) is just
+false. A `.njk` main file that renders empty (after its frontmatter) switches the item off
+in that scope and target — nothing written, installed copy removed. A `{% if %}` tag inside
+frontmatter opens with `{%-`, or the blank line it leaves silently truncates a `briefing:`
+block. Read [references/templates.md](references/templates.md) when writing or debugging a
+template: context variables, the on/off pattern with vars, the `{%-` example.
 
 ## Trust
 
