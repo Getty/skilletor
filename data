@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-27T01:29:09Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T01:28:57Z
+created: 2026-09-26T22:50:58Z
+id: 103
+priority: low
+started: 2026-09-27T00:29:13Z
+status: done
+tags:
+- cli
+- bug
+title: 'cli: add, install, uninstall, source remove exit 0 after their sync hit a
+  config error'
+updated: 2026-09-27T01:29:09Z
+---
+
+Found during k101 (worker). sync exits 2 on a config error; add, install, uninstall and source remove run a sync too, but exit 0 when that sync reports a config error (e.g. no harness detected). Decide: the config edit itself succeeded, so maybe exit 0 is intended – but then the error must stand out; or align with sync (exit 2). Document the choice in spec §7.
+
+2026-09-27 00:28 Decision (maintainer, 2026-09-27): align with sync – exit 2 when the follow-up sync hits a config error; the message says the config edit itself was saved. Document in spec §7.
+
+2026-09-27 01:24 Reproduced by hand (temp HOME, no harness marker): add, install, uninstall, source remove all exit 0; the sync's config error goes to stdout as 'config error, nothing changed' although the config edit was written. sync maps r.error to stderr + exit 2 in src/cli.ts; plan: factor that branch into one helper all five commands use, the edit commands passing the config file they wrote (commands.ts configPath exported) so the message says the edit was saved there; add of a kept source (no config write) keeps sync's own message.
+
+2026-09-27 01:27 Done: src/cli.ts – sync's config-error branch (stderr + exit 2) is now one helper, syncFailed(), used by sync and by add, install, uninstall, source remove after their follow-up sync. For the edit commands it prints 'config error, nothing synced — <err>' plus 'the config edit itself was saved in <file> (not rolled back); fix the error, then run skilletor sync'; an add that kept an existing entry (no write) gets sync's own 'nothing changed' line. src/commands.ts: configPath exported (the file named). dist/skilletor.js rebuilt. test/cli.test.ts: k103 table test through the binary (5 rows: add, add kept, install, uninstall, source remove; no harness in HOME) – red before (exit 0), green after. Spec §7 documents the choice; README CLI reference got the sentence. Verified: typecheck ok, npm test 729/729, build ok, check-dist up to date. k110 case (add http://…tar.gz) now exits 2 naming the saved file. Also found: (1) source remove <name> not in that config prints 'removed source <name>', exit 0, writes nothing (and would now claim the edit was saved on a config error) – ticket for this board; (2) for k110: after the bad url is written, 'source remove web' exits 1 (loads the whole config first), so the CLI cannot undo it; (3) skills/skilletor/SKILL.md lacks the new exit-2 sentence README now has – for skilletor-skill-author; (4) thrown sync errors (write error, lock timeout) exit 1 for sync and the edit commands alike, but for the edit commands the saved edit goes unmentioned – unchanged, other code path.
+
+2026-09-27 01:28 Committed as e800eb0: cli: add, install, uninstall, source remove exit 2 when their sync hits a config error (k103)
