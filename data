@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-27T23:03:35Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T23:03:27Z
+created: 2026-09-27T04:02:07Z
+id: 118
+priority: low
+started: 2026-09-27T22:49:59Z
+status: done
+tags:
+- spec
+- feature
+title: 'spec: git''s transport::address form (codecommit::region://repo) is an unknown-prefix
+  error'
+updated: 2026-09-27T23:03:35Z
+---
+
+Found during k117 (worker). Since k109, `codecommit::us-east-1://my-repo` (git remote-helper syntax transport::address) fails as unknown prefix "codecommit:"; before k109 it was stored as a broken https://github.com/... URL, so it never worked. AWS CodeCommit users with a region in the address could hit this. Expected: a spec of the form <transport>::<address> is kept verbatim as a git source (git's remote helpers decide), like any scheme:// URL since k117. Document in §4.2.
+
+2026-09-27 22:56 Reproduced: resolveSpec('codecommit::us-east-1://my-repo') and a bundle entry x@codecommit::us-east-1://my-repo both fail as unknown prefix "codecommit:" (spec.ts step 5/6 colon check; firstSeg has no dot). Config load (gitField) already takes the value; git.ts passes it verbatim (cacheDir hashes it, remote add/fetch/ls-remote after --); bundles normalizeIdentity only touches scheme:// forms. Verified by hand: git 2.47.3 fetches, resets and ls-remotes k118::<path> through a fake connect helper on PATH. Plan: detect <transport>::<address> in spec.ts before scheme/scp-like (git checks :: first), verbatim, transport case kept.
+
+2026-09-27 23:02 Done (uncommitted, tree commit-ready). src/spec.ts: <transport>::<address> (transport [A-Za-z][A-Za-z0-9+.-]*, non-empty address) is checked right after local paths, before scheme/scp-like (git looks for :: first), kept exactly as written as git, never url, never probed. Case: transport kept verbatim - it names the program git runs (git-remote-<transport>, looked up as written; protocol.<transport>.allow is a case-sensitive subsection), not an RFC 3986 scheme. Name: an explicit/scp-like address named as one (codecommit::us-east-1://profile@my-repo -> my-repo, same as codecommit://profile@my-repo), else by its path as a git repo (testgit::/srv/repo.git -> repo); k95 fallback 'source'. FORMS now lists transport::address. Single colon, codecommit:: without address, 1helper::x, my_helper::x stay unknown-prefix errors. github::Getty is transport github (git's reading), not the shorthand. No change needed in config.ts (gitField takes it), sources/git.ts (verbatim: cache hash, remote add/fetch/ls-remote after --) or bundles.ts (normalizeIdentity only touches scheme://; bundle entries x@codecommit::... now parse as full git addresses). dist/skilletor.js rebuilt. Tests: spec.test.ts k118Rows (13 rows) + k118 unknown-prefix pin + k95 empties; bundles.test.ts k118 parseBundle/sameIdentity; git.test.ts k118 resolve+check through a fake git-remote-k118 connect helper on PATH (address reaches the helper verbatim); commands.test.ts k118 add -> config -> install through the helper. New test/helpers/remote-helper.ts. Docs: design spec 4.2 table row + paragraph. README/skill untouched (not misleading). Verified: typecheck ok; npm test 817/817 pass; build ok; check-dist up to date; hand test of bin/skilletor with temp HOME/CODEX_HOME: add k118::<repo> + install via helper, SessionStart hook silent exit 0.
+
+2026-09-27 23:03 Committed 14d9fdd97c07aebea441c1db0b5f6d130debe787: spec: git's transport::address form is a git source kept as written (k118)
