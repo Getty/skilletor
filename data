@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-09-27T03:34:32Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T03:34:11Z
+created: 2026-09-27T00:59:01Z
+id: 109
+priority: low
+started: 2026-09-27T03:01:56Z
+status: done
+tags:
+- spec
+- bug
+title: 'spec: an unknown or upper-case prefix (GitHub:, gitlab:, HTTPS://) becomes
+  a GitHub owner with a colon'
+updated: 2026-09-27T03:34:32Z
+---
+
+Found during k104 (worker). resolveSpec recognises only lowercase `github:`; any other `word:` prefix falls through to the owner/repo branch and yields a broken URL: `GitHub:Getty` -> https://github.com/GitHub:Getty/skills (name github-getty), `gitlab:u/r` -> https://github.com/gitlab:u/r. §4.2 does not cover these. Expected: a SpecError for an unknown prefix (a GitHub owner cannot contain a colon), and possibly a case-insensitive `github:`. Decide and document in §4.2.
+
+2026-09-27 03:23 Also (k110 worker): the scheme check in src/spec.ts is case-sensitive – HTTPS://host/x.tar.gz silently resolves to git https://github.com/HTTPS:/host. Same root cause (an unrecognised word: prefix falls through to owner/repo); fix together: schemes and github: case-insensitive, any other unknown prefix a SpecError.
+
+2026-09-27 03:30 Cause: hasScheme and the github: check are case-sensitive, and branches 5/6 take any dotless first segment as a GitHub owner, colon included. Red first: test/spec.test.ts k109Rows (10 upper-case scheme/github: rows), unknown-prefix SpecError test (11 dotless word: specs) and test/commands.test.ts k109 add test fail on unchanged code; k109Pinned (10 colon forms) and the dotted-host probe test (host:port, userinfo) pass before the fix. Rule chosen: the error fires only where a dotless first segment would become a GitHub owner, so a dotted host with a port or userinfo (mydir.com:8080/x, user:pw@host.tld/x) stays a probed generic host.
+
+2026-09-27 03:32 Done. Files: src/spec.ts, dist/skilletor.js (rebuilt), test/spec.test.ts, test/commands.test.ts, docs/superpowers/specs/2026-09-22-skilletor-design.md (§4.2 table row + paragraph). Change: schemes (SCHEME regex, now /i) and github: match in any case; an explicit URL is stored with a lower-case scheme, host/path verbatim; a dotless first segment containing ':' (would be a GitHub owner in branches 5/6) is SpecError 'cannot resolve "<spec>": unknown prefix "<word:>"; expected a local path (/path, ./path, ../path, ~/path), scheme://..., user@host:path, github:owner[/repo], owner[/repo] or host.tld[/path]'. Forms touched: GitHub:/GITHUB:/Github: -> github: form; HTTPS:// Https:// HTTP:// SSH:// Git+SSH:// FILE:// -> lower-case scheme; gitlab:u/r, Gitlab:u/r, bitbucket:…, HTTPS:/host, https:host, localhost:8080[/x], C:\x, :foo, user:pw@localhost/x -> SpecError (all previously stored as https://github.com/<prefix>…). Pinned unchanged: lower-case scheme URLs (https/http/file/git/git+ssh/ssh), scp-like (git@…, Git@GitHub.com:…, user:pw@host:o/r), local paths with ':', dotted host with port/userinfo (mydir.com:8080[/x], user:pw@host.tld/x, probed). Verified: typecheck ok; npm test 758/758 pass; build ok; check-dist up to date; hand test dist/skilletor.js add gitlab:u/r in temp HOME -> exit 1, nothing written.
+
+2026-09-27 03:32 Also found (not fixed, for the board): (1) github: with a colon in the owner still stores a broken URL: github:gitlab:u -> https://github.com/gitlab:u/skills, GitHub:HTTPS://x -> https://github.com/HTTPS:/x. (2) A colon in the repo segment: Getty/re:po -> https://github.com/Getty/re:po. (3) Dotted host with a non-numeric port, e.g. scp-without-user typo github.com:Getty/karr / gitlab.com:u/r -> probed as https://github.com:Getty/karr (known forge probed; real probe fails, so only a SpecError 'neither responded' after two network attempts). (4) isTarball is case-sensitive: https://host/X.TAR.GZ resolves as git, not url. (5) An unknown scheme (foo://bar) is kept verbatim as git; only fails at fetch.
+
+2026-09-27 03:34 Committed 125871d: spec.ts case-insensitive scheme/github: match + unknown word: prefix SpecError, tests, spec doc.
