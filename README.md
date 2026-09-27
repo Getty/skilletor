@@ -683,7 +683,10 @@ exit 2, nothing changed; `add`, `install`, `uninstall` and `source remove` exit 
 the sync they run after their edit hits one — the edit itself is saved and stays, and the
 message names the config file. `source remove` of a name the target config (user, or project
 with `--project`) does not declare exits 1 and changes nothing, `--force` or not; the error
-names where else it is declared (the other config, `skilletor.local.json`), if anywhere.
+names where else it is declared (the other config, `skilletor.local.json`), if anywhere. It
+removes a source whose entry config load refuses (an `http://` url, a hand-written
+`"ref": ""`) when that entry is all the config load refuses; any other config error stops
+it (exit 1, nothing changed).
 `-h`/`--help` anywhere prints the usage and runs nothing (`sync --help` does not sync);
 `-v`/`--version` only as the first argument.
 

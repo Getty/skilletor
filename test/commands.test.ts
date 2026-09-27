@@ -715,6 +715,154 @@ test("k114: source remove of an unknown name without a project scope says it is 
   }
 });
 
+// k120: `source remove` loaded the whole config before removing anything, so an entry config
+// load refuses – an http:// url v0.4.1's `add` could write (before k110), a `.github` name it
+// could derive (before k95), a hand-written `ref: ""`, an entry that is not an object – could
+// be removed by no command, `--force` or not. Asserts: when that entry of the target config
+// (user, or project with --project) is all load refuses, it is removed from that file, the
+// file's other keys kept and the other config byte-identical, and the sync after it runs clean
+// – the user config's other source is installed from.
+test("k120: source remove drops the one entry config load refuses, then syncs", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => skill(d, "foo"));
+    const projCfg = join(e.projectDir, ".claude", "skilletor.json");
+    const user = { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } };
+    const cases: { args: { name: string; project?: boolean }; entry: unknown }[] = [
+      { args: { name: "web" }, entry: { url: "http://host/x.tar.gz" } },
+      { args: { name: ".github" }, entry: { git: "https://github.com/Getty/.github" } },
+      { args: { name: "tools", project: true }, entry: { git: "https://example.invalid/Getty/tools", ref: "" } },
+      { args: { name: "tools", project: true }, entry: "https://example.invalid/Getty/tools" },
+    ];
+    for (const [i, { args, entry }] of cases.entries()) {
+      const label = `${JSON.stringify(args)} ${JSON.stringify(entry)}`;
+      // The refused entry first, so load meets it before anything else.
+      e.writeUserCfg(args.project ? user : { sources: { [args.name]: entry, ...user.sources }, install: user.install });
+      writeFileSync(projCfg, JSON.stringify(args.project ? { sources: { [args.name]: entry }, vars: { team: i } } : {}, null, 2));
+      assert.throws(() => loadConfig({ home: e.home, projectDir: e.projectDir }), ConfigError, `${label}: load refuses it`);
+      const other = readFileSync(args.project ? e.userCfgPath : projCfg);
+
+      const report = await cmdSourceRemove(e.ctx, args);
+      assert.equal(report.error, undefined, label);
+      if (args.project) assert.deepEqual(JSON.parse(readFileSync(projCfg, "utf8")), { vars: { team: i } }, label);
+      else assert.deepEqual(e.readUserCfg(), user, label);
+      assert.deepEqual(readFileSync(args.project ? e.userCfgPath : projCfg), other, `${label}: the other config byte-identical`);
+      const mine = report.scopes.find((s) => s.scope === "user")!;
+      assert.deepEqual([...mine.added, ...mine.unchanged].map((c) => `${c.key}@${c.source}`), ["skills/foo@mine"], label);
+      assert.doesNotThrow(() => loadConfig({ home: e.home, projectDir: e.projectDir }), label);
+    }
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo/SKILL.md")), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k120: only an error in that one entry of the target config lets `source remove` past config
+// load. Asserts, `--force` or not: any other error – a second refused source in the same file,
+// the same name refused in skilletor.local.json as well, the name refused only in another
+// config, an error elsewhere in another config or outside `sources` in the target file –
+// fails with load's own ConfigError for the error that is left (for a valid entry beside a
+// refused one, as before k120); every config byte-identical and no sync run (no lock).
+test("k120: source remove of a refused entry still stops at any other config error", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => skill(d, "foo"));
+    const projCfg = join(e.projectDir, ".claude", "skilletor.json");
+    const localCfg = join(e.projectDir, ".claude", "skilletor.local.json");
+    const web = { url: "http://host/x.tar.gz" };
+    const webRefused = (file: string) => `${file}: sources.web.url "http://host/x.tar.gz" must be an https:// URL`;
+    const cases: { user: object; proj?: object; local?: object; args: { name: string; project?: boolean }; message: string }[] = [
+      { user: { sources: { web, other: { git: "https://example.invalid/o", ref: "" } } }, args: { name: "web" },
+        message: `${e.userCfgPath}: sources.other.ref "" must not be empty (omit "ref" for the remote's HEAD)` },
+      { user: { sources: { web } }, local: { sources: { web } }, args: { name: "web" }, message: webRefused(localCfg) },
+      { user: { sources: { web: { url: "https://host/x.tar.gz" } } }, proj: { sources: { web } }, args: { name: "web" },
+        message: webRefused(projCfg) },
+      { user: { sources: { web } }, proj: { checkInterval: 5 }, args: { name: "web" },
+        message: `${projCfg}: "checkInterval" is user-only` },
+      { user: {}, proj: { sources: { web }, install: { skills: ["foo@nowhere"] } }, args: { name: "web", project: true },
+        message: `${projCfg}: project install "foo@nowhere" references unknown source "nowhere"` },
+      { user: { sources: { mine: { local: src }, web } }, args: { name: "mine" }, message: webRefused(e.userCfgPath) },
+    ];
+    for (const c of cases) {
+      e.writeUserCfg(c.user);
+      writeFileSync(projCfg, JSON.stringify(c.proj ?? {}, null, 2));
+      if (c.local) writeFileSync(localCfg, JSON.stringify(c.local, null, 2));
+      else rmSync(localCfg, { force: true });
+      const files = [e.userCfgPath, projCfg, ...(c.local ? [localCfg] : [])];
+      const before = files.map((f) => readFileSync(f));
+      for (const force of [false, true]) {
+        const args = { ...c.args, force };
+        await assert.rejects(() => cmdSourceRemove(e.ctx, args), { name: "ConfigError", message: c.message }, JSON.stringify(args));
+        assert.deepEqual(files.map((f) => readFileSync(f)), before, `${JSON.stringify(args)}: every config byte-identical`);
+      }
+    }
+    assert.equal(existsSync(join(e.home, ".claude", "skilletor.lock.json")), false, "no sync: no user lock");
+    assert.equal(existsSync(join(e.projectDir, ".claude", "skilletor.lock.json")), false, "no sync: no project lock");
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k120: a refused entry is still in use while the config declares items from it – an explicit
+// entry, a wildcard or a bundle – as any source, and the lock may still hold what a sync
+// installed from it before it broke. Asserts: without --force the command refuses as before
+// (in the user and the project config), config byte-identical. With --force the entry goes at
+// once and the sync stops at the item left without a source (report error, as --force of any
+// source in use); uninstalling that item then syncs it away. The other way out – uninstall
+// first (its sync stops at the refused source), then `source remove` – removes the entry and
+// its sync removes the installed item.
+test("k120: a refused source that declared items use is in use: refused without --force, removed with it", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      skill(d, "foo");
+      rule(d, "r1");
+    });
+    const projCfg = join(e.projectDir, ".claude", "skilletor.json");
+    const foo = join(e.home, ".claude/skills/foo/SKILL.md");
+    const broken = { local: src, ref: "" };
+    for (const [cfg, project] of [[e.userCfgPath, false], [projCfg, true]] as const) {
+      for (const install of [{ skills: ["foo@web"] }, { rules: ["*@web"] }, { bundles: ["perl@web"] }]) {
+        writeFileSync(cfg, JSON.stringify({ sources: { web: broken }, install }, null, 2));
+        const before = readFileSync(cfg);
+        await assert.rejects(() => cmdSourceRemove(e.ctx, { name: "web", project }), {
+          name: "CommandError",
+          message: 'source "web" still has installed items; use --force to remove anyway',
+        }, `${cfg} ${JSON.stringify(install)}`);
+        assert.deepEqual(readFileSync(cfg), before, `${cfg}: byte-identical`);
+      }
+      rmSync(cfg);
+    }
+
+    // Installed while it loaded; then `"ref": ""` written by hand.
+    const install = () => {
+      e.writeUserCfg({ sources: { web: { local: src } }, install: { skills: ["foo@web"] } });
+      return sync(e.ctx).then((r) => assert.equal(r.error, undefined));
+    };
+    await install();
+    e.writeUserCfg({ sources: { web: broken }, install: { skills: ["foo@web"] } });
+    const forced = await cmdSourceRemove(e.ctx, { name: "web", force: true });
+    assert.equal(forced.error, `${e.userCfgPath}: user install "foo@web" references unknown source "web"`);
+    assert.deepEqual(e.readUserCfg(), { install: { skills: ["foo@web"] } });
+    assert.equal(existsSync(foo), true, "that sync stopped: still installed");
+    assert.equal((await cmdUninstall(e.ctx, { items: ["foo@web"] })).report.error, undefined);
+    assert.equal(existsSync(foo), false);
+
+    await install();
+    e.writeUserCfg({ sources: { web: broken }, install: { skills: ["foo@web"] } });
+    const un = await cmdUninstall(e.ctx, { items: ["foo@web"] });
+    assert.match(un.report.error ?? "", /sources\.web\.ref "" must not be empty/);
+    assert.equal(existsSync(foo), true, "that sync stopped: still installed");
+    const removed = await cmdSourceRemove(e.ctx, { name: "web" });
+    assert.equal(removed.error, undefined);
+    assert.deepEqual(e.readUserCfg(), {});
+    assert.deepEqual(removed.scopes.find((s) => s.scope === "user")!.removed.map((c) => `${c.key}@${c.source}`), ["skills/foo@web"]);
+    assert.equal(existsSync(foo), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("available lists a trusted source's catalog with installed markers", async () => {
   const e = env();
   try {

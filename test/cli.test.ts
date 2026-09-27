@@ -937,6 +937,73 @@ test("k114: source remove of a name the target config lacks exits 1, prints no r
   }
 });
 
+// k120: `source remove` of an entry config load refuses exited 1 naming the file, `--force`
+// or not, so only a hand edit removed it. Asserts, through the real binary: the one refused
+// entry of the target config – an http:// url in the user config, a `ref: ""` in the project
+// config with --project – is removed, exit 0, "removed source" on stdout, nothing on stderr,
+// the file's other keys kept. A second refused source in the file: exit 1, load's error for
+// that one on stderr, nothing on stdout, file byte-identical, no lock. In use: exit 1 without
+// --force, file byte-identical; with --force exit 2 as any `source remove` whose sync stops
+// at a config error (k103) – the item left without its source – the edit saved and named.
+test("k120: source remove of the one entry config load refuses removes it; any other error still exits 1", () => {
+  const home = join(tmp.dir, "k120-home");
+  const proj = join(tmp.dir, "k120-proj");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(proj, ".claude"), { recursive: true });
+  const env = claudeOnlyEnv(home);
+  const common = ["--project-dir", proj];
+  const cfg = join(home, ".claude", "skilletor.json");
+  const projCfg = join(proj, ".claude", "skilletor.json");
+  const noLock = (label: string) => {
+    assert.equal(existsSync(join(home, ".claude", "skilletor.lock.json")), false, `${label}: no user lock`);
+    assert.equal(existsSync(join(proj, ".claude", "skilletor.lock.json")), false, `${label}: no project lock`);
+  };
+  const web = `"web": { "url": "http://host/x.tar.gz" }`;
+
+  writeFileSync(cfg, `{ "sources": { ${web} }, "vars": { "x": 1 } }\n`);
+  let r = runCli(["source", "remove", "web", ...common], env);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.stdout, "removed source web\n");
+  assert.equal(r.stderr, "");
+  assert.equal(readFileSync(cfg, "utf8"), `{\n  "vars": {\n    "x": 1\n  }\n}\n`);
+
+  // No managed .gitignore block: the sync has nothing to report, so the removed line shows.
+  writeFileSync(projCfg, `{ "sources": { "tools": { "git": "https://example.invalid/Getty/tools", "ref": "" } }, "gitignore": false }\n`);
+  r = runCli(["source", "remove", "tools", "--project", "--force", ...common], env);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(r.stdout, "removed source tools\n");
+  assert.equal(r.stderr, "");
+  assert.equal(readFileSync(projCfg, "utf8"), `{\n  "gitignore": false\n}\n`);
+  rmSync(projCfg);
+
+  const two = `{ "sources": { ${web}, "other": { "git": "https://example.invalid/o", "ref": "" } } }\n`;
+  writeFileSync(cfg, two);
+  for (const force of [[], ["--force"]]) {
+    r = runCli(["source", "remove", "web", ...force, ...common], env);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.equal(r.stdout, "");
+    assert.equal(r.stderr, `skilletor: ${cfg}: sources.other.ref "" must not be empty (omit "ref" for the remote's HEAD)\n`);
+    assert.equal(readFileSync(cfg, "utf8"), two, "byte-identical");
+    noLock(`two refused ${force}`);
+  }
+
+  const used = `{ "sources": { ${web} }, "install": { "skills": ["foo@web"] } }\n`;
+  writeFileSync(cfg, used);
+  r = runCli(["source", "remove", "web", ...common], env);
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.equal(r.stdout, "");
+  assert.equal(r.stderr, `skilletor: source "web" still has installed items; use --force to remove anyway\n`);
+  assert.equal(readFileSync(cfg, "utf8"), used, "byte-identical");
+  noLock("in use");
+  r = runCli(["source", "remove", "web", "--force", ...common], env);
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(r.stdout, "");
+  assert.equal(r.stderr,
+    `skilletor: config error, nothing synced — ${cfg}: user install "foo@web" references unknown source "web"\n` +
+    `skilletor: the config edit itself was saved in ${cfg} (not rolled back); fix the error, then run skilletor sync\n`);
+  assert.deepEqual(JSON.parse(readFileSync(cfg, "utf8")), { install: { skills: ["foo@web"] } });
+});
+
 // k110: `add` of a spec that resolves to a url config load refuses (http://, file://) wrote it,
 // and the sync after it failed (exit 2 since k103, "the edit was saved") – a config every later
 // sync and `source remove` refused. Asserts, through the real binary: exit 1 as any refusal

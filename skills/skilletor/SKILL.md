@@ -49,22 +49,22 @@ skilletor sync --force                    # overwrite and adopt unmanaged files 
 skilletor trust <source>                  # confirm a project-declared source (shows the backend it trusts)
 ```
 
-`add`, `install`, `uninstall`, `source remove` edit one `skilletor.json`, then sync; a
-config error there → exit 2, the edit stays saved. `uninstall` or `source remove` of an
-entry or source that config does not declare → exit 1, config untouched even with `--force`;
-the error names what covers it or where else the source is declared. `check` writes nothing;
-non-zero = a sync is due. An option the command does not take → exit 2, nothing runs
+`add`, `install`, `uninstall`, `source remove` edit one `skilletor.json`, then sync; a config
+error there → exit 2, the edit stays saved. `uninstall` or `source remove` of an entry or
+source that config does not declare → exit 1, config untouched even with `--force`; the error
+names what covers it or where else it is declared. `source remove` also drops an entry config
+load refuses (an `http://` url) unless load refuses more (exit 1 as above). `check` writes
+nothing; non-zero = a sync is due. An option the command does not take → exit 2, nothing runs
 (`--project-dir` goes with all); `-h` anywhere only prints usage, `-v` only as first argument.
 
 `add` without a name takes the repo's for a git repo other than `skills` (`Getty/karr`,
 `https://github.com/Getty/karr.git` → `karr`), else the owner's (`Getty` → `getty`), the
 host's or the directory's. A GitHub tree link (`github.com/o/r/tree/<ref>`) adds the repo
-pinned to `<ref>`; a file or subdirectory link is refused. `add` never replaces a source:
-the same address again keeps the entry as written (`ref`, `local` stay) and syncs. Exit 1,
-nothing changed or trusted, when config load refuses that entry (a hand-written `"ref": ""`:
-fix it by hand), when a tree link pins a ref the entry lacks (no `ref` or another: set it by
-hand, use another name, or remove the source), or when the name has another address (pass
-a name, or `source remove <name>` first).
+pinned to `<ref>`; a file or subdirectory link is refused. `add` never replaces a source: the
+same address again keeps the entry as written (`ref`, `local` stay) and syncs. Exit 1, nothing
+changed or trusted, when config load refuses that entry (a hand-written `"ref": ""`: fix it by
+hand), a tree link pins a ref the entry lacks (set it by hand or use another name) or the name
+has another address (use another name); `source remove <name>` first gets past all three.
 
 Sources use `skills/<name>/`, `agents/<name>.md`, `rules/<name>.md`. Claude plugin repos
 work too, the skills their `.claude-plugin/plugin.json` lists installed as `skills/<name>/`:

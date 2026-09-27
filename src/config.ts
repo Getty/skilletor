@@ -118,6 +118,9 @@ export interface LoadOptions {
   home: string;
   /** Project root; omit to load only the user scope. */
   projectDir?: string;
+  /** Source `name` of config file `path` is declared but not checked, and has no backend:
+   *  the config `source remove` of an entry load refuses checks for use (k120). Never synced. */
+  unchecked?: { path: string; name: string };
 }
 
 const ALLOWED_KEYS = new Set(["sources", "install", "vars", "gitignore", "checkInterval", "targets"]);
@@ -165,11 +168,16 @@ function asObject(value: unknown, path: string, where: string): Json {
   return value as Json;
 }
 
-/** Parse and validate the `sources` object of one file; every backend field gets `origin`. */
-function parseSources(obj: Json, path: string, origin: Origin): Map<string, ResolvedSource> {
+/** Parse and validate the `sources` object of one file; every backend field gets `origin`.
+ *  Source `unchecked` is declared as is, without a backend (LoadOptions.unchecked). */
+function parseSources(obj: Json, path: string, origin: Origin, unchecked?: string): Map<string, ResolvedSource> {
   const sources = new Map<string, ResolvedSource>();
   const raw = asObject(obj.sources, path, "sources");
   for (const [name, def] of Object.entries(raw)) {
+    if (name === unchecked) {
+      sources.set(name, { name, origins: {} });
+      continue;
+    }
     if (!isSourceName(name)) {
       throw new ConfigError(`${path}: source name ${JSON.stringify(name)} is not valid (${SOURCE_NAME_RULE})`);
     }
@@ -409,9 +417,10 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
 
   // The user scope reads the user config's sources alone; the project scope the merged
   // map: project (base) < user < local, per field (spec §3).
-  const userSources = parseSources(user, userPath, "user");
-  const projectSources = hasProject ? parseSources(project, projectPath, "project") : new Map<string, ResolvedSource>();
-  const localSources = hasProject ? parseSources(local, localPath, "user") : new Map<string, ResolvedSource>();
+  const skip = (p: string) => (opts.unchecked?.path === p ? opts.unchecked.name : undefined);
+  const userSources = parseSources(user, userPath, "user", skip(userPath));
+  const projectSources = hasProject ? parseSources(project, projectPath, "project", skip(projectPath)) : new Map<string, ResolvedSource>();
+  const localSources = hasProject ? parseSources(local, localPath, "user", skip(localPath)) : new Map<string, ResolvedSource>();
 
   const sources = new Map<string, ResolvedSource>();
   for (const [name, s] of projectSources) sources.set(name, mergeSource(undefined, s));

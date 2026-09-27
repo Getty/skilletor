@@ -5864,10 +5864,14 @@ function asObject(value2, path, where) {
   }
   return value2;
 }
-function parseSources(obj, path, origin) {
+function parseSources(obj, path, origin, unchecked) {
   const sources = /* @__PURE__ */ new Map();
   const raw = asObject(obj.sources, path, "sources");
   for (const [name, def] of Object.entries(raw)) {
+    if (name === unchecked) {
+      sources.set(name, { name, origins: {} });
+      continue;
+    }
     if (!isSourceName(name)) {
       throw new ConfigError(`${path}: source name ${JSON.stringify(name)} is not valid (${SOURCE_NAME_RULE})`);
     }
@@ -6054,9 +6058,10 @@ function loadConfig(opts) {
       throw new ConfigError(`${p}: "checkInterval" is user-only`);
     }
   }
-  const userSources = parseSources(user, userPath, "user");
-  const projectSources = hasProject ? parseSources(project, projectPath, "project") : /* @__PURE__ */ new Map();
-  const localSources = hasProject ? parseSources(local, localPath, "user") : /* @__PURE__ */ new Map();
+  const skip = (p) => opts.unchecked?.path === p ? opts.unchecked.name : void 0;
+  const userSources = parseSources(user, userPath, "user", skip(userPath));
+  const projectSources = hasProject ? parseSources(project, projectPath, "project", skip(projectPath)) : /* @__PURE__ */ new Map();
+  const localSources = hasProject ? parseSources(local, localPath, "user", skip(localPath)) : /* @__PURE__ */ new Map();
   const sources = /* @__PURE__ */ new Map();
   for (const [name, s] of projectSources) sources.set(name, mergeSource(void 0, s));
   for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s));
@@ -10416,13 +10421,21 @@ async function cmdSourceRemove(ctx, args) {
       `source "${args.name}" is not declared in the ${project ? "project" : "user"} config (${path})` + sourceElsewhere(ctx, args.name, project)
     );
   }
-  const config = load(ctx);
+  const config = removalConfig(ctx, path, args.name);
   const inUse = usedSources(config).has(args.name);
   if (inUse && !args.force) {
     throw new CommandError(`source "${args.name}" still has installed items; use --force to remove anyway`);
   }
   removeSource(path, args.name);
   return sync(ctx);
+}
+function removalConfig(ctx, path, name) {
+  try {
+    return load(ctx);
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    return loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx), unchecked: { path, name } });
+  }
 }
 function sourceElsewhere(ctx, name, project) {
   const root = projectDirOf(ctx);

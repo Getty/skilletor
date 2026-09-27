@@ -818,6 +818,21 @@ and file, then where else the name is declared: the other scope's config (→ `-
 without it) or the project's `skilletor.local.json` (no command edits that file: by hand);
 otherwise it says the name is not a configured source.
 
+An entry config load refuses (§3: its name or a field – an `http://` url `add` wrote before
+k110, a hand-written `"ref": ""`) is removable when it is all load refuses (k120). The
+command then loads the config with that one entry of that one file declared but unchecked;
+that load is config load itself, so every other source still goes through its check. If
+it loads, the entry is removed and the sync runs as after any `source remove`. Anything
+else load refuses – another source, the same name in another config file, a key outside
+`sources` – stops the command before the edit, `--force` or not (exit 1, every config
+byte-identical, no sync), with load's own error for what is left. The in-use rule is the
+usual one: an explicit entry, wildcard or bundle of that source in any config refuses it
+without `--force` (the lock may still hold items installed before the entry broke);
+`uninstall` them first, whose sync stops at the refused source (exit 2, the edit saved),
+and `source remove` then removes the source and its sync removes those items. With
+`--force` the source goes at once and the sync stops at the entries left without it (exit
+2, the edit saved), as `--force` of any source in use.
+
 `status` shows a declared item that rendered empty at the last sync as skipped
 (`skipped: "renders-empty"` in `--json`, `installed: false`), distinct from an item that
 is not installed yet. It marks items that were declared through a wildcard (`via *@shared`, and a `via`

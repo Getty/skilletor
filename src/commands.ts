@@ -191,6 +191,7 @@ function pickDef(s: { git?: string; ref?: string; url?: string; local?: string }
  * Remove a source from one config (user, or project with --project), then sync. A name that
  * config does not declare is an error before anything else, `--force` or not (k114, as
  * `uninstall` of an absent entry): nothing edited, no sync; it names where else it is declared.
+ * An entry config load refuses is removed when nothing else in the config is (k120).
  */
 export async function cmdSourceRemove(
   ctx: CommandContext,
@@ -204,13 +205,26 @@ export async function cmdSourceRemove(
         sourceElsewhere(ctx, args.name, project),
     );
   }
-  const config = load(ctx);
+  const config = removalConfig(ctx, path, args.name);
   const inUse = usedSources(config).has(args.name);
   if (inUse && !args.force) {
     throw new CommandError(`source "${args.name}" still has installed items; use --force to remove anyway`);
   }
   removeSource(path, args.name);
   return sync(ctx);
+}
+
+/** The config `source remove` checks a source's use in: the engine's; or, when load refuses
+ *  it, the config loaded with the entry being removed unchecked (k120) – which loads only when
+ *  that entry (its name or fields) was all load refused. Any error left stops the command,
+ *  `--force` or not, with load's own message for it. */
+function removalConfig(ctx: CommandContext, path: string, name: string): LoadedConfig {
+  try {
+    return load(ctx);
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    return loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx), unchecked: { path, name } });
+  }
 }
 
 /** Where else a source is declared: the other scope's config, the project's local file. */
