@@ -313,6 +313,32 @@ test("k111: add refuses an empty or whitespace-only spec before writing or trust
   }
 });
 
+// k117: `add github.com:Getty/karr` probed https://github.com:Getty/karr twice before failing,
+// and `add Getty/re:po`, `add "a b"`, `add gitlab.com/a b/r` stored and trusted a source no fetch
+// could serve. Asserts: each is the SpecError before anything is probed (the probe throws),
+// written or trusted (no user or project config, no trust.json).
+test("k117: add refuses an owner, repo or port no forge takes before probing, writing or trusting", async () => {
+  const e = env();
+  try {
+    const calls = [
+      { spec: "github.com:Getty/karr" }, { spec: "Getty/re:po" }, { spec: "a b", project: true },
+      { name: "x", spec: "Getty/re po" }, { spec: "gitlab.com/a b/r" },
+    ];
+    for (const args of calls) {
+      await assert.rejects(() => cmdAdd(e.ctx, args), (err: unknown) => {
+        assert.ok(err instanceof SpecError, `${JSON.stringify(args)}: ${String(err)}`);
+        assert.ok((err as Error).message.startsWith(`cannot resolve "${args.spec}": `), (err as Error).message);
+        return true;
+      });
+    }
+    assert.equal(existsSync(e.userCfgPath), false, "no user config written");
+    assert.equal(existsSync(join(e.projectDir, ".claude", "skilletor.json")), false, "no project config written");
+    assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("install adds the entry with an auto-detected type and syncs", async () => {
   const e = env();
   try {
@@ -1213,16 +1239,17 @@ test("k95: the bundle prompt refuses what config load refuses and takes what it 
 
 // k95: a bundle entry's address with no ASCII letter or digit in its name part derived "",
 // so without a TTY the printed command was `skilletor add  ___` – a spec where the name goes.
-// Asserts: the printed command names the fallback "source", config untouched.
+// Asserts: the printed command names the fallback "source", config untouched. (`___` itself is
+// no GitHub owner since k117, so a known forge's owner of underscores stands in.)
 test("k95: install bundle without a TTY prints a valid derived name for any address", async () => {
   const e = env();
   try {
-    const src = makeSource(e.tmp.dir, "s", (d) => bundleFile(d, "perl", "description: P\nrules: [x@___]\n"));
+    const src = makeSource(e.tmp.dir, "s", (d) => bundleFile(d, "perl", "description: P\nrules: [x@gitlab.com/___]\n"));
     const cfg = { sources: { mine: { local: src } } };
     e.writeUserCfg(cfg);
     await assert.rejects(() => cmdInstall(e.ctx, { items: ["bundle:perl@mine"] }), (err: unknown) => {
       assert.ok(err instanceof CommandError, String(err));
-      assert.ok((err as Error).message.split("\n").includes("  skilletor add source ___"), (err as Error).message);
+      assert.ok((err as Error).message.split("\n").includes("  skilletor add source gitlab.com/___"), (err as Error).message);
       return true;
     });
     assert.deepEqual(e.readUserCfg(), cfg);

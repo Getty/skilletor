@@ -60,17 +60,53 @@ function lowerScheme(spec: string): string {
   return spec.replace(SCHEME, (scheme) => scheme.toLowerCase());
 }
 
-/** What an unknown prefix (k109) or an empty source (k111) is told. */
+/** What an unknown prefix (k109), an empty source (k111) or an owner, repo or port no
+ *  address takes (k117) is told. */
 const FORMS = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., user@host:path, " +
   "github:owner[/repo], owner[/repo] or host.tld[/path]";
+
+/** The characters GitHub allows in an owner and in a repo (k117). */
+const GITHUB_OWNER = /^[A-Za-z0-9-]+$/;
+const GITHUB_REPO = /^[A-Za-z0-9._-]+$/;
+/** What no known forge's owner or repo holds (k117); their own rules differ. */
+const NOT_IN_SEGMENT = /[\s\p{Cc}:@]/u;
+
+/** A path segment that is empty or whitespace only is skipped (k104, k117). */
+function filled(seg: string): boolean {
+  return seg.trim() !== "";
+}
+
+/** A GitHub owner and repo (`undefined`: the default) as a shorthand gives them (k117). */
+function checkGithub(spec: string, owner: string, repo: string | undefined): void {
+  if (!GITHUB_OWNER.test(owner)) {
+    throw new SpecError(`cannot resolve "${spec}": GitHub owner "${owner}" may only contain ASCII letters, digits and "-"; ${FORMS}`);
+  }
+  if (repo !== undefined && !GITHUB_REPO.test(repo)) {
+    throw new SpecError(
+      `cannot resolve "${spec}": GitHub repo "${repo}" may only contain ASCII letters, digits, ".", "_" and "-"; ${FORMS}`,
+    );
+  }
+}
+
+/** Another known forge's owner and repo (k117): only what none of them takes is refused. */
+function checkForge(spec: string, forge: string, owner: string, repo: string): void {
+  for (const [what, seg] of [["owner", owner], ["repo", repo]] as const) {
+    if (NOT_IN_SEGMENT.test(seg)) {
+      throw new SpecError(
+        `cannot resolve "${spec}": ${forge} ${what} "${seg}" must not contain whitespace, control characters, ":" or "@"; ${FORMS}`,
+      );
+    }
+  }
+}
 
 function isScpLike(spec: string): boolean {
   // git@host:owner/repo.git
   return /^[^@/]+@[^:/]+:/.test(spec);
 }
 
+/** `.tar.gz` or `.tgz`, in any case (k117). */
 function isTarball(url: string): boolean {
-  return url.endsWith(".tar.gz") || url.endsWith(".tgz");
+  return /\.(?:tar\.gz|tgz)$/i.test(url);
 }
 
 /** The name of a git repo `owner/repo` (k101): the repo's, unless it is the default repo
@@ -125,21 +161,23 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
     return { kind: "local", value: s, derivedName: normalizeName(basename(s)) };
   }
 
-  // 2. Explicit URLs / scp-like git addresses: kept verbatim, but for a lower-case scheme.
+  // 2. Explicit URLs / scp-like git addresses: kept verbatim, but for a lower-case scheme. Any
+  //    scheme is git's to judge: a remote helper (`codecommit://`, `s3://`) fetches its own (k117).
   if (hasScheme(s) || isScpLike(s)) {
     const value = lowerScheme(s);
     const kind: SourceKind = isTarball(value) ? "url" : "git";
     return { kind, value, derivedName: nameFromUrl(value, kind) };
   }
 
-  // 3. github:owner/repo (manage-skills compatibility), in any case (k109). An empty repo
-  //    segment is skipped, as in 4. and 6., so `github:Getty/` is the default repo (k104); a
-  //    blank owner is as empty as none (k111).
+  // 3. github:owner/repo (manage-skills compatibility), in any case (k109). An empty or blank
+  //    repo segment is skipped, as in 4. and 6., so `github:Getty/` is the default repo (k104,
+  //    k117); a blank owner is as empty as none (k111). Owner and repo take GitHub's characters.
   if (/^github:/i.test(s)) {
     const path = s.slice("github:".length);
     const [owner, ...more] = path.split("/");
     if (!owner?.trim()) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
-    const repo = more.find(Boolean);
+    const repo = more.find(filled);
+    checkGithub(spec, owner, repo);
     return {
       kind: "git",
       value: `https://github.com/${owner}/${repo ?? DEFAULT_REPO}`,
@@ -151,12 +189,15 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
   const firstSeg = slash === -1 ? s : s.slice(0, slash);
   const rest = slash === -1 ? "" : s.slice(slash + 1);
 
-  // 4. Known forge with an owner (never probed).
+  // 4. Known forge with an owner (never probed); github.com takes GitHub's characters, another
+  //    forge whatever a URL path segment holds but whitespace, control characters, ":" and "@".
   if (KNOWN_FORGES.includes(firstSeg.toLowerCase()) && slash !== -1) {
     const segs = rest.split("/").filter(Boolean);
     const owner = segs[0];
     if (!owner?.trim()) throw new SpecError(`cannot resolve "${spec}": expected ${firstSeg}/owner[/repo]`);
-    const repo = segs[1] ?? DEFAULT_REPO;
+    const repo = segs.slice(1).find(filled) ?? DEFAULT_REPO;
+    if (firstSeg.toLowerCase() === "github.com") checkGithub(spec, owner, repo);
+    else checkForge(spec, firstSeg, owner, repo);
     return {
       kind: "git",
       value: `https://${firstSeg.toLowerCase()}/${owner}/${repo}`,
@@ -171,10 +212,21 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
     throw new SpecError(`cannot resolve "${spec}": unknown prefix "${firstSeg.slice(0, colon + 1)}"; ${FORMS}`);
   }
 
+  // 5. and 7. take a colon after a dotted host as its port, a number: `github.com:Getty/karr`
+  //    is never probed as https://github.com:Getty/karr (k117). A colon before an "@" is userinfo.
+  const hostPort = firstSeg.slice(firstSeg.lastIndexOf("@") + 1);
+  const portAt = hostPort.indexOf(":");
+  if (portAt !== -1 && !/^\d+$/.test(hostPort.slice(portAt + 1))) {
+    throw new SpecError(
+      `cannot resolve "${spec}": port "${hostPort.slice(portAt + 1)}" of ${hostPort.slice(0, portAt)} is not a number; ${FORMS}`,
+    );
+  }
+
   // 5. Single token (no slash).
   if (slash === -1) {
     if (!firstSeg.includes(".")) {
       // A bare word -> GitHub owner with the default repo.
+      checkGithub(spec, firstSeg, undefined);
       return {
         kind: "git",
         value: `https://github.com/${firstSeg}/${DEFAULT_REPO}`,
@@ -187,8 +239,8 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
 
   // 6. owner/repo where the first segment has no dot -> GitHub.
   if (!firstSeg.includes(".")) {
-    const segs = rest.split("/").filter(Boolean);
-    const repo = segs[0] ?? DEFAULT_REPO;
+    const repo = rest.split("/").find(filled) ?? DEFAULT_REPO;
+    checkGithub(spec, firstSeg, repo);
     return {
       kind: "git",
       value: `https://github.com/${firstSeg}/${repo}`,

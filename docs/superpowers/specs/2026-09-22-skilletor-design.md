@@ -248,6 +248,25 @@ never a stored `https://github.com//skills`. An owner of whitespace only is as e
 `github: /karr` and `github.com/ /karr` are the same `expected …owner[/repo]` error as
 `github:/karr` and `github.com/`.
 
+A shorthand is never stored or probed when no address could serve it (k117); each case is an
+error naming the spec and the offending part, before anything is probed, written or trusted:
+
+- A GitHub owner (`github:owner`, `owner[/repo]`, a bare `owner`, `github.com/owner`) takes
+  ASCII letters, digits and `-`; a GitHub repo also `.` and `_` (`github:gitlab:u`,
+  `Getty/re:po`, `@`, `a b`, `___` are errors). Another known forge's rules differ, so its
+  owner and repo are only refused for whitespace, a control character, `:` or `@`
+  (`gitlab.com/group.name/sub_repo` stays valid).
+- A colon after a dotted host starts its port, which is a number: `mydir.com:8080/x` is
+  probed as before, `github.com:Getty/karr` (an scp-like address missing its `git@`) is an
+  error.
+
+A repo segment of whitespace only is skipped like an empty one: `github:Getty/ /x` →
+`https://github.com/Getty/x`. An explicit `scheme://` address of any scheme is kept as
+written for `git` (`https://github.com//skills`, `codecommit://my-repo`, `foo://bar`): git
+and its remote helpers decide what it can fetch, so an unknown scheme fails at fetch with
+git's own error, never at `add`. `.tar.gz` and `.tgz` match in any case
+(`https://host/X.TAR.GZ` is a `url`), and a `url` must still be `https://` (k110).
+
 **Probe for generic hosts:** first `git ls-remote <url>`; if that does not respond,
 `HEAD <url>.tar.gz`. The first hit decides `git` vs. `url`; no hit → error listing both
 attempted addresses.

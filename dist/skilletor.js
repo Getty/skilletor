@@ -6664,11 +6664,36 @@ function lowerScheme(spec) {
   return spec.replace(SCHEME, (scheme) => scheme.toLowerCase());
 }
 var FORMS = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., user@host:path, github:owner[/repo], owner[/repo] or host.tld[/path]";
+var GITHUB_OWNER = /^[A-Za-z0-9-]+$/;
+var GITHUB_REPO = /^[A-Za-z0-9._-]+$/;
+var NOT_IN_SEGMENT = /[\s\p{Cc}:@]/u;
+function filled(seg) {
+  return seg.trim() !== "";
+}
+function checkGithub(spec, owner, repo) {
+  if (!GITHUB_OWNER.test(owner)) {
+    throw new SpecError(`cannot resolve "${spec}": GitHub owner "${owner}" may only contain ASCII letters, digits and "-"; ${FORMS}`);
+  }
+  if (repo !== void 0 && !GITHUB_REPO.test(repo)) {
+    throw new SpecError(
+      `cannot resolve "${spec}": GitHub repo "${repo}" may only contain ASCII letters, digits, ".", "_" and "-"; ${FORMS}`
+    );
+  }
+}
+function checkForge(spec, forge, owner, repo) {
+  for (const [what, seg] of [["owner", owner], ["repo", repo]]) {
+    if (NOT_IN_SEGMENT.test(seg)) {
+      throw new SpecError(
+        `cannot resolve "${spec}": ${forge} ${what} "${seg}" must not contain whitespace, control characters, ":" or "@"; ${FORMS}`
+      );
+    }
+  }
+}
 function isScpLike(spec) {
   return /^[^@/]+@[^:/]+:/.test(spec);
 }
 function isTarball(url) {
-  return url.endsWith(".tar.gz") || url.endsWith(".tgz");
+  return /\.(?:tar\.gz|tgz)$/i.test(url);
 }
 function repoName(owner, repo) {
   const name = repo === void 0 ? "" : normalizeName(repo);
@@ -6714,7 +6739,8 @@ function resolveAddress(spec, probe) {
     const path2 = s.slice("github:".length);
     const [owner, ...more] = path2.split("/");
     if (!owner?.trim()) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
-    const repo = more.find(Boolean);
+    const repo = more.find(filled);
+    checkGithub(spec, owner, repo);
     return {
       kind: "git",
       value: `https://github.com/${owner}/${repo ?? DEFAULT_REPO}`,
@@ -6728,7 +6754,9 @@ function resolveAddress(spec, probe) {
     const segs = rest.split("/").filter(Boolean);
     const owner = segs[0];
     if (!owner?.trim()) throw new SpecError(`cannot resolve "${spec}": expected ${firstSeg}/owner[/repo]`);
-    const repo = segs[1] ?? DEFAULT_REPO;
+    const repo = segs.slice(1).find(filled) ?? DEFAULT_REPO;
+    if (firstSeg.toLowerCase() === "github.com") checkGithub(spec, owner, repo);
+    else checkForge(spec, firstSeg, owner, repo);
     return {
       kind: "git",
       value: `https://${firstSeg.toLowerCase()}/${owner}/${repo}`,
@@ -6739,8 +6767,16 @@ function resolveAddress(spec, probe) {
   if (colon !== -1 && !firstSeg.includes(".")) {
     throw new SpecError(`cannot resolve "${spec}": unknown prefix "${firstSeg.slice(0, colon + 1)}"; ${FORMS}`);
   }
+  const hostPort = firstSeg.slice(firstSeg.lastIndexOf("@") + 1);
+  const portAt = hostPort.indexOf(":");
+  if (portAt !== -1 && !/^\d+$/.test(hostPort.slice(portAt + 1))) {
+    throw new SpecError(
+      `cannot resolve "${spec}": port "${hostPort.slice(portAt + 1)}" of ${hostPort.slice(0, portAt)} is not a number; ${FORMS}`
+    );
+  }
   if (slash === -1) {
     if (!firstSeg.includes(".")) {
+      checkGithub(spec, firstSeg, void 0);
       return {
         kind: "git",
         value: `https://github.com/${firstSeg}/${DEFAULT_REPO}`,
@@ -6750,8 +6786,8 @@ function resolveAddress(spec, probe) {
     return probeGeneric(`https://${firstSeg}/${DEFAULT_REPO}`, firstSeg, spec, probe);
   }
   if (!firstSeg.includes(".")) {
-    const segs = rest.split("/").filter(Boolean);
-    const repo = segs[0] ?? DEFAULT_REPO;
+    const repo = rest.split("/").find(filled) ?? DEFAULT_REPO;
+    checkGithub(spec, firstSeg, repo);
     return {
       kind: "git",
       value: `https://github.com/${firstSeg}/${repo}`,

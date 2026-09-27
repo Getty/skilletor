@@ -114,7 +114,51 @@ const k109Pinned: Row[] = [
   { spec: "~/dir:x", kind: "local", value: "~/dir:x", name: "dir-x" },
 ];
 
-for (const row of [...rows, ...k101Rows, ...k104Rows, ...k109Rows, ...k109Pinned]) {
+// k117, pinned: forms next to the new owner, repo and port rules keep their result – a
+// GitHub owner or repo of the characters GitHub allows, a known forge's owner or repo with
+// characters GitHub would not take (`.`, `_`), segments past the repo ignored, an explicit URL
+// verbatim whatever its path holds, and a git source of any scheme: git and its remote helpers
+// (`codecommit://`, `persistent-https://`) decide what they fetch, so `foo://bar` fails there.
+const k117Pinned: Row[] = [
+  { spec: "my-org/my.repo_x", kind: "git", value: "https://github.com/my-org/my.repo_x", name: "my-repo-x" },
+  { spec: "github:my-org/my.repo_x", kind: "git", value: "https://github.com/my-org/my.repo_x", name: "my-repo-x" },
+  { spec: "github.com/my-org/my.repo_x", kind: "git", value: "https://github.com/my-org/my.repo_x", name: "my-repo-x" },
+  { spec: "123/456", kind: "git", value: "https://github.com/123/456", name: "456" },
+  { spec: "gitlab.com/group.name/sub_repo", kind: "git", value: "https://gitlab.com/group.name/sub_repo", name: "sub-repo" },
+  { spec: "codeberg.org/user_name/re.po", kind: "git", value: "https://codeberg.org/user_name/re.po", name: "re-po" },
+  { spec: "hf.co/Org-X/model_1", kind: "git", value: "https://hf.co/Org-X/model_1", name: "model-1" },
+  { spec: "github:Getty/karr/tree/main", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "Getty/karr/extra", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "https://github.com//skills", kind: "git", value: "https://github.com//skills", name: "skills" },
+  { spec: "https://github.com/a b/re:po", kind: "git", value: "https://github.com/a b/re:po", name: "re-po" },
+  { spec: "ssh+git://git@host/o/r", kind: "git", value: "ssh+git://git@host/o/r", name: "r" },
+  { spec: "ftp://host.example/o/r", kind: "git", value: "ftp://host.example/o/r", name: "r" },
+  { spec: "foo://bar", kind: "git", value: "foo://bar", name: "bar" },
+  { spec: "FOO://bar", kind: "git", value: "foo://bar", name: "bar" },
+  { spec: "codecommit://my-repo", kind: "git", value: "codecommit://my-repo", name: "my-repo" },
+  { spec: "persistent-https://host/o/r", kind: "git", value: "persistent-https://host/o/r", name: "r" },
+];
+
+// k117: a tarball extension in another case resolved as git (`https://host/X.TAR.GZ` a git source
+// named "x-tar-gz"), and a repo segment of blanks was the repo (`github:Getty/ /x` ->
+// https://github.com/Getty/ ). Asserts: `.tar.gz`/`.tgz` match in any case, the address kept as
+// written; a whitespace-only repo segment is skipped like an empty one (k104), in every form.
+const k117Rows: Row[] = [
+  { spec: "https://host/X.TAR.GZ", kind: "url", value: "https://host/X.TAR.GZ", name: "host" },
+  { spec: "https://host/x.TGZ", kind: "url", value: "https://host/x.TGZ", name: "host" },
+  { spec: "HTTPS://Host/X.Tar.Gz", kind: "url", value: "https://Host/X.Tar.Gz", name: "host" },
+  { spec: "git@host.example:team/X.TGZ", kind: "url", value: "git@host.example:team/X.TGZ", name: "team" },
+  { spec: "github:Getty/ /x", kind: "git", value: "https://github.com/Getty/x", name: "x" },
+  { spec: "github:Getty/ /", kind: "git", value: "https://github.com/Getty/skills", name: "getty" },
+  { spec: "Getty/ /karr", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "Getty/\t/", kind: "git", value: "https://github.com/Getty/skills", name: "getty" },
+  { spec: "github.com/Getty/ /karr", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "gitlab.com/u/ /r", kind: "git", value: "https://gitlab.com/u/r", name: "r" },
+];
+
+const allRows = [...rows, ...k101Rows, ...k104Rows, ...k109Rows, ...k109Pinned, ...k117Pinned, ...k117Rows];
+
+for (const row of allRows) {
   test(`resolves ${row.spec}`, () => {
     const r = resolveSpec(row.spec, noProbe);
     assert.equal(r.kind, row.kind, "kind");
@@ -258,6 +302,57 @@ test("k111: an empty spec or a blank owner is a SpecError, never https://github.
   }
 });
 
+/** Assert `spec` is a SpecError with exactly `message`, the probe never called. */
+function refused(spec: string, message: string): void {
+  assert.throws(() => resolveSpec(spec, noProbe), (e: unknown) => {
+    assert.ok(e instanceof SpecError, `${JSON.stringify(spec)}: ${String(e)}`);
+    assert.equal((e as Error).message, message);
+    return true;
+  });
+}
+
+// k117: resolveSpec stored shorthands no forge can serve and probed a typo. A GitHub owner or
+// repo took any character (`github:gitlab:u` -> https://github.com/gitlab:u/skills, `Getty/re:po`,
+// `@`, `a b`, `github: Getty`), so did a known forge's (`gitlab.com/a b/r`); a colon after a
+// dotted host was a port whatever followed (`github.com:Getty/karr` probed as
+// https://github.com:Getty/karr). Asserts: each is a SpecError naming the spec and the offending
+// segment or port, never probed – a GitHub owner of ASCII letters, digits and "-" (github:,
+// owner[/repo], a bare owner, github.com/), a GitHub repo of those and "." "_"; another known
+// forge's owner or repo only without whitespace, control characters, ":" and "@"; a port of digits.
+test("k117: an owner, repo or port no forge takes is a SpecError, never stored, never probed", () => {
+  const owner = (seg: string) => `GitHub owner "${seg}" may only contain ASCII letters, digits and "-"`;
+  const repo = (seg: string) => `GitHub repo "${seg}" may only contain ASCII letters, digits, ".", "_" and "-"`;
+  const github: [string, string][] = [
+    ["github:gitlab:u", owner("gitlab:u")], ["GitHub:HTTPS://x", owner("HTTPS:")], // (1)
+    ["Getty/re:po", repo("re:po")], ["github:Getty/re:po", repo("re:po")], // (2)
+    ["@", owner("@")], ["@/karr", owner("@")], // (6)
+    ["a b", owner("a b")], ["a b/karr", owner("a b")], ["github: Getty", owner(" Getty")], // (7)
+    ["___", owner("___")], ["Gétty/karr", owner("Gétty")], ["github.com/a_b/r", owner("a_b")],
+    ["github:Getty/re po", repo("re po")], ["github.com/Getty/re@po", repo("re@po")], ["GitHub.com/u/r!", repo("r!")],
+  ];
+  for (const [spec, why] of github) refused(spec, `cannot resolve "${spec}": ${why}; ${forms}`);
+
+  const lenient = (host: string, what: string, seg: string) =>
+    `${host} ${what} "${seg}" must not contain whitespace, control characters, ":" or "@"`;
+  const forge: [string, string][] = [
+    ["gitlab.com/a b/r", lenient("gitlab.com", "owner", "a b")],
+    ["codeberg.org/u:x/r", lenient("codeberg.org", "owner", "u:x")],
+    ["hf.co/u/re@po", lenient("hf.co", "repo", "re@po")],
+    ["huggingface.co/u/r\x01", lenient("huggingface.co", "repo", "r\x01")],
+    ["GitLab.com/u/re po", lenient("GitLab.com", "repo", "re po")],
+  ];
+  for (const [spec, why] of forge) refused(spec, `cannot resolve "${spec}": ${why}; ${forms}`);
+
+  const ports: [string, string, string][] = [ // (3)
+    ["github.com:Getty/karr", "Getty", "github.com"], ["gitlab.com:u/r", "u", "gitlab.com"],
+    ["host.tld:/x", "", "host.tld"], ["mydir.com:80a/x", "80a", "mydir.com"], ["mydir.com:x", "x", "mydir.com"],
+    ["gitlab:u.x/r", "u.x", "gitlab"],
+  ];
+  for (const [spec, port, host] of ports) {
+    refused(spec, `cannot resolve "${spec}": port "${port}" of ${host} is not a number; ${forms}`);
+  }
+});
+
 test("known forges are never probed", () => {
   // noProbe throws if called; these must resolve without it.
   assert.doesNotThrow(() => resolveSpec("github.com/user", noProbe));
@@ -271,10 +366,11 @@ test("known forges are never probed", () => {
 // derives "source" (a probe that says git for the generic host).
 test('k95: a derived name is always a valid source name; one normalization empties is "source"', () => {
   const SOURCE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-  for (const row of [...rows, ...k101Rows, ...k104Rows, ...k109Rows, ...k109Pinned]) {
+  for (const row of allRows) {
     assert.match(resolveSpec(row.spec, noProbe).derivedName, SOURCE_NAME, row.spec);
   }
-  const empties = ["/", "~", "~/", "./", "../", "/tmp/日本", "./___", "___", "github:___", "github.com/___",
+  // "___" is no GitHub owner since k117 (the k117 test asserts its error); "---" is one.
+  const empties = ["/", "~", "~/", "./", "../", "/tmp/日本", "./___", "github:---", "github.com/---",
     "gitlab.com/___/skills", "https://example.com/___/___", "git@host:___.git",
     "git@host:___/x.tar.gz", "file:///", "file:///x.tar.gz", "日本.__/x"];
   for (const spec of empties) {
