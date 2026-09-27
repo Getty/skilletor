@@ -3,6 +3,7 @@
 // Resolution happens once, at add time; the config always stores the explicit
 // form. Known forges resolve without any network access; only truly generic
 // hosts are probed, via an injected `probe` (never by hooks).
+import { isSourceName } from "./config.ts";
 
 export type SourceKind = "git" | "url" | "local";
 
@@ -26,6 +27,8 @@ export class SpecError extends Error {
 
 const KNOWN_FORGES = ["github.com", "gitlab.com", "codeberg.org", "hf.co", "huggingface.co"];
 const DEFAULT_REPO = "skills";
+/** The derived name of a spec normalization leaves nothing of (`/`, `~`, `~/日本`) (k95). */
+const FALLBACK_NAME = "source";
 
 /** Lowercase and reduce to [a-z0-9-]. */
 function normalizeName(raw: string): string {
@@ -91,7 +94,14 @@ function nameFromUrl(spec: string, kind: SourceKind): string {
   }
 }
 
+/** Resolve a spec; its derived name is always a valid source name (spec §3), since config
+ *  load refuses any other (k95). */
 export function resolveSpec(spec: string, probe: Probe): ResolvedSpec {
+  const r = resolveAddress(spec, probe);
+  return isSourceName(r.derivedName) ? r : { ...r, derivedName: FALLBACK_NAME };
+}
+
+function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
   const s = spec.trim();
 
   // 0. An address kept verbatim below would reach git as an option (k85).

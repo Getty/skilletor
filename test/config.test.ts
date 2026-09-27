@@ -413,6 +413,55 @@ test('k88: an empty git, ref or local is refused, naming file, source and key; n
   }
 });
 
+// k95: a source name reaches lock entries, state keys (trust.json, sources-read.json) and
+// `name@source` specs, yet any key under `sources` loaded – control characters, spaces,
+// slashes. The rule (maintainer, 2026-09-27) is the bundle prompt's pattern. Asserts: in each
+// of the three files a name outside ^[A-Za-z0-9][A-Za-z0-9._-]*$ is a ConfigError naming the
+// file and the name as JSON – no raw C0 control in the message – checked before the source's
+// own fields (the `x` key would be an error too, printing the name raw).
+test("k95: a source name outside the pattern is refused in each file, naming the file and the name as JSON", () => {
+  const bad = ["", " team", "team ", "team x", "a/b", "../up", ".hidden", "-x", "_x", "team\u0007", "a\nb",
+    "\u001b[31mred", "t‮am", "tëam", "a@b", "a:b", "a*", "__proto__"];
+  const files = ["user", "project", "local"] as const;
+  for (const [i, name] of bad.entries()) {
+    const file = files[i % files.length]!;
+    const { home, projectDir, cleanup } = setup({ [file]: { sources: { [name]: { git: "https://example.com/s", x: 1 } } } });
+    try {
+      assert.throws(() => loadConfig({ home, projectDir }), (e: unknown) => {
+        assert.ok(e instanceof ConfigError, String(e));
+        const msg = (e as Error).message;
+        assert.equal(msg, `${configPath(file, home, projectDir)}: source name ${JSON.stringify(name)} is not valid ` +
+          `(ASCII letters, digits, ".", "_" and "-", starting with a letter or digit)`);
+        assert.doesNotMatch(msg, /[\x00-\x1f\x7f]/);
+        return true;
+      });
+    } finally {
+      cleanup();
+    }
+  }
+});
+
+// k95: the rule's other side. Asserts: names inside the pattern – a digit first, dots,
+// underscores, dashes, `..` inside – load from every file, and `name@source` resolves them.
+test("k95: source names inside the pattern load and can be referenced", () => {
+  const good = ["a", "Z", "0", "team", "Team.X", "my_src", "a-b", "peter-2", "v1.2", "a..b", "x_", "9-.x"];
+  const files = ["user", "project", "local"] as const;
+  for (const [i, name] of good.entries()) {
+    const file = files[i % files.length]!;
+    const { home, projectDir, cleanup } = setup({
+      [file]: { sources: { [name]: { git: "https://example.com/s" } }, install: { skills: [`foo@${name}`] } },
+    });
+    try {
+      const cfg = loadConfig({ home, projectDir });
+      assert.equal(cfg.sources.get(name)?.git, "https://example.com/s");
+      const items = file === "user" ? cfg.user.install : cfg.project!.install;
+      assert.deepEqual(items.map((it) => it.source), [name]);
+    } finally {
+      cleanup();
+    }
+  }
+});
+
 test("source with no kind is rejected", () => {
   const { home, projectDir, cleanup } = setup({
     user: { sources: { empty: {} } },

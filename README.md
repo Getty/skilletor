@@ -135,6 +135,9 @@ for (`claude`, `codex`) — see [Codex](#codex).
 A source's `git`, `ref` or `local`, when present, must be a non-empty string (omit `ref`
 for the remote's HEAD, never `""`), and `url` an `https://` URL. Anything else is a config
 error naming the file, the source and the key — never a field quietly read as absent.
+A source's name — its key under `sources` — is ASCII letters, digits, `.`, `_` and `-`,
+starting with a letter or digit; any other name is a config error naming the file and the
+name, and `skilletor add` refuses it before writing anything.
 
 `skilletor uninstall` removes explicit entries from one config — the user config, or the
 project config with `--project`. `rule:k8s@shared` removes only from `rules`;

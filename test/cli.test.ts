@@ -603,7 +603,8 @@ const SHOWN = "\\u001b[31mred\\u0007\\u202eevil\\nnext";
 /** A character no output line carries raw (a tab may; a newline only between lines). */
 const RAW = /(?![\t\n])[\p{Cc}\p{Bidi_Control}\u200b\u2028\u2029\u2060\ufeff]/u;
 
-/** A home, a project whose config (a cloned repo) declares a source named and placed with EVIL. */
+/** A home, a project whose config (a cloned repo) declares a source placed with EVIL. Its name
+ *  is plain: one with EVIL is a config error since k95 (the next test). */
 function evilProject(tag: string) {
   const home = join(tmp.dir, `${tag}-home`);
   const proj = join(tmp.dir, `${tag}-proj`);
@@ -611,49 +612,53 @@ function evilProject(tag: string) {
   mkdirSync(join(home, ".claude"), { recursive: true });
   mkdirSync(join(proj, ".claude"), { recursive: true });
   writeFileSync(join(proj, ".claude", "skilletor.json"), JSON.stringify({
-    sources: { [`team${EVIL}`]: { local: payload + EVIL } },
-    install: { skills: [`foo@team${EVIL}`] },
+    sources: { team: { local: payload + EVIL } },
+    install: { skills: ["foo@team"] },
   }));
   return { home, proj, payload, env: claudeOnlyEnv(home), common: ["--project-dir", proj] };
 }
 
-// Asserts: `status`, `source list` and `trust` name an untrusted project source whose name and
-// address carry EVIL escaped, each on its one line, nothing raw; `status --json` carries it
-// escaped too, and parses back to the very name and address (JSON's own escapes).
-test("k87: status, source list and trust show a project source's name and address escaped", () => {
+// Asserts: `status`, `source list` and `trust` name an untrusted project source whose address
+// carries EVIL escaped, each on its one line, nothing raw; `status --json` carries it escaped
+// too, and parses back to the very address (JSON's own escapes).
+test("k87: status, source list and trust show a project source's address escaped", () => {
   const p = evilProject("k87-status");
   const st = runCli(["status", "--scope", "project", ...p.common], p.env);
   assert.equal(st.status, 0, st.stderr);
   assert.doesNotMatch(st.stdout, RAW);
-  assert.ok(st.stdout.split("\n").includes(`  trust: team${SHOWN} (local ${p.payload}${SHOWN})`), st.stdout);
+  assert.ok(st.stdout.split("\n").includes(`  trust: team (local ${p.payload}${SHOWN})`), st.stdout);
 
   const json = runCli(["status", "--scope", "project", "--json", ...p.common], p.env);
   assert.equal(json.status, 0, json.stderr);
   assert.doesNotMatch(json.stdout, RAW);
-  assert.ok(json.stdout.includes(`"name": "team${SHOWN}"`), json.stdout);
-  assert.deepEqual(JSON.parse(json.stdout).scopes[0].trustRequests, [{ name: `team${EVIL}`, kind: "local", url: p.payload + EVIL }]);
+  assert.ok(json.stdout.includes(`"url": "${p.payload}${SHOWN}"`), json.stdout);
+  assert.deepEqual(JSON.parse(json.stdout).scopes[0].trustRequests, [{ name: "team", kind: "local", url: p.payload + EVIL }]);
 
   const list = runCli(["source", "list", ...p.common], p.env);
   assert.equal(list.status, 0, list.stderr);
-  assert.equal(list.stdout, `team${SHOWN} [project] {"local":"${p.payload}${SHOWN}"}\n`);
+  assert.equal(list.stdout, `team [project] {"local":"${p.payload}${SHOWN}"}\n`);
 
-  const trust = runCli(["trust", `team${EVIL}`, ...p.common], p.env);
+  const trust = runCli(["trust", "team", ...p.common], p.env);
   assert.equal(trust.status, 0, trust.stderr);
-  assert.equal(trust.stdout, `trusted source team${SHOWN} (local ${p.payload}${SHOWN})\n`);
+  assert.equal(trust.stdout, `trusted source team (local ${p.payload}${SHOWN})\n`);
 });
 
-// Asserts: a config error naming such a source is one escaped line on sync's and check's
-// stderr, and the SessionStart hook through the binary gives that line as its systemMessage;
-// an error thrown for an unknown source of that name shows no raw escape, BEL or override.
+// Asserts: a source name with EVIL – a config error (k95), found before the source's unknown
+// key – is one escaped line on sync's and check's stderr, nothing changed, and the SessionStart
+// hook through the binary gives that line as its systemMessage; an error thrown for an unknown
+// source of that name shows no raw escape, BEL or override.
 test("k87: a config error or a failed command naming such a source is escaped on stderr and in the hook", () => {
   const p = evilProject("k87-error");
   const cfg = join(p.proj, ".claude", "skilletor.json");
   writeFileSync(cfg, JSON.stringify({ sources: { [`team${EVIL}`]: { local: "/src", x: 1 } } }));
-  const problem = `${cfg}: sources.team${SHOWN}: unknown key "x"`;
+  const problem = `${cfg}: source name "team${SHOWN}" is not valid ` +
+    `(ASCII letters, digits, ".", "_" and "-", starting with a letter or digit)`;
 
   const sy = runCli(["sync", ...p.common], p.env);
   assert.equal(sy.status, 2);
   assert.equal(sy.stderr, `skilletor: config error, nothing changed — ${problem}\n`);
+  assert.equal(existsSync(join(p.proj, ".claude", "skilletor.lock.json")), false, "nothing written");
+  assert.equal(existsSync(join(p.home, ".claude", "skilletor.lock.json")), false, "nothing written");
   const ch = runCli(["check", ...p.common], p.env);
   assert.equal(ch.status, 2);
   assert.equal(ch.stderr, `skilletor: ${problem}\n`);

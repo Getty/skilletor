@@ -26,6 +26,16 @@ export class ConfigError extends Error {
   override name = "ConfigError";
 }
 
+/** A source name – the key under `sources` (spec §3, k95). It reaches lock entries, state keys
+ *  and `name@source` specs, so config load, `add` and the bundle prompt all hold it to this. */
+const SOURCE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/** SOURCE_NAME in words, for error messages. */
+export const SOURCE_NAME_RULE = 'ASCII letters, digits, ".", "_" and "-", starting with a letter or digit';
+
+export function isSourceName(name: string): boolean {
+  return SOURCE_NAME.test(name);
+}
+
 /** Which config file a source field came from: `user` for the user config and
  *  `skilletor.local.json` (both written by the user), `project` for the project's
  *  committed `skilletor.json` (spec §3, merging sources). */
@@ -160,6 +170,9 @@ function parseSources(obj: Json, path: string, origin: Origin): Map<string, Reso
   const sources = new Map<string, ResolvedSource>();
   const raw = asObject(obj.sources, path, "sources");
   for (const [name, def] of Object.entries(raw)) {
+    if (!isSourceName(name)) {
+      throw new ConfigError(`${path}: source name ${JSON.stringify(name)} is not valid (${SOURCE_NAME_RULE})`);
+    }
     const d = asObject(def, path, `sources.${name}`);
     for (const key of Object.keys(d)) {
       if (!SOURCE_KEYS.has(key)) {

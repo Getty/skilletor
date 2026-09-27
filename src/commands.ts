@@ -3,9 +3,9 @@
 // config.ts so the declarative config stays the single source of truth.
 import { dirname, join } from "node:path";
 import {
-  addBundleEntry, addInstallEntry, addSource, bundleEntries, findInstallEntries, findWildcardEntries, loadConfig,
-  removeBundleEntries, removeInstallEntries, removeSource, sourceEntry, WILDCARD, type BackendKind, type ItemType,
-  type LoadedConfig, type Origin, type SourceDef,
+  addBundleEntry, addInstallEntry, addSource, bundleEntries, findInstallEntries, findWildcardEntries, isSourceName,
+  loadConfig, removeBundleEntries, removeInstallEntries, removeSource, SOURCE_NAME_RULE, sourceEntry, WILDCARD,
+  type BackendKind, type ItemType, type LoadedConfig, type Origin, type SourceDef,
 } from "./config.ts";
 import { BundleError, expandBundle, matchesPattern, sameIdentity, type ForeignEntry } from "./bundles.ts";
 import { resolveSpec, type Probe, type ResolvedSpec } from "./spec.ts";
@@ -66,11 +66,15 @@ const TYPE_DIR: Record<ItemType, string> = { skill: "skills", agent: "agents", r
  * config already has keeps its entry untouched (ref, local override and all) when the entry
  * has the same backend and address – still trusted and synced, `kept` set – and is an error,
  * before anything is written or trusted, when it has another one. Only that file counts.
+ * A name config load would refuse (k95) is refused first, before the spec is resolved.
  */
 export async function cmdAdd(
   ctx: CommandContext,
   args: { name?: string; spec: string; project?: boolean },
 ): Promise<{ name: string; def: SourceDef; kept: boolean; report: SyncReport }> {
+  if (args.name !== undefined && !isSourceName(args.name)) {
+    throw new CommandError(`source name ${JSON.stringify(args.name)} is not valid (${SOURCE_NAME_RULE}); nothing was changed`);
+  }
   const path = configPath(ctx, Boolean(args.project));
   const resolved = resolveSpec(args.spec, ctx.probe ?? makeProbe());
   const name = args.name ?? resolved.derivedName;
@@ -355,7 +359,7 @@ async function missingSources(
       const answer = (await ctx.prompt.ask(note + question)).trim();
       if (/^(n|no)$/i.test(answer)) break;
       const name = answer || fallback;
-      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+      if (!isSourceName(name)) {
         note = `"${name}" is not a valid source name. `;
         continue;
       }

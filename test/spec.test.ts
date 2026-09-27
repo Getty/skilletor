@@ -159,6 +159,24 @@ test("known forges are never probed", () => {
   assert.doesNotThrow(() => resolveSpec("gitlab.com/user/repo", noProbe));
 });
 
+// k95: a derived name becomes a config key, and config load refuses a source name outside
+// the pattern, so an `add` without a name – or a bundle prompt's default – must never produce
+// one. Normalization leaves nothing of a spec without an ASCII letter or digit where the name
+// comes from. Asserts: every table row derives a name inside the pattern, and each such spec
+// derives "source" (a probe that says git for the generic host).
+test('k95: a derived name is always a valid source name; one normalization empties is "source"', () => {
+  const SOURCE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+  for (const row of [...rows, ...k101Rows, ...k104Rows]) {
+    assert.match(resolveSpec(row.spec, noProbe).derivedName, SOURCE_NAME, row.spec);
+  }
+  const empties = ["/", "~", "~/", "./", "../", "/tmp/日本", "./___", "___", "github:___", "github.com/___",
+    "gitlab.com/___/skills", "https://example.com/___/___", "git@host:___.git",
+    "git@host:___/x.tar.gz", "file:///", "file:///x.tar.gz", "日本.__/x"];
+  for (const spec of empties) {
+    assert.equal(resolveSpec(spec, () => ({ git: true })).derivedName, "source", spec);
+  }
+});
+
 // k85: an explicit or scp-like address is stored verbatim, so `-oProxyCommand=…@host:repo`
 // would become a git address that reaches git as an option. Asserts: every spec starting with
 // "-" (after trimming) is a SpecError before anything else, the probe never called.

@@ -5820,6 +5820,11 @@ var WILDCARD = "*";
 var ConfigError = class extends Error {
   name = "ConfigError";
 };
+var SOURCE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+var SOURCE_NAME_RULE = 'ASCII letters, digits, ".", "_" and "-", starting with a letter or digit';
+function isSourceName(name) {
+  return SOURCE_NAME.test(name);
+}
 var BACKEND_KINDS = ["git", "url", "local"];
 var ALLOWED_KEYS = /* @__PURE__ */ new Set(["sources", "install", "vars", "gitignore", "checkInterval", "targets"]);
 var SOURCE_KEYS = /* @__PURE__ */ new Set(["git", "ref", "url", "local"]);
@@ -5863,6 +5868,9 @@ function parseSources(obj, path, origin) {
   const sources = /* @__PURE__ */ new Map();
   const raw = asObject(obj.sources, path, "sources");
   for (const [name, def] of Object.entries(raw)) {
+    if (!isSourceName(name)) {
+      throw new ConfigError(`${path}: source name ${JSON.stringify(name)} is not valid (${SOURCE_NAME_RULE})`);
+    }
     const d = asObject(def, path, `sources.${name}`);
     for (const key of Object.keys(d)) {
       if (!SOURCE_KEYS.has(key)) {
@@ -6632,6 +6640,7 @@ var SpecError = class extends Error {
 };
 var KNOWN_FORGES = ["github.com", "gitlab.com", "codeberg.org", "hf.co", "huggingface.co"];
 var DEFAULT_REPO = "skills";
+var FALLBACK_NAME = "source";
 function normalizeName(raw) {
   return raw.toLowerCase().replace(/\.git$/, "").replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
 }
@@ -6676,6 +6685,10 @@ function nameFromUrl(spec, kind) {
   }
 }
 function resolveSpec(spec, probe) {
+  const r = resolveAddress(spec, probe);
+  return isSourceName(r.derivedName) ? r : { ...r, derivedName: FALLBACK_NAME };
+}
+function resolveAddress(spec, probe) {
   const s = spec.trim();
   if (s.startsWith("-")) throw new SpecError(`cannot resolve "${spec}": a source must not start with "-"`);
   if (isLocal(s)) {
@@ -10196,6 +10209,9 @@ function load(ctx) {
 }
 var TYPE_DIR2 = { skill: "skills", agent: "agents", rule: "rules" };
 async function cmdAdd(ctx, args) {
+  if (args.name !== void 0 && !isSourceName(args.name)) {
+    throw new CommandError(`source name ${JSON.stringify(args.name)} is not valid (${SOURCE_NAME_RULE}); nothing was changed`);
+  }
   const path = configPath(ctx, Boolean(args.project));
   const resolved = resolveSpec(args.spec, ctx.probe ?? makeProbe());
   const name = args.name ?? resolved.derivedName;
@@ -10406,7 +10422,7 @@ ${lines.join("\n")}`
       const answer = (await ctx.prompt.ask(note + question)).trim();
       if (/^(n|no)$/i.test(answer)) break;
       const name = answer || fallback;
-      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+      if (!isSourceName(name)) {
         note = `"${name}" is not a valid source name. `;
         continue;
       }

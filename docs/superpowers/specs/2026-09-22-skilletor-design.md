@@ -73,6 +73,13 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
 - `ref` is optional (default: the remote's HEAD); a tag or commit pins it. A `git`, `ref` or
   `local` present must be a non-empty string (`url` an `https://` URL) – else a config error
   naming file, source and key, never a field read as absent (k88).
+- A source name – the key under `sources` – is ASCII letters, digits, `.`, `_` and `-`,
+  starting with a letter or digit (`^[A-Za-z0-9][A-Za-z0-9._-]*$`): it ends up in lock
+  entries, state keys (`trust.json`, `sources-read.json`) and `name@source` specs. Any other
+  name is a config error naming the file and the name as JSON, before the source's fields
+  are read (k95). The one rule holds everywhere a name is made: `add` refuses another name
+  before writing anything, the bundle prompt (§15.6) asks again, and a derived name (§4.2)
+  always fits.
 - `gitignore` (user or project/local, default `true`): see 6.4. In the user config it
   only switches the user-scope blocks off; a project's blocks follow the project/local value.
 - `checkInterval` (user only, seconds, default 1800 = 30 min): throttle for the
@@ -227,7 +234,10 @@ naming a repo other than the default gives the repo's name, `.git` stripped (`Ge
 segment); a default-repo spec gives the owner (`Getty`, `Getty/skills`,
 `https://github.com/Getty/skills` → `getty`; `gitlab.com/u/skills` → `u`); a probed generic
 host and a `url` give the hostname, a local path its directory name. The default repo name
-is `skills` everywhere. Names are stored, so an existing config keeps its names.
+is `skills` everywhere. A spec that leaves nothing that way (`/`, `~`, a directory or repo
+named without an ASCII letter or digit) gives `source` (k95). A `[name]` given must be a
+valid source name (§3), else `add` fails before resolving the spec. Names are stored, so an
+existing config keeps its names.
 
 **`add` never replaces a source** (k101). Only the config `add` writes to is checked. If it
 already has a source by that name with the same backend and address (`git`/`url` compared as
@@ -1296,7 +1306,8 @@ errors (§15.4).
   whatever its address (a user `local` override of a project's source included), or when any
   configured source (all files merged, §3) holds it with a different identity. A taken
   derived name makes `<name>-2` (`-3`, …) the default, a typed one is refused and asked
-  again; without a TTY the printed command uses that default.
+  again; without a TTY the printed command uses that default. A typed name that is not a
+  valid source name (§3) is refused and asked again too.
 - **Project-declared sources:** a source that exists only in the project config and is not
   trusted yet counts as present but untrusted – the usual trust request applies (§4.3).
 - Nested `bundles` stay bare (this source only).

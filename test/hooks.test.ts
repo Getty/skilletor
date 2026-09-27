@@ -868,24 +868,25 @@ function assertDisplaySafe(out: HookOutput): void {
   assert.doesNotMatch(out.hookSpecificOutput?.additionalContext ?? "", RAW);
 }
 
-// Asserts: a cloned project config that declares a source whose name and local path carry
-// EVIL gets its trust request into the context escaped – name, address and the command to
-// run – on one line, the systemMessage counting it; nothing raw reaches the output.
+// Asserts: a cloned project config that declares a source whose local path carries EVIL gets
+// its trust request into the context escaped – the address, beside the name and the command to
+// run – on one line, the systemMessage counting it; nothing raw reaches the output. (A name
+// with EVIL is a config error since k95: the next test.)
 test("k87: session-start names an untrusted project source escaped, on one context line", async () => {
   const e = env();
   try {
     e.writeUserCfg({});
     const payload = join(e.tmp.dir, "payload");
     writeFileSync(join(e.projectDir, ".claude/skilletor.json"), JSON.stringify({
-      sources: { [`team${EVIL}`]: { local: payload + EVIL } },
-      install: { skills: [`foo@team${EVIL}`] },
+      sources: { team: { local: payload + EVIL } },
+      install: { skills: ["foo@team"] },
     }));
     const out = await runHook("session-start", { source: "startup" }, e.ctx);
     assertDisplaySafe(out);
     assert.match(out.systemMessage ?? "", /^skilletor: 1 warning\(s\)/);
     const lines = (out.hookSpecificOutput?.additionalContext ?? "").split("\n");
     assert.ok(
-      lines.includes(`- untrusted source team${SHOWN} (local ${payload}${SHOWN}); run: skilletor trust team${SHOWN}`),
+      lines.includes(`- untrusted source team (local ${payload}${SHOWN}); run: skilletor trust team`),
       lines.join("\n"),
     );
   } finally {
@@ -893,9 +894,9 @@ test("k87: session-start names an untrusted project source escaped, on one conte
   }
 });
 
-// Asserts: a config error naming such a source – the warning SessionStart gives in one line –
-// is that one line with EVIL escaped, and the background sync's report the next prompt
-// delivers is the same line.
+// Asserts: a source name with EVIL – a config error (k95), found before the source's unknown
+// key; the warning SessionStart gives in one line – is that one line with EVIL escaped, and the
+// background sync's report the next prompt delivers is the same line.
 test("k87: a config error naming such a source is one escaped warning line, now and on the next prompt", async () => {
   const e = env();
   try {
@@ -903,7 +904,10 @@ test("k87: a config error naming such a source is one escaped warning line, now 
     const cfg = join(e.projectDir, ".claude/skilletor.json");
     writeFileSync(cfg, JSON.stringify({ sources: { [`team${EVIL}`]: { local: "/src", x: 1 } } }));
     const out = await runHook("session-start", { source: "startup" }, e.ctx);
-    assert.deepEqual(out, { systemMessage: `skilletor: ${cfg}: sources.team${SHOWN}: unknown key "x"` });
+    assert.deepEqual(out, {
+      systemMessage: `skilletor: ${cfg}: source name "team${SHOWN}" is not valid ` +
+        `(ASCII letters, digits, ".", "_" and "-", starting with a letter or digit)`,
+    });
     await runHook("__sync-background", {}, e.ctx);
     const delivered = await runHook("user-prompt-submit", {}, e.ctx);
     assert.equal(delivered.systemMessage, out.systemMessage);

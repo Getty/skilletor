@@ -161,6 +161,50 @@ test("k101: add with a name another address holds fails, config byte-identical, 
   }
 });
 
+// k95: config load refuses a source name outside ^[A-Za-z0-9][A-Za-z0-9._-]*$, so `add` must
+// not write one. Asserts: an explicit name outside the pattern is a CommandError naming it as
+// JSON, raised before the spec is resolved (the probe would throw) – neither config file is
+// created, nothing is trusted.
+test("k95: add refuses an explicit name outside the pattern before resolving or writing anything", async () => {
+  const e = env();
+  try {
+    const projPath = join(e.projectDir, ".claude/skilletor.json");
+    for (const [i, name] of ["a b", "../x", ".x", "-x", "team\u0007", "a/b", ""].entries()) {
+      await assert.rejects(() => cmdAdd(e.ctx, { name, spec: "host.tld", project: i % 2 === 1 }), (err: unknown) => {
+        assert.ok(err instanceof CommandError, String(err));
+        assert.equal((err as Error).message, `source name ${JSON.stringify(name)} is not valid ` +
+          `(ASCII letters, digits, ".", "_" and "-", starting with a letter or digit); nothing was changed`);
+        return true;
+      });
+    }
+    assert.equal(existsSync(e.userCfgPath), false, "no user config");
+    assert.equal(existsSync(projPath), false, "no project config");
+    assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k95: a directory whose name has no ASCII letter or digit derived "" – written as the
+// source's key, which config load now refuses. Asserts: `add` without a name stores the
+// fallback "source", and the sync it runs loads that config and installs from it.
+test("k95: add without a name derives a valid one even from a directory named without ASCII", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "日本", (d) => skill(d, "foo"));
+    const res = await cmdAdd(e.ctx, { spec: src });
+    assert.equal(res.name, "source");
+    assert.deepEqual(e.readUserCfg().sources, { source: { local: src } });
+    assert.equal(res.report.error, undefined);
+    e.writeUserCfg({ ...e.readUserCfg(), install: { skills: ["foo@source"] } });
+    const r = await sync(e.ctx);
+    assert.equal(r.error, undefined);
+    assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`), ["skills/foo@source"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("install adds the entry with an auto-detected type and syncs", async () => {
   const e = env();
   try {
@@ -992,6 +1036,52 @@ test("k102: install bundle never proposes or writes over a name its target confi
     assert.equal(readFileSync(projPath, "utf8"), projRaw);
     assert.equal(new State(e.ctx.stateRoot).isTrusted("peter-2", { kind: "git", address: url, origin: "project" }), true);
     assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`), ["rules/p-one@peter-2"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k95: the prompt and config load share one rule. This pins the prompt side: a name config
+// load would refuse is refused and asked again, and the name it takes loads. Asserts: "a b"
+// and "_x" each get the note and the question again, "ok.name" is added and the sync installs
+// from it without a config error.
+test("k95: the bundle prompt refuses what config load refuses and takes what it loads", async () => {
+  const e = env();
+  try {
+    const url = gitRepo(e.tmp.dir, "peter", ["p-one"]);
+    const src = makeSource(e.tmp.dir, "s", (d) => bundleFile(d, "perl", `description: P\nrules: [p-one@${url}]\n`));
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    const a = answers("a b", "_x", "ok.name");
+    const r = await cmdInstall({ ...e.ctx, prompt: a.prompt }, { items: ["bundle:perl@mine"] });
+    const question = `bundle perl needs a source you don't have yet: ${url} → ${url} — add it as [peter]? (name, or n to skip)`;
+    assert.deepEqual(a.questions, [
+      question,
+      `"a b" is not a valid source name. ${question}`,
+      `"_x" is not a valid source name. ${question}`,
+    ]);
+    assert.deepEqual(e.readUserCfg().sources, { mine: { local: src }, "ok.name": { git: url } });
+    assert.equal(r.error, undefined);
+    assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`), ["rules/p-one@ok.name"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k95: a bundle entry's address with no ASCII letter or digit in its name part derived "",
+// so without a TTY the printed command was `skilletor add  ___` – a spec where the name goes.
+// Asserts: the printed command names the fallback "source", config untouched.
+test("k95: install bundle without a TTY prints a valid derived name for any address", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => bundleFile(d, "perl", "description: P\nrules: [x@___]\n"));
+    const cfg = { sources: { mine: { local: src } } };
+    e.writeUserCfg(cfg);
+    await assert.rejects(() => cmdInstall(e.ctx, { items: ["bundle:perl@mine"] }), (err: unknown) => {
+      assert.ok(err instanceof CommandError, String(err));
+      assert.ok((err as Error).message.split("\n").includes("  skilletor add source ___"), (err as Error).message);
+      return true;
+    });
+    assert.deepEqual(e.readUserCfg(), cfg);
   } finally {
     e.cleanup();
   }
