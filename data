@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-09-27T03:24:37Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T03:24:29Z
+created: 2026-09-27T01:09:52Z
+id: 110
+priority: medium
+started: 2026-09-27T03:01:48Z
+status: done
+tags:
+- add
+- bug
+title: 'add: a non-https url source (http://, file://) is written although config
+  load refuses it'
+updated: 2026-09-27T03:24:37Z
+---
+
+Found during k95 (worker). `skilletor add http://host/x.tar.gz` (and `file:///x.tar.gz`) writes a `url` source that config load rejects (url must be https://). The follow-up sync then fails with a config error, add still exits 0 (see k103), and the user is left with a broken config that breaks every later sync. Expected: add validates the source def with the same rules config load applies, before writing anything, and refuses (exit 1, config byte-identical).
+
+2026-09-27 01:27 From k103 (worker): since k103 this case exits 2 and says the edit was saved. But once the bad url is written, `skilletor source remove web` exits 1 because it loads and checks the whole config first – the CLI cannot undo the damage, only a hand edit can. The fix here (validate before writing) prevents it; consider whether source remove should tolerate a config error in the entry it removes.
+
+2026-09-27 03:17 Cause: cmdAdd writes {url: resolved.value} unchecked; resolveSpec keeps any scheme verbatim and makes .tar.gz/.tgz a url, so http://, file://, ftp://, ssh:// and scp-like git@host:x.tar.gz all resolve to a url config load refuses (only these: every git/local value resolveSpec builds already loads). missingSources (install bundle prompt) builds {url: f.url} from the same resolveSpec, so a bundle entry x@http://host/x.tar.gz hits it too. Plan: extract config.ts's per-source checks into one exported function used by parseSources, cmdAdd (before sourceEntry/trust) and missingSources (before any question); tests first.
+
+2026-09-27 03:21 Red first: 3 new tests (commands.test.ts k110 add + k110 install bundle, cli.test.ts k110 real binary) failed as the card says (CLI: 'added source host', exit 2; install printed 'skilletor add host http://host/x.tar.gz'). Fix: config.ts sourceFields(def, at) is now the one per-source check parseSources uses; commands.ts loadRefusal() runs it in cmdAdd before sourceEntry/trust and in missingSources before any question. The 3 tests are green; the full suite is waiting on loadguard (memory pressure).
+
+2026-09-27 03:22 Done. config.ts: new exported sourceFields(def, at): parseSources' per-source checks (object, keys, git/ref/local k85/k88, url https-only, needs one of) moved there unchanged, stringField/gitField take the prefix 'at'; the url message now quotes the value like the k88 ones (sources.x.url "http://…" must be an https:// URL). commands.ts: loadRefusal(name, def) runs sourceFields; cmdAdd refuses before sourceEntry/trust ('cannot add <spec>: sources.<name>.url "…" must be an https:// URL; nothing was changed', exit 1), also for a hand-written entry with that same address (k101 keep path no longer trusts it); missingSources refuses before any question or printed add command ('bundle <b> needs <spec>, which cannot be added as a source: …'). Docs: spec §4.2 new paragraph, §15.6 one sentence, README one sentence. Tests: commands.test.ts 'k110: add refuses …' + 'k110: install bundle refuses …', cli.test.ts 'k110: add of an http:// or file:// tarball exits 1 …'. Verified: typecheck ok; npm test 735/735 pass, 0 fail/skip; build ok; check-dist up to date; hand run of bin/skilletor in a temp HOME/CODEX_HOME: http:// exits 1 with no config created, https:// tarball added.
+
+2026-09-27 03:22 Also found (not fixed, for the dispatcher): (1) resolveSpec's hasScheme is case-sensitive, so 'HTTPS://host/x.tar.gz' resolves to git https://github.com/HTTPS:/host (derived name 'host'), silently wrong; skilletor board. (2) A declared bundle whose foreign entry is a non-https tarball (a hand edit, or upstream changing the bundle later) gets the sync warning 'run skilletor install bundle:…', which now refuses; maybe §15.4 should make such an address a bundle error, like a generic host without https://; skilletor board. (3) k101 keep path: an existing entry with the same address but another field load refuses (hand-written ref "" or '-x') is still kept, trusted and synced, so exit 2 with sync's message. Hand-edit only; low. source remove (note 2): after this card a bad url entry needs a hand edit or a pre-fix release (v0.4.1 can write one). Load's error names file, source and key, so the hand fix is guided. Low priority; a tolerant source remove is only worth a card if pre-fix users show up.
+
+2026-09-27 03:24 Committed 287a53e: add: refuse a non-https url source before writing (k110)
