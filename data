@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-27T01:10:51Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T01:10:46Z
+created: 2026-09-26T17:48:43Z
+id: 95
+priority: low
+started: 2026-09-27T00:29:03Z
+status: done
+tags:
+- config
+title: 'config: a source name may contain control characters and anything else'
+updated: 2026-09-27T01:10:51Z
+---
+
+Found during k87 (worker). config.ts accepts any source name (the key under `sources`), control characters, spaces and slashes included, while the bundle-source prompt enforces ^[A-Za-z0-9][A-Za-z0-9._-]*$ and item specs `name@source` need a parseable name. Since k87 such names are displayed escaped, but they still flow into lock entries, state keys (trust.json, sources-read.json) and `name@source` specs. Design decision: reject names outside the bundle-prompt pattern at config load (breaks configs that use odd names – check README/spec for what names are documented; maybe warn first for one release), or accept and keep escaping. Tests in test/config.test.ts.
+
+2026-09-27 00:28 Decision (maintainer, 2026-09-27): reject at config load. A source name outside ^[A-Za-z0-9][A-Za-z0-9._-]*$ (the bundle-prompt pattern) is a config error; nothing touched. Document in spec §3.
+
+2026-09-27 01:08 Done (worker): one rule, src/config.ts isSourceName() + SOURCE_NAME_RULE over ^[A-Za-z0-9][A-Za-z0-9._-]*$. parseSources checks each name first (before its fields), so any file with another name is a ConfigError '<file>: source name <JSON> is not valid (ASCII letters, digits, ".", "_" and "-", starting with a letter or digit)'; the existing config-error path prints it escaped, nothing touched, hook exit 0. commands.ts: cmdAdd refuses an invalid explicit name before resolving the spec (no probe) or writing/trusting anything; the bundle prompt uses isSourceName instead of its own regex copy. spec.ts: normalizeName could yield "" (/, ~, ./, a dir or repo without ASCII letter/digit such as ~/日本, ___, git@host:___.git, file:///); resolveSpec now falls back to derivedName "source" whenever the derived name fails isSourceName, so add and the bundle suggestion (was 'skilletor add  ___') always get a valid one. Docs: spec §3 bullet (rule, where names flow, k95), §4.2 fallback + explicit-name check, §15.6 prompt line; README source-fields paragraph. No documented example uses a name the rule rejects (README, skills/skilletor/SKILL.md + references, spec checked). Tests: config.test.ts (bad names in all 3 files, exact message, no raw C0; good names load + referenceable), spec.test.ts (all table rows derive valid names; 17 empty-normalizing specs give 'source'), commands.test.ts (add invalid name: CommandError before probe, no config, no trust.json; add from dir '日本' -> 'source' and syncs; prompt refuses 'a b'/'_x', takes 'ok.name' which loads; no-TTY bundle prints 'skilletor add source ___'). Adapted 4 k87 tests (cli.test.ts x2, hooks.test.ts x2) that put EVIL into a source NAME: those configs are now a k95 config error; the address-escaping claims keep EVIL in the local path, the config-error claims now expect the k95 message (escaped). Verified: typecheck ok; npm test 724/724 pass; build ok; check-dist up to date; hand test with temp HOME/CODEX_HOME (sync exit 2 escaped, hook exit 0, add 'a b' exit 1 config untouched).
+
+2026-09-27 01:08 Also found (not fixed, for the dispatcher to decide / file on this board): (1) 'skilletor add http://host/x.tar.gz' (and file:///x.tar.gz) writes a non-https url source, then the sync fails the config (url must be https) and add still exits 0, leaving a broken config; add should refuse a non-https url before writing. (2) 'skilletor add ""' (empty or blank spec) resolves to git https://github.com//skills and is written; resolveSpec should refuse an empty spec. (3) For skilletor-skill-author: skills/skilletor/SKILL.md lists source-field rules (line ~106) but not the source-name rule; one line would keep it in step with README/spec. Fallback name choice: 'source' (constant); the alternative, refusing add without a name when nothing derives, was not taken because the bundle prompt needs a valid default too.
+
+2026-09-27 01:10 Committed 5d9168eeb58597606863d699291600b4825f9c31
