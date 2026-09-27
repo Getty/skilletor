@@ -232,6 +232,7 @@ Hooks never guess or probe.
 |---|---|
 | `/path`, `./path`, `~/path` | `local` |
 | `https://…`, `git@…`, `ssh://…` | unchanged but for a lower-case scheme; `.tar.gz`/`.tgz` → `url`, otherwise `git` |
+| `transport::address` (`codecommit::us-east-1://my-repo`) | `git`, exactly as written (git's remote-helper form) |
 | `Getty` (single word) | `git: https://github.com/Getty/skills` |
 | `Getty/repo` (first segment has no dot) | `git: https://github.com/Getty/repo` |
 | `github:Getty/repo` | as above (manage-skills compatibility) |
@@ -276,6 +277,23 @@ written for `git` (`https://github.com//skills`, `codecommit://my-repo`, `foo://
 and its remote helpers decide what it can fetch, so an unknown scheme fails at fetch with
 git's own error, never at `add`. `.tar.gz` and `.tgz` match in any case
 (`https://host/X.TAR.GZ` is a `url`), and a `url` must still be `https://` (k110).
+
+git's remote-helper form `<transport>::<address>` (k118) – a transport of a letter, then
+letters, digits, `+`, `.` or `-`, then `::` and a non-empty address – is a `git` source kept
+exactly as written and never probed. It is recognised before every other form but a local
+path, as git looks for `::` first. git runs `git-remote-<transport>` with the address: the
+transport names that program, looked up as written, so it keeps its case where a scheme is
+lower-cased (`CodeCommit::…` stays), and the address is the helper's to read
+(`hg::HTTPS://Host/x` and `hg::https://host/x.tar.gz` stay as written, both `git`). Its name
+is its address's: an explicit or scp-like address is named as one
+(`codecommit::us-east-1://my-repo` and `codecommit::us-east-1://profile@my-repo` → `my-repo`,
+as `codecommit://profile@my-repo`; `hg::https://host/team/tools` → `tools`), any other by
+its path as a git repo (`testgit::/srv/repo.git` → `repo`). A single colon
+(`codecommit:us-east-1://my-repo`), `codecommit::` without an address and a transport that
+does not start with a letter or holds another character (`1helper::x`, `my_helper::x`) stay
+unknown prefixes; `github::Getty` names a helper `github`, not the `github:` shorthand. Being
+probe-free, the form is allowed in a bundle entry (`x@codecommit::us-east-1://my-repo`,
+§15.6).
 
 **Probe for generic hosts:** first `git ls-remote <url>`; if that does not respond,
 `HEAD <url>.tar.gz`. The first hit decides `git` vs. `url`; no hit → error listing both

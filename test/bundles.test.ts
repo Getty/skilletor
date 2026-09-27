@@ -101,6 +101,23 @@ test("k115: parseBundle refuses an entry address config load would refuse as a s
   ]);
 });
 
+// k118: an entry naming its source in git's remote-helper form (`x@codecommit::…`) was the
+// bundle error unknown prefix "codecommit:". Asserts: it parses as a full git address does – no
+// probe, kind git, the address as written, the name `add` would derive – a profile's "@" after
+// the entry's own included; its identity is the address as written but for a trailing "/" and
+// ".git", as any identity: the transport names the program git runs, so its case counts.
+test("k118: parseBundle takes a transport::address entry as a full git address", () => {
+  const def = parseBundle(
+    "description: D\nskills:\n  - x@codecommit::us-east-1://profile@my-repo\nrules: [\"r-*@hg::https://h.example/o/tools\"]\n",
+  );
+  assert.deepEqual(def.foreign.map((f) => [f.type, f.name, f.spec, f.kind, f.url, f.derivedName]), [
+    ["skill", "x", "codecommit::us-east-1://profile@my-repo", "git", "codecommit::us-east-1://profile@my-repo", "my-repo"],
+    ["rule", "r-*", "hg::https://h.example/o/tools", "git", "hg::https://h.example/o/tools", "tools"],
+  ]);
+  assert.equal(sameIdentity("codecommit::us-east-1://my-repo", "codecommit::us-east-1://my-repo/"), true);
+  assert.equal(sameIdentity("codecommit::us-east-1://my-repo", "CodeCommit::us-east-1://my-repo"), false);
+});
+
 // ---- catalog scan -------------------------------------------------------------
 
 function source(layout: Record<string, string>): { dir: string; cleanup: () => void } {

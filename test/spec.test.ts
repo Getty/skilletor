@@ -156,7 +156,32 @@ const k117Rows: Row[] = [
   { spec: "gitlab.com/u/ /r", kind: "git", value: "https://gitlab.com/u/r", name: "r" },
 ];
 
-const allRows = [...rows, ...k101Rows, ...k104Rows, ...k109Rows, ...k109Pinned, ...k117Pinned, ...k117Rows];
+// k118: git's remote-helper form `<transport>::<address>` (`codecommit::us-east-1://my-repo`, AWS
+// CodeCommit with a region) was the unknown prefix "codecommit:" (k109), before k109 a stored
+// https://github.com/codecommit::us-east-1:/my-repo. Asserts: a transport – a letter, then
+// letters, digits, "+", "." or "-" – with "::" and a non-empty address is a git source kept
+// exactly as written (the transport's case, the address's scheme, a tarball extension, an
+// scp-like address) and named as its address would be: an explicit or scp-like address as an
+// explicit one is (`us-east-1://profile@my-repo` -> my-repo, as `codecommit://profile@my-repo`),
+// any other by its path as a git repo (k101).
+const k118Rows: Row[] = [
+  { spec: "codecommit::us-east-1://my-repo", kind: "git", value: "codecommit::us-east-1://my-repo", name: "my-repo" },
+  { spec: "codecommit::us-east-1://profile@my-repo", kind: "git", value: "codecommit::us-east-1://profile@my-repo", name: "my-repo" },
+  { spec: "CodeCommit::US-East-1://Profile@My-Repo", kind: "git", value: "CodeCommit::US-East-1://Profile@My-Repo", name: "my-repo" },
+  { spec: " codecommit::eu-west-1://tools ", kind: "git", value: "codecommit::eu-west-1://tools", name: "tools" },
+  { spec: "hg::https://hg.example.com/team/tools", kind: "git", value: "hg::https://hg.example.com/team/tools", name: "tools" },
+  { spec: "hg::HTTPS://Host/Getty/skills", kind: "git", value: "hg::HTTPS://Host/Getty/skills", name: "getty" },
+  { spec: "hg::https://host/x.tar.gz", kind: "git", value: "hg::https://host/x.tar.gz", name: "x-tar-gz" },
+  { spec: "gcrypt::rsync://host/path/repo.git", kind: "git", value: "gcrypt::rsync://host/path/repo.git", name: "repo" },
+  { spec: "gcrypt::git@host:team/secret.git", kind: "git", value: "gcrypt::git@host:team/secret.git", name: "secret" },
+  { spec: "testgit::/srv/git/repo.git", kind: "git", value: "testgit::/srv/git/repo.git", name: "repo" },
+  { spec: "bzr::lp:project", kind: "git", value: "bzr::lp:project", name: "lp-project" },
+  { spec: "my.helper+x-1::addr", kind: "git", value: "my.helper+x-1::addr", name: "addr" },
+  // git reads "::" before any other form, so `github::` names a helper; `github:` is the shorthand.
+  { spec: "github::Getty", kind: "git", value: "github::Getty", name: "getty" },
+];
+
+const allRows = [...rows, ...k101Rows, ...k104Rows, ...k109Rows, ...k109Pinned, ...k117Pinned, ...k117Rows, ...k118Rows];
 
 for (const row of allRows) {
   test(`resolves ${row.spec}`, () => {
@@ -227,8 +252,8 @@ test("k104: github: with an empty owner is still an error", () => {
   });
 });
 
-// What a spec no form takes is told (k109, k111).
-const forms = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., user@host:path, " +
+// What a spec no form takes is told (k109, k111), git's transport::address among them (k118).
+const forms = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., transport::address, user@host:path, " +
   "github:owner[/repo], owner[/repo] or host.tld[/path]";
 
 // k109: a first segment without a dot is a GitHub owner, which cannot contain a colon, so a
@@ -353,6 +378,17 @@ test("k117: an owner, repo or port no forge takes is a SpecError, never stored, 
   }
 });
 
+// k118, pinned: only `<transport>::<address>` is git's form. Asserts: a single colon
+// (`gitlab:u/r`, `codecommit:us-east-1://my-repo`), a "::" without an address, and a "::" after
+// no transport word (a leading digit, an "_", nothing) stay k109's unknown prefix, never probed.
+test("k118: a single colon, an empty address or no transport word stays an unknown prefix", () => {
+  const cases: [string, string][] = [
+    ["gitlab:u/r", "gitlab:"], ["codecommit:us-east-1://my-repo", "codecommit:"], ["codecommit::", "codecommit:"],
+    ["codecommit:: ", "codecommit:"], ["1helper::x", "1helper:"], ["my_helper::x", "my_helper:"], ["::x", ":"],
+  ];
+  for (const [spec, prefix] of cases) refused(spec, `cannot resolve "${spec}": unknown prefix "${prefix}"; ${forms}`);
+});
+
 test("known forges are never probed", () => {
   // noProbe throws if called; these must resolve without it.
   assert.doesNotThrow(() => resolveSpec("github.com/user", noProbe));
@@ -372,7 +408,8 @@ test('k95: a derived name is always a valid source name; one normalization empti
   // "___" is no GitHub owner since k117 (the k117 test asserts its error); "---" is one.
   const empties = ["/", "~", "~/", "./", "../", "/tmp/日本", "./___", "github:---", "github.com/---",
     "gitlab.com/___/skills", "https://example.com/___/___", "git@host:___.git",
-    "git@host:___/x.tar.gz", "file:///", "file:///x.tar.gz", "日本.__/x"];
+    "git@host:___/x.tar.gz", "file:///", "file:///x.tar.gz", "日本.__/x",
+    "codecommit::us-east-1://___", "x::___", "x::日本"];
   for (const spec of empties) {
     assert.equal(resolveSpec(spec, () => ({ git: true })).derivedName, "source", spec);
   }

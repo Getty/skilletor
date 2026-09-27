@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
+import { prependPath, writeRemoteHelper } from "./helpers/remote-helper.ts";
 import { GitSource } from "../src/sources/git.ts";
 
 const ENV = {
@@ -483,4 +484,34 @@ test("k87: a git failure's message ends in git's last word, not its trailing new
     assert.match(err.message, /^git ls-remote .*: (?:fatal: |Command failed: )[^]*\S$/);
     return true;
   });
+});
+
+// k118: a source in git's remote-helper form `<transport>::<address>` (`codecommit::us-east-1://
+// my-repo`) is kept as written, so it must reach git as written: cache naming, `remote add`,
+// fetch and ls-remote must not parse or rewrite it. Asserts: through a helper on PATH, resolve
+// checks out the repo, check sees the locked commit as unchanged and a new upstream commit as a
+// change, and every run of the helper got the address exactly as written.
+test("k118: a transport::address source resolves and checks through git's remote helper, as written", async () => {
+  const tmp = makeTmpDir();
+  const restore = prependPath(join(tmp.dir, "bin"));
+  try {
+    const repo = makeRepo(tmp);
+    repo.commit("hello", "first");
+    const address = repo.url.slice("file://".length);
+    const log = join(tmp.dir, "helper.log");
+    writeRemoteHelper(join(tmp.dir, "bin"), "k118", log);
+    const src = new GitSource({ url: `k118::${address}`, cacheRoot: join(tmp.dir, "cache") });
+    const loc = await src.resolve();
+    assert.equal(loc.warning, undefined);
+    assert.equal(readFileSync(join(loc.dir, "file.txt"), "utf8"), "hello");
+    assert.equal(await src.check(loc.version), false);
+    repo.commit("again", "second");
+    assert.equal(await src.check(loc.version), true);
+    const calls = readFileSync(log, "utf8").split("\n").filter(Boolean);
+    assert.ok(calls.length >= 3, calls.join(" | ")); // fetch, two ls-remote
+    assert.deepEqual([...new Set(calls)], [address]);
+  } finally {
+    restore();
+    tmp.cleanup();
+  }
 });

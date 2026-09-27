@@ -6663,7 +6663,12 @@ function hasScheme(spec) {
 function lowerScheme(spec) {
   return spec.replace(SCHEME, (scheme) => scheme.toLowerCase());
 }
-var FORMS = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., user@host:path, github:owner[/repo], owner[/repo] or host.tld[/path]";
+var TRANSPORT = /^[A-Za-z][A-Za-z0-9+.-]*::/;
+function helperAddress(spec) {
+  const m = TRANSPORT.exec(spec);
+  return m && spec.length > m[0].length ? spec.slice(m[0].length) : void 0;
+}
+var FORMS = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., transport::address, user@host:path, github:owner[/repo], owner[/repo] or host.tld[/path]";
 var GITHUB_OWNER = /^[A-Za-z0-9-]+$/;
 var GITHUB_REPO = /^[A-Za-z0-9._-]+$/;
 var NOT_IN_SEGMENT = /[\s\p{Cc}:@]/u;
@@ -6719,6 +6724,9 @@ function nameFromUrl(spec, kind) {
     return normalizeName(spec);
   }
 }
+function nameFromHelper(address) {
+  return hasScheme(address) || isScpLike(address) ? nameFromUrl(address, "git") : nameFromPath(address);
+}
 function resolveSpec(spec, probe) {
   const r = resolveAddress(spec, probe);
   return isSourceName(r.derivedName) ? r : { ...r, derivedName: FALLBACK_NAME };
@@ -6730,6 +6738,8 @@ function resolveAddress(spec, probe) {
   if (isLocal(s)) {
     return { kind: "local", value: s, derivedName: normalizeName(basename2(s)) };
   }
+  const address = helperAddress(s);
+  if (address !== void 0) return { kind: "git", value: s, derivedName: nameFromHelper(address) };
   if (hasScheme(s) || isScpLike(s)) {
     const value2 = lowerScheme(s);
     const kind = isTarball(value2) ? "url" : "git";

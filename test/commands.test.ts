@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
+import { prependPath, writeRemoteHelper } from "./helpers/remote-helper.ts";
 import {
   cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall, CommandError,
   type CommandContext,
@@ -392,6 +393,34 @@ test("k117: add refuses an owner, repo or port no forge takes before probing, wr
     assert.equal(existsSync(join(e.projectDir, ".claude", "skilletor.json")), false, "no project config written");
     assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
   } finally {
+    e.cleanup();
+  }
+});
+
+// k118: `add codecommit::us-east-1://my-repo` – git's remote-helper form – was the SpecError
+// unknown prefix "codecommit:" (k109), before k109 a stored https://github.com/codecommit::…
+// Asserts: `add` of `<transport>::<address>` stores the spec as written as a git source under the
+// name its address gives, config load takes it, and an install fetches it through
+// `git-remote-<transport>`, which git hands the address exactly as written.
+test("k118: add keeps transport::address verbatim as a git source and installs through its remote helper", async () => {
+  const e = env();
+  const restore = prependPath(join(e.tmp.dir, "bin"));
+  try {
+    const address = gitRepo(e.tmp.dir, "tools", ["t-one"]).slice("file://".length);
+    const log = join(e.tmp.dir, "helper.log");
+    writeRemoteHelper(join(e.tmp.dir, "bin"), "k118", log);
+    const spec = `k118::${address}`;
+    const res = await cmdAdd(e.ctx, { spec });
+    assert.equal(res.name, "tools");
+    assert.deepEqual(res.def, { git: spec });
+    assert.equal(res.report.error, undefined);
+    assert.equal(loadConfig({ home: e.home }).sources.get("tools")?.git, spec);
+    const installed = await cmdInstall(e.ctx, { items: ["rule:t-one@tools"] });
+    assert.equal(installed.error, undefined);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.t-one.md")), true);
+    assert.deepEqual([...new Set(readFileSync(log, "utf8").split("\n").filter(Boolean))], [address]);
+  } finally {
+    restore();
     e.cleanup();
   }
 });

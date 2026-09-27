@@ -60,9 +60,19 @@ function lowerScheme(spec: string): string {
   return spec.replace(SCHEME, (scheme) => scheme.toLowerCase());
 }
 
+/** git's remote-helper form `<transport>::<address>` (k118): git runs `git-remote-<transport>`
+ *  with the address. The transport names that program, so it keeps its case, unlike a scheme. */
+const TRANSPORT = /^[A-Za-z][A-Za-z0-9+.-]*::/;
+
+/** The address of a `<transport>::<address>` spec; undefined for another form or no address. */
+function helperAddress(spec: string): string | undefined {
+  const m = TRANSPORT.exec(spec);
+  return m && spec.length > m[0].length ? spec.slice(m[0].length) : undefined;
+}
+
 /** What an unknown prefix (k109), an empty source (k111) or an owner, repo or port no
  *  address takes (k117) is told. */
-const FORMS = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., user@host:path, " +
+const FORMS = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., transport::address, user@host:path, " +
   "github:owner[/repo], owner[/repo] or host.tld[/path]";
 
 /** The characters GitHub allows in an owner and in a repo (k117). */
@@ -141,6 +151,13 @@ function nameFromUrl(spec: string, kind: SourceKind): string {
   }
 }
 
+/** derivedName for `<transport>::<address>` (k118): an explicit or scp-like address named as
+ *  one (`us-east-1://profile@my-repo` → "my-repo", as `codecommit://profile@my-repo`), any
+ *  other by its path as a git repo (`/srv/repo.git` → "repo"). */
+function nameFromHelper(address: string): string {
+  return hasScheme(address) || isScpLike(address) ? nameFromUrl(address, "git") : nameFromPath(address);
+}
+
 /** Resolve a spec; its derived name is always a valid source name (spec §3), since config
  *  load refuses any other (k95). */
 export function resolveSpec(spec: string, probe: Probe): ResolvedSpec {
@@ -163,6 +180,10 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
 
   // 2. Explicit URLs / scp-like git addresses: kept verbatim, but for a lower-case scheme. Any
   //    scheme is git's to judge: a remote helper (`codecommit://`, `s3://`) fetches its own (k117).
+  //    git's `<transport>::<address>` comes first, as git reads it, and is kept exactly as
+  //    written, never a url: `codecommit::us-east-1://my-repo` (k118).
+  const address = helperAddress(s);
+  if (address !== undefined) return { kind: "git", value: s, derivedName: nameFromHelper(address) };
   if (hasScheme(s) || isScpLike(s)) {
     const value = lowerScheme(s);
     const kind: SourceKind = isTarball(value) ? "url" : "git";
