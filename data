@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-27T05:01:51Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T05:01:45Z
+created: 2026-09-27T00:44:17Z
+id: 108
+priority: low
+started: 2026-09-27T03:02:33Z
+status: done
+tags:
+- skills
+title: 'skilletor-core: state k99''s executable-bit rule in the Templating invariant'
+updated: 2026-09-27T05:01:51Z
+---
+
+Found during k99 (worker). .claude/skills/skilletor-core/SKILL.md Templating invariant could state: a skill file keeps the owner executable bit of its source (a .njk passes its bit to the rendered file); agents and rules never carry it; the lock hashes bytes only. Skill text → skilletor-skill-author.
+
+2026-09-27 03:12 Also (k107): skilletor-core Invariants should say – a release that changes what a sync makes of unchanged sources and inputs bumps RENDER_FORMAT in engine.ts (else earlier installs wait for a source to move); a change to what a url cache tree holds bumps URL_CACHE_FORMAT in sources/url.ts.
+
+2026-09-27 04:57 Done (uncommitted, not staged): .claude/skills/skilletor-core/SKILL.md (not hardlinked, link count 1). Invariants > Templating: a skill's file keeps its source's owner executable bit (.njk passes its bit), agents/rules/generated files never carry it, lock hashes bytes only (check sees no mode), a sync rewrites a file whose bit is wrong. Invariants > Render-and-compare: check asks for a sync only when a source version or the render-inputs hash moves, so a release changing what a sync makes of unchanged sources+inputs bumps RENDER_FORMAT (engine.ts), else earlier installs wait for a source to move; a change to what a url cache tree holds bumps URL_CACHE_FORMAT (sources/url.ts). Names checked in src. +7 lines / +99 words. Static check 0 errors. Fresh-subagent A/B on 5 questions (exec bit skill/agent, lock+chmod, render change, url cache change): baseline guessed 4 wrong/vague (incl. 'nothing else has to change' for a render change); with skill all 5 stated and correct.
+
+2026-09-27 05:01 Committed e6425e1bf57b5abefd11ddbc3e878d122cd8275d: skilletor-core: state the executable bit and the RENDER_FORMAT / URL_CACHE_FORMAT bumps (k108)
