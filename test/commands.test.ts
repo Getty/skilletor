@@ -291,6 +291,28 @@ test("k109: add refuses an unknown prefix before writing, and stores an upper-ca
   }
 });
 
+// k111: `add ""` stored git https://github.com//skills as source "source" and trusted it.
+// Asserts: an empty or whitespace-only spec – with or without a name, to either config – is the
+// SpecError before anything is written or trusted (no user or project config, no trust.json).
+test("k111: add refuses an empty or whitespace-only spec before writing or trusting anything", async () => {
+  const e = env();
+  try {
+    const calls = [{ spec: "" }, { spec: " \t" }, { name: "shared", spec: "" }, { spec: "", project: true }];
+    for (const args of calls) {
+      await assert.rejects(() => cmdAdd(e.ctx, args), (err: unknown) => {
+        assert.ok(err instanceof SpecError, `${JSON.stringify(args)}: ${String(err)}`);
+        assert.match((err as Error).message, /^cannot resolve "[ \t]*": empty source; expected /);
+        return true;
+      });
+    }
+    assert.equal(existsSync(e.userCfgPath), false, "no user config written");
+    assert.equal(existsSync(join(e.projectDir, ".claude", "skilletor.json")), false, "no project config written");
+    assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("install adds the entry with an auto-detected type and syncs", async () => {
   const e = env();
   try {

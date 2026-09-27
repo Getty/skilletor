@@ -60,7 +60,7 @@ function lowerScheme(spec: string): string {
   return spec.replace(SCHEME, (scheme) => scheme.toLowerCase());
 }
 
-/** What an unknown prefix is told (k109). */
+/** What an unknown prefix (k109) or an empty source (k111) is told. */
 const FORMS = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., user@host:path, " +
   "github:owner[/repo], owner[/repo] or host.tld[/path]";
 
@@ -115,7 +115,9 @@ export function resolveSpec(spec: string, probe: Probe): ResolvedSpec {
 function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
   const s = spec.trim();
 
-  // 0. An address kept verbatim below would reach git as an option (k85).
+  // 0. An empty spec would be a bare word, stored as https://github.com//skills (k111); an
+  //    address kept verbatim below would reach git as an option (k85).
+  if (!s) throw new SpecError(`cannot resolve "${spec}": empty source; ${FORMS}`);
   if (s.startsWith("-")) throw new SpecError(`cannot resolve "${spec}": a source must not start with "-"`);
 
   // 1. Local paths.
@@ -131,11 +133,12 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
   }
 
   // 3. github:owner/repo (manage-skills compatibility), in any case (k109). An empty repo
-  //    segment is skipped, as in 4. and 6., so `github:Getty/` is the default repo (k104).
+  //    segment is skipped, as in 4. and 6., so `github:Getty/` is the default repo (k104); a
+  //    blank owner is as empty as none (k111).
   if (/^github:/i.test(s)) {
     const path = s.slice("github:".length);
     const [owner, ...more] = path.split("/");
-    if (!owner) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
+    if (!owner?.trim()) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
     const repo = more.find(Boolean);
     return {
       kind: "git",
@@ -152,7 +155,7 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
   if (KNOWN_FORGES.includes(firstSeg.toLowerCase()) && slash !== -1) {
     const segs = rest.split("/").filter(Boolean);
     const owner = segs[0];
-    if (!owner) throw new SpecError(`cannot resolve "${spec}": expected ${firstSeg}/owner[/repo]`);
+    if (!owner?.trim()) throw new SpecError(`cannot resolve "${spec}": expected ${firstSeg}/owner[/repo]`);
     const repo = segs[1] ?? DEFAULT_REPO;
     return {
       kind: "git",

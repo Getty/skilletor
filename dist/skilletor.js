@@ -6700,6 +6700,7 @@ function resolveSpec(spec, probe) {
 }
 function resolveAddress(spec, probe) {
   const s = spec.trim();
+  if (!s) throw new SpecError(`cannot resolve "${spec}": empty source; ${FORMS}`);
   if (s.startsWith("-")) throw new SpecError(`cannot resolve "${spec}": a source must not start with "-"`);
   if (isLocal(s)) {
     return { kind: "local", value: s, derivedName: normalizeName(basename2(s)) };
@@ -6712,7 +6713,7 @@ function resolveAddress(spec, probe) {
   if (/^github:/i.test(s)) {
     const path2 = s.slice("github:".length);
     const [owner, ...more] = path2.split("/");
-    if (!owner) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
+    if (!owner?.trim()) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
     const repo = more.find(Boolean);
     return {
       kind: "git",
@@ -6726,7 +6727,7 @@ function resolveAddress(spec, probe) {
   if (KNOWN_FORGES.includes(firstSeg.toLowerCase()) && slash !== -1) {
     const segs = rest.split("/").filter(Boolean);
     const owner = segs[0];
-    if (!owner) throw new SpecError(`cannot resolve "${spec}": expected ${firstSeg}/owner[/repo]`);
+    if (!owner?.trim()) throw new SpecError(`cannot resolve "${spec}": expected ${firstSeg}/owner[/repo]`);
     const repo = segs[1] ?? DEFAULT_REPO;
     return {
       kind: "git",

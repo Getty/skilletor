@@ -243,6 +243,11 @@ forms, never a stored `https://github.com/gitlab:u/r`. A colon after a dotted ho
 port or userinfo (`host.tld:8080/x`, probed); scp-like addresses (`git@host:path`) and local
 paths keep theirs.
 
+An empty or whitespace-only spec is an error naming the spec and the supported forms (k111),
+never a stored `https://github.com//skills`. An owner of whitespace only is as empty as none:
+`github: /karr` and `github.com/ /karr` are the same `expected …owner[/repo]` error as
+`github:/karr` and `github.com/`.
+
 **Probe for generic hosts:** first `git ls-remote <url>`; if that does not respond,
 `HEAD <url>.tar.gz`. The first hit decides `git` vs. `url`; no hit → error listing both
 attempted addresses.

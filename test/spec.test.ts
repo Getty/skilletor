@@ -183,13 +183,15 @@ test("k104: github: with an empty owner is still an error", () => {
   });
 });
 
+// What a spec no form takes is told (k109, k111).
+const forms = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., user@host:path, " +
+  "github:owner[/repo], owner[/repo] or host.tld[/path]";
+
 // k109: a first segment without a dot is a GitHub owner, which cannot contain a colon, so a
 // prefix no form supports (`gitlab:u/r` -> https://github.com/gitlab:u/r) was stored as a broken
 // URL. Asserts: each such spec is a SpecError naming the spec, its prefix and the supported
 // forms, the probe never called; `github:` in another case keeps its own empty-owner error.
 test("k109: an unknown word: prefix is a SpecError, never a GitHub owner, never probed", () => {
-  const forms = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., user@host:path, " +
-    "github:owner[/repo], owner[/repo] or host.tld[/path]";
   const cases: [string, string][] = [
     ["gitlab:u/r", "gitlab:"], ["Gitlab:u/r", "Gitlab:"], ["gitlab:u", "gitlab:"], ["bitbucket:team/repo", "bitbucket:"],
     ["HTTPS:/host", "HTTPS:"], ["https:host", "https:"], ["localhost:8080", "localhost:"], ["localhost:8080/x", "localhost:"],
@@ -225,6 +227,34 @@ test("k109: a dotted host keeps its port or userinfo and is probed as before", (
     });
     assert.deepEqual(probed, [url], spec);
     assert.deepEqual(r, { kind: "git", value: url, derivedName: name }, spec);
+  }
+});
+
+// k111: an empty spec fell through to a bare word and became git https://github.com//skills
+// (named "source"), and an owner of blanks became https://github.com/ /karr. Asserts: an empty
+// or whitespace-only spec is a SpecError naming the spec, the problem and the supported forms;
+// a github: or known-forge owner of whitespace only is that form's empty-owner error, as the
+// empty owners already were; the probe never called.
+test("k111: an empty spec or a blank owner is a SpecError, never https://github.com//skills, never probed", () => {
+  for (const spec of ["", " ", "  \t\n "]) {
+    assert.throws(() => resolveSpec(spec, noProbe), (e: unknown) => {
+      assert.ok(e instanceof SpecError, `${JSON.stringify(spec)}: ${String(e)}`);
+      assert.equal((e as Error).message, `cannot resolve "${spec}": empty source; ${forms}`);
+      return true;
+    });
+  }
+  const owners: [string, string][] = [
+    ["github: /karr", "github:owner[/repo]"], ["GitHub:\t/karr", "github:owner[/repo]"],
+    ["github.com/ /karr", "github.com/owner[/repo]"], ["gitlab.com/ /r", "gitlab.com/owner[/repo]"],
+    // Already errors; pinned so the empty and the blank owner agree.
+    ["github:", "github:owner[/repo]"], ["github: ", "github:owner[/repo]"], ["github.com/", "github.com/owner[/repo]"],
+  ];
+  for (const [spec, form] of owners) {
+    assert.throws(() => resolveSpec(spec, noProbe), (e: unknown) => {
+      assert.ok(e instanceof SpecError, `${JSON.stringify(spec)}: ${String(e)}`);
+      assert.equal((e as Error).message, `cannot resolve "${spec}": expected ${form}`);
+      return true;
+    });
   }
 });
 
