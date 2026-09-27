@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-09-27T23:46:52Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T23:46:45Z
+created: 2026-09-27T04:11:45Z
+id: 120
+priority: low
+started: 2026-09-27T22:50:11Z
+status: done
+tags:
+- cli
+- bug
+title: 'source remove: cannot remove a source that config load refuses, even with
+  --force'
+updated: 2026-09-27T23:46:52Z
+---
+
+Reported by the k103 and k114 workers (reproduced). source remove loads and validates the whole config before removing, so an entry config load refuses (an http:// url that add wrote in v0.4.1 before k110, or a hand edit) cannot be removed by the CLI: exit 1 naming the file; only a hand edit fixes it. Expected: when the config error is in the entry being removed (and only there), source remove drops that entry from the target file and syncs; any other config error still stops it. Document in §7.
+
+2026-09-27 23:31 Reproduced through bin/skilletor (temp HOME/project): user config {sources:{web:{url:'http://host/x.tar.gz'}}}, 'source remove web --force' -> exit 1, '<file>: sources.web.url "http://host/x.tar.gz" must be an https:// URL', file unchanged. Cause: cmdSourceRemove calls load(ctx) (full loadConfig) before the in-use check; any ConfigError propagates. Note: k116's own error text already tells the user 'remove it (skilletor source remove <name>)', which is exactly the command that fails here.
+
+2026-09-27 23:33 Red tests first (4, all failing on the refused entry's ConfigError): commands.test.ts k120 x3 (drops the one refused entry and syncs: http url, .github name, ref "" --project, non-object entry; any other error still throws load's ConfigError for the error left, --force or not, byte-identical, no lock; in use (item/wildcard/bundle, user and project) refused without --force, --force removes and the sync reports the orphaned install entry, both ways out clean up the locked item), cli.test.ts k120 x1 (real binary: exit 0/1/2, stdout/stderr, file bytes). Decision: in-use = today's usedSources over the config loaded with that one entry unchecked (declared, no backend) - same rule as a valid source; with two errors the message is load's error for the one left, not the entry being removed.
+
+2026-09-27 23:36 Done. src/config.ts: LoadOptions.unchecked {path,name} - that one source of that one file is declared ({name, origins:{}}), not checked (name or fields), no backend; parseSources takes it. src/commands.ts: cmdSourceRemove loads via new removalConfig(): load(ctx); on a ConfigError, loadConfig with the entry being removed unchecked - loads only when that entry was all load refused (every other source still goes through sourceFields); any error left propagates (exit 1, load's own message for it, --force or not, nothing changed). In-use check unchanged (usedSources over that config): items/wildcards/bundles naming it refuse without --force; --force removes and the sync reports the orphaned install entry (exit 2, as --force of any in-use source). A sourceFields pre-check on the entry was dropped as redundant (the unchecked load throws the identical error for a valid entry; no test could tell). dist/skilletor.js rebuilt. Tests: commands.test.ts +3 k120, cli.test.ts +1 k120 (real binary). Docs: spec §7 paragraph after k114's; README one clause in the CLI reference. Verified: typecheck 0; npm test 850/850 pass, 0 fail, 0 skipped; build 0; check-dist 0 (up to date). Hand run of bin/skilletor in a temp HOME/project: http:// entry removed exit 0; with a second refused source exit 1, file unchanged.
+
+2026-09-27 23:37 Also found (skill drift, for skilletor-skill-author, this board): skills/skilletor/SKILL.md lines 52-55 state source remove's exit-1 rule but not k120's; lines 64-65 say an add whose kept entry load refuses is 'fix it by hand' only - k116's own error names 'remove it (skilletor source remove <name>)' as the other way out, which works now. No usage-text change: no new flag.
+
+2026-09-27 23:45 Skill text (skilletor-skill-author): skills/skilletor/SKILL.md now states k120 in the source remove rule (drops an entry config load refuses unless load refuses more, exit 1 as above) and names source remove <name> as the way out of all three add keep-path exit-1 cases; body stays 150 lines, static check 0 errors 0 warnings, fresh-subagent A/B old vs new text passed on the two-errors case.
+
+2026-09-27 23:46 Committed a70864ed5859e3d23b6a8436aa9dd05f6a411f4d: source remove drops an entry config load refuses when nothing else is refused; any other error still stops it with load's own message; in-use rule unchanged. dist rebuilt, docs/README/skill updated.
