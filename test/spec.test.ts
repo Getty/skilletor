@@ -84,7 +84,37 @@ const k104Rows: Row[] = [
   { spec: "gitlab.com/u/", kind: "git", value: "https://gitlab.com/u/skills", name: "u" },
 ];
 
-for (const row of [...rows, ...k101Rows, ...k104Rows]) {
+// k109: a scheme or `github:` in another case fell through to owner/repo and became a GitHub
+// owner with a colon (`HTTPS://host/x.tar.gz` -> https://github.com/HTTPS:/host). Both match
+// case-insensitively; the stored scheme is lower-case, host and path stay as written.
+const k109Rows: Row[] = [
+  { spec: "GitHub:Getty", kind: "git", value: "https://github.com/Getty/skills", name: "getty" },
+  { spec: "GITHUB:Getty/karr", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "Github:Getty/", kind: "git", value: "https://github.com/Getty/skills", name: "getty" },
+  { spec: "HTTPS://host/x.tar.gz", kind: "url", value: "https://host/x.tar.gz", name: "host" },
+  { spec: "HTTPS://Host/X.tar.gz", kind: "url", value: "https://Host/X.tar.gz", name: "host" },
+  { spec: "Https://github.com/Getty/karr", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "SSH://git@Example.com/Getty/Karr.git", kind: "git", value: "ssh://git@Example.com/Getty/Karr.git", name: "karr" },
+  { spec: "Git+SSH://git@host/o/r", kind: "git", value: "git+ssh://git@host/o/r", name: "r" },
+  { spec: "HTTP://Host/x.tar.gz", kind: "url", value: "http://Host/x.tar.gz", name: "host" },
+  { spec: "FILE:///Tmp/X", kind: "git", value: "file:///Tmp/X", name: "x" },
+];
+
+// k109, pinned: colon-bearing forms that resolved to a working address keep their result.
+const k109Pinned: Row[] = [
+  { spec: "http://host/x.tar.gz", kind: "url", value: "http://host/x.tar.gz", name: "host" },
+  { spec: "file:///tmp/x", kind: "git", value: "file:///tmp/x", name: "x" },
+  { spec: "git://example.com/Getty/karr", kind: "git", value: "git://example.com/Getty/karr", name: "karr" },
+  { spec: "git+ssh://git@host/o/r", kind: "git", value: "git+ssh://git@host/o/r", name: "r" },
+  { spec: "Git@GitHub.com:Getty/karr.git", kind: "git", value: "Git@GitHub.com:Getty/karr.git", name: "karr" },
+  { spec: "user:pw@host:o/r", kind: "git", value: "user:pw@host:o/r", name: "r" },
+  { spec: "/abs/with:colon", kind: "local", value: "/abs/with:colon", name: "with-colon" },
+  { spec: "./rel:colon", kind: "local", value: "./rel:colon", name: "rel-colon" },
+  { spec: "../x:y", kind: "local", value: "../x:y", name: "x-y" },
+  { spec: "~/dir:x", kind: "local", value: "~/dir:x", name: "dir-x" },
+];
+
+for (const row of [...rows, ...k101Rows, ...k104Rows, ...k109Rows, ...k109Pinned]) {
   test(`resolves ${row.spec}`, () => {
     const r = resolveSpec(row.spec, noProbe);
     assert.equal(r.kind, row.kind, "kind");
@@ -153,6 +183,51 @@ test("k104: github: with an empty owner is still an error", () => {
   });
 });
 
+// k109: a first segment without a dot is a GitHub owner, which cannot contain a colon, so a
+// prefix no form supports (`gitlab:u/r` -> https://github.com/gitlab:u/r) was stored as a broken
+// URL. Asserts: each such spec is a SpecError naming the spec, its prefix and the supported
+// forms, the probe never called; `github:` in another case keeps its own empty-owner error.
+test("k109: an unknown word: prefix is a SpecError, never a GitHub owner, never probed", () => {
+  const forms = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., user@host:path, " +
+    "github:owner[/repo], owner[/repo] or host.tld[/path]";
+  const cases: [string, string][] = [
+    ["gitlab:u/r", "gitlab:"], ["Gitlab:u/r", "Gitlab:"], ["gitlab:u", "gitlab:"], ["bitbucket:team/repo", "bitbucket:"],
+    ["HTTPS:/host", "HTTPS:"], ["https:host", "https:"], ["localhost:8080", "localhost:"], ["localhost:8080/x", "localhost:"],
+    ["C:\\skills", "C:"], [":foo", ":"], ["user:pw@localhost/x", "user:"],
+  ];
+  for (const [spec, prefix] of cases) {
+    assert.throws(() => resolveSpec(spec, noProbe), (e: unknown) => {
+      assert.ok(e instanceof SpecError, `${spec}: ${String(e)}`);
+      assert.equal((e as Error).message, `cannot resolve "${spec}": unknown prefix "${prefix}"; ${forms}`);
+      return true;
+    });
+  }
+  assert.throws(() => resolveSpec("GitHub:/karr", noProbe), (e: unknown) => {
+    assert.ok(e instanceof SpecError);
+    assert.equal((e as Error).message, 'cannot resolve "GitHub:/karr": expected github:owner[/repo]');
+    return true;
+  });
+});
+
+// k109, pinned: a colon after a dotted first segment is a port or userinfo of a generic host,
+// probed as before.
+test("k109: a dotted host keeps its port or userinfo and is probed as before", () => {
+  const cases: [string, string, string][] = [
+    ["mydir.com:8080/x", "https://mydir.com:8080/x", "mydir-com-8080"],
+    ["mydir.com:8080", "https://mydir.com:8080/skills", "mydir-com-8080"],
+    ["user:pw@host.tld/x", "https://user:pw@host.tld/x", "user-pw-host-tld"],
+  ];
+  for (const [spec, url, name] of cases) {
+    const probed: string[] = [];
+    const r = resolveSpec(spec, (u) => {
+      probed.push(u);
+      return { git: true };
+    });
+    assert.deepEqual(probed, [url], spec);
+    assert.deepEqual(r, { kind: "git", value: url, derivedName: name }, spec);
+  }
+});
+
 test("known forges are never probed", () => {
   // noProbe throws if called; these must resolve without it.
   assert.doesNotThrow(() => resolveSpec("github.com/user", noProbe));
@@ -166,7 +241,7 @@ test("known forges are never probed", () => {
 // derives "source" (a probe that says git for the generic host).
 test('k95: a derived name is always a valid source name; one normalization empties is "source"', () => {
   const SOURCE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-  for (const row of [...rows, ...k101Rows, ...k104Rows]) {
+  for (const row of [...rows, ...k101Rows, ...k104Rows, ...k109Rows, ...k109Pinned]) {
     assert.match(resolveSpec(row.spec, noProbe).derivedName, SOURCE_NAME, row.spec);
   }
   const empties = ["/", "~", "~/", "./", "../", "/tmp/日本", "./___", "___", "github:___", "github.com/___",

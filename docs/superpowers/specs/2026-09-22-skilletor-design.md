@@ -221,7 +221,7 @@ Hooks never guess or probe.
 | `<spec>` | resolves to |
 |---|---|
 | `/path`, `./path`, `~/path` | `local` |
-| `https://…`, `git@…`, `ssh://…` | unchanged; `.tar.gz`/`.tgz` → `url`, otherwise `git` |
+| `https://…`, `git@…`, `ssh://…` | unchanged but for a lower-case scheme; `.tar.gz`/`.tgz` → `url`, otherwise `git` |
 | `Getty` (single word) | `git: https://github.com/Getty/skills` |
 | `Getty/repo` (first segment has no dot) | `git: https://github.com/Getty/repo` |
 | `github:Getty/repo` | as above (manage-skills compatibility) |
@@ -233,6 +233,15 @@ Hooks never guess or probe.
 Empty path segments are skipped, so a missing or empty repo segment means the default repo
 in every git shorthand (k104): `Getty/`, `github:Getty/`, `github.com/Getty/` →
 `https://github.com/Getty/skills`; `github:Getty//karr` → `https://github.com/Getty/karr`.
+
+A scheme and `github:` match in any case (k109). The stored address has a lower-case scheme,
+host and path as written (`HTTPS://Host/x.tar.gz` → `url: https://Host/x.tar.gz`,
+`GitHub:Getty` → `git: https://github.com/Getty/skills`). A first segment without a dot is
+a GitHub owner, which cannot contain `:`, so any other `word:` prefix (`gitlab:u/r`,
+`HTTPS:/host`, `localhost:8080`) is an error naming the spec, the prefix and the supported
+forms, never a stored `https://github.com/gitlab:u/r`. A colon after a dotted host is its
+port or userinfo (`host.tld:8080/x`, probed); scp-like addresses (`git@host:path`) and local
+paths keep theirs.
 
 **Probe for generic hosts:** first `git ls-remote <url>`; if that does not respond,
 `HEAD <url>.tar.gz`. The first hit decides `git` vs. `url`; no hit → error listing both

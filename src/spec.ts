@@ -49,9 +49,20 @@ function isLocal(spec: string): boolean {
   return spec.startsWith("/") || spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("~");
 }
 
+/** A scheme matches in any case (k109); `lowerScheme` stores it lower-case. */
+const SCHEME = /^[a-z][a-z0-9+.-]*:(?=\/\/)/i;
+
 function hasScheme(spec: string): boolean {
-  return /^[a-z][a-z0-9+.-]*:\/\//.test(spec);
+  return SCHEME.test(spec);
 }
+
+function lowerScheme(spec: string): string {
+  return spec.replace(SCHEME, (scheme) => scheme.toLowerCase());
+}
+
+/** What an unknown prefix is told (k109). */
+const FORMS = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., user@host:path, " +
+  "github:owner[/repo], owner[/repo] or host.tld[/path]";
 
 function isScpLike(spec: string): boolean {
   // git@host:owner/repo.git
@@ -112,15 +123,16 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
     return { kind: "local", value: s, derivedName: normalizeName(basename(s)) };
   }
 
-  // 2. Explicit URLs / scp-like git addresses: kept verbatim.
+  // 2. Explicit URLs / scp-like git addresses: kept verbatim, but for a lower-case scheme.
   if (hasScheme(s) || isScpLike(s)) {
-    const kind: SourceKind = isTarball(s) ? "url" : "git";
-    return { kind, value: s, derivedName: nameFromUrl(s, kind) };
+    const value = lowerScheme(s);
+    const kind: SourceKind = isTarball(value) ? "url" : "git";
+    return { kind, value, derivedName: nameFromUrl(value, kind) };
   }
 
-  // 3. github:owner/repo (manage-skills compatibility). An empty repo segment is skipped,
-  //    as in 4. and 6., so `github:Getty/` is the default repo (k104).
-  if (s.startsWith("github:")) {
+  // 3. github:owner/repo (manage-skills compatibility), in any case (k109). An empty repo
+  //    segment is skipped, as in 4. and 6., so `github:Getty/` is the default repo (k104).
+  if (/^github:/i.test(s)) {
     const path = s.slice("github:".length);
     const [owner, ...more] = path.split("/");
     if (!owner) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
@@ -147,6 +159,13 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
       value: `https://${firstSeg.toLowerCase()}/${owner}/${repo}`,
       derivedName: repoName(owner, repo),
     };
+  }
+
+  // 5. and 6. take a first segment without a dot as a GitHub owner, which cannot contain a
+  //    colon: `gitlab:u/r` is an unknown prefix, never https://github.com/gitlab:u/r (k109).
+  const colon = firstSeg.indexOf(":");
+  if (colon !== -1 && !firstSeg.includes(".")) {
+    throw new SpecError(`cannot resolve "${spec}": unknown prefix "${firstSeg.slice(0, colon + 1)}"; ${FORMS}`);
   }
 
   // 5. Single token (no slash).

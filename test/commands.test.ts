@@ -10,7 +10,7 @@ import {
   cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall, CommandError,
   type CommandContext,
 } from "../src/commands.ts";
-import { resolveSpec, type Probe } from "../src/spec.ts";
+import { resolveSpec, SpecError, type Probe } from "../src/spec.ts";
 import { State } from "../src/state.ts";
 import { check, status, sync } from "../src/engine.ts";
 import { ConfigError, loadConfig } from "../src/config.ts";
@@ -264,6 +264,28 @@ test("k110: add refuses a spec that resolves to a url config load refuses, befor
     const ok = await cmdAdd(e.ctx, { spec: "https://host.example/x.tar.gz" });
     assert.deepEqual(ok.def, { url: "https://host.example/x.tar.gz" });
     assert.deepEqual(loadConfig({ home: e.home }).sources.get("host-example")?.url, "https://host.example/x.tar.gz");
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k109: `add gitlab:u/r` stored git https://github.com/gitlab:u/r, and `add HTTPS://…` a GitHub
+// owner "HTTPS:". Asserts: an unknown prefix is the SpecError before anything is written or
+// trusted (no config, no trust.json); an upper-case scheme is stored lower-case and loads.
+test("k109: add refuses an unknown prefix before writing, and stores an upper-case scheme lower-case", async () => {
+  const e = env();
+  try {
+    await assert.rejects(() => cmdAdd(e.ctx, { spec: "gitlab:u/r" }), (err: unknown) => {
+      assert.ok(err instanceof SpecError, String(err));
+      assert.match((err as Error).message, /^cannot resolve "gitlab:u\/r": unknown prefix "gitlab:"; expected /);
+      return true;
+    });
+    assert.equal(existsSync(e.userCfgPath), false, "no config written");
+    assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+
+    const ok = await cmdAdd(e.ctx, { spec: "HTTPS://host.example/x.tar.gz" });
+    assert.deepEqual(ok.def, { url: "https://host.example/x.tar.gz" });
+    assert.equal(loadConfig({ home: e.home }).sources.get("host-example")?.url, "https://host.example/x.tar.gz");
   } finally {
     e.cleanup();
   }

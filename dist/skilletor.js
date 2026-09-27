@@ -6656,9 +6656,14 @@ function basename2(path) {
 function isLocal(spec) {
   return spec.startsWith("/") || spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("~");
 }
+var SCHEME = /^[a-z][a-z0-9+.-]*:(?=\/\/)/i;
 function hasScheme(spec) {
-  return /^[a-z][a-z0-9+.-]*:\/\//.test(spec);
+  return SCHEME.test(spec);
 }
+function lowerScheme(spec) {
+  return spec.replace(SCHEME, (scheme) => scheme.toLowerCase());
+}
+var FORMS = "expected a local path (/path, ./path, ../path, ~/path), scheme://..., user@host:path, github:owner[/repo], owner[/repo] or host.tld[/path]";
 function isScpLike(spec) {
   return /^[^@/]+@[^:/]+:/.test(spec);
 }
@@ -6700,10 +6705,11 @@ function resolveAddress(spec, probe) {
     return { kind: "local", value: s, derivedName: normalizeName(basename2(s)) };
   }
   if (hasScheme(s) || isScpLike(s)) {
-    const kind = isTarball(s) ? "url" : "git";
-    return { kind, value: s, derivedName: nameFromUrl(s, kind) };
+    const value2 = lowerScheme(s);
+    const kind = isTarball(value2) ? "url" : "git";
+    return { kind, value: value2, derivedName: nameFromUrl(value2, kind) };
   }
-  if (s.startsWith("github:")) {
+  if (/^github:/i.test(s)) {
     const path2 = s.slice("github:".length);
     const [owner, ...more] = path2.split("/");
     if (!owner) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
@@ -6727,6 +6733,10 @@ function resolveAddress(spec, probe) {
       value: `https://${firstSeg.toLowerCase()}/${owner}/${repo}`,
       derivedName: repoName(owner, repo)
     };
+  }
+  const colon = firstSeg.indexOf(":");
+  if (colon !== -1 && !firstSeg.includes(".")) {
+    throw new SpecError(`cannot resolve "${spec}": unknown prefix "${firstSeg.slice(0, colon + 1)}"; ${FORMS}`);
   }
   if (slash === -1) {
     if (!firstSeg.includes(".")) {
