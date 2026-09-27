@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-27T04:13:32Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T04:13:26Z
+created: 2026-09-27T01:27:43Z
+id: 114
+priority: low
+started: 2026-09-27T03:02:18Z
+status: done
+tags:
+- cli
+- bug
+title: 'source remove: a name the config file lacks prints "removed source" and exits
+  0'
+updated: 2026-09-27T04:13:32Z
+---
+
+Found during k103 (worker). `skilletor source remove <name>` for a name the target config file does not have prints "removed source <name>", exits 0 and writes nothing. Since k103, if its sync then hits a config error it also claims "the config edit itself was saved in <file>". Expected: like uninstall of an absent entry – exit 1, nothing changed, the error says where else the name is declared (other scope → --project), if anywhere.
+
+2026-09-27 04:06 Started (worker): cmdSourceRemove (src/commands.ts) calls removeSource without checking the target file has the name; removeSource is a silent no-op then, and the CLI prints 'removed source' after a sync. Plan: check sourceEntry(path, name) first, before load/in-use/--force, and fail with a CommandError whose 'where else' hint mirrors cmdUninstall's declaredElsewhere (other scope's config, skilletor.local.json).
+
+2026-09-27 04:09 Red first: 3 new k114 tests (2 in test/commands.test.ts, 1 black-box in test/cli.test.ts) failed on the old code (resolved / exit 0). Fix in src/commands.ts: cmdSourceRemove checks sourceEntry(path, name) before load, the in-use check and --force; the new sourceElsewhere() gives the hint (other scope's config -> --project / run without --project; <project>/.claude/skilletor.local.json -> edit by hand; else 'it is not a configured source'). k114 tests + commands/cli files green (95/95). Spec §7 and README CLI reference updated. Full verify pending: loadguard is refusing npm test under memory pressure.
+
+2026-09-27 04:11 Done. Files: src/commands.ts (cmdSourceRemove: sourceEntry check first; new sourceElsewhere()), dist/skilletor.js (rebuilt), test/commands.test.ts (2 k114 tests), test/cli.test.ts (1 k114 black-box test, with and without a detected harness), docs/superpowers/specs/2026-09-22-skilletor-design.md (§7 paragraph on source remove), README.md (CLI reference sentence). Verified: typecheck exit 0; npm test 792/792 pass, 0 fail, 0 skipped; build ok; check-dist 'up to date'. Hand check via bin/skilletor with HOME/CODEX_HOME in a temp dir: absent name -> exit 1 with the hint, present name -> removed, exit 0. Also found (for the dispatcher): (1) source remove cannot remove a source that config load refuses, even with --force (e.g. an http:// url that add wrote before k110, or one written by hand): load(ctx) throws before removeSource, so it exits 1 naming the file and only a hand edit fixes it. Reproduced by hand. (2) skills/skilletor/SKILL.md's Commands paragraph states the uninstall exit-1 rule but not the new source remove one: a clause for skilletor-skill-author if wanted (not a flag, so not touched here).
+
+2026-09-27 04:13 Committed 6a86119: source remove: a name the target config lacks is an error, naming where else it is declared (k114)
