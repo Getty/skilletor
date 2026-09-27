@@ -9,3 +9,9 @@
 import { REPO_LOCAL_VARS } from "../src/gitenv.ts";
 
 for (const name of REPO_LOCAL_VARS) delete process.env[name];
+
+// k123: the same for the project a spawned `skilletor hook` takes from its environment. A suite
+// run from a Claude Code hook inherits CLAUDE_PROJECT_DIR naming that project – the developer's
+// checkout, whose .claude/skilletor.json is real – and every hook a test spawns would sync it.
+// A test that needs one sets it in the env it spawns with (test/e2e.test.ts).
+for (const name of ["CLAUDE_PROJECT_DIR", "SKILLETOR_PROJECT_DIR"]) delete process.env[name];

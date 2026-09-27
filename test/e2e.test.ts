@@ -57,6 +57,7 @@ test("full lifecycle: add, install, update, re-render, author mode, uninstall", 
       spawnSync(process.execPath, [bundle, ...args], {
         encoding: "utf8",
         input,
+        cwd: project, // k123: a step without --project-dir stays in the test's project
         env: claudeOnlyEnv(home, { CLAUDE_PROJECT_DIR: project }),
       });
 

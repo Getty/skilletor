@@ -11,17 +11,23 @@ import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 let tmp: TmpDir;
 // Written as .mjs so Node runs the ESM bundle as ESM even outside a package.json.
 let bundle: string;
+// k123: the cwd of a spawn that names none – an empty directory outside git, so a command or
+// hook without --project-dir or a cwd of its own never takes this checkout, whose
+// .claude/skilletor.json is real, as its project.
+let noProject: string;
 
 before(async () => {
   tmp = makeTmpDir();
   bundle = join(tmp.dir, "skilletor.mjs");
   writeFileSync(bundle, await buildToString());
+  noProject = join(tmp.dir, "no-project");
+  mkdirSync(noProject);
 });
 
 after(() => tmp.cleanup());
 
 function runCli(args: string[], env?: NodeJS.ProcessEnv, input?: string, cwd?: string) {
-  return spawnSync(process.execPath, [bundle, ...args], { encoding: "utf8", env: env ?? process.env, input, cwd });
+  return spawnSync(process.execPath, [bundle, ...args], { encoding: "utf8", env: env ?? process.env, input, cwd: cwd ?? noProject });
 }
 
 test("--version prints the package version", () => {
@@ -408,9 +414,11 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
 
 test("no harness on the machine: sync fails with the fix named, exit 2", () => {
   const home = join(tmp.dir, "bare-home");
+  const proj = join(tmp.dir, "bare-proj");
   mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(proj, { recursive: true });
   writeFileSync(join(home, ".claude", "skilletor.json"), "{}");
-  const r = runCli(["sync", "--scope", "user"], { ...process.env, HOME: home, CODEX_HOME: join(home, "nope") });
+  const r = runCli(["sync", "--scope", "user", "--project-dir", proj], { ...process.env, HOME: home, CODEX_HOME: join(home, "nope") });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /no agent harness detected.*set "targets"/);
 });
@@ -633,8 +641,9 @@ test("every documented option still works for its command", () => {
     assert.doesNotMatch(r.stderr, /unknown option/, args.join(" "));
     assert.notEqual(r.status, 2, `${args.join(" ")}: ${r.stderr}`);
   }
-  // The internal hook flag stays accepted, and the hook still exits 0 on anything.
-  const hook = runCli(["hook", "session-start", "--harness", "codex", "--whatever"], h.env, "{}");
+  // The internal hook flag stays accepted, and the hook still exits 0 on anything. Its input
+  // names no cwd, so the project is the spawn's cwd: ~, as for the commands above.
+  const hook = runCli(["hook", "session-start", "--harness", "codex", "--whatever"], h.env, "{}", h.home);
   assert.equal(hook.status, 0);
 });
 
