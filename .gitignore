@@ -6,11 +6,8 @@ node_modules/
 tasks/
 config.yml
 
-# skilletor never manages this repo itself
-/.claude/.gitignore
-/.claude/skilletor.json
-/.claude/skilletor.local.json
-/.claude/skilletor.lock.json
+# Claude Code agent worktrees
+/.claude/worktrees/
 
 # claude plugin eval output
 evals/results/
