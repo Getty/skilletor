@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-27T23:29:18Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T23:29:08Z
+created: 2026-09-27T05:00:08Z
+id: 121
+priority: low
+started: 2026-09-27T22:50:19Z
+status: done
+tags:
+- skills
+title: 'skilletor skill: compress the bundled SKILL.md body back under its ~150-line
+  budget'
+updated: 2026-09-27T23:29:18Z
+---
+
+Found during k112 (skill-author). skills/skilletor/SKILL.md body is ~190 lines against a ~150 budget (it was 181 before k112 added the k95–k117 rules). A compression pass or a move of detail into references/ is due – keep every rule k112 added reachable, verify with a baseline-vs-skill question run as k112 did. skilletor-skill-author (skill-compressor).
+
+2026-09-27 23:09 Plan: body stays the common path (install, add, exit codes, config, wildcards, bundles, templates, trust); conflict/--force detail, partial syncs, check's due conditions and the gitignore detail move to a new references/sync.md behind 'read when' pointers. Baseline: 14 questions (common tasks + k95-k117 rules) written before editing; old text answered all 14 (blind grading pending). SKILL.md link count 1 (not hardlinked).
+
+2026-09-27 23:20 Coordinator addendum folded in (k119, uncommitted in the tree): SKILL.md add paragraph - a GitHub tree link (github.com/o/r/tree/<ref>) adds the repo pinned to <ref>, a file/subdirectory link is refused; the same address already there without that ref -> exit 1, nothing changed or trusted (set ref by hand, another name, or remove the source). references/bundles.md Refused column: a link carrying a ref, file or subdirectory (…/tree/<ref>, …/blob/…) - an entry names the repo address only. Two k119 questions added to the verification set (now 16).
+
+2026-09-27 23:26 Done (uncommitted, not staged). SKILL.md 193 lines/1852 words -> 153/1446 (body 190 -> 150, static check 0 errors 0 warnings; command block and frontmatter unchanged, src/cli.ts unchanged, no test reads the bundled skill). New references/sync.md (52/489): conflicts and --force table (adopt / replace-or-delete / is-not-a-file), overlapping entries, partial syncs, check's due conditions, checkInterval, gitignore detail - body points there before --force and on a conflict, partial item, overlap or git rm --cached warning, or a due check. references/bundles.md 120/948 -> 127/1026: new 'An agent and its briefing.skills' section (body keeps the one-bundle rule) + k119 Refused entry. Bundle YAML example dropped from the body (bundles.md has the full one; body says read it before writing one). Verification, 16 questions (14 common + k95-k117, 2 k119), fresh answerers given only one text, blind grader (1/0.5/0 strict): Q1-14 old 11.5 and 10.5, new 11 and 11 (main point right: 14/14 in all four runs; every deduction is an answer omitting a fact both texts state); Q15-16 (k119) old 0.5, new 1.5 and 1.5. New-text answerers found sync.md for Q13/Q14 and bundles.md for Q11/Q16 from the body's pointers. Proposed subject: 'skilletor skill: move sync and git detail to references/sync.md, body back under 150 lines; state k119 tree links (k121)'.
+
+2026-09-27 23:29 Committed 3dd1aac: skilletor skill: move sync and git detail to references/sync.md, body back to 150 lines (k121)
