@@ -10287,10 +10287,16 @@ async function cmdAdd(ctx, args) {
   const existing = sourceEntry(path, name);
   const kept = existing !== void 0;
   if (kept) {
+    const flag = args.project ? " --project" : "";
     if (!sameAddress(ctx, name, existing, resolved)) {
-      const flag = args.project ? " --project" : "";
       throw new CommandError(
         `source "${name}" in ${path} is ${addressText(existing)}, not ${resolved.kind} ${resolved.value}; nothing was changed. Add it under another name (skilletor add <name> ${args.spec}${flag}) or remove the source first (skilletor source remove ${name}${flag}).`
+      );
+    }
+    const refused = loadRefusal(name, existing, path);
+    if (refused !== void 0) {
+      throw new CommandError(
+        `cannot add ${args.spec}: ${refused}; nothing was changed. Source "${name}" there already has this address: fix its entry by hand, or remove it (skilletor source remove ${name}${flag}).`
       );
     }
     def = entryDef(existing);
@@ -10302,9 +10308,9 @@ async function cmdAdd(ctx, args) {
   return { name, def, kept, report };
 }
 var DEF_KEYS = ["git", "ref", "url", "local"];
-function loadRefusal(name, def) {
+function loadRefusal(name, def, file) {
   try {
-    sourceFields(def, `sources.${name}`);
+    sourceFields(def, `${file === void 0 ? "" : `${file}: `}sources.${name}`);
     return void 0;
   } catch (err) {
     if (err instanceof ConfigError) return err.message;

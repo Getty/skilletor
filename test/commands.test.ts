@@ -269,6 +269,63 @@ test("k110: add refuses a spec that resolves to a url config load refuses, befor
   }
 });
 
+// k116: k101's keep path trusted an entry with the same address whose other fields config load
+// refuses (a hand-written `ref: ""`), then the sync after it stopped at that config error.
+// Asserts, for each such entry in the user or the project config: `add` of that address is a
+// CommandError quoting config load's own error for the entry, naming both ways out; the file
+// byte-identical, nothing trusted, no sync (no lock in either scope). Fixed by hand, the same
+// `add` keeps and trusts it again.
+test("k116: add of an address whose kept entry config load refuses fails before trusting it", async () => {
+  const e = env();
+  try {
+    const url = gitRepo(e.tmp.dir, "tools", ["t-one"]);
+    const projPath = join(e.projectDir, ".claude/skilletor.json");
+    const cases: { entry: Record<string, unknown>; spec: string; name?: string; project: boolean }[] = [
+      { entry: { git: url, ref: "" }, spec: url, project: false },
+      { entry: { git: url, ref: "-x" }, spec: url.replace(/\.git$/, ""), name: "tools", project: false },
+      { entry: { git: url, ref: 5 }, spec: url, project: true },
+      { entry: { git: url, rev: "main" }, spec: url, name: "tools", project: true },
+    ];
+    for (const c of cases) {
+      const path = c.project ? projPath : e.userCfgPath;
+      rmSync(e.userCfgPath, { force: true });
+      rmSync(projPath, { force: true });
+      const raw = `{ "sources": { "tools": ${JSON.stringify(c.entry)} } }\n`;
+      writeFileSync(path, raw);
+      let loadMsg = "";
+      assert.throws(() => loadConfig({ home: e.home, projectDir: e.projectDir }), (err: unknown) => {
+        assert.ok(err instanceof ConfigError, String(err));
+        loadMsg = (err as Error).message;
+        return true;
+      });
+      const flag = c.project ? " --project" : "";
+      await assert.rejects(() => cmdAdd(e.ctx, { name: c.name, spec: c.spec, project: c.project }), (err: unknown) => {
+        assert.ok(err instanceof CommandError, String(err));
+        assert.equal((err as Error).message, `cannot add ${c.spec}: ${loadMsg}; nothing was changed. ` +
+          `Source "tools" there already has this address: fix its entry by hand, or remove it ` +
+          `(skilletor source remove tools${flag}).`);
+        return true;
+      });
+      const label = JSON.stringify(c.entry);
+      assert.equal(readFileSync(path, "utf8"), raw, `${label}: config byte-identical`);
+      assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, `${label}: nothing trusted`);
+      assert.equal(existsSync(join(e.home, ".claude/skilletor.lock.json")), false, `${label}: no sync, no user lock`);
+      assert.equal(existsSync(join(e.projectDir, ".claude/skilletor.lock.json")), false, `${label}: no sync, no project lock`);
+    }
+
+    // Fixed by hand, the entry is kept, trusted and synced again.
+    const fixed = `{ "sources": { "tools": { "git": "${url}", "ref": "main" } } }\n`;
+    writeFileSync(projPath, fixed);
+    const res = await cmdAdd(e.ctx, { spec: url, project: true });
+    assert.equal(res.kept, true);
+    assert.equal(res.report.error, undefined);
+    assert.equal(readFileSync(projPath, "utf8"), fixed);
+    assert.equal(new State(e.ctx.stateRoot).isTrusted("tools", { kind: "git", address: url, origin: "project" }), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
 // k109: `add gitlab:u/r` stored git https://github.com/gitlab:u/r, and `add HTTPS://…` a GitHub
 // owner "HTTPS:". Asserts: an unknown prefix is the SpecError before anything is written or
 // trusted (no config, no trust.json); an upper-case scheme is stored lower-case and loads.

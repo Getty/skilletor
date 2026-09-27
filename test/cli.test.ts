@@ -906,3 +906,38 @@ test("k110: add of an http:// or file:// tarball exits 1 before writing, config 
   assert.equal(list.status, 0, list.stderr);
   assert.match(list.stdout, /^keep \[user\] /m);
 });
+
+// k116: `add` of an address the config already holds kept that entry – trusted it and synced –
+// even when config load refuses its other fields (a hand-written `ref: ""`), and the sync then
+// exited 2. Asserts, through the real binary: exit 1 as any refusal before the edit, nothing on
+// stdout, stderr quotes load's error for the entry and both ways out; the config byte-identical,
+// nothing trusted, no lock (no sync ran).
+test("k116: add of an address whose kept entry config load refuses exits 1, trusts nothing", () => {
+  const home = join(tmp.dir, "k116-home");
+  const proj = join(tmp.dir, "k116-proj");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(proj, ".claude"), { recursive: true });
+  const env = claudeOnlyEnv(home);
+  const common = ["--project-dir", proj];
+  const url = "https://example.invalid/Getty/tools";
+  const cases: [string, string[], string, string][] = [
+    [join(home, ".claude", "skilletor.json"), ["add", url], `"ref": ""`, `sources.tools.ref "" must not be empty (omit "ref" for the remote's HEAD)`],
+    [join(proj, ".claude", "skilletor.json"), ["add", "tools", url, "--project"], `"ref": "-x"`,
+      `sources.tools.ref "-x" must not start with "-" (git would read it as an option)`],
+  ];
+  for (const [cfg, args, field, problem] of cases) {
+    const raw = `{ "sources": { "tools": { "git": "${url}", ${field} } } }\n`;
+    writeFileSync(cfg, raw);
+    const r = runCli([...args, ...common], env);
+    const flag = args.includes("--project") ? " --project" : "";
+    assert.equal(r.status, 1, `${args.join(" ")}: ${r.stdout}${r.stderr}`);
+    assert.equal(r.stdout, "");
+    assert.equal(r.stderr, `skilletor: cannot add ${url}: ${cfg}: ${problem}; nothing was changed. ` +
+      `Source "tools" there already has this address: fix its entry by hand, or remove it (skilletor source remove tools${flag}).\n`);
+    assert.equal(readFileSync(cfg, "utf8"), raw, "config byte-identical");
+    assert.equal(existsSync(join(home, ".claude", "skilletor", "trust.json")), false, "nothing trusted");
+    assert.equal(existsSync(join(home, ".claude", "skilletor.lock.json")), false, "no sync, no user lock");
+    assert.equal(existsSync(join(proj, ".claude", "skilletor.lock.json")), false, "no sync, no project lock");
+    rmSync(cfg);
+  }
+});

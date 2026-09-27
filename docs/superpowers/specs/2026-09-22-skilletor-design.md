@@ -290,7 +290,14 @@ identities, §15.6; `local` as the directory it names), the entry stays as writt
 it and syncs (`source karr already added (…), kept as is`). Another backend or address is an
 error before anything is written or trusted (exit 1, config byte-identical) naming the
 existing address and the ways out: another name (`skilletor add <name> <spec>`) or
-`skilletor source remove <name>` first.
+`skilletor source remove <name>` first. A kept entry goes through config load's own check of
+a source (§3) as written, before it is trusted (k116): one load refuses (a hand-written
+`"ref": ""` or `"ref": "-x"`, an unknown key) is never kept – exit 1, nothing trusted, no
+sync, config byte-identical – and the error quotes load's own words for it and the ways out:
+fix the entry by hand, or `skilletor source remove <name>` (`cannot add <spec>: <file>:
+sources.karr.ref "" must not be empty (omit "ref" for the remote's HEAD); nothing was
+changed. Source "karr" there already has this address: fix its entry by hand, or remove it
+(skilletor source remove karr).`).
 
 **`add` writes only what config load takes** (k110). The source definition a spec resolves
 to goes through config load's own check of a source (§3) before the config is read or
@@ -730,8 +737,10 @@ well when the sync they run after their edit stops at one (k103). Their edit is 
 not rolled back – the config stays what the user asked for, and the next `sync` after the
 fix applies it – so the error on stderr says plainly that the config edit itself was saved
 and names the file, instead of `sync`'s "nothing changed". An `add` that keeps an existing
-entry writes nothing and reports the error as `sync` does. Exit 1 stays a command error
-before the edit (nothing changed); exit 2 a usage error or a config error.
+entry writes nothing and reports the error as `sync` does; an entry config load itself
+refuses is never kept, so that `add` fails before any trust or sync (exit 1, §4.2, k116).
+Exit 1 stays a command error before the edit (nothing changed); exit 2 a usage error or a
+config error.
 
 The project root is `--project-dir`, else the git top level of the current directory, else
 the current directory – the resolution the hooks use without `CLAUDE_PROJECT_DIR` (§14.5),

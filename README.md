@@ -66,9 +66,11 @@ shown here:
 A git repo other than `skills` is named after the repo, explicit URLs too
 (`https://github.com/Getty/karr.git`, `git@github.com:Getty/karr.git` → `karr`); the
 default repo after its owner. `add` never replaces a source: the same address again keeps
-the entry as it is (a `ref` or `local` you set stays) and syncs; a name the config already
-gives another address fails (exit 1, nothing changed) — pass a name (`skilletor add <name>
-<spec>`) or `skilletor source remove <name>` first.
+the entry as it is (a `ref` or `local` you set stays) and syncs — unless that entry is one
+config load refuses (a hand-written `"ref": ""`, say), which fails (exit 1, nothing trusted
+or changed) until you fix it; a name the config already gives another address fails (exit
+1, nothing changed) — pass a name (`skilletor add <name> <spec>`) or `skilletor source
+remove <name>` first.
 
 A source's layout (convention, no manifest):
 

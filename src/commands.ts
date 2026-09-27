@@ -68,7 +68,8 @@ const TYPE_DIR: Record<ItemType, string> = { skill: "skills", agent: "agents", r
  * has the same backend and address – still trusted and synced, `kept` set – and is an error,
  * before anything is written or trusted, when it has another one. Only that file counts.
  * A name config load would refuse (k95) is refused first, before the spec is resolved; a
- * definition it would refuse (k110: a `url` not https://) next, before that file is read.
+ * definition it would refuse (k110: a `url` not https://) next, before that file is read;
+ * a kept entry it would refuse (k116: a hand-written `ref: ""`) before it is trusted.
  */
 export async function cmdAdd(
   ctx: CommandContext,
@@ -88,12 +89,20 @@ export async function cmdAdd(
   const existing = sourceEntry(path, name);
   const kept = existing !== undefined;
   if (kept) {
+    const flag = args.project ? " --project" : "";
     if (!sameAddress(ctx, name, existing, resolved)) {
-      const flag = args.project ? " --project" : "";
       throw new CommandError(
         `source "${name}" in ${path} is ${addressText(existing)}, not ${resolved.kind} ${resolved.value}; ` +
           `nothing was changed. Add it under another name (skilletor add <name> ${args.spec}${flag}) ` +
           `or remove the source first (skilletor source remove ${name}${flag}).`,
+      );
+    }
+    // Kept as written, so checked as load reads it: an entry the sync would refuse is not trusted.
+    const refused = loadRefusal(name, existing, path);
+    if (refused !== undefined) {
+      throw new CommandError(
+        `cannot add ${args.spec}: ${refused}; nothing was changed. Source "${name}" there already has this address: ` +
+          `fix its entry by hand, or remove it (skilletor source remove ${name}${flag}).`,
       );
     }
     def = entryDef(existing as Record<string, unknown>);
@@ -110,10 +119,11 @@ export async function cmdAdd(
 const DEF_KEYS = ["git", "ref", "url", "local"];
 
 /** Why config load would refuse source `name` defined as `def` (`sources.<name>.url … must be
- *  an https:// URL`), by load's own check (k110); undefined when it would load. */
-function loadRefusal(name: string, def: SourceDef): string | undefined {
+ *  an https:// URL`; with `file`, load's own `<file>: sources.<name>…`), by load's own check
+ *  (k110); undefined when it would load. */
+function loadRefusal(name: string, def: unknown, file?: string): string | undefined {
   try {
-    sourceFields(def, `sources.${name}`);
+    sourceFields(def, `${file === undefined ? "" : `${file}: `}sources.${name}`);
     return undefined;
   } catch (err) {
     if (err instanceof ConfigError) return err.message;
