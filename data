@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-27T23:03:13Z
+id: 124
+priority: medium
+status: backlog
+tags:
+- skills
+- dogfood
+title: 'dogfood: agent worktrees lack the gitignored skilletor-installed skills'
+updated: 2026-09-27T23:03:13Z
+---
+
+Found during k122 (worker). Since k122 the six shared skills in .claude/skills are installed by skilletor and gitignored. A fresh git worktree (Agent isolation: worktree, .claude/worktrees/…) has only the tracked repo-owned skills until a sync runs there; kanban-issues-karr-ticket, kanban-issues-karr-coordination and getty-git-commit-style are not in ~/.claude/skills either, so briefing.skills of the skilletor-* agents would not resolve. Not observed yet (no worktree used since). Options: (a) verify whether a worktree session runs the SessionStart hook before briefing resolves; (b) install those skills at user scope too (maintainer user config); (c) a WorktreeCreate hook or documented `skilletor sync --scope project` step; (d) gitignore: false. Decide with the maintainer.
