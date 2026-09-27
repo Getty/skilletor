@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-27T00:59:46Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T00:59:34Z
+created: 2026-09-26T22:51:03Z
+id: 104
+priority: low
+started: 2026-09-27T00:28:57Z
+status: done
+tags:
+- spec
+- bug
+title: 'spec: github:Getty/ stores https://github.com/Getty/ instead of the default
+  skills repo'
+updated: 2026-09-27T00:59:46Z
+---
+
+Found during k101 (worker). resolveSpec for "github:Getty/" (trailing slash, empty repo) stores git https://github.com/Getty/ rather than https://github.com/Getty/skills, unlike "Getty" and "github:Getty". An empty repo segment should mean the default repo.
+
+2026-09-27 00:57 Cause: resolveSpec's github: branch split the path with a plain split('/'), so an empty repo segment became the repo (github:Getty/, github:Getty//, github:Getty//karr all stored https://github.com/Getty/). Known-forge (github.com/u/) and owner/ forms already filter empty segments and were fine. Fix: github: takes the first non-empty segment after the owner; empty owner (github:/karr) still errors. Red test: 3 github: rows failed, 55 passed.
+
+2026-09-27 00:58 Done. Files: src/spec.ts (github: branch: repo = first non-empty segment after owner), test/spec.test.ts (k104Rows: github:Getty/, github:Getty// -> .../Getty/skills 'getty'; github:Getty//karr -> .../Getty/karr 'karr'; sibling pins Getty/, Getty//karr, github.com/Getty/, github.com/Getty//karr, gitlab.com/u/; plus github:/karr still a SpecError), docs/superpowers/specs/2026-09-22-skilletor-design.md §4.2 (empty path segments skipped -> empty repo = default repo), dist/skilletor.js rebuilt. Only form touched: github: prefix; known-forge and owner/ forms already correct, now pinned. Verified: typecheck ok; npm test 717/717 pass, 0 fail, 0 skipped; build ok; check-dist up to date.
+
+2026-09-27 00:58 Also found (not fixed, for this board): a prefix other than lowercase 'github:' is not recognized and resolves via the bare-word/owner branch into a GitHub URL with a colon in the owner: 'GitHub:Getty' -> https://github.com/GitHub:Getty/skills (name github-getty); 'gitlab:u/r' -> https://github.com/gitlab:u/r. Probably should be a SpecError (or case-insensitive github:). §4.2 does not cover it.
+
+2026-09-27 00:59 Committed 9bc2038: spec: an empty repo segment in github: means the default repo (k104)
