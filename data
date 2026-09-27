@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-27T23:17:55Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T23:17:50Z
+created: 2026-09-27T04:02:13Z
+id: 119
+priority: low
+started: 2026-09-27T22:50:05Z
+status: done
+tags:
+- spec
+- bug
+title: 'spec: a pasted GitHub browser URL (…/tree/main) is stored as written or loses
+  its ref silently'
+updated: 2026-09-27T23:17:55Z
+---
+
+Found during k117 (worker). `https://github.com/Getty/karr/tree/main` is stored verbatim as git and fails only at fetch; `github.com/Getty/karr/tree/main` (no scheme) silently drops /tree/main and tracks HEAD. Users paste browser URLs. Expected: decide – either resolve …/tree/<ref> to the repo plus `ref: <ref>`, or refuse with a hint to use `add <spec>` and set ref. Document in §4.2.
+
+2026-09-27 23:11 Red tests first (worker). test/spec.test.ts: k119Rows assert [https://]github.com/<owner>/<repo>/tree/<ref>[/] (scheme/host any case, blank segment skipped) -> git https://github.com/<owner>/<repo> + ref <ref>, named after the repo (k101), never probed; ref taken as written. k119Pinned + a ref assertion on every existing row pin that no other form gains a ref (github:/owner-repo shorthands, http://, www., gitlab /-/tree/, codeberg, archive tarball, repo named tree/blob). k119 SpecError test: blob link, tree link into a subdir (incl. slash ref feature/x), tree link without ref -> SpecError naming what to add instead. test/commands.test.ts: add stores {git, ref} in user/project config, load reads it, trust binds address only; blob/subdir/no-ref refused before writing; link ref gitField refuses (-x, main~1) is k110's CommandError; keep path: same address with no/other ref is a CommandError (set ref by hand / other name / remove), same ref kept, spec without ref still keeps an entry's ref. test/bundles.test.ts: x@<github tree link> is a BundleError (entries name a source by address alone), blob/subdir wrap the SpecError, repo address still parses. All 15 new cases fail on the current tree for the stated reason.
+
+2026-09-27 23:15 Done (worker), uncommitted, nothing staged. src/spec.ts: ResolvedSpec gains optional ref; githubLink() reads [https://]github.com/<owner>/<repo>/tree|blob/... (scheme/host any case, blank segments skipped, ?query/#fragment ignored as the page's) in branch 2 (explicit https URL) and branch 4 (github.com shorthand): tree/<ref> -> git https://github.com/<owner>/<repo> + ref, named per k101, owner/repo per k117; blob link, tree link past its ref (subdir; slash refs cannot be told apart, message says add the repo and set ref by hand) and tree link without ref -> SpecError naming what to add. src/commands.ts: cmdAdd writes def.ref, so k110's loadRefusal/gitField judges it before anything is written (tree/-x, tree/main~1 refused); keep path: a spec with a ref keeps a same-address entry only at that ref, else CommandError naming both refs (set ref by hand / other name / remove); a spec without ref still keeps any entry ref (k101). src/bundles.ts: a bundle entry with a ref is a BundleError (entries name a source by address alone, §15.6; carrying it would still be dropped by servingSource). dist/skilletor.js rebuilt. Tests: test/spec.test.ts (k119Rows, k119Pinned, ref asserted undefined on every existing row, SpecError test), test/commands.test.ts (3 add tests), test/bundles.test.ts (1). Docs: design spec §4.2 row + paragraph + keep-path sentence, §15.4 bullet, §15.6 sentence; README one table row. Verified: typecheck clean; npm test 846/846 pass; build ok; check-dist up to date; hand run of bin/skilletor add from temp cwd/HOME/CODEX_HOME. Other forges untouched (gitlab /-/tree/, codeberg /src/branch/ still drop the tail). Drift for the skill author: skills/skilletor/SKILL.md keep-path sentence and references/bundles.md not-allowed column do not mention tree links.
+
+2026-09-27 23:15 Also found (for the dispatcher to file on this board, not fixed here): (1) a repo page link with an anchor or view query, https://github.com/Getty/karr#readme or ?tab=readme-ov-file, is stored verbatim as git and fails only at fetch; github.com/Getty/karr#readme is a repo-character SpecError. (2) Other GitHub page links: github.com/o/r/releases/tag/v1, /commit/<sha>, /issues silently track HEAD, and their https:// forms are stored verbatim and fail at fetch. Same class as k119. (3) Other forges: gitlab.com/u/r/-/tree/main, codeberg.org/u/r/src/branch/main and hf.co/u/r/tree/main silently drop the tail and track HEAD; their https:// forms are stored verbatim and fail at fetch. Pinned in k119Pinned. (4) github:Getty/karr/tree/main and Getty/karr/tree/main still drop /tree/main silently (k117Pinned/k119Pinned), which is now inconsistent with github.com/Getty/karr/tree/main. (5) Low: a percent-encoded ref in a link (%C3%BC) is stored encoded, and the fetch fails naming it.
+
+2026-09-27 23:17 Committed b060c07dd252664e566b19a4cdf80007f9ffcda5
