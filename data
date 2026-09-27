@@ -1,0 +1,39 @@
+---
+claimed_at: 2026-09-27T05:02:07Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T05:02:02Z
+created: 2026-09-27T01:10:03Z
+id: 112
+priority: low
+started: 2026-09-27T03:02:39Z
+status: done
+tags:
+- skills
+title: 'skilletor skill: state the k95, k100, k103, k110, k114, k115 and k116 rules'
+updated: 2026-09-27T05:02:07Z
+---
+
+Found during k95 (worker). skills/skilletor/SKILL.md (around line 106) lists the source-field rules (k88) but not the source-name rule: ASCII letters, digits, ".", "_" and "-", starting with a letter or digit; anything else is a config error and add refuses it. Skill text -> skilletor-skill-author.
+
+2026-09-27 01:20 Also (k100): agents/rules published as both <name>.md and <name>.md.njk are an error of that item – available shows it, install refuses it, sync warns and keeps an installed copy. README states it under Templates.
+
+2026-09-27 01:27 Also (k103): skills/skilletor/SKILL.md gives exit codes for add and uninstall but lacks that add, install, uninstall and source remove exit 2 when their follow-up sync hits a config error (the edit is saved and stays). README states it in the CLI reference.
+
+2026-09-27 03:23 Also (k110): skills/skilletor/SKILL.md config bullets list git/ref/local rules but not url: url must be https://; add refuses a spec that resolves to any other url (http://, file://, ssh://, git@host: tarball) before writing anything – exit 1, config untouched; install refuses a bundle source it could only add that way.
+
+2026-09-27 04:11 Also (k114): skills/skilletor/SKILL.md Commands paragraph states uninstall's exit-1 rule but not source remove's: a name the target config does not declare exits 1, nothing changed, --force or not; the error names where else it is declared.
+
+2026-09-27 04:20 Also (k116): skills/skilletor/SKILL.md:68 says the same address again keeps the entry and syncs – add the exception: an existing entry config load refuses (hand-written ref "", say) fails with exit 1, nothing trusted or changed, until fixed by hand. README states it.
+
+2026-09-27 04:29 Also (k115): skills/skilletor/references/bundles.md line ~83, the 'Refused (bundle error)' column should list an entry address config load would refuse as a source (a non-https tarball: x@http://host/x.tar.gz); available and sync show that bundle error, install refuses it, and the whole bundle is frozen (installed items stay, new members wait) while it lasts.
+
+2026-09-27 04:51 Also (k113): the pair rule covers skills too – a skill holding f beside f.njk (SKILL.md + SKILL.md.njk, scripts/x.sh + scripts/x.sh.njk) is an error of that skill, also under .claude/: available shows it, install refuses it, sync warns and keeps an installed copy. README states it under Templates.
+
+2026-09-27 04:57 Done (uncommitted, not staged): skills/skilletor/SKILL.md + references/bundles.md (neither hardlinked). Commands para: k103 (add/install/uninstall/source remove: sync config error -> exit 2, edit saved), k114 (merged with uninstall's exit-1 rule: absent source -> exit 1 even with --force, error names where else declared), k116 (same address kept unless config load refuses the entry: exit 1, nothing trusted, fix by hand). Config source bullet: k95 (name rule) + k110 (url is https://; add refuses a bad name or non-https tarball before writing, exit 1). Templates para: k100+k113 (f beside f.njk in one item is an error: available shows, install refuses, sync warns + keeps copy). bundles.md: k115 (Refused column + Errors para: never a missing source, sync warns, install refuses, new members wait). Shorthand check (k104/k109/k111/k117): the skill describes no github:/scheme/word:/empty-spec/owner-char forms and every example still resolves as written - no change. SKILL.md +9 lines/+125 words, bundles.md +1/+29. Static check 0 errors. Fresh-subagent A/B, 8 questions: baseline mostly guessed (http tarball leaned 'accepted'); with skill all 8 stated and correct. No test reads the bundled skill; npm test not needed.
+
+2026-09-27 04:58 Also found: (1) the bundled skill does not state k99's executable bit (README Templates does: a skill's file keeps its source's bit, so a skill can tell the model to run scripts/x.sh) - not on this card, left out. (2) SKILL.md body is 190 lines vs the ~150 budget (181 before this card); a skill-compressor pass or a move to references/ is due.
+
+2026-09-27 05:00 Also (coordinator): k99 added to SKILL.md Templates - 'every other file is copied byte for byte (a skill's executable bit included; a `.njk` passes its own on)'; +0 lines/+11 words (now 193 lines/1852 words), static check 0 errors.
+
+2026-09-27 05:01 Committed 1e6624e9ab85fb55d8afd52f6cbc274eb93ca529: skilletor skill: state the rules k95-k117 added (k112)
