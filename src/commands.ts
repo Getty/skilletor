@@ -3,9 +3,9 @@
 // config.ts so the declarative config stays the single source of truth.
 import { dirname, join } from "node:path";
 import {
-  addBundleEntry, addInstallEntry, addSource, bundleEntries, findInstallEntries, findWildcardEntries, isSourceName,
-  loadConfig, removeBundleEntries, removeInstallEntries, removeSource, SOURCE_NAME_RULE, sourceEntry, WILDCARD,
-  type BackendKind, type ItemType, type LoadedConfig, type Origin, type SourceDef,
+  addBundleEntry, addInstallEntry, addSource, bundleEntries, ConfigError, findInstallEntries, findWildcardEntries,
+  isSourceName, loadConfig, removeBundleEntries, removeInstallEntries, removeSource, SOURCE_NAME_RULE, sourceEntry,
+  sourceFields, WILDCARD, type BackendKind, type ItemType, type LoadedConfig, type Origin, type SourceDef,
 } from "./config.ts";
 import { BundleError, expandBundle, matchesPattern, sameIdentity, type ForeignEntry } from "./bundles.ts";
 import { resolveSpec, type Probe, type ResolvedSpec } from "./spec.ts";
@@ -67,7 +67,8 @@ const TYPE_DIR: Record<ItemType, string> = { skill: "skills", agent: "agents", r
  * config already has keeps its entry untouched (ref, local override and all) when the entry
  * has the same backend and address – still trusted and synced, `kept` set – and is an error,
  * before anything is written or trusted, when it has another one. Only that file counts.
- * A name config load would refuse (k95) is refused first, before the spec is resolved.
+ * A name config load would refuse (k95) is refused first, before the spec is resolved; a
+ * definition it would refuse (k110: a `url` not https://) next, before that file is read.
  */
 export async function cmdAdd(
   ctx: CommandContext,
@@ -81,6 +82,8 @@ export async function cmdAdd(
   const name = args.name ?? resolved.derivedName;
   let def: SourceDef =
     resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };
+  const invalid = loadRefusal(name, def);
+  if (invalid !== undefined) throw new CommandError(`cannot add ${args.spec}: ${invalid}; nothing was changed`);
 
   const existing = sourceEntry(path, name);
   const kept = existing !== undefined;
@@ -105,6 +108,18 @@ export async function cmdAdd(
 }
 
 const DEF_KEYS = ["git", "ref", "url", "local"];
+
+/** Why config load would refuse source `name` defined as `def` (`sources.<name>.url … must be
+ *  an https:// URL`), by load's own check (k110); undefined when it would load. */
+function loadRefusal(name: string, def: SourceDef): string | undefined {
+  try {
+    sourceFields(def, `sources.${name}`);
+    return undefined;
+  } catch (err) {
+    if (err instanceof ConfigError) return err.message;
+    throw err;
+  }
+}
 
 /** Does a config entry name the backend and address a spec resolved to? git/url compare as
  *  source identities (§15.6), a local path as the directory it names. */
@@ -319,7 +334,8 @@ export async function cmdInstall(
 /**
  * Sources the bundles name by address that no visible configured source serves
  * (spec §15.6). On a TTY each is offered for adding; without one the command fails,
- * printing the `skilletor add` commands. Returns the sources to add.
+ * printing the `skilletor add` commands. One config load would refuse fails it on either,
+ * before any question (k110). Returns the sources to add.
  */
 async function missingSources(
   ctx: CommandContext, config: LoadedConfig, bundles: { name: string; foreign: ForeignEntry[] }[], path: string,
@@ -346,6 +362,14 @@ async function missingSources(
     while (!free(`${f.derivedName}-${n}`, f.url)) n++;
     return `${f.derivedName}-${n}`;
   };
+  const defOf = (f: ForeignEntry): SourceDef => (f.kind === "git" ? { git: f.url } : { url: f.url });
+  // A source load would refuse (k110) can be neither offered nor added by hand: refused first.
+  for (const { bundle, f } of missing) {
+    const invalid = loadRefusal(suggest(f), defOf(f));
+    if (invalid !== undefined) {
+      throw new CommandError(`bundle ${bundle} needs ${f.spec}, which cannot be added as a source: ${invalid}; nothing was changed`);
+    }
+  }
   const flag = project ? " --project" : "";
   if (!ctx.prompt) {
     const lines = missing.map((m) => `  skilletor add ${suggest(m.f)} ${m.f.spec}${flag}`);
@@ -373,7 +397,7 @@ async function missingSources(
         note = `"${name}" is already a source with another address (${own !== undefined ? addressText(own) : taken.get(name)}). `;
         continue;
       }
-      out.push({ name, def: f.kind === "git" ? { git: f.url } : { url: f.url }, url: f.url });
+      out.push({ name, def: defOf(f), url: f.url });
       taken.set(name, f.url);
       break;
     }

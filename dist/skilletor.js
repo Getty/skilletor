@@ -5871,39 +5871,44 @@ function parseSources(obj, path, origin) {
     if (!isSourceName(name)) {
       throw new ConfigError(`${path}: source name ${JSON.stringify(name)} is not valid (${SOURCE_NAME_RULE})`);
     }
-    const d = asObject(def, path, `sources.${name}`);
-    for (const key of Object.keys(d)) {
-      if (!SOURCE_KEYS.has(key)) {
-        throw new ConfigError(`${path}: sources.${name}: unknown key "${key}"`);
-      }
-    }
-    const src = { name, origins: {} };
-    if (d.git !== void 0) src.git = gitField(stringField(d.git, "git", path, name), "git", path, name);
-    if (d.ref !== void 0) src.ref = gitField(stringField(d.ref, "ref", path, name), "ref", path, name);
-    if (d.local !== void 0) src.local = stringField(d.local, "local", path, name);
-    if (d.url !== void 0) {
-      if (typeof d.url !== "string" || !d.url.startsWith("https://")) {
-        throw new ConfigError(`${path}: sources.${name}.url must be an https:// URL`);
-      }
-      src.url = d.url;
-    }
-    if (src.git === void 0 && src.url === void 0 && src.local === void 0) {
-      throw new ConfigError(`${path}: sources.${name} needs one of "git", "url" or "local"`);
-    }
+    const src = Object.assign({ name, origins: {} }, sourceFields(def, `${path}: sources.${name}`));
     for (const kind of BACKEND_KINDS) if (src[kind] !== void 0) src.origins[kind] = origin;
     sources.set(name, src);
   }
   return sources;
 }
-function stringField(value2, key, path, name) {
-  const where = `${path}: sources.${name}.${key} ${JSON.stringify(value2)}`;
+function sourceFields(def, at) {
+  if (def === null || typeof def !== "object" || Array.isArray(def)) throw new ConfigError(`${at} must be an object`);
+  const d = def;
+  for (const key of Object.keys(d)) {
+    if (!SOURCE_KEYS.has(key)) {
+      throw new ConfigError(`${at}: unknown key "${key}"`);
+    }
+  }
+  const src = {};
+  if (d.git !== void 0) src.git = gitField(stringField(d.git, "git", at), "git", at);
+  if (d.ref !== void 0) src.ref = gitField(stringField(d.ref, "ref", at), "ref", at);
+  if (d.local !== void 0) src.local = stringField(d.local, "local", at);
+  if (d.url !== void 0) {
+    if (typeof d.url !== "string" || !d.url.startsWith("https://")) {
+      throw new ConfigError(`${at}.url ${JSON.stringify(d.url)} must be an https:// URL`);
+    }
+    src.url = d.url;
+  }
+  if (src.git === void 0 && src.url === void 0 && src.local === void 0) {
+    throw new ConfigError(`${at} needs one of "git", "url" or "local"`);
+  }
+  return src;
+}
+function stringField(value2, key, at) {
+  const where = `${at}.${key} ${JSON.stringify(value2)}`;
   if (typeof value2 !== "string") throw new ConfigError(`${where} must be a string`);
   if (value2 === "") throw new ConfigError(`${where} must not be empty${key === "ref" ? ` (omit "ref" for the remote's HEAD)` : ""}`);
   return value2;
 }
 var NOT_IN_REF = /[\x00-\x20\x7f~^:?*[\\]|\.\.|@\{/;
-function gitField(value2, key, path, name) {
-  const where = `${path}: sources.${name}.${key} ${JSON.stringify(value2)}`;
+function gitField(value2, key, at) {
+  const where = `${at}.${key} ${JSON.stringify(value2)}`;
   if (value2.startsWith("-")) throw new ConfigError(`${where} must not start with "-" (git would read it as an option)`);
   if (key === "ref" && NOT_IN_REF.test(value2)) {
     throw new ConfigError(`${where} is not a git ref name (no whitespace, control characters, ~ ^ : ? * [ \\, ".." or "@{")`);
@@ -10230,6 +10235,8 @@ async function cmdAdd(ctx, args) {
   const resolved = resolveSpec(args.spec, ctx.probe ?? makeProbe());
   const name = args.name ?? resolved.derivedName;
   let def = resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };
+  const invalid = loadRefusal(name, def);
+  if (invalid !== void 0) throw new CommandError(`cannot add ${args.spec}: ${invalid}; nothing was changed`);
   const existing = sourceEntry(path, name);
   const kept = existing !== void 0;
   if (kept) {
@@ -10248,6 +10255,15 @@ async function cmdAdd(ctx, args) {
   return { name, def, kept, report };
 }
 var DEF_KEYS = ["git", "ref", "url", "local"];
+function loadRefusal(name, def) {
+  try {
+    sourceFields(def, `sources.${name}`);
+    return void 0;
+  } catch (err) {
+    if (err instanceof ConfigError) return err.message;
+    throw err;
+  }
+}
 function sameAddress(ctx, name, entry, resolved) {
   if (entry === null || typeof entry !== "object") return false;
   const field = entry[resolved.kind];
@@ -10421,6 +10437,13 @@ async function missingSources(ctx, config, bundles, path, project) {
     while (!free(`${f.derivedName}-${n}`, f.url)) n++;
     return `${f.derivedName}-${n}`;
   };
+  const defOf = (f) => f.kind === "git" ? { git: f.url } : { url: f.url };
+  for (const { bundle, f } of missing) {
+    const invalid = loadRefusal(suggest(f), defOf(f));
+    if (invalid !== void 0) {
+      throw new CommandError(`bundle ${bundle} needs ${f.spec}, which cannot be added as a source: ${invalid}; nothing was changed`);
+    }
+  }
   const flag = project ? " --project" : "";
   if (!ctx.prompt) {
     const lines = missing.map((m) => `  skilletor add ${suggest(m.f)} ${m.f.spec}${flag}`);
@@ -10448,7 +10471,7 @@ ${lines.join("\n")}`
         note = `"${name}" is already a source with another address (${own !== void 0 ? addressText(own) : taken.get(name)}). `;
         continue;
       }
-      out.push({ name, def: f.kind === "git" ? { git: f.url } : { url: f.url }, url: f.url });
+      out.push({ name, def: defOf(f), url: f.url });
       taken.set(name, f.url);
       break;
     }

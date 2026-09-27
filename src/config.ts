@@ -173,37 +173,46 @@ function parseSources(obj: Json, path: string, origin: Origin): Map<string, Reso
     if (!isSourceName(name)) {
       throw new ConfigError(`${path}: source name ${JSON.stringify(name)} is not valid (${SOURCE_NAME_RULE})`);
     }
-    const d = asObject(def, path, `sources.${name}`);
-    for (const key of Object.keys(d)) {
-      if (!SOURCE_KEYS.has(key)) {
-        throw new ConfigError(`${path}: sources.${name}: unknown key "${key}"`);
-      }
-    }
-    const src: ResolvedSource = { name, origins: {} };
-    if (d.git !== undefined) src.git = gitField(stringField(d.git, "git", path, name), "git", path, name);
-    if (d.ref !== undefined) src.ref = gitField(stringField(d.ref, "ref", path, name), "ref", path, name);
-    if (d.local !== undefined) src.local = stringField(d.local, "local", path, name);
-    if (d.url !== undefined) {
-      if (typeof d.url !== "string" || !d.url.startsWith("https://")) {
-        throw new ConfigError(`${path}: sources.${name}.url must be an https:// URL`);
-      }
-      src.url = d.url;
-    }
-    if (src.git === undefined && src.url === undefined && src.local === undefined) {
-      throw new ConfigError(`${path}: sources.${name} needs one of "git", "url" or "local"`);
-    }
+    const src: ResolvedSource = Object.assign({ name, origins: {} }, sourceFields(def, `${path}: sources.${name}`));
     for (const kind of BACKEND_KINDS) if (src[kind] !== undefined) src.origins[kind] = origin;
     sources.set(name, src);
   }
   return sources;
 }
 
+/** One source definition checked field by field, as config load reads it; every error starts
+ *  with `at` (`<file>: sources.<name>`). `add` and the bundle prompt check what they would
+ *  write with it before writing anything (k110), so neither writes a source load refuses. */
+export function sourceFields(def: unknown, at: string): SourceDef {
+  if (def === null || typeof def !== "object" || Array.isArray(def)) throw new ConfigError(`${at} must be an object`);
+  const d = def as Json;
+  for (const key of Object.keys(d)) {
+    if (!SOURCE_KEYS.has(key)) {
+      throw new ConfigError(`${at}: unknown key "${key}"`);
+    }
+  }
+  const src: SourceDef = {};
+  if (d.git !== undefined) src.git = gitField(stringField(d.git, "git", at), "git", at);
+  if (d.ref !== undefined) src.ref = gitField(stringField(d.ref, "ref", at), "ref", at);
+  if (d.local !== undefined) src.local = stringField(d.local, "local", at);
+  if (d.url !== undefined) {
+    if (typeof d.url !== "string" || !d.url.startsWith("https://")) {
+      throw new ConfigError(`${at}.url ${JSON.stringify(d.url)} must be an https:// URL`);
+    }
+    src.url = d.url;
+  }
+  if (src.git === undefined && src.url === undefined && src.local === undefined) {
+    throw new ConfigError(`${at} needs one of "git", "url" or "local"`);
+  }
+  return src;
+}
+
 /** A source field as written: present means a non-empty string (k88). Anything else would
  *  read as absent – a ref's pin lost, a `git` beside a `url` passed over – without a word; an
  *  empty ref reads as unpinned to the cache dir but as a ref named "" to fetch and check, and
  *  an empty `local` is the process cwd, a directory author mode would take. */
-function stringField(value: unknown, key: string, path: string, name: string): string {
-  const where = `${path}: sources.${name}.${key} ${JSON.stringify(value)}`;
+function stringField(value: unknown, key: string, at: string): string {
+  const where = `${at}.${key} ${JSON.stringify(value)}`;
   if (typeof value !== "string") throw new ConfigError(`${where} must be a string`);
   if (value === "") throw new ConfigError(`${where} must not be empty${key === "ref" ? ` (omit "ref" for the remote's HEAD)` : ""}`);
   return value;
@@ -217,8 +226,8 @@ const NOT_IN_REF = /[\x00-\x20\x7f~^:?*[\\]|\.\.|@\{/;
 /** A `git` or `ref` value as written; refused when git could read it as an option, or – a
  *  ref – when it cannot be a ref name (k85). Trust binds no ref (spec §4.3), so a project's
  *  ref must never be able to reach git as anything but a ref. */
-function gitField(value: string, key: "git" | "ref", path: string, name: string): string {
-  const where = `${path}: sources.${name}.${key} ${JSON.stringify(value)}`;
+function gitField(value: string, key: "git" | "ref", at: string): string {
+  const where = `${at}.${key} ${JSON.stringify(value)}`;
   if (value.startsWith("-")) throw new ConfigError(`${where} must not start with "-" (git would read it as an option)`);
   if (key === "ref" && NOT_IN_REF.test(value)) {
     throw new ConfigError(`${where} is not a git ref name (no whitespace, control characters, ~ ^ : ? * [ \\, ".." or "@{")`);

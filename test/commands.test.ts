@@ -13,6 +13,7 @@ import {
 import { resolveSpec, type Probe } from "../src/spec.ts";
 import { State } from "../src/state.ts";
 import { check, status, sync } from "../src/engine.ts";
+import { ConfigError, loadConfig } from "../src/config.ts";
 
 const noProbe: Probe = () => {
   throw new Error("probe must not run");
@@ -200,6 +201,69 @@ test("k95: add without a name derives a valid one even from a directory named wi
     const r = await sync(e.ctx);
     assert.equal(r.error, undefined);
     assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`), ["skills/foo@source"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k110: resolveSpec keeps an explicit address verbatim and makes a `.tar.gz`/`.tgz` a `url`, so
+// `add http://host/x.tar.gz` wrote a url config load refuses (https only) – every later sync
+// failed, and `source remove` could not undo it. Asserts: each such spec, named or not, in the
+// user or the project config, is a CommandError naming key, value and rule, before anything is
+// written or trusted (user config byte-identical, no project config, no trust.json); load says
+// the same of the def written by hand, and re-adding that hand-written entry (k101's keep path)
+// is refused too; an https:// tarball is still added and loads.
+test("k110: add refuses a spec that resolves to a url config load refuses, before writing or trusting", async () => {
+  const e = env();
+  try {
+    const projPath = join(e.projectDir, ".claude/skilletor.json");
+    const userRaw = `{ "sources": { "keep": { "git": "https://example.invalid/keep" } } }\n`;
+    writeFileSync(e.userCfgPath, userRaw);
+    const specs: [string, string][] = [
+      ["http://host/x.tar.gz", "host"],
+      ["file:///x.tar.gz", "source"],
+      ["ftp://files.example/x.tgz", "files-example"],
+      ["ssh://git@host.example/x.tar.gz", "host-example"],
+      ["git@host.example:team/x.tar.gz", "team"],
+    ];
+    let i = 0;
+    for (const [spec, derived] of specs) {
+      for (const name of [undefined, "web"]) {
+        const project = i++ % 2 === 1;
+        await assert.rejects(() => cmdAdd(e.ctx, { name, spec, project }), (err: unknown) => {
+          assert.ok(err instanceof CommandError, String(err));
+          assert.equal((err as Error).message, `cannot add ${spec}: sources.${name ?? derived}.url ` +
+            `${JSON.stringify(spec)} must be an https:// URL; nothing was changed`);
+          return true;
+        });
+      }
+    }
+    assert.equal(readFileSync(e.userCfgPath, "utf8"), userRaw, "user config byte-identical");
+    assert.equal(existsSync(projPath), false, "no project config");
+    assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+
+    // The one rule: load refuses the same def with the same words, and add keeps no such entry.
+    const handRaw = `{ "sources": { "web": { "url": "http://host/x.tar.gz" } } }\n`;
+    writeFileSync(e.userCfgPath, handRaw);
+    assert.throws(() => loadConfig({ home: e.home }), (err: unknown) => {
+      assert.ok(err instanceof ConfigError, String(err));
+      assert.equal((err as Error).message, `${e.userCfgPath}: sources.web.url "http://host/x.tar.gz" must be an https:// URL`);
+      return true;
+    });
+    await assert.rejects(() => cmdAdd(e.ctx, { name: "web", spec: "http://host/x.tar.gz" }), (err: unknown) => {
+      assert.ok(err instanceof CommandError, String(err));
+      assert.equal((err as Error).message,
+        `cannot add http://host/x.tar.gz: sources.web.url "http://host/x.tar.gz" must be an https:// URL; nothing was changed`);
+      return true;
+    });
+    assert.equal(readFileSync(e.userCfgPath, "utf8"), handRaw, "hand-written config byte-identical");
+    assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+
+    // What load takes, add still writes.
+    writeFileSync(e.userCfgPath, userRaw);
+    const ok = await cmdAdd(e.ctx, { spec: "https://host.example/x.tar.gz" });
+    assert.deepEqual(ok.def, { url: "https://host.example/x.tar.gz" });
+    assert.deepEqual(loadConfig({ home: e.home }).sources.get("host-example")?.url, "https://host.example/x.tar.gz");
   } finally {
     e.cleanup();
   }
@@ -1118,6 +1182,41 @@ test("k95: install bundle without a TTY prints a valid derived name for any addr
       return true;
     });
     assert.deepEqual(e.readUserCfg(), cfg);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k110: the prompt adds a missing source as `add` would, from the same resolveSpec, so a bundle
+// entry `x@http://host/x.tar.gz` would be added as a url config load refuses. Asserts: without
+// a TTY and on one, install is a CommandError naming the bundle, the address, key, value and
+// rule before any question is asked; the user config stays byte-identical (not even the bundle
+// entry or the source's own items), nothing is trusted.
+test("k110: install bundle refuses a missing source it could only add as a url config load refuses", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      rule(d, "r1");
+      bundleFile(d, "perl", "description: P\nrules: [r1, x@http://host/x.tar.gz]\n");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    const raw = readFileSync(e.userCfgPath, "utf8");
+    const msg = `bundle perl needs http://host/x.tar.gz, which cannot be added as a source: ` +
+      `sources.host.url "http://host/x.tar.gz" must be an https:// URL; nothing was changed`;
+    for (const tty of [false, true]) {
+      const a = answers("");
+      await assert.rejects(
+        () => cmdInstall({ ...e.ctx, prompt: tty ? a.prompt : undefined }, { items: ["bundle:perl@mine", "rule:r1@mine"] }),
+        (err: unknown) => {
+          assert.ok(err instanceof CommandError, String(err));
+          assert.equal((err as Error).message, msg);
+          return true;
+        },
+      );
+      assert.deepEqual(a.questions, [], "no question asked");
+      assert.equal(readFileSync(e.userCfgPath, "utf8"), raw, "user config byte-identical");
+      assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+    }
   } finally {
     e.cleanup();
   }

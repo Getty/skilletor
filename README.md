@@ -137,7 +137,10 @@ for the remote's HEAD, never `""`), and `url` an `https://` URL. Anything else i
 error naming the file, the source and the key — never a field quietly read as absent.
 A source's name — its key under `sources` — is ASCII letters, digits, `.`, `_` and `-`,
 starting with a letter or digit; any other name is a config error naming the file and the
-name, and `skilletor add` refuses it before writing anything.
+name, and `skilletor add` refuses it before writing anything. It likewise refuses a spec
+that resolves to a source config load would refuse, such as an `http://` or `file://` tarball
+(exit 1, nothing written or trusted), and `install` refuses a bundle source it could only add
+that way.
 
 `skilletor uninstall` removes explicit entries from one config — the user config, or the
 project config with `--project`. `rule:k8s@shared` removes only from `rules`;

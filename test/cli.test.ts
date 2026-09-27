@@ -831,3 +831,35 @@ test("k103: a config error in the sync after add, install, uninstall, source rem
     c.after(JSON.parse(readFileSync(cfg, "utf8")));
   }
 });
+
+// k110: `add` of a spec that resolves to a url config load refuses (http://, file://) wrote it,
+// and the sync after it failed (exit 2 since k103, "the edit was saved") – a config every later
+// sync and `source remove` refused. Asserts, through the real binary: exit 1 as any refusal
+// before the edit, nothing on stdout, stderr names the value and the https rule and never says
+// "saved"; the user config byte-identical, no project config; the config still loads.
+test("k110: add of an http:// or file:// tarball exits 1 before writing, config untouched and loadable", () => {
+  const home = join(tmp.dir, "k110-home");
+  const proj = join(tmp.dir, "k110-proj");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(proj, { recursive: true });
+  const env = claudeOnlyEnv(home);
+  const common = ["--project-dir", proj];
+  const cfg = join(home, ".claude", "skilletor.json");
+  writeFileSync(cfg, `{ "sources": { "keep": { "local": "${home}" } } }\n`);
+  const written = readFileSync(cfg);
+  const cases: [string[], string][] = [
+    [["add", "http://host/x.tar.gz"], `skilletor: cannot add http://host/x.tar.gz: sources.host.url "http://host/x.tar.gz" must be an https:// URL; nothing was changed\n`],
+    [["add", "web", "file:///x.tar.gz", "--project"], `skilletor: cannot add file:///x.tar.gz: sources.web.url "file:///x.tar.gz" must be an https:// URL; nothing was changed\n`],
+  ];
+  for (const [args, stderr] of cases) {
+    const r = runCli([...args, ...common], env);
+    assert.equal(r.status, 1, `${args.join(" ")}: ${r.stdout}${r.stderr}`);
+    assert.equal(r.stdout, "");
+    assert.equal(r.stderr, stderr);
+    assert.deepEqual(readFileSync(cfg), written, "user config byte-identical");
+    assert.equal(existsSync(join(proj, ".claude", "skilletor.json")), false, "no project config");
+  }
+  const list = runCli(["source", "list", ...common], env);
+  assert.equal(list.status, 0, list.stderr);
+  assert.match(list.stdout, /^keep \[user\] /m);
+});
