@@ -8167,6 +8167,14 @@ function skillFile(dir) {
   }
   return void 0;
 }
+function skillItem(dir, skillDir, file, files = walkFiles(skillDir, dir)) {
+  const have = new Set(files);
+  const twice = files.filter((f) => !f.endsWith(".njk") && have.has(`${f}.njk`));
+  const item = { type: "skill", name: basename3(skillDir), files, dir: relative(dir, skillDir) };
+  if (!twice.includes(relative(dir, file))) item.description = descriptionOf(file);
+  if (twice.length > 0) item.error = twice.map((f) => `both ${f} and ${f}.njk exist`).join("; ");
+  return item;
+}
 function itemName(fileName) {
   const m = /^(.+?)\.md(\.njk)?$/.exec(fileName);
   return m ? m[1] : void 0;
@@ -8185,7 +8193,7 @@ function scan(dir) {
         if (!st.isDirectory()) continue;
         const file = skillFile(p);
         if (!file) continue;
-        items.push({ type, name: entry, description: descriptionOf(file), files: walkFiles(p, dir), dir: relative(dir, p) });
+        items.push(skillItem(dir, p, file));
       } else {
         if (!st.isFile()) continue;
         const name = itemName(entry);
@@ -8248,7 +8256,7 @@ function claudeItem(dir, typeDir, entry, type) {
     const files = walkFiles(p, dir);
     const gitignore = join9(p, ".gitignore");
     if (files.includes(relative(dir, gitignore)) && readFileSync5(gitignore, "utf8") === SKILL_GITIGNORE) return void 0;
-    return { type, name: entry, description: descriptionOf(file), files, dir: relative(dir, p) };
+    return skillItem(dir, p, file, files);
   }
   if (!st.isFile()) return void 0;
   const name = itemName(entry);
@@ -8286,7 +8294,7 @@ function pluginSkills(dir, found) {
       throw new CatalogError(`${p}: skill "${name}" found twice: ${known} and ${rel}`);
     }
     dirOf.set(name, rel);
-    out.push({ type: "skill", name, description: descriptionOf(file), files: walkFiles(skillDir, dir), dir: rel });
+    out.push(skillItem(dir, skillDir, file));
   };
   for (const entry of paths) {
     const target = pluginPath(dir, p, entry);

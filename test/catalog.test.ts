@@ -163,3 +163,59 @@ test("k100: x.md beside x.md.njk is one item carrying an error naming both, the 
     tmp.cleanup();
   }
 });
+
+// k113: inside one skill, `f` beside `f.njk` both install as `f` – one file, twice. Asserts: the
+// scan does not fail; such a skill is one item carrying an error naming both source files, in
+// the published `skills/` layout, a plugin.json skill and a `.claude/skills/` skill alike (in
+// `.claude/` too: one skill directory has no "which item wins" question); several pairs are all
+// named, in sorted order; a skill whose SKILL.md is in a pair has no description, one whose
+// clash is a companion keeps SKILL.md's; its files are all still listed; `f.njk` beside
+// `f.njk.njk` is no clash (they install as `f` and `f.njk`); a broken skill still counts as
+// found, so a `.claude/` skill of that name does not step in; every other item is intact.
+test("k113: a skill with f beside f.njk carries an error naming both, the scan goes on", () => {
+  const tmp = makeTmpDir();
+  const put = (rel: string, content: string) => {
+    mkdirSync(join(tmp.dir, rel, ".."), { recursive: true });
+    writeFileSync(join(tmp.dir, rel), content);
+  };
+  try {
+    put("skills/both/SKILL.md", "---\ndescription: plain\n---\nA\n");
+    put("skills/both/SKILL.md.njk", "---\ndescription: template\n---\n{{ oops }}\n");
+    put("skills/script/SKILL.md", "---\ndescription: runs x\n---\nRun scripts/x.sh\n");
+    put("skills/script/scripts/x.sh", "#!/bin/sh\necho plain\n");
+    put("skills/script/scripts/x.sh.njk", "#!/bin/sh\necho {{ vars.y }}\n");
+    put("skills/multi/a.sh.njk", "A\n");
+    put("skills/multi/a.sh", "A\n");
+    put("skills/multi/SKILL.md.njk", "---\ndescription: t\n---\nM\n");
+    put("skills/multi/SKILL.md", "---\ndescription: p\n---\nM\n");
+    put("skills/ok/SKILL.md.njk", "---\ndescription: ok\n---\nOK\n");
+    put("skills/ok/data.njk", "{{ 1 }}\n");
+    put("skills/ok/data.njk.njk", "{{ 2 }}\n");
+    put(".claude-plugin/plugin.json", JSON.stringify({ skills: ["extra/p"] }));
+    put("extra/p/SKILL.md", "---\ndescription: p plain\n---\nP\n");
+    put("extra/p/SKILL.md.njk", "---\ndescription: p template\n---\nP\n");
+    put(".claude/skills/both/SKILL.md", "---\ndescription: project copy\n---\nC\n");
+    put(".claude/skills/c/SKILL.md", "---\ndescription: c skill\n---\nC\n");
+    put(".claude/skills/c/scripts/x.sh", "plain\n");
+    put(".claude/skills/c/scripts/x.sh.njk", "template\n");
+    const cat = scan(tmp.dir);
+    const rows = cat.items
+      .map((i) => [`${i.type}:${i.name}`, i.files, i.error, i.description] as const)
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    assert.deepEqual(rows, [
+      ["skill:both", ["skills/both/SKILL.md", "skills/both/SKILL.md.njk"],
+        "both skills/both/SKILL.md and skills/both/SKILL.md.njk exist", undefined],
+      ["skill:c", [".claude/skills/c/SKILL.md", ".claude/skills/c/scripts/x.sh", ".claude/skills/c/scripts/x.sh.njk"],
+        "both .claude/skills/c/scripts/x.sh and .claude/skills/c/scripts/x.sh.njk exist", "c skill"],
+      ["skill:multi", ["skills/multi/SKILL.md", "skills/multi/SKILL.md.njk", "skills/multi/a.sh", "skills/multi/a.sh.njk"],
+        "both skills/multi/SKILL.md and skills/multi/SKILL.md.njk exist; both skills/multi/a.sh and skills/multi/a.sh.njk exist",
+        undefined],
+      ["skill:ok", ["skills/ok/SKILL.md.njk", "skills/ok/data.njk", "skills/ok/data.njk.njk"], undefined, "ok"],
+      ["skill:p", ["extra/p/SKILL.md", "extra/p/SKILL.md.njk"], "both extra/p/SKILL.md and extra/p/SKILL.md.njk exist", undefined],
+      ["skill:script", ["skills/script/SKILL.md", "skills/script/scripts/x.sh", "skills/script/scripts/x.sh.njk"],
+        "both skills/script/scripts/x.sh and skills/script/scripts/x.sh.njk exist", "runs x"],
+    ]);
+  } finally {
+    tmp.cleanup();
+  }
+});

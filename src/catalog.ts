@@ -29,7 +29,9 @@
 // .njk, never rendered). Symlinks anywhere in the tree are rejected (spec §9); in
 // `.claude/` they are skipped, never followed. An agent or rule with both `<name>.md`
 // and `<name>.md.njk` is one item carrying an error, never a failed scan (k100);
-// `.claude/` keeps the first of the two silently.
+// `.claude/` keeps the first of the two silently. A skill holding `f` beside `f.njk`,
+// which both install as `f`, carries an error naming every such pair – in `.claude/`
+// too, where one skill directory has no "which item wins" question (k113).
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { basename, isAbsolute, join, relative } from "node:path";
 import type { ItemType } from "./config.ts";
@@ -50,8 +52,9 @@ export interface CatalogItem {
    *  `skills/<name>`), the directory holding an agent's or rule's file (default `agents`,
    *  `rules`). Its files install under `skills/<name>/`, `agents/`, `rules/` (render.ts). */
   dir?: string;
-  /** Why the item cannot be built: both `<name>.md` and `<name>.md.njk` exist (k100). That
-   *  error belongs to the item, never to the scan (spec §4.1); `files` holds both. */
+  /** Why the item cannot be built: both `<name>.md` and `<name>.md.njk` exist (k100), or a
+   *  skill holds `f` beside `f.njk` (k113). That error belongs to the item, never to the scan
+   *  (spec §4.1); `files` holds both. */
   error?: string;
 }
 
@@ -142,6 +145,18 @@ function skillFile(dir: string): string | undefined {
   return undefined;
 }
 
+/** The skill in `skillDir`, whose main file is `file`. `f` beside `f.njk` in it both install
+ *  as `f`: an error of the skill naming every such pair in sorted order, never a failed scan
+ *  (spec §4.1, k113); while SKILL.md is one of them, which description is meant is unknown. */
+function skillItem(dir: string, skillDir: string, file: string, files = walkFiles(skillDir, dir)): CatalogItem {
+  const have = new Set(files);
+  const twice = files.filter((f) => !f.endsWith(".njk") && have.has(`${f}.njk`));
+  const item: CatalogItem = { type: "skill", name: basename(skillDir), files, dir: relative(dir, skillDir) };
+  if (!twice.includes(relative(dir, file))) item.description = descriptionOf(file);
+  if (twice.length > 0) item.error = twice.map((f) => `both ${f} and ${f}.njk exist`).join("; ");
+  return item;
+}
+
 /** Match `<name>.md` or `<name>.md.njk`; returns the name. */
 function itemName(fileName: string): string | undefined {
   const m = /^(.+?)\.md(\.njk)?$/.exec(fileName);
@@ -165,7 +180,7 @@ export function scan(dir: string): Catalog {
         if (!st.isDirectory()) continue;
         const file = skillFile(p);
         if (!file) continue;
-        items.push({ type, name: entry, description: descriptionOf(file), files: walkFiles(p, dir), dir: relative(dir, p) });
+        items.push(skillItem(dir, p, file));
       } else {
         if (!st.isFile()) continue;
         const name = itemName(entry);
@@ -250,7 +265,7 @@ function claudeItem(dir: string, typeDir: string, entry: string, type: ItemType)
     const files = walkFiles(p, dir);
     const gitignore = join(p, ".gitignore");
     if (files.includes(relative(dir, gitignore)) && readFileSync(gitignore, "utf8") === SKILL_GITIGNORE) return undefined;
-    return { type, name: entry, description: descriptionOf(file), files, dir: relative(dir, p) };
+    return skillItem(dir, p, file, files);
   }
   if (!st.isFile()) return undefined;
   const name = itemName(entry);
@@ -292,7 +307,7 @@ function pluginSkills(dir: string, found: CatalogItem[]): CatalogItem[] {
       throw new CatalogError(`${p}: skill "${name}" found twice: ${known} and ${rel}`);
     }
     dirOf.set(name, rel);
-    out.push({ type: "skill", name, description: descriptionOf(file), files: walkFiles(skillDir, dir), dir: rel });
+    out.push(skillItem(dir, skillDir, file));
   };
 
   for (const entry of paths as string[]) {

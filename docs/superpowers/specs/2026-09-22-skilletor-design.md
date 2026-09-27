@@ -174,6 +174,16 @@ builds nothing for it, so an installed copy stays (§6.6). The name counts as fo
 `.claude/` item of that name is skipped as below. Under `.claude/` the pair is no error: the
 first of the two, `<name>.md`, is taken silently.
 
+Inside a skill the same holds for any file (k113): `f` beside `f.njk` – `SKILL.md` and
+`SKILL.md.njk`, `scripts/x.sh` and `scripts/x.sh.njk` – both install as `f`, so the skill
+carries an error naming every such pair in sorted order (`both skills/x/SKILL.md and
+skills/x/SKILL.md.njk exist; both skills/x/scripts/x.sh and skills/x/scripts/x.sh.njk
+exist`), and `available`, `install` and `sync` treat it as above. `f.njk` beside
+`f.njk.njk` is no pair: they install as `f` and `f.njk`. While `SKILL.md` is in a pair the
+skill has no description; a companion's pair leaves `SKILL.md`'s. It holds for a
+`plugin.json` skill and under `.claude/` alike: within one skill directory there is no item
+to prefer, only an ambiguous file.
+
 **Claude plugin repos** (`.claude-plugin/plugin.json` with a `skills` field) are read as
 sources too. `skills` is a path or an array of paths, relative to the source root. A path
 whose directory holds a `SKILL.md[.njk]` is one skill; any other directory is scanned one
@@ -676,8 +686,9 @@ resolve's `reset --hard` restores it.
 
 A sync error never aborts a session. Fetch error/offline → continue with the cache, one
 warning line. Template error → that item stays at its old state, error with file and
-line. An item the catalog marks broken (both `<name>.md` and `<name>.md.njk`, §4.1) → the
-same: that item stays at its old state, the warning names both files. Config error →
+line. An item the catalog marks broken (both `<name>.md` and `<name>.md.njk`, or a skill's
+`f` beside `f.njk`, §4.1) → the same: that item stays at its old state, the warning names
+both files. Config error →
 nothing is touched, clear message. Write error while applying → the sync stops with that
 error; the lock keeps what landed (§6.2), and the next sync resumes.
 

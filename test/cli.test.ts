@@ -205,6 +205,59 @@ test("k100: x.md beside x.md.njk: available shows the error, install exits 1, sy
   assert.equal(existsSync(join(home, ".claude", "rules", ".local.x.md")), false);
 });
 
+// k113: inside a skill, `f` beside `f.njk`, through the real binary. Asserts: `available` prints
+// each broken skill with an `error:` line naming both files (SKILL.md's pair without a
+// description, a companion's pair with SKILL.md's) and the intact one plainly; `install y@shared`
+// exits 1 with that error on stderr and leaves the config byte-identical; `sync` of a wildcard
+// exits 0, installs the intact skill, names both files of each broken one and installs neither.
+test("k113: a skill with f beside f.njk: available shows the error, install exits 1, sync installs the rest", () => {
+  const home = join(tmp.dir, "k113-home");
+  const proj = join(tmp.dir, "k113-proj");
+  const src = join(tmp.dir, "k113-src");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(proj, { recursive: true });
+  const put = (rel: string, content: string) => {
+    mkdirSync(join(src, rel, ".."), { recursive: true });
+    writeFileSync(join(src, rel), content);
+  };
+  put("skills/ok/SKILL.md", "---\ndescription: fine\n---\nOK\n");
+  put("skills/x/SKILL.md", "---\ndescription: x\n---\nX\n");
+  put("skills/x/SKILL.md.njk", "---\ndescription: x\n---\nX\n");
+  put("skills/y/SKILL.md", "---\ndescription: runs x\n---\nY\n");
+  put("skills/y/scripts/x.sh", "#!/bin/sh\n");
+  put("skills/y/scripts/x.sh.njk", "#!/bin/sh\n");
+  const cfgPath = join(home, ".claude", "skilletor.json");
+  const cfg = JSON.stringify({ sources: { shared: { local: src } } });
+  writeFileSync(cfgPath, cfg);
+  const env = claudeOnlyEnv(home);
+  const common = ["--project-dir", proj];
+
+  const av = runCli(["available", "shared", ...common], env);
+  assert.equal(av.status, 0, av.stderr);
+  assert.equal(av.stdout, [
+    "  skill ok@shared — fine",
+    "  skill x@shared",
+    "    error: both skills/x/SKILL.md and skills/x/SKILL.md.njk exist",
+    "  skill y@shared — runs x",
+    "    error: both skills/y/scripts/x.sh and skills/y/scripts/x.sh.njk exist",
+  ].join("\n") + "\n");
+
+  const inst = runCli(["install", "y@shared", ...common], env);
+  assert.equal(inst.status, 1);
+  assert.equal(inst.stdout, "");
+  assert.match(inst.stderr, /shared: skill y: both skills\/y\/scripts\/x\.sh and skills\/y\/scripts\/x\.sh\.njk exist/);
+  assert.equal(readFileSync(cfgPath, "utf8"), cfg);
+
+  writeFileSync(cfgPath, JSON.stringify({ sources: { shared: { local: src } }, install: { skills: ["*@shared"] } }));
+  const sy = runCli(["sync", "--scope", "user", ...common], env);
+  assert.equal(sy.status, 0, sy.stderr);
+  assert.match(sy.stdout, /\+ skills\/ok/);
+  assert.match(sy.stdout, /skill x@shared: both skills\/x\/SKILL\.md and skills\/x\/SKILL\.md\.njk exist/);
+  assert.match(sy.stdout, /skill y@shared: both skills\/y\/scripts\/x\.sh and skills\/y\/scripts\/x\.sh\.njk exist/);
+  assert.equal(existsSync(join(home, ".claude", "skills", "x")), false);
+  assert.equal(existsSync(join(home, ".claude", "skills", "y")), false);
+});
+
 // k48 phase B: without a TTY, a bundle needing an unknown source exits 1 and edits nothing.
 test("install bundle: with a missing source and no TTY exits 1, prints the add command, edits nothing", () => {
   const home = join(tmp.dir, "foreign-home");

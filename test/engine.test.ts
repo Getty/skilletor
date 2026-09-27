@@ -1833,6 +1833,51 @@ test("k100: x.md beside x.md.njk: sync warns naming both, keeps the installed co
   }
 });
 
+// k113: inside one skill, `f` beside `f.njk` both install as `f`: an error of that skill (spec
+// §4.1), as k100's pair is of an agent or rule. Asserts: whether the pair is SKILL.md or a
+// companion (`scripts/x.sh`), and an explicit entry or a wildcard declares the skill, sync warns
+// once per skill naming both files, keeps every file it installed before byte for byte (lock
+// entry included), installs nothing for a skill never installed, and still installs the rest –
+// no config error, nothing updated or removed.
+test("k113: a skill with f beside f.njk: sync warns naming both, keeps the installed copy, installs the rest", async () => {
+  const e = env();
+  try {
+    const src = resolvePath(join(e.tmp.dir, "twice"));
+    putItem(src, "skill", "a");
+    putItem(src, "skill", "s1");
+    putRaw(src, "skills/s1/scripts/x.sh", "#!/bin/sh\necho old\n");
+    const cfg = (skills: string[]) => ({ sources: { shared: { local: src } }, install: { skills } });
+    e.writeCfg("user", cfg(["a@shared", "s*@shared"]));
+    const first = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(first.scopes[0]!.added.map((i) => i.key).sort(), ["skills/a", "skills/s1"]);
+
+    putRaw(src, "skills/a/SKILL.md.njk", "---\ndescription: a\n---\nNEW A\n"); // explicit entry, SKILL.md
+    putRaw(src, "skills/s1/scripts/x.sh.njk", "#!/bin/sh\necho new\n"); // wildcard, a companion
+    putItem(src, "skill", "n"); // never installed
+    putRaw(src, "skills/n/SKILL.md.njk", "---\ndescription: n\n---\nN\n");
+    putItem(src, "skill", "s2");
+    e.writeCfg("user", cfg(["a@shared", "n@shared", "s*@shared"]));
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.equal(r.error, undefined);
+    const s = r.scopes[0]!;
+    assert.deepEqual(s.added.map((i) => i.key), ["skills/s2"]);
+    assert.deepEqual([s.removed, s.updated], [[], []]);
+    assert.deepEqual(s.warnings.slice().sort(), [
+      "skill a@shared: both skills/a/SKILL.md and skills/a/SKILL.md.njk exist; an installed copy stays",
+      "skill n@shared: both skills/n/SKILL.md and skills/n/SKILL.md.njk exist; an installed copy stays",
+      "skill s1@shared: both skills/s1/scripts/x.sh and skills/s1/scripts/x.sh.njk exist; an installed copy stays",
+    ]);
+    const skills = join(e.home, ".claude", "skills");
+    assert.equal(readFileSync(join(skills, "a/SKILL.md"), "utf8"), "---\ndescription: a\n---\nA\n");
+    assert.equal(readFileSync(join(skills, "s1/scripts/x.sh"), "utf8"), "#!/bin/sh\necho old\n");
+    assert.equal(existsSync(join(skills, "n")), false);
+    assert.deepEqual(Object.keys(readLock(join(e.home, ".claude", "skilletor.lock.json"))).sort(),
+      ["skills/a", "skills/s1", "skills/s2"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("check covers sources referenced only by a bundle", async () => {
   const e = env();
   try {

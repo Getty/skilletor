@@ -301,8 +301,9 @@ stripped; everything else is copied byte for byte, so skills that use `{{ }}`/`{
 themselves stay intact. A skill's file keeps its source file's executable bit (a template
 passes its own to what it renders), so a skill can tell the model to run `scripts/x.sh`.
 An agent or rule published as both `<name>.md` and `<name>.md.njk` is an error of that
-item: `available` shows it, `install` refuses it, and `sync` warns and keeps an installed
-copy.
+item, as is a skill holding any file beside its template (`SKILL.md` and `SKILL.md.njk`,
+`scripts/x.sh` and `scripts/x.sh.njk`): `available` shows it, `install` refuses it, and
+`sync` warns and keeps an installed copy.
 
 ```njk
 {% if vars.kubernetes %}

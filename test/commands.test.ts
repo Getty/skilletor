@@ -1185,6 +1185,49 @@ test("k100: an item with both x.md and x.md.njk: install fails naming both, avai
   }
 });
 
+// k113: inside one skill, `f` beside `f.njk` is an error of that skill (spec §4.1). Asserts:
+// install of it – typed or bare, SKILL.md's pair or a companion's – fails naming both files and
+// edits nothing, also beside an intact item; available lists it once with that error (and
+// SKILL.md's description only where SKILL.md is not in a pair); the source's other skill still
+// installs.
+test("k113: a skill with f beside f.njk: install fails naming both, available lists it with its error", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      skill(d, "x");
+      writeFileSync(join(d, "skills", "x", "SKILL.md.njk"), "---\ndescription: x template\n---\nB\n");
+      skill(d, "y");
+      mkdirSync(join(d, "skills", "y", "scripts"));
+      writeFileSync(join(d, "skills", "y", "scripts", "x.sh"), "#!/bin/sh\necho plain\n");
+      writeFileSync(join(d, "skills", "y", "scripts", "x.sh.njk"), "#!/bin/sh\necho template\n");
+      skill(d, "ok");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    const X = "both skills/x/SKILL.md and skills/x/SKILL.md.njk exist";
+    const Y = "both skills/y/scripts/x.sh and skills/y/scripts/x.sh.njk exist";
+    for (const [spec, message] of [
+      ["skill:x@mine", `mine: skill x: ${X}`], ["x@mine", `mine: skill x: ${X}`], ["y@mine", `mine: skill y: ${Y}`],
+    ] as const) {
+      await assert.rejects(() => cmdInstall(e.ctx, { items: [spec] }),
+        (err: unknown) => err instanceof CommandError && err.message === message, spec);
+    }
+    await assert.rejects(() => cmdInstall(e.ctx, { items: ["ok@mine", "y@mine"] }), /both skills\/y\/scripts\/x\.sh and/);
+    assert.equal(e.readUserCfg().install, undefined);
+
+    const items = await cmdAvailable(e.ctx, { source: "mine" });
+    assert.deepEqual(items.map((i) => [`${i.type}:${i.name}`, i.description, i.error]).sort(), [
+      ["skill:ok", "ok skill", undefined],
+      ["skill:x", undefined, X],
+      ["skill:y", "y skill", Y],
+    ]);
+
+    const r = await cmdInstall(e.ctx, { items: ["ok@mine"] });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["skills/ok"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("source remove refuses while a bundle uses the source", async () => {
   const e = env();
   try {
