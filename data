@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-27T04:04:06Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T04:03:36Z
+created: 2026-09-27T03:33:23Z
+id: 117
+priority: low
+started: 2026-09-27T03:35:05Z
+status: done
+tags:
+- spec
+- bug
+title: 'spec: check shorthand owner and repo characters; X.TAR.GZ, foo://, github.com:owner'
+updated: 2026-09-27T04:04:06Z
+---
+
+Found during k109 (worker). Edge cases resolveSpec still stores or probes wrongly: (1) a colon in a github: owner – github:gitlab:u -> https://github.com/gitlab:u/skills, GitHub:HTTPS://x -> https://github.com/HTTPS:/x; (2) a colon in the repo segment – Getty/re:po -> https://github.com/Getty/re:po; (3) a dotted host with a non-numeric port, e.g. the typo github.com:Getty/karr, is probed as https://github.com:Getty/karr (a known forge probed, error only after two network attempts); (4) the tarball check is case-sensitive – https://host/X.TAR.GZ resolves as git, not url; (5) an unknown scheme like foo://bar is kept as a git source and fails only at fetch. Expected: (1)(2)(3) SpecError naming the spec and the forms (k109 FORMS text), (4) case-insensitive extension, (5) SpecError for a scheme git cannot fetch (decide the allowed set: https, http, ssh, git, git+ssh, file). Document in §4.2.
+
+2026-09-27 03:41 Also (k111 worker): (6) '@' resolves to https://github.com/@/skills; (7) spaces inside an owner are stored – 'a b' -> https://github.com/a b/skills, 'github: Getty' -> https://github.com/ Getty/skills; (8) a whitespace-only repo segment is not skipped – 'github:Getty/ /x' -> https://github.com/Getty/ . Common fix for (1)(2)(6)(7): check every shorthand owner and repo segment (github:, owner/repo, known forges) against the characters the forge allows (GitHub owner: alnum and '-'; repo: alnum, '.', '_', '-'), else SpecError with the k109 FORMS text; (8) treat a whitespace-only segment as empty (k104 skip). k95's test pins '___' -> derived name 'source'; that row changes if '___' as an owner becomes an error – adapt it. Explicit URLs stay verbatim (§4.2).
+
+2026-09-27 03:45 Worker start. Plan: GitHub forms (github:, owner[/repo], bare owner, and github.com/…) check owner [A-Za-z0-9-] and repo [A-Za-z0-9._-]; other known forges lenient (no whitespace/control/:/@); blank repo segment skipped; dotted host with non-numeric port a SpecError; tarball ext case-insensitive; scheme set checked against git's native transports (git ls-remote 2.47.3: ssh, git+ssh, ssh+git, git, http, https, ftp, ftps, file handled; foo:// needs git-remote-foo). k110's test pins ftp://…tgz reaching the https-url refusal, so ftp/ftps stay in the set.
+
+2026-09-27 03:50 Red first: test/spec.test.ts k117Rows (10 rows, cases 4 and 8) and the k117 SpecError test failed on current code, all k117Pinned rows and every k101/k104/k109/k111 row passed; test/commands.test.ts k117 add test failed with 'probe must not run' for github.com:Getty/karr. Fix in src/spec.ts (checkGithub/checkForge, filled(), port check after k109's, SCHEMES check in branch 2, case-insensitive isTarball); spec.test.ts 106/106 green. §4.2 documented. Waiting on loadguard (memory pressure) for the full npm test/build/check-dist.
+
+2026-09-27 03:56 Done, uncommitted. Files: src/spec.ts, dist/skilletor.js (rebuilt), test/spec.test.ts, test/commands.test.ts, docs/superpowers/specs/2026-09-22-skilletor-design.md (§4.2). Cases: (1) github:gitlab:u, GitHub:HTTPS://x -> SpecError 'GitHub owner "…" may only contain ASCII letters, digits and "-"; <FORMS>'; (2) Getty/re:po -> SpecError 'GitHub repo "re:po" may only contain ASCII letters, digits, ".", "_" and "-"; <FORMS>'; (3) github.com:Getty/karr -> SpecError 'port "Getty" of github.com is not a number; <FORMS>', never probed (mydir.com:8080/x still probed); (4) https://host/X.TAR.GZ -> url, verbatim; (5) foo://bar -> SpecError 'unknown scheme "foo"; expected https, http, ssh, git, git+ssh, ssh+git, ftp, ftps or file' (git's native transports: ssh+git is git+ssh's twin in connect.c, ftp/ftps kept because k110's test pins ftp://…tgz reaching the https-url refusal); (6) @ -> GitHub owner SpecError; (7) 'a b', 'github: Getty' -> GitHub owner SpecError; (8) github:Getty/ /x -> https://github.com/Getty/x (blank repo segment skipped in github:, owner/repo and forge forms). github.com/owner[/repo] takes the GitHub rule (it is GitHub); gitlab.com/codeberg.org/hf.co/huggingface.co only refuse whitespace, control chars, ':' and '@'. Adapted: k95 empties '___' dropped (now a k117 error row), github:___ / github.com/___ -> github:--- / github.com/---; commands.test k95 bundle 'x@___' -> 'x@gitlab.com/___'. Verified: typecheck exit 0; npm test 785/785 pass; build ok; check-dist up to date. Open for maintainer: remote-helper schemes (codecommit://, persistent-https://, s3://) are now refused by add; hand-written config git values still take any scheme.
+
+2026-09-27 04:01 (5) reverted on the coordinator's request: an allow-list refused real git remote helpers (codecommit://, s3://, persistent-https://) that worked before k117, and foo://bar failing at fetch with git's own 'remote-foo' error is the lesser evil. src/spec.ts: SCHEMES and the 'unknown scheme' SpecError removed; an explicit scheme:// URL of any scheme is kept verbatim as git again (url only for .tar.gz/.tgz, case-insensitive). Pinned in test/spec.test.ts k117Pinned: foo://bar, FOO://bar -> git foo://bar; codecommit://my-repo, persistent-https://host/o/r -> git verbatim. commands.test k117 add test: foo://bar replaced by 'Getty/re po'. §4.2 rewritten: any scheme kept as written for git, git's remote helpers decide what it can fetch; k110's https-only url check still refuses ftp://…tgz (its test passes). Cases 1-4, 6-8 unchanged. Verified: typecheck exit 0; npm test 789/789 pass; build ok; check-dist up to date. Card stays in review.
+
+2026-09-27 04:03 Committed 34d91df1e080a9d7884403c274c6a25059f8d48a: spec: a shorthand owner, repo or port no forge takes is an error; .TAR.GZ is a url (k117)
