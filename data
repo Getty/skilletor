@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-27T03:13:28Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T03:13:21Z
+created: 2026-09-27T00:44:12Z
+id: 107
+priority: medium
+started: 2026-09-27T03:01:38Z
+status: done
+tags:
+- apply
+- bug
+title: 'apply: k99''s executable bit does not reach installs made by an earlier version
+  until a source moves'
+updated: 2026-09-27T03:13:28Z
+---
+
+Found during k99 (worker). Two gaps, both documented in spec §6.2: (1) a url cache extracted by an earlier version has no executable bits and is reused while the server answers 304, so its scripts stay non-executable until the archive changes; (2) scripts installed by an earlier version get their bit only when a sync runs, and check has no reason to start one, so they stay non-executable until a source moves or the user runs `skilletor sync`. Possible fix: a one-time invalidation, e.g. a format number in the render-inputs record (k76) that makes check see drift once, plus a url cache format marker. Done: after upgrading, the next check/sync gives existing installs their executable bits without a source change.
+
+2026-09-27 03:06 Plan: reuse the two existing records. Gap 2 (check has no reason to sync): a format number hashed into the k76 render-inputs record, so the hash an earlier version recorded differs once and check names the scope in varsChanged; the sync it starts records the new hash, so it fires once. No git cache is touched: git checkouts always kept the bit, the sync renders from them. Gap 1 (url cache without bits reused on 304): a format line in the k82 version file (.skilletor-version); a cache without it has no known version, exactly the k82 path for caches of skilletor <= 0.3.0: unconditional GET, re-extraction with bits, an offline fallback labelled 'unknown' (so check keeps counting the url source until a download succeeds). Tests first.
+
+2026-09-27 03:08 Reproduced in test/modes.test.ts (3 new k107 tests, red before any code change): git and url fail at the first check after simulating an earlier version's state (scripts 0644 + the render-inputs hash <= 0.4.1 wrote, verified equal to what the pre-change code records): check.changed false, no varsChanged. The offline url test fails at the label: a cache without modes keeps the known version etag:"v1", so nothing would ever re-download it.
+
+2026-09-27 03:11 Done. Mechanism: reuse the two existing records instead of a new one. (1) src/engine.ts: RENDER_FORMAT = 2 is hashed with the k76 render inputs ({format, vars, project?}); the hash <= 0.4.1 recorded differs once, check names each in-use scope in varsChanged, the sync it starts re-renders from the sources as they stand and records the new hash, so it fires once per scope. Git caches and local sources always held the bits: no git cache is invalidated or re-cloned (the sync does its usual depth-1 fetch; the test asserts the same cache dir inode and pack list). (2) src/sources/url.ts: the k82 version file gets a first line URL_CACHE_FORMAT ('format 2'); a file holding the version alone (<= 0.4.1) is read as no known version, exactly k82's path for <= 0.3.0 caches: the GET goes unconditional and re-extracts with bits; an offline fallback is labelled 'unknown', so check keeps counting that url source until a download succeeds (a real label would let the offline first session consume the one-time trigger and leave the cache bit-less). Why this: both gaps have an existing 'earlier version' record whose mismatch already means 'sync/refetch once'; a format number in each is the smallest change, fires once, and needs no new state file or lock field. Files: src/engine.ts, src/sources/url.ts, dist/skilletor.js (rebuilt), test/modes.test.ts (3 k107 tests: git session once, url re-extract once + 304 after, url offline-first then heal once), test/url-cache.test.ts (3 exact version-file assertions take the format line), spec §4.4 (version file format), §6.2 (known limit replaced by the new behavior), §14.3 (render format in the hash). Verified: typecheck ok; npm test 732/732 pass; build ok; check-dist up to date. Hand e2e in temp HOME/CODEX_HOME: 0.4.1 build (89fe03d dist) installed x.sh as -rw-rw-r--; new build's SessionStart: 'skilletor: 1 item(s) updated', x.sh -rwxrwxr-x; second session silent; check --json changed:false.
+
+2026-09-27 03:13 Committed as 73b40e3
