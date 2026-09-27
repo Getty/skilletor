@@ -1287,8 +1287,12 @@ errors (§15.4).
   trust (§4.3). Skipping leaves those items to the warning above. Without a TTY the command
   fails before editing anything (exit 1) and prints the `skilletor add <name> <spec>`
   commands to run. The probe of §4.2 (generic hosts) happens here, never in a hook.
-- **Name clash:** if the derived name is taken by a source with a different identity, the
-  prompt requires a different name (non-TTY: the printed command uses `<name>-2`).
+- **Name clash:** the prompt never writes over a source of the config the bundle goes into,
+  as `add` never replaces one (§4.2, k102). A name is taken when that config already has it,
+  whatever its address (a user `local` override of a project's source included), or when any
+  configured source (all files merged, §3) holds it with a different identity. A taken
+  derived name makes `<name>-2` (`-3`, …) the default, a typed one is refused and asked
+  again; without a TTY the printed command uses that default.
 - **Project-declared sources:** a source that exists only in the project config and is not
   trusted yet counts as present but untrusted – the usual trust request applies (§4.3).
 - Nested `bundles` stay bare (this source only).

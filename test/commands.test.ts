@@ -952,6 +952,51 @@ test("install bundle: a taken name is refused and asked again; n skips; --projec
   }
 });
 
+// k102: the missing-source prompt never writes over an entry of the config it writes to, as
+// `add` never replaces one (k101). Here the user file's `peter` is a local override and only
+// the project file gives it the bundle's address, so the user scope has no source serving it.
+// Asserts: without a TTY the printed command names `peter-2` (`add peter` would be refused)
+// and both files stay byte-identical; on a TTY `peter-2` is the default, typing `peter` is
+// refused naming the user file's own entry, and accepting adds `peter-2` – user `peter` and
+// the project file untouched, `peter-2` trusted and installed from.
+test("k102: install bundle never proposes or writes over a name its target config already has", async () => {
+  const e = env();
+  try {
+    const url = gitRepo(e.tmp.dir, "peter", ["p-one"]);
+    const derived = resolveSpec(url, noProbe).derivedName;
+    assert.equal(derived, "peter");
+    const src = makeSource(e.tmp.dir, "s", (d) => bundleFile(d, "perl", `description: P\nrules: [p-one@${url}]\n`));
+    const checkout = makeSource(e.tmp.dir, "peter-checkout", (d) => rule(d, "x-one"));
+    e.writeUserCfg({ sources: { mine: { local: src }, peter: { local: checkout } } });
+    const projPath = join(e.projectDir, ".claude/skilletor.json");
+    const projRaw = JSON.stringify({ sources: { peter: { git: url } } }, null, 2) + "\n";
+    writeFileSync(projPath, projRaw);
+    const userRaw = readFileSync(e.userCfgPath, "utf8");
+
+    await assert.rejects(() => cmdInstall(e.ctx, { items: ["bundle:perl@mine"] }), (err: unknown) => {
+      const lines = (err as Error).message.split("\n");
+      assert.ok(lines.includes(`  skilletor add peter-2 ${url}`), (err as Error).message);
+      return true;
+    });
+    assert.equal(readFileSync(e.userCfgPath, "utf8"), userRaw);
+    assert.equal(readFileSync(projPath, "utf8"), projRaw);
+
+    const a = answers("peter", "");
+    const r = await cmdInstall({ ...e.ctx, prompt: a.prompt }, { items: ["bundle:perl@mine"] });
+    const question = `bundle perl needs a source you don't have yet: ${url} → ${url} — add it as [peter-2]? (name, or n to skip)`;
+    assert.deepEqual(a.questions, [
+      question,
+      `"peter" is already a source with another address (local ${checkout}). ${question}`,
+    ]);
+    assert.deepEqual(e.readUserCfg().sources, { mine: { local: src }, peter: { local: checkout }, "peter-2": { git: url } });
+    assert.equal(readFileSync(projPath, "utf8"), projRaw);
+    assert.equal(new State(e.ctx.stateRoot).isTrusted("peter-2", { kind: "git", address: url, origin: "project" }), true);
+    assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`), ["rules/p-one@peter-2"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("install bundle: a source already configured under any name is not asked for", async () => {
   const e = env();
   try {

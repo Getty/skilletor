@@ -10359,7 +10359,7 @@ async function cmdInstall(ctx, args) {
   await withSyncLock(ctx, async () => {
     for (const spec of args.items) await planItem(spec);
   });
-  const additions = await missingSources(ctx, config, bundles, Boolean(args.project));
+  const additions = await missingSources(ctx, config, bundles, path, Boolean(args.project));
   for (const a of additions) {
     edits.push(() => {
       addSource(path, a.name, a.def);
@@ -10369,7 +10369,7 @@ async function cmdInstall(ctx, args) {
   for (const edit of edits) edit();
   return sync(ctx);
 }
-async function missingSources(ctx, config, bundles, project) {
+async function missingSources(ctx, config, bundles, path, project) {
   const scope = project ? "project" : "user";
   const missing = [];
   for (const b of bundles) {
@@ -10380,7 +10380,7 @@ async function missingSources(ctx, config, bundles, project) {
   }
   if (missing.length === 0) return [];
   const taken = new Map([...config.sources.values()].map((s) => [s.name, s.git ?? s.url ?? s.local ?? ""]));
-  const free = (name, url) => !taken.has(name) || sameIdentity(taken.get(name), url);
+  const free = (name, url) => sourceEntry(path, name) === void 0 && (!taken.has(name) || sameIdentity(taken.get(name), url));
   const suggest = (f) => {
     if (free(f.derivedName, f.url)) return f.derivedName;
     let n = 2;
@@ -10410,7 +10410,8 @@ ${lines.join("\n")}`
         continue;
       }
       if (!free(name, f.url)) {
-        note = `"${name}" is already a source with another address (${taken.get(name)}). `;
+        const own = sourceEntry(path, name);
+        note = `"${name}" is already a source with another address (${own !== void 0 ? addressText(own) : taken.get(name)}). `;
         continue;
       }
       out.push({ name, def: f.kind === "git" ? { git: f.url } : { url: f.url }, url: f.url });

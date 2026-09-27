@@ -296,7 +296,7 @@ export async function cmdInstall(
   await withSyncLock(ctx, async () => {
     for (const spec of args.items) await planItem(spec);
   });
-  const additions = await missingSources(ctx, config, bundles, Boolean(args.project));
+  const additions = await missingSources(ctx, config, bundles, path, Boolean(args.project));
   for (const a of additions) {
     edits.push(() => {
       addSource(path, a.name, a.def);
@@ -313,7 +313,8 @@ export async function cmdInstall(
  * printing the `skilletor add` commands. Returns the sources to add.
  */
 async function missingSources(
-  ctx: CommandContext, config: LoadedConfig, bundles: { name: string; foreign: ForeignEntry[] }[], project: boolean,
+  ctx: CommandContext, config: LoadedConfig, bundles: { name: string; foreign: ForeignEntry[] }[], path: string,
+  project: boolean,
 ): Promise<{ name: string; def: SourceDef; url: string }[]> {
   const scope = project ? "project" : "user";
   const missing: { bundle: string; f: ForeignEntry }[] = [];
@@ -325,8 +326,11 @@ async function missingSources(
   }
   if (missing.length === 0) return [];
   const taken = new Map([...config.sources.values()].map((s) => [s.name, s.git ?? s.url ?? s.local ?? ""]));
-  /** A name is free unless a source with another address holds it. */
-  const free = (name: string, url: string) => !taken.has(name) || sameIdentity(taken.get(name)!, url);
+  /** A name is free unless `path`, the config the source goes into, has it – whatever its
+   *  address: the prompt never writes over an entry, as `add` never replaces one (k102) – or
+   *  a source with another address holds it. */
+  const free = (name: string, url: string) =>
+    sourceEntry(path, name) === undefined && (!taken.has(name) || sameIdentity(taken.get(name)!, url));
   const suggest = (f: ForeignEntry) => {
     if (free(f.derivedName, f.url)) return f.derivedName;
     let n = 2;
@@ -356,7 +360,8 @@ async function missingSources(
         continue;
       }
       if (!free(name, f.url)) {
-        note = `"${name}" is already a source with another address (${taken.get(name)}). `;
+        const own = sourceEntry(path, name);
+        note = `"${name}" is already a source with another address (${own !== undefined ? addressText(own) : taken.get(name)}). `;
         continue;
       }
       out.push({ name, def: f.kind === "git" ? { git: f.url } : { url: f.url }, url: f.url });
