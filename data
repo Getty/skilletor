@@ -1,0 +1,82 @@
+{"action":"edit","agent":"skilletor","detail":"review","task_id":99,"ts":"2026-09-27T00:45:25Z"}
+{"action":"edit","agent":"skilletor","detail":"review","task_id":99,"ts":"2026-09-27T00:45:31Z"}
+{"action":"move","agent":"skilletor","detail":"done","task_id":99,"ts":"2026-09-27T00:45:36Z"}
+{"action":"edit","agent":"skilletor","detail":"done","task_id":99,"ts":"2026-09-27T00:45:55Z"}
+{"action":"move","agent":"skilletor","detail":"in-progress","task_id":102,"ts":"2026-09-27T00:46:01Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":102,"ts":"2026-09-27T00:53:19Z"}
+{"action":"move","agent":"skilletor","detail":"review","task_id":102,"ts":"2026-09-27T00:53:29Z"}
+{"action":"edit","agent":"skilletor","detail":"review","task_id":102,"ts":"2026-09-27T00:54:34Z"}
+{"action":"move","agent":"skilletor","detail":"done","task_id":102,"ts":"2026-09-27T00:54:43Z"}
+{"action":"edit","agent":"skilletor","detail":"done","task_id":102,"ts":"2026-09-27T00:54:53Z"}
+{"action":"move","agent":"skilletor","detail":"in-progress","task_id":104,"ts":"2026-09-27T00:55:34Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":104,"ts":"2026-09-27T00:57:28Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":104,"ts":"2026-09-27T00:58:24Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":104,"ts":"2026-09-27T00:58:29Z"}
+{"action":"move","agent":"skilletor","detail":"review","task_id":104,"ts":"2026-09-27T00:58:34Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":109,"ts":"2026-09-27T00:59:01Z"}
+{"action":"move","agent":"skilletor","detail":"done","task_id":104,"ts":"2026-09-27T00:59:34Z"}
+{"action":"edit","agent":"skilletor","detail":"done","task_id":104,"ts":"2026-09-27T00:59:39Z"}
+{"action":"edit","agent":"skilletor","detail":"done","task_id":104,"ts":"2026-09-27T00:59:46Z"}
+{"action":"move","agent":"skilletor","detail":"in-progress","task_id":95,"ts":"2026-09-27T01:00:01Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":95,"ts":"2026-09-27T01:08:47Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":95,"ts":"2026-09-27T01:08:57Z"}
+{"action":"move","agent":"skilletor","detail":"review","task_id":95,"ts":"2026-09-27T01:09:03Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":110,"ts":"2026-09-27T01:09:52Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":111,"ts":"2026-09-27T01:09:57Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":112,"ts":"2026-09-27T01:10:03Z"}
+{"action":"edit","agent":"skilletor","detail":"review","task_id":95,"ts":"2026-09-27T01:10:41Z"}
+{"action":"move","agent":"skilletor","detail":"done","task_id":95,"ts":"2026-09-27T01:10:46Z"}
+{"action":"edit","agent":"skilletor","detail":"done","task_id":95,"ts":"2026-09-27T01:10:51Z"}
+{"action":"move","agent":"skilletor","detail":"in-progress","task_id":100,"ts":"2026-09-27T01:11:05Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":100,"ts":"2026-09-27T01:13:35Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":100,"ts":"2026-09-27T01:17:16Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":100,"ts":"2026-09-27T01:19:02Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":100,"ts":"2026-09-27T01:19:07Z"}
+{"action":"move","agent":"skilletor","detail":"review","task_id":100,"ts":"2026-09-27T01:19:13Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":113,"ts":"2026-09-27T01:19:53Z"}
+{"action":"edit","agent":"skilletor","detail":"backlog","task_id":112,"ts":"2026-09-27T01:19:58Z"}
+{"action":"edit","agent":"skilletor","detail":"backlog","task_id":112,"ts":"2026-09-27T01:20:03Z"}
+{"action":"edit","agent":"skilletor","detail":"review","task_id":100,"ts":"2026-09-27T01:20:47Z"}
+{"action":"move","agent":"skilletor","detail":"done","task_id":100,"ts":"2026-09-27T01:20:52Z"}
+{"action":"edit","agent":"skilletor","detail":"done","task_id":100,"ts":"2026-09-27T01:20:58Z"}
+{"action":"move","agent":"skilletor","detail":"in-progress","task_id":103,"ts":"2026-09-27T01:21:14Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":103,"ts":"2026-09-27T01:24:33Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":103,"ts":"2026-09-27T01:27:02Z"}
+{"action":"move","agent":"skilletor","detail":"review","task_id":103,"ts":"2026-09-27T01:27:07Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":114,"ts":"2026-09-27T01:27:43Z"}
+{"action":"edit","agent":"skilletor","detail":"backlog","task_id":110,"ts":"2026-09-27T01:27:49Z"}
+{"action":"edit","agent":"skilletor","detail":"backlog","task_id":112,"ts":"2026-09-27T01:27:54Z"}
+{"action":"edit","agent":"skilletor","detail":"backlog","task_id":112,"ts":"2026-09-27T01:28:00Z"}
+{"action":"edit","agent":"skilletor","detail":"review","task_id":103,"ts":"2026-09-27T01:28:50Z"}
+{"action":"move","agent":"skilletor","detail":"done","task_id":103,"ts":"2026-09-27T01:28:57Z"}
+{"action":"edit","agent":"skilletor","detail":"done","task_id":103,"ts":"2026-09-27T01:29:09Z"}
+{"action":"move","agent":"skilletor","detail":"todo","task_id":107,"ts":"2026-09-27T03:01:38Z"}
+{"action":"move","agent":"skilletor","detail":"todo","task_id":110,"ts":"2026-09-27T03:01:48Z"}
+{"action":"move","agent":"skilletor","detail":"todo","task_id":109,"ts":"2026-09-27T03:01:56Z"}
+{"action":"move","agent":"skilletor","detail":"todo","task_id":111,"ts":"2026-09-27T03:02:09Z"}
+{"action":"move","agent":"skilletor","detail":"todo","task_id":114,"ts":"2026-09-27T03:02:18Z"}
+{"action":"move","agent":"skilletor","detail":"todo","task_id":113,"ts":"2026-09-27T03:02:27Z"}
+{"action":"move","agent":"skilletor","detail":"todo","task_id":108,"ts":"2026-09-27T03:02:33Z"}
+{"action":"move","agent":"skilletor","detail":"todo","task_id":112,"ts":"2026-09-27T03:02:39Z"}
+{"action":"move","agent":"skilletor","detail":"in-progress","task_id":107,"ts":"2026-09-27T03:02:46Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":107,"ts":"2026-09-27T03:06:19Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":107,"ts":"2026-09-27T03:08:40Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":107,"ts":"2026-09-27T03:11:42Z"}
+{"action":"move","agent":"skilletor","detail":"review","task_id":107,"ts":"2026-09-27T03:11:50Z"}
+{"action":"edit","agent":"skilletor","detail":"todo","task_id":108,"ts":"2026-09-27T03:12:39Z"}
+{"action":"edit","agent":"skilletor","detail":"review","task_id":107,"ts":"2026-09-27T03:13:13Z"}
+{"action":"move","agent":"skilletor","detail":"done","task_id":107,"ts":"2026-09-27T03:13:21Z"}
+{"action":"edit","agent":"skilletor","detail":"done","task_id":107,"ts":"2026-09-27T03:13:28Z"}
+{"action":"move","agent":"skilletor","detail":"in-progress","task_id":110,"ts":"2026-09-27T03:13:47Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":110,"ts":"2026-09-27T03:17:42Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":110,"ts":"2026-09-27T03:21:10Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":110,"ts":"2026-09-27T03:22:24Z"}
+{"action":"edit","agent":"skilletor","detail":"in-progress","task_id":110,"ts":"2026-09-27T03:22:29Z"}
+{"action":"move","agent":"skilletor","detail":"review","task_id":110,"ts":"2026-09-27T03:22:34Z"}
+{"action":"edit","agent":"skilletor","detail":"todo","task_id":109,"ts":"2026-09-27T03:23:15Z"}
+{"action":"edit","agent":"skilletor","detail":"todo","task_id":109,"ts":"2026-09-27T03:23:20Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":115,"ts":"2026-09-27T03:23:25Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":116,"ts":"2026-09-27T03:23:31Z"}
+{"action":"edit","agent":"skilletor","detail":"todo","task_id":112,"ts":"2026-09-27T03:23:36Z"}
+{"action":"edit","agent":"skilletor","detail":"todo","task_id":112,"ts":"2026-09-27T03:23:41Z"}
+{"action":"edit","agent":"skilletor","detail":"review","task_id":110,"ts":"2026-09-27T03:24:23Z"}
