@@ -2,7 +2,8 @@
 
 Every command here takes `--json`. `ID,ID,...` is accepted wherever an `ID`
 is shown. A karr id is written `k12` in prose, never `#12` — the forge
-resolves `#12` against its own issue tracker.
+resolves `#12` against its own issue tracker. Commands take either spelling:
+`karr show k12` is `karr show 12`, and a batch may mix them (`k12,13`).
 
 ## create
 
@@ -14,7 +15,7 @@ karr create "Wait for the fix" --needs other-repo#7     # waits on a card in ano
 karr create "Fix the thing" --escalated-from home#5     # the card raised in that other repository
 karr create "Start now" --status in-progress            # claimed as $KARR_CLAIM; a require_claim status refuses without a claim
 karr create "Start now" --status in-progress --claim NAME
-karr create "For someone else"                         # unclaimed: KARR_CLAIM is used only for a require_claim status
+karr create "For someone else"                         # into backlog, unclaimed: KARR_CLAIM is used only for a require_claim status
 karr create "New card" --json                           # the card as JSON, so the id can be piped on
 ```
 
@@ -41,10 +42,13 @@ karr move 12 STATUS                    # to a named column
 karr move 12 --next                    # one column forward
 karr move 12 --prev                    # one column back
 karr move 12 in-progress --claim NAME  # move and claim (defaults to $KARR_CLAIM)
+karr move 12 todo                      # promote out of backlog, into the pool pick takes from
 ```
 
-A `require_claim` column refuses without a claim. Taking a card whose
-dependencies are unfinished warns, never blocks.
+A `require_claim` column refuses without a claim. `backlog` is held back and
+holds no claim: `--claim` onto it is refused, and a move into it releases the
+claim. Promoting a card out of backlog is the maintainer's call. Taking a
+card whose dependencies are unfinished warns, never blocks.
 
 ## edit
 
@@ -58,7 +62,7 @@ karr edit 12 --add-tag urgent --remove-tag later
 karr edit 12 --body "New description"
 karr edit 12 -a "Appended note"               # append to the body
 karr edit 12 -a "Appended note" -t            # ... prefixed with the UTC timestamp
-karr edit 12 --claim NAME                     # claim (defaults to $KARR_CLAIM)
+karr edit 12 --claim NAME                     # claim ($KARR_CLAIM only on a require_claim card; refused in backlog)
 karr edit 12 --release                        # release the claim
 karr edit 12 --block "Waiting on API"         # mark blocked, with the reason
 karr edit 12 --unblock
@@ -68,10 +72,11 @@ karr edit 12 --add-needs other-repo#7         # cross-board dependency (cross-bo
 karr edit 12 --remove-needs other-repo#7      # absent references are a no-op
 ```
 
-Dependency rules: an unknown or non-numeric id in `--depends-on` /
-`--add-depends-on` rejects the whole invocation before anything is written
-(usage error, exit 2). A self-reference (`karr edit 5 --add-depends-on 5`)
-fails only that id, the rest of the batch proceeds, and the command exits 1.
+Dependency rules: an id in `--depends-on` / `--add-depends-on` that names no
+card here, or is neither a number nor `kNNN`, rejects the whole invocation
+before anything is written (usage error, exit 2). A self-reference
+(`karr edit 5 --add-depends-on 5`) fails only that id, the rest of the batch
+proceeds, and the command exits 1.
 
 ## delete
 
