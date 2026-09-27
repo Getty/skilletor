@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-09-27T23:16:48Z
+id: 125
+priority: low
+status: backlog
+tags:
+- spec
+- bug
+title: 'spec: other GitHub page links (anchors, /releases, /commit, github:o/r/tree/x)
+  resolve wrongly'
+updated: 2026-09-27T23:16:48Z
+---
+
+Found during k119 (worker). After k119 resolves github.com/o/r/tree/<ref>: (1) a repo page link with an anchor or query (https://github.com/Getty/karr#readme, ?tab=readme-ov-file) is stored as written and fails at fetch; (2) other page links (/releases/tag/v1, /commit/<sha>, /issues) silently track HEAD in shorthand form, their https:// forms fail at fetch; (3) github:Getty/karr/tree/main and Getty/karr/tree/main still drop /tree/main silently (pinned by k117), inconsistent with the github.com/ form; (4) low: a percent-encoded ref in a link is stored encoded. Also other forges' link shapes (GitLab /-/tree/<ref>, Codeberg /src/branch/<ref>, HF /tree/<ref>) drop or keep the tail. Decide: strip query/anchor on repo links, /releases/tag/<t> and /commit/<sha> → ref, refuse other page links; align shorthand forms with k119.
