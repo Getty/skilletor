@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-27T00:45:55Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T00:45:36Z
+created: 2026-09-26T22:24:30Z
+id: 99
+priority: medium
+started: 2026-09-27T00:28:45Z
+status: done
+tags:
+- apply
+- bug
+title: 'apply: installed files lose their mode (a skill''s scripts are not executable)'
+updated: 2026-09-27T00:45:55Z
+---
+
+Found during k96 (worker). A source file's mode is not kept on install, for skills/ and .claude/ alike: karr's .claude/skills/karr-single-binary/scripts/benchmark.sh is 0775 in the source and installs as 0664, so a skill that tells the model to run scripts/x.sh gets a non-executable file. Expected: the executable bit of a source file survives render/apply (git and url sources and local); check/lock hashing decides whether a mode change counts as drift. Pre-existing, not a regression.
+
+2026-09-27 00:33 Cause (worker): render.build reads only bytes (readFileSync), apply writes via atomicWrite with the default mode, and the url backend's tar reader ignores the header mode. Git caches and local sources do keep the bit on disk; it is lost between render and apply. Writing the regression test first (test/modes.test.ts).
+
+2026-09-27 00:39 Fix in place, regression test test/modes.test.ts red before / green after (4 tests: local both layouts + .njk, source mode change, git + check, url). Full npm test pending: the host's loadguard refuses it under memory pressure; retrying.
+
+2026-09-27 00:42 Changed: src/fsutil.ts (isExecutable = owner bit 0o100, the one git records; atomicWrite(path, data, executable) creates 0777/0666 less umask), src/render.ts (executables(item, sourceDir): install paths whose source file is executable, .njk passes its bit on), src/engine.ts (skills only: plan item gets executable set, skilletor's own skill .gitignore excluded), src/apply.ts (PlanItem.executable; a file is correct only if bytes AND bit match; bit-only rewrite is an update, never 'overwritten'), src/sources/url.ts (tar reader keeps the entry's owner exec bit when extracting; git caches and local sources already had it on disk), test/helpers/tar.ts (optional entry mode), test/modes.test.ts (new), dist/skilletor.js rebuilt, spec §5 + §6.2. DRIFT DECISION: the bit is not lock state and not a check drift kind. Lock hashes stay bytes-only; each sync compares the bit like the bytes (render-and-compare) and fixes it. Why: a source-side mode change always moves the source version (commit / new archive / local always re-rendered), so the existing source test already covers it; a local chmod is like a local edit, which check never sees either (it never reads installed files); folding mode into the hash would have made every file an earlier version installed read as locally overwritten on the first sync. Agents/rules: one Markdown file the harness reads, never runs - install without the bit, like every generated file (Codex TOML, rules file, skill .gitignore).
+
+2026-09-27 00:43 Also found (to file on the skilletor board, not fixed here - documented as known in spec §6.2): (1) a url cache an earlier version extracted holds no exec bits and a 304 keeps reusing it, so its scripts stay non-executable until the archive changes; fix would be a one-time cache invalidation (e.g. a cache-format marker next to .skilletor-version). (2) Scripts an earlier version installed get their bit only from the next sync that runs; check has no reason to start one, so in-session hooks do not migrate them until a source moves or the user runs 'skilletor sync'; a fix could be a one-time drift (e.g. a format number folded into the k76 render-inputs record). (3) skill text: .claude/skills/skilletor-core/SKILL.md Templating invariant could state the exec-bit rule (skill-author lane). The dispatch asked me to karr create these; my brief forbids creating cards, so they stay notes here for the dispatcher to file.
+
+2026-09-27 00:43 Done: a skill file's owner exec bit survives render+apply for local, git and url sources, both skills/ and .claude/skills layouts, .njk included. Regression test test/modes.test.ts (4 tests) red before, green after. Verified: npm run typecheck OK; npm test 707/707 pass, 0 fail, 0 skipped; npm run build OK; npm run check-dist up to date. Nothing committed; unrelated .claude/skills/kanban-issues-karr-* edits untouched.
+
+2026-09-27 00:45 Committed fa1ba98cb248a96fd6edfdc8bfe3e38af1ab7141: apply: a skill's scripts keep their executable bit (k99).
