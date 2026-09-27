@@ -76,6 +76,31 @@ test("parseBundle: name@<spec> entries are kept apart; a spec that needs a probe
   assert.throws(() => parseBundle("description: D\nskills: [\"@Getty\"]\n"), /empty/);
 });
 
+// k115: an entry whose address resolves to a source config load refuses (a `.tar.gz`/`.tgz`
+// not on https:// is a `url`, and a url must be https://) was accepted, so sync told the user
+// to run `install bundle:`, which refuses it (k110). Asserts: each such address is a
+// BundleError quoting the key, the entry and load's own error for the source `add` would
+// write; a git address load takes (http://, ssh://, scp-like) still parses, so the rule is
+// load's and not a second, stricter one.
+test("k115: parseBundle refuses an entry address config load would refuse as a source", () => {
+  const bad: [string, string][] = [
+    ["x@http://host/x.tar.gz", `sources.host.url "http://host/x.tar.gz" must be an https:// URL`],
+    ["x@file:///x.tgz", `sources.source.url "file:///x.tgz" must be an https:// URL`],
+    ["x@git@host:x.tar.gz", `sources.x-tar-gz.url "git@host:x.tar.gz" must be an https:// URL`],
+  ];
+  for (const [entry, problem] of bad) {
+    assert.throws(() => parseBundle(`description: D\nrules: [r1, "${entry}"]\n`), (e: unknown) => {
+      assert.ok(e instanceof BundleError, String(e));
+      assert.equal((e as Error).message, `rules: "${entry}" cannot be added as a source: ${problem}`);
+      return true;
+    }, entry);
+  }
+  const def = parseBundle("description: D\nrules: [\"a@http://host/repo\", \"b@ssh://host/repo\", \"c@git@host:o/repo\"]\n");
+  assert.deepEqual(def.foreign.map((f) => [f.kind, f.url]), [
+    ["git", "http://host/repo"], ["git", "ssh://host/repo"], ["git", "git@host:o/repo"],
+  ]);
+});
+
 // ---- catalog scan -------------------------------------------------------------
 
 function source(layout: Record<string, string>): { dir: string; cleanup: () => void } {

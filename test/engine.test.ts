@@ -1966,6 +1966,34 @@ test("a foreign entry matching nothing in its source warns; an untrusted project
   }
 });
 
+// k115: a declared bundle that gains an entry `x@http://host/x.tar.gz` upstream (or by hand)
+// made sync warn "needs … run skilletor install bundle:…", an install that refuses the source
+// (k110): a url config load refuses can never be configured. Asserts: that entry is an error
+// of the bundle (spec §15.4) – the one warning quotes it and load's error, no "run skilletor
+// install" hint – and what the bundle installed before stays, `via` included.
+test("k115: sync reports an entry address config load would refuse as the bundle's error", async () => {
+  const e = env();
+  try {
+    const src = bundleSource(e.tmp.dir, "k115", { perl: "description: P\nrules: [r1]\n" });
+    e.writeCfg("user", { sources: { shared: { local: src } }, install: { bundles: ["perl@shared"] } });
+    const first = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(first.scopes[0]!.added.map((i) => i.key), ["rules/r1"]);
+
+    putRaw(src, "bundles/perl.yaml", "description: P\nrules: [r1, r2, x@http://host/x.tar.gz]\n");
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.equal(r.error, undefined);
+    assert.deepEqual(r.scopes[0]!.warnings, [
+      `bundle:perl@shared: bundle perl: bundles/perl.yaml: rules: "x@http://host/x.tar.gz" cannot be added as a source: ` +
+        `sources.host.url "http://host/x.tar.gz" must be an https:// URL; its installed items are kept`,
+    ]);
+    assert.deepEqual([r.scopes[0]!.added, r.scopes[0]!.removed], [[], []]);
+    assert.equal(existsSync(join(e.home, ".claude/rules/.local.r1.md")), true);
+    assert.deepEqual(readLock(join(e.home, ".claude/skilletor.lock.json"))["rules/r1"]!.via, ["bundle:perl@shared"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("a user-scope bundle does not see a source only the project declares", async () => {
   const e = env();
   try {

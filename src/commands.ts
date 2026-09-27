@@ -369,8 +369,8 @@ export async function cmdInstall(
 /**
  * Sources the bundles name by address that no visible configured source serves
  * (spec §15.6). On a TTY each is offered for adding; without one the command fails,
- * printing the `skilletor add` commands. One config load would refuse fails it on either,
- * before any question (k110). Returns the sources to add.
+ * printing the `skilletor add` commands. None is one config load would refuse (k110): such
+ * an address is already an error of its bundle (k115, §15.4). Returns the sources to add.
  */
 async function missingSources(
   ctx: CommandContext, config: LoadedConfig, bundles: { name: string; foreign: ForeignEntry[] }[], path: string,
@@ -398,13 +398,6 @@ async function missingSources(
     return `${f.derivedName}-${n}`;
   };
   const defOf = (f: ForeignEntry): SourceDef => (f.kind === "git" ? { git: f.url } : { url: f.url });
-  // A source load would refuse (k110) can be neither offered nor added by hand: refused first.
-  for (const { bundle, f } of missing) {
-    const invalid = loadRefusal(suggest(f), defOf(f));
-    if (invalid !== undefined) {
-      throw new CommandError(`bundle ${bundle} needs ${f.spec}, which cannot be added as a source: ${invalid}; nothing was changed`);
-    }
-  }
   const flag = project ? " --project" : "";
   if (!ctx.prompt) {
     const lines = missing.map((m) => `  skilletor add ${suggest(m.f)} ${m.f.spec}${flag}`);

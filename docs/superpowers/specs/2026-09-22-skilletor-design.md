@@ -306,8 +306,8 @@ written and before any trust. An explicit address is kept verbatim, so a `.tar.g
 load refuses: `add` fails with exit 1, config byte-identical, naming key, value and rule
 (`cannot add http://host/x.tar.gz: sources.host.url "http://host/x.tar.gz" must be an https://
 URL; nothing was changed`), also when that config already has the same address by hand
-under that name (never kept and trusted). The bundle prompt refuses such a source the same
-way (§15.6).
+under that name (never kept and trusted). A bundle entry naming such an address is an error
+of that bundle (§15.4, k115), so the bundle prompt never offers it (§15.6).
 
 ### 4.3 Trust
 
@@ -1345,6 +1345,14 @@ installed before stay installed (kept like an unresolvable source's items, §6.1
   `.yaml` and `.yml`;
 - an entry's `@<spec>` is not a probe-free remote spec (bad shorthand, generic host
   without `https://`, local path);
+- an entry's `@<spec>` resolves to a source config load would refuse (§3; k115): a
+  `.tar.gz`/`.tgz` address that is not `https://` (`http://…`, `file://…`, `git@host:….tar.gz`)
+  is a `url` (§4.2), and a `url` must be `https://`. Checked by load's own check, on the
+  source `add` would write, so the error quotes it (`rules: "x@http://host/x.tar.gz" cannot
+  be added as a source: sources.host.url "http://host/x.tar.gz" must be an https:// URL`).
+  Such a source could never be configured, so this is the bundle's error, not a missing
+  source (§15.6): `available` shows it, `install bundle:` refuses it, and `sync` reports it
+  instead of `run skilletor install bundle:…`;
 - a cycle in `bundles` (`a` → `b` → `a`); the warning names the cycle.
 
 An unresolvable or untrusted source keeps what its bundles installed, as for wildcards.
@@ -1393,10 +1401,10 @@ errors (§15.4).
   (user, or project with `--project`) exactly like `skilletor add` – which is the act of
   trust (§4.3). Skipping leaves those items to the warning above. Without a TTY the command
   fails before editing anything (exit 1) and prints the `skilletor add <name> <spec>`
-  commands to run. The probe of §4.2 (generic hosts) happens here, never in a hook. A
-  missing source config load would refuse (a `url` that is not `https://`, §4.2, k110) can be
-  added neither way: with a TTY or without, the command fails before any question (exit 1,
-  nothing changed), naming the bundle, the address and the rule.
+  commands to run. The probe of §4.2 (generic hosts) happens here, never in a hook. An
+  address config load would refuse as a source (a `url` that is not `https://`, §4.2, k110)
+  is never a missing source: it is an error of its bundle (§15.4, k115), so the command
+  fails before any question (exit 1, nothing changed), with the bundle's error.
 - **Name clash:** the prompt never writes over a source of the config the bundle goes into,
   as `add` never replaces one (§4.2, k102). A name is taken when that config already has it,
   whatever its address (a user `local` override of a project's source included), or when any

@@ -1389,11 +1389,13 @@ test("k95: install bundle without a TTY prints a valid derived name for any addr
 });
 
 // k110: the prompt adds a missing source as `add` would, from the same resolveSpec, so a bundle
-// entry `x@http://host/x.tar.gz` would be added as a url config load refuses. Asserts: without
-// a TTY and on one, install is a CommandError naming the bundle, the address, key, value and
-// rule before any question is asked; the user config stays byte-identical (not even the bundle
-// entry or the source's own items), nothing is trusted.
-test("k110: install bundle refuses a missing source it could only add as a url config load refuses", async () => {
+// entry `x@http://host/x.tar.gz` would be added as a url config load refuses. k115: such an
+// entry is an error of the bundle (spec §15.4), as a generic host without https:// is.
+// Asserts: `available` lists the bundle with that error (load's own, for the source `add`
+// would write) and no members; without a TTY and on one, install is a CommandError with the
+// bundle error before any question is asked; the user config stays byte-identical (not even
+// the bundle entry or the source's own items), nothing is trusted.
+test("k115: available shows, install bundle refuses, an entry address config load would refuse", async () => {
   const e = env();
   try {
     const src = makeSource(e.tmp.dir, "s", (d) => {
@@ -1402,8 +1404,12 @@ test("k110: install bundle refuses a missing source it could only add as a url c
     });
     e.writeUserCfg({ sources: { mine: { local: src } } });
     const raw = readFileSync(e.userCfgPath, "utf8");
-    const msg = `bundle perl needs http://host/x.tar.gz, which cannot be added as a source: ` +
-      `sources.host.url "http://host/x.tar.gz" must be an https:// URL; nothing was changed`;
+    const error = `bundle perl: bundles/perl.yaml: rules: "x@http://host/x.tar.gz" cannot be added as a source: ` +
+      `sources.host.url "http://host/x.tar.gz" must be an https:// URL`;
+    const perl = (await cmdAvailable(e.ctx, { source: "mine" })).find((i) => i.type === "bundle")!;
+    assert.equal(perl.error, error);
+    assert.equal(perl.members, undefined);
+    const msg = `mine: ${error}`;
     for (const tty of [false, true]) {
       const a = answers("");
       await assert.rejects(

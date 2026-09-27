@@ -141,8 +141,8 @@ A source's name — its key under `sources` — is ASCII letters, digits, `.`, `
 starting with a letter or digit; any other name is a config error naming the file and the
 name, and `skilletor add` refuses it before writing anything. It likewise refuses a spec
 that resolves to a source config load would refuse, such as an `http://` or `file://` tarball
-(exit 1, nothing written or trusted), and `install` refuses a bundle source it could only add
-that way.
+(exit 1, nothing written or trusted); a bundle entry naming such an address is an error of
+that bundle, which `available` and `sync` show and `install` refuses.
 
 `skilletor uninstall` removes explicit entries from one config — the user config, or the
 project config with `--project`. `rule:k8s@shared` removes only from `rules`;
@@ -243,8 +243,9 @@ even when a bundle yields it too.
 **Items of other sources.** `name@<spec>` (patterns too: `perl-*@gitlab.com/peter`) names
 an item of another source by its address, so a bundle means the same on every machine.
 `<spec>` is the `skilletor add` shorthand, limited to forms that need no network probe:
-`Getty`, `Getty/repo`, `gitlab.com/peter`, `hf.co/user`, full `https://…` URLs. A generic
-host must be written as a full `https://` URL, and local paths are not allowed. The entry
+`Getty`, `Getty/repo`, `gitlab.com/peter`, `hf.co/user`, full git URLs (a tarball only as
+`https://…`). A generic host must be written as a full `https://` URL, and local paths are
+not allowed; an address config load would refuse as a source is an error of the bundle. The entry
 is served by whichever configured source has the same resolved `git`/`url` — its config
 name does not matter, and a `local` override of it (authoring mode) still applies.
 

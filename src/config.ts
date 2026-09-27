@@ -181,8 +181,9 @@ function parseSources(obj: Json, path: string, origin: Origin): Map<string, Reso
 }
 
 /** One source definition checked field by field, as config load reads it; every error starts
- *  with `at` (`<file>: sources.<name>`). `add` and the bundle prompt check what they would
- *  write with it before writing anything (k110), so neither writes a source load refuses. */
+ *  with `at` (`<file>: sources.<name>`). `add` checks what it would write with it before
+ *  writing anything (k110), a bundle entry's address is checked with it at parse (k115), so
+ *  neither `add` nor the bundle prompt writes a source load refuses. */
 export function sourceFields(def: unknown, at: string): SourceDef {
   if (def === null || typeof def !== "object" || Array.isArray(def)) throw new ConfigError(`${at} must be an object`);
   const d = def as Json;

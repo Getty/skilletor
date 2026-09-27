@@ -4,8 +4,9 @@
 // source's items (names or `*` patterns per type), other bundles of the source
 // included recursively, and var defaults for the items it yields. This module
 // parses one bundle file and expands a bundle against a scanned catalog; it
-// knows nothing about config, rendering or the target filesystem.
-import type { ItemType } from "./config.ts";
+// reads no config file and knows nothing about rendering or the target filesystem.
+// An entry's address is checked as config load checks a source (k115).
+import { ConfigError, sourceFields, type ItemType } from "./config.ts";
 import { FrontmatterError, parseYamlDocument, YamlFloat, type YamlValue } from "./frontmatter.ts";
 import { resolveSpec, SpecError } from "./spec.ts";
 import type { Catalog } from "./catalog.ts";
@@ -101,7 +102,8 @@ function stringList(value: YamlValue | undefined, key: string): string[] {
   });
 }
 
-/** Resolve `name@<spec>` without a probe; local paths and generic hosts are errors. */
+/** Resolve `name@<spec>` without a probe; local paths, generic hosts and an address config
+ *  load would refuse as a source (k115: a `url` not https://) are errors. */
 function foreignEntry(type: ItemType, entry: string, key: string): ForeignEntry {
   const at = entry.indexOf("@");
   const name = entry.slice(0, at);
@@ -124,6 +126,12 @@ function foreignEntry(type: ItemType, entry: string, key: string): ForeignEntry 
       throw new BundleError(`${key}: "${entry}": a generic host must be written as a full https:// URL`);
     }
     throw new BundleError(`${key}: "${entry}": ${(err as Error).message}`);
+  }
+  try {
+    sourceFields(kind === "git" ? { git: url } : { url }, `sources.${derivedName}`);
+  } catch (err) {
+    if (err instanceof ConfigError) throw new BundleError(`${key}: "${entry}" cannot be added as a source: ${err.message}`);
+    throw err;
   }
   return { type, entry, name, spec, url, kind, derivedName };
 }

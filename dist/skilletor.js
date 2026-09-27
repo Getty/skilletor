@@ -6880,6 +6880,12 @@ function foreignEntry(type, entry, key) {
     }
     throw new BundleError(`${key}: "${entry}": ${err.message}`);
   }
+  try {
+    sourceFields(kind === "git" ? { git: url } : { url }, `sources.${derivedName}`);
+  } catch (err) {
+    if (err instanceof ConfigError) throw new BundleError(`${key}: "${entry}" cannot be added as a source: ${err.message}`);
+    throw err;
+  }
   return { type, entry, name, spec, url, kind, derivedName };
 }
 function parseBundle(text) {
@@ -10508,12 +10514,6 @@ async function missingSources(ctx, config, bundles, path, project) {
     return `${f.derivedName}-${n}`;
   };
   const defOf = (f) => f.kind === "git" ? { git: f.url } : { url: f.url };
-  for (const { bundle, f } of missing) {
-    const invalid = loadRefusal(suggest(f), defOf(f));
-    if (invalid !== void 0) {
-      throw new CommandError(`bundle ${bundle} needs ${f.spec}, which cannot be added as a source: ${invalid}; nothing was changed`);
-    }
-  }
   const flag = project ? " --project" : "";
   if (!ctx.prompt) {
     const lines = missing.map((m) => `  skilletor add ${suggest(m.f)} ${m.f.spec}${flag}`);
