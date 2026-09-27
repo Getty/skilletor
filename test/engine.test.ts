@@ -1784,6 +1784,55 @@ test("bundle warnings (missing name, other source not supported yet) reach the r
   }
 });
 
+// k100: a name with both `<name>.md` and `<name>.md.njk` is an error of that one item (spec
+// §4.1), scoped like a bundle's `.yaml`/`.yml` clash (§15.4). Asserts: whether an explicit
+// entry, a wildcard or a bundle declares it, sync warns once per item naming both files, keeps
+// the copy it installed before (lock entry and `via` included), installs nothing for a name
+// never installed, and still installs every other item – no config error.
+test("k100: x.md beside x.md.njk: sync warns naming both, keeps the installed copy, installs the rest", async () => {
+  const e = env();
+  try {
+    const src = bundleSource(e.tmp.dir, "twice", { b: "description: B\nagents: [c]\n" });
+    putItem(src, "agent", "a");
+    putItem(src, "agent", "c");
+    const cfg = (agents: string[]) => ({
+      sources: { shared: { local: src } }, install: { agents, rules: ["r*@shared"], bundles: ["b@shared"] },
+    });
+    e.writeCfg("user", cfg(["a@shared"]));
+    const first = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(first.scopes[0]!.added.map((i) => i.key).sort(),
+      ["agents/a", "agents/c", "rules/r1", "rules/r2", "rules/r3"]);
+
+    putRaw(src, "agents/a.md.njk", "---\ndescription: a\n---\nNEW A\n"); // explicit entry
+    putRaw(src, "rules/r1.md.njk", "---\ndescription: r1\n---\nNEW R1\n"); // wildcard
+    putRaw(src, "agents/c.md.njk", "---\ndescription: c\n---\nNEW C\n"); // bundle
+    putRaw(src, "agents/n.md", "---\ndescription: n\n---\nN\n"); // never installed
+    putRaw(src, "agents/n.md.njk", "---\ndescription: n\n---\nN\n");
+    putItem(src, "rule", "r4");
+    e.writeCfg("user", cfg(["a@shared", "n@shared"]));
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.equal(r.error, undefined);
+    const s = r.scopes[0]!;
+    assert.deepEqual(s.added.map((i) => i.key), ["rules/r4"]);
+    assert.deepEqual([s.removed, s.updated], [[], []]);
+    assert.deepEqual(s.warnings.slice().sort(), [
+      "agent a@shared: both agents/a.md and agents/a.md.njk exist; an installed copy stays",
+      "agent c@shared: both agents/c.md and agents/c.md.njk exist; an installed copy stays",
+      "agent n@shared: both agents/n.md and agents/n.md.njk exist; an installed copy stays",
+      "rule r1@shared: both rules/r1.md and rules/r1.md.njk exist; an installed copy stays",
+    ]);
+    const claude = join(e.home, ".claude");
+    assert.equal(readFileSync(join(claude, "agents/.local.a.md"), "utf8"), "---\ndescription: a\n---\nA\n");
+    assert.equal(readFileSync(join(claude, "rules/.local.r1.md"), "utf8"), "---\ndescription: r1\n---\nR1\n");
+    const lock = readLock(join(claude, "skilletor.lock.json"));
+    assert.deepEqual(lock["agents/c"]!.via, ["bundle:b@shared"]);
+    assert.deepEqual(Object.keys(lock).sort(),
+      ["agents/a", "agents/c", "rules/r1", "rules/r2", "rules/r3", "rules/r4"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("check covers sources referenced only by a bundle", async () => {
   const e = env();
   try {

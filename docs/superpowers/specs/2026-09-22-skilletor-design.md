@@ -163,6 +163,17 @@ skilletor.json             # optional: { "description": "…", "vars": { default
 .claude/rules/<name>.md[.njk]
 ```
 
+An agent or rule is one file, `<name>.md` or `<name>.md.njk`. **Both for one name is an error
+of that item** (k100), scoped like a bundle's `.yaml` beside its `.yml` (§15.4): the scan
+goes on, and every other item – another type's item of that name included – is offered as
+usual. The catalog holds the item once, with the error naming both files (`both
+agents/x.md and agents/x.md.njk exist`); `available` lists it with that error (an `error:`
+line, `error` in `--json`), `install` of it fails before editing the config, and `sync` –
+whether an explicit entry, a wildcard or a bundle declares it – warns with the error and
+builds nothing for it, so an installed copy stays (§6.6). The name counts as found: a
+`.claude/` item of that name is skipped as below. Under `.claude/` the pair is no error: the
+first of the two, `<name>.md`, is taken silently.
+
 **Claude plugin repos** (`.claude-plugin/plugin.json` with a `skills` field) are read as
 sources too. `skills` is a path or an array of paths, relative to the source root. A path
 whose directory holds a `SKILL.md[.njk]` is one skill; any other directory is scanned one
@@ -607,8 +618,10 @@ resolve's `reset --hard` restores it.
 
 A sync error never aborts a session. Fetch error/offline → continue with the cache, one
 warning line. Template error → that item stays at its old state, error with file and
-line. Config error → nothing is touched, clear message. Write error while applying → the
-sync stops with that error; the lock keeps what landed (§6.2), and the next sync resumes.
+line. An item the catalog marks broken (both `<name>.md` and `<name>.md.njk`, §4.1) → the
+same: that item stays at its old state, the warning names both files. Config error →
+nothing is touched, clear message. Write error while applying → the sync stops with that
+error; the lock keeps what landed (§6.2), and the next sync resumes.
 
 ### 6.7 Briefing check for agents (#56)
 

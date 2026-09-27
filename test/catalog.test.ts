@@ -126,3 +126,40 @@ test("a symlink in the source is rejected", () => {
     tmp.cleanup();
   }
 });
+
+// k100: `agents/x.md` and `agents/x.md.njk` (or the same under `rules/`) are one name twice.
+// Asserts: the scan does not fail; that name is one item of its type carrying an error that
+// names both files (the bundle `.yaml`/`.yml` shape, spec §15.4); every other item – another
+// type's `x` included – is intact; a `.claude/` item of that name does not step in; and the
+// `.claude/` scan still dedupes its own pair silently (the first file wins).
+test("k100: x.md beside x.md.njk is one item carrying an error naming both, the scan goes on", () => {
+  const tmp = makeTmpDir();
+  const put = (rel: string, content: string) => {
+    mkdirSync(join(tmp.dir, rel, ".."), { recursive: true });
+    writeFileSync(join(tmp.dir, rel), content);
+  };
+  try {
+    put("agents/x.md", "---\ndescription: plain\n---\nA\n");
+    put("agents/x.md.njk", "---\ndescription: template\n---\n{{ oops }}\n");
+    put("agents/ok.md", "---\ndescription: fine\n---\nOK\n");
+    put("rules/y.md.njk", "---\ndescription: t\n---\nY\n");
+    put("rules/y.md", "---\ndescription: p\n---\nY\n");
+    put("skills/x/SKILL.md", "---\ndescription: a skill named x\n---\nS\n");
+    put(".claude/agents/x.md", "---\ndescription: project copy\n---\nC\n");
+    put(".claude/rules/z.md", "---\ndescription: z plain\n---\nZ\n");
+    put(".claude/rules/z.md.njk", "---\ndescription: z template\n---\nZ\n");
+    const cat = scan(tmp.dir);
+    const rows = cat.items
+      .map((i) => [`${i.type}:${i.name}`, i.files, i.error, i.description] as const)
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    assert.deepEqual(rows, [
+      ["agent:ok", ["agents/ok.md"], undefined, "fine"],
+      ["agent:x", ["agents/x.md", "agents/x.md.njk"], "both agents/x.md and agents/x.md.njk exist", undefined],
+      ["rule:y", ["rules/y.md", "rules/y.md.njk"], "both rules/y.md and rules/y.md.njk exist", undefined],
+      ["rule:z", [".claude/rules/z.md"], undefined, "z plain"],
+      ["skill:x", ["skills/x/SKILL.md"], undefined, "a skill named x"],
+    ]);
+  } finally {
+    tmp.cleanup();
+  }
+});

@@ -292,7 +292,11 @@ background fetching while you work. Raise the number instead to check less often
 
 A source file ending in `.njk` is rendered with Nunjucks and installed with `.njk`
 stripped; everything else is copied byte for byte, so skills that use `{{ }}`/`{% %}`
-themselves stay intact.
+themselves stay intact. A skill's file keeps its source file's executable bit (a template
+passes its own to what it renders), so a skill can tell the model to run `scripts/x.sh`.
+An agent or rule published as both `<name>.md` and `<name>.md.njk` is an error of that
+item: `available` shows it, `install` refuses it, and `sync` warns and keeps an installed
+copy.
 
 ```njk
 {% if vars.kubernetes %}

@@ -167,6 +167,44 @@ test("install bundle:name@src and a pattern; status and available show bundles; 
   assert.match(un.stdout, /- rules\/perl-a/);
 });
 
+// k100: `rules/x.md` beside `rules/x.md.njk`, through the real binary. Asserts: `available`
+// prints x once with an `error:` line naming both files (as a broken bundle's), and the other
+// rule plainly; `install x@shared` exits 1 with that error on stderr and leaves the config
+// byte-identical; `sync` of a wildcard exits 0, installs the other rule and names both files.
+test("k100: x.md beside x.md.njk: available shows the error, install exits 1, sync installs the rest", () => {
+  const home = join(tmp.dir, "k100-home");
+  const proj = join(tmp.dir, "k100-proj");
+  const src = join(tmp.dir, "k100-src");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(proj, { recursive: true });
+  mkdirSync(join(src, "rules"), { recursive: true });
+  writeFileSync(join(src, "rules", "x.md"), "---\ndescription: x\n---\nX\n");
+  writeFileSync(join(src, "rules", "x.md.njk"), "---\ndescription: x\n---\nX\n");
+  writeFileSync(join(src, "rules", "ok.md"), "---\ndescription: fine\n---\nOK\n");
+  const cfgPath = join(home, ".claude", "skilletor.json");
+  const cfg = JSON.stringify({ sources: { shared: { local: src } } });
+  writeFileSync(cfgPath, cfg);
+  const env = claudeOnlyEnv(home);
+  const common = ["--project-dir", proj];
+
+  const av = runCli(["available", "shared", ...common], env);
+  assert.equal(av.status, 0, av.stderr);
+  assert.equal(av.stdout, "  rule ok@shared — fine\n  rule x@shared\n    error: both rules/x.md and rules/x.md.njk exist\n");
+
+  const inst = runCli(["install", "x@shared", ...common], env);
+  assert.equal(inst.status, 1);
+  assert.equal(inst.stdout, "");
+  assert.match(inst.stderr, /shared: rule x: both rules\/x\.md and rules\/x\.md\.njk exist/);
+  assert.equal(readFileSync(cfgPath, "utf8"), cfg);
+
+  writeFileSync(cfgPath, JSON.stringify({ sources: { shared: { local: src } }, install: { rules: ["*@shared"] } }));
+  const sy = runCli(["sync", "--scope", "user", ...common], env);
+  assert.equal(sy.status, 0, sy.stderr);
+  assert.match(sy.stdout, /\+ rules\/ok/);
+  assert.match(sy.stdout, /rule x@shared: both rules\/x\.md and rules\/x\.md\.njk exist/);
+  assert.equal(existsSync(join(home, ".claude", "rules", ".local.x.md")), false);
+});
+
 // k48 phase B: without a TTY, a bundle needing an unknown source exits 1 and edits nothing.
 test("install bundle: with a missing source and no TTY exits 1, prints the add command, edits nothing", () => {
   const home = join(tmp.dir, "foreign-home");

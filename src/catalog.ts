@@ -27,7 +27,9 @@
 //
 // Names come from the path; descriptions from item frontmatter (read raw for
 // .njk, never rendered). Symlinks anywhere in the tree are rejected (spec §9); in
-// `.claude/` they are skipped, never followed.
+// `.claude/` they are skipped, never followed. An agent or rule with both `<name>.md`
+// and `<name>.md.njk` is one item carrying an error, never a failed scan (k100);
+// `.claude/` keeps the first of the two silently.
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { basename, isAbsolute, join, relative } from "node:path";
 import type { ItemType } from "./config.ts";
@@ -48,6 +50,9 @@ export interface CatalogItem {
    *  `skills/<name>`), the directory holding an agent's or rule's file (default `agents`,
    *  `rules`). Its files install under `skills/<name>/`, `agents/`, `rules/` (render.ts). */
   dir?: string;
+  /** Why the item cannot be built: both `<name>.md` and `<name>.md.njk` exist (k100). That
+   *  error belongs to the item, never to the scan (spec §4.1); `files` holds both. */
+  error?: string;
 }
 
 export interface SourceMeta {
@@ -151,6 +156,7 @@ export function scan(dir: string): Catalog {
     if (!existsSync(typeDir)) continue;
     noSymlink(typeDir);
 
+    const byName = new Map<string, string[]>(); // an agent's or rule's file(s), per name
     for (const entry of readdirSync(typeDir)) {
       const p = join(typeDir, entry);
       const st = noSymlink(p);
@@ -164,8 +170,16 @@ export function scan(dir: string): Catalog {
         if (!st.isFile()) continue;
         const name = itemName(entry);
         if (name === undefined) continue;
-        items.push({ type, name, description: descriptionOf(p), files: [relative(dir, p)] });
+        byName.set(name, [...(byName.get(name) ?? []), relative(dir, p)]);
       }
+    }
+    // Both `<name>.md` and `<name>.md.njk` is an error of that item, like a bundle's `.yaml`
+    // beside its `.yml` (spec §4.1, §15.4).
+    for (const [name, files] of byName) {
+      files.sort();
+      items.push(files.length > 1
+        ? { type, name, files, error: `both ${files.join(" and ")} exist` }
+        : { type, name, description: descriptionOf(join(dir, files[0]!)), files });
     }
   }
 

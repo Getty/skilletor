@@ -585,6 +585,12 @@ async function syncScopeRun(
       keepIfLocked(item.target, item.type);
       return;
     }
+    if (catItem.error !== undefined) {
+      // An error of the item itself (spec §4.1, k100): it is not built, what it installed stays.
+      rep.warnings.push(`${item.type} ${item.name}@${item.source}: ${catItem.error}; an installed copy stays`);
+      keepIfLocked(item.target, item.type);
+      return;
+    }
     // Rendered once per target, with that target's harness and root (spec §14.3).
     for (const h of targets) {
       const key = lockKey(h, item.target);

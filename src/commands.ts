@@ -177,7 +177,7 @@ export interface AvailableItem {
   members?: string[];
   /** Bundles: the var defaults the bundle file declares. */
   vars?: Record<string, unknown>;
-  /** Bundles: why the bundle cannot be expanded (spec §15.4). */
+  /** Why the item cannot be built (spec §4.1), or the bundle cannot be expanded (spec §15.4). */
   error?: string;
 }
 
@@ -205,13 +205,15 @@ async function listAvailable(
     const loc = await makeBackend(backend, cacheRootOf(ctx)).resolve();
     const cat = scan(loc.dir);
     for (const item of cat.items) {
-      out.push({
+      const entry: AvailableItem = {
         type: item.type,
         name: item.name,
         description: item.description,
         source: name,
         installed: installedKeys.has(`${TYPE_DIR[item.type]}/${item.name}@${name}`),
-      });
+      };
+      if (item.error !== undefined) entry.error = item.error;
+      out.push(entry);
     }
     for (const b of cat.bundles) {
       const entry: AvailableItem = {
@@ -293,6 +295,8 @@ export async function cmdInstall(
       throw new CommandError(`"${name}" is ambiguous in ${source}; use one of: ${options.join(", ")}`);
     }
     const type = matches[0]!.type;
+    // An error of the item itself (spec §4.1) fails before any edit, as a broken bundle's does.
+    if (matches[0]!.error !== undefined) throw new CommandError(`${source}: ${type} ${name}: ${matches[0]!.error}`);
     edits.push(() => addInstallEntry(path, type, `${name}@${source}`));
   };
   // Resolving writes the source cache, planning reads it: under the sync lock (spec §6.5),

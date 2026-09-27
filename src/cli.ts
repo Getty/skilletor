@@ -277,7 +277,8 @@ export async function run(argv: string[]): Promise<number> {
         } else {
           const lines = items.flatMap((i) => {
             const line = `${i.installed ? "✓" : " "} ${i.type} ${i.name}@${i.source}${i.description ? ` — ${i.description}` : ""}`;
-            if (i.type !== "bundle") return [line];
+            // An item that cannot be built (spec §4.1) says why on the next line, as a bundle.
+            if (i.type !== "bundle") return i.error !== undefined ? [line, `    error: ${i.error}`] : [line];
             // A bundle's members (spec §15.5) on the next line, or why it cannot be expanded.
             return [line, `    ${i.error !== undefined ? `error: ${i.error}` : i.members!.join(", ") || "(no items)"}`];
           });

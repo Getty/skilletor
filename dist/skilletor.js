@@ -8116,6 +8116,7 @@ function scan(dir) {
     const typeDir = join9(dir, sub);
     if (!existsSync7(typeDir)) continue;
     noSymlink(typeDir);
+    const byName = /* @__PURE__ */ new Map();
     for (const entry of readdirSync3(typeDir)) {
       const p = join9(typeDir, entry);
       const st = noSymlink(p);
@@ -8128,8 +8129,12 @@ function scan(dir) {
         if (!st.isFile()) continue;
         const name = itemName(entry);
         if (name === void 0) continue;
-        items.push({ type, name, description: descriptionOf(p), files: [relative(dir, p)] });
+        byName.set(name, [...byName.get(name) ?? [], relative(dir, p)]);
       }
+    }
+    for (const [name, files] of byName) {
+      files.sort();
+      items.push(files.length > 1 ? { type, name, files, error: `both ${files.join(" and ")} exist` } : { type, name, description: descriptionOf(join9(dir, files[0])), files });
     }
   }
   items.push(...pluginSkills(dir, items));
@@ -9535,6 +9540,11 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
       keepIfLocked(item.target, item.type);
       return;
     }
+    if (catItem.error !== void 0) {
+      rep.warnings.push(`${item.type} ${item.name}@${item.source}: ${catItem.error}; an installed copy stays`);
+      keepIfLocked(item.target, item.type);
+      return;
+    }
     for (const h of targets) {
       const key = lockKey(h, item.target);
       const root = rootOf(rc, h, item.type);
@@ -10293,13 +10303,15 @@ async function listAvailable(ctx, config, state, names, installedKeys, declaredB
     const loc = await makeBackend(backend, cacheRootOf(ctx)).resolve();
     const cat = scan(loc.dir);
     for (const item of cat.items) {
-      out.push({
+      const entry = {
         type: item.type,
         name: item.name,
         description: item.description,
         source: name,
         installed: installedKeys.has(`${TYPE_DIR2[item.type]}/${item.name}@${name}`)
-      });
+      };
+      if (item.error !== void 0) entry.error = item.error;
+      out.push(entry);
     }
     for (const b of cat.bundles) {
       const entry = {
@@ -10371,6 +10383,7 @@ async function cmdInstall(ctx, args) {
       throw new CommandError(`"${name}" is ambiguous in ${source}; use one of: ${options.join(", ")}`);
     }
     const type = matches[0].type;
+    if (matches[0].error !== void 0) throw new CommandError(`${source}: ${type} ${name}: ${matches[0].error}`);
     edits.push(() => addInstallEntry(path, type, `${name}@${source}`));
   };
   await withSyncLock(ctx, async () => {
@@ -11003,7 +11016,7 @@ async function run(argv) {
         } else {
           const lines = items.flatMap((i) => {
             const line = `${i.installed ? "\u2713" : " "} ${i.type} ${i.name}@${i.source}${i.description ? ` \u2014 ${i.description}` : ""}`;
-            if (i.type !== "bundle") return [line];
+            if (i.type !== "bundle") return i.error !== void 0 ? [line, `    error: ${i.error}`] : [line];
             return [line, `    ${i.error !== void 0 ? `error: ${i.error}` : i.members.join(", ") || "(no items)"}`];
           });
           printLines(process.stdout, lines);

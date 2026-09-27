@@ -885,6 +885,42 @@ test("available lists bundles with description, expanded members, vars and insta
   }
 });
 
+// k100: `agents/x.md` beside `agents/x.md.njk` is an error of item x (spec §4.1), like a
+// bundle's `.yaml`/`.yml` clash (§15.4). Asserts: install of x – typed or bare – fails naming
+// both files and edits nothing, as a broken bundle's does; available lists x once, with that
+// error, and every other item without one; the source's other items still install.
+test("k100: an item with both x.md and x.md.njk: install fails naming both, available lists it with its error", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      agent(d, "x");
+      writeFileSync(join(d, "agents", "x.md.njk"), "---\ndescription: x template\n---\nprompt\n");
+      agent(d, "ok");
+      skill(d, "s1");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } } });
+    for (const spec of ["agent:x@mine", "x@mine"]) {
+      await assert.rejects(() => cmdInstall(e.ctx, { items: [spec] }),
+        (err: unknown) => err instanceof CommandError &&
+          err.message === "mine: agent x: both agents/x.md and agents/x.md.njk exist", spec);
+    }
+    await assert.rejects(() => cmdInstall(e.ctx, { items: ["ok@mine", "x@mine"] }), /both agents\/x\.md and agents\/x\.md\.njk/);
+    assert.equal(e.readUserCfg().install, undefined);
+
+    const items = await cmdAvailable(e.ctx, { source: "mine" });
+    assert.deepEqual(items.map((i) => [`${i.type}:${i.name}`, i.error]).sort(), [
+      ["agent:ok", undefined],
+      ["agent:x", "both agents/x.md and agents/x.md.njk exist"],
+      ["skill:s1", undefined],
+    ]);
+
+    const r = await cmdInstall(e.ctx, { items: ["ok@mine", "s1@mine"] });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => i.key).sort(), ["agents/ok", "skills/s1"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("source remove refuses while a bundle uses the source", async () => {
   const e = env();
   try {
