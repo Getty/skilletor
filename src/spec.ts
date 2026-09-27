@@ -108,11 +108,13 @@ export function resolveSpec(spec: string, probe: Probe): ResolvedSpec {
     return { kind, value: s, derivedName: nameFromUrl(s, kind) };
   }
 
-  // 3. github:owner/repo (manage-skills compatibility).
+  // 3. github:owner/repo (manage-skills compatibility). An empty repo segment is skipped,
+  //    as in 4. and 6., so `github:Getty/` is the default repo (k104).
   if (s.startsWith("github:")) {
     const path = s.slice("github:".length);
-    const [owner, repo] = path.split("/");
+    const [owner, ...more] = path.split("/");
     if (!owner) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
+    const repo = more.find(Boolean);
     return {
       kind: "git",
       value: `https://github.com/${owner}/${repo ?? DEFAULT_REPO}`,

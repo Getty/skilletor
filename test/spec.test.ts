@@ -70,7 +70,21 @@ const k101Rows: Row[] = [
   { spec: "~/dev/karr", kind: "local", value: "~/dev/karr", name: "karr" },
 ];
 
-for (const row of [...rows, ...k101Rows]) {
+// k104: an empty path segment is skipped, so a missing repo means the default repo in every
+// git shorthand. `github:` used to keep the empty segment and store `https://github.com/Getty/`.
+const k104Rows: Row[] = [
+  { spec: "github:Getty/", kind: "git", value: "https://github.com/Getty/skills", name: "getty" },
+  { spec: "github:Getty//", kind: "git", value: "https://github.com/Getty/skills", name: "getty" },
+  { spec: "github:Getty//karr", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  // The sibling forms already skip empty segments; pinned so all three agree.
+  { spec: "Getty/", kind: "git", value: "https://github.com/Getty/skills", name: "getty" },
+  { spec: "Getty//karr", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "github.com/Getty/", kind: "git", value: "https://github.com/Getty/skills", name: "getty" },
+  { spec: "github.com/Getty//karr", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "gitlab.com/u/", kind: "git", value: "https://gitlab.com/u/skills", name: "u" },
+];
+
+for (const row of [...rows, ...k101Rows, ...k104Rows]) {
   test(`resolves ${row.spec}`, () => {
     const r = resolveSpec(row.spec, noProbe);
     assert.equal(r.kind, row.kind, "kind");
@@ -129,6 +143,14 @@ test("owner/repo with a dotted first segment is a generic host, not GitHub", () 
     return { git: true };
   });
   assert.equal(probed, true);
+});
+
+test("k104: github: with an empty owner is still an error", () => {
+  assert.throws(() => resolveSpec("github:/karr", noProbe), (e: unknown) => {
+    assert.ok(e instanceof SpecError);
+    assert.equal((e as Error).message, 'cannot resolve "github:/karr": expected github:owner[/repo]');
+    return true;
+  });
 });
 
 test("known forges are never probed", () => {

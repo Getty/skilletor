@@ -6687,8 +6687,9 @@ function resolveSpec(spec, probe) {
   }
   if (s.startsWith("github:")) {
     const path2 = s.slice("github:".length);
-    const [owner, repo] = path2.split("/");
+    const [owner, ...more] = path2.split("/");
     if (!owner) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
+    const repo = more.find(Boolean);
     return {
       kind: "git",
       value: `https://github.com/${owner}/${repo ?? DEFAULT_REPO}`,

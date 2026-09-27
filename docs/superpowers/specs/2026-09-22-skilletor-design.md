@@ -212,6 +212,10 @@ Hooks never guess or probe.
 | `host.tld` or `host.tld/` | `https://host.tld/skills` – probe below |
 | `host.tld/path` | `https://host.tld/path` – probe below |
 
+Empty path segments are skipped, so a missing or empty repo segment means the default repo
+in every git shorthand (k104): `Getty/`, `github:Getty/`, `github.com/Getty/` →
+`https://github.com/Getty/skills`; `github:Getty//karr` → `https://github.com/Getty/karr`.
+
 **Probe for generic hosts:** first `git ls-remote <url>`; if that does not respond,
 `HEAD <url>.tar.gz`. The first hit decides `git` vs. `url`; no hit → error listing both
 attempted addresses.
