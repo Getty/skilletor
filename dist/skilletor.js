@@ -7712,6 +7712,7 @@ var TarError = class extends Error {
 };
 var DEFAULT_TIMEOUT_MS2 = 6e4;
 var URL_VERSION_FILE = ".skilletor-version";
+var URL_CACHE_FORMAT = "format 2";
 var UrlSource = class {
   opts;
   constructor(opts) {
@@ -7849,8 +7850,9 @@ function stripTopLevel(entries) {
 }
 function cacheVersion(dir) {
   try {
-    const version = readFileSync3(join7(dir, URL_VERSION_FILE), "utf8");
-    return /^(etag|sha256):[^\r\n]+$/.test(version) ? version : void 0;
+    const [format, version, ...rest] = readFileSync3(join7(dir, URL_VERSION_FILE), "utf8").split("\n");
+    if (format !== URL_CACHE_FORMAT || rest.length > 0) return void 0;
+    return /^(etag|sha256):[^\r\n]+$/.test(version ?? "") ? version : void 0;
   } catch {
     return void 0;
   }
@@ -7867,7 +7869,8 @@ function publishEntries(dir, entries, version) {
   const cleanupWarnings = [];
   try {
     writeEntries(staging, entries);
-    writeFileSync2(join7(staging, URL_VERSION_FILE), version);
+    writeFileSync2(join7(staging, URL_VERSION_FILE), `${URL_CACHE_FORMAT}
+${version}`);
     if (existsSync5(dir)) {
       backup = mkdtempSync(`${dir}.backup-`);
       renameSync2(dir, join7(backup, "tree"));
@@ -9363,8 +9366,9 @@ function canonicalJson(value2) {
   }
   return JSON.stringify(value2) ?? "null";
 }
+var RENDER_FORMAT = 2;
 function renderInputsHash(inputs) {
-  return hashBuffer(Buffer.from(canonicalJson(inputs), "utf8"));
+  return hashBuffer(Buffer.from(canonicalJson({ format: RENDER_FORMAT, ...inputs }), "utf8"));
 }
 function renderSources(scopeCfg, lock) {
   return [.../* @__PURE__ */ new Set([...scopeSources(scopeCfg), ...Object.values(lock).map((e) => e.source)])];

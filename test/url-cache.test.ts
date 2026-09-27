@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs, { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { basename, join } from "node:path";
-import { sweepUrlCache, UrlSource, URL_VERSION_FILE } from "../src/sources/url.ts";
+import { sweepUrlCache, UrlSource, URL_CACHE_FORMAT, URL_VERSION_FILE } from "../src/sources/url.ts";
 import { sync, type EngineContext } from "../src/engine.ts";
 import { cmdAvailable } from "../src/commands.ts";
 import { readLock } from "../src/lock.ts";
@@ -428,7 +428,7 @@ test("k82: a cache without a version file is fetched unconditionally, then condi
   e.serve(V1, '"1"');
   await sync(e.ctx);
   const versionFile = join(e.cacheDir(), URL_VERSION_FILE);
-  assert.equal(readFileSync(versionFile, "utf8"), 'etag:"1"');
+  assert.equal(readFileSync(versionFile, "utf8"), `${URL_CACHE_FORMAT}\netag:"1"`);
 
   rmSync(versionFile);
   e.sent.length = 0;
@@ -437,7 +437,7 @@ test("k82: a cache without a version file is fetched unconditionally, then condi
   assert.deepEqual(legacy.scopes[0]!.warnings, []);
   assert.deepEqual(e.sent, [null], "no If-None-Match without the cache's own version");
   assert.equal(e.lockVersion(), 'etag:"1"');
-  assert.equal(readFileSync(versionFile, "utf8"), 'etag:"1"');
+  assert.equal(readFileSync(versionFile, "utf8"), `${URL_CACHE_FORMAT}\netag:"1"`);
 
   e.sent.length = 0;
   await sync(e.ctx);
@@ -467,7 +467,7 @@ for (const [layout, entries] of [
     t.mock.method(globalThis, "fetch", async () => response(makeTarGz([...entries]), '"real"'));
     const first = await src.resolve();
     assert.equal(first.version, 'etag:"real"');
-    assert.equal(readFileSync(join(first.dir, URL_VERSION_FILE), "utf8"), 'etag:"real"');
+    assert.equal(readFileSync(join(first.dir, URL_VERSION_FILE), "utf8"), `${URL_CACHE_FORMAT}\netag:"real"`);
     assert.equal(readFileSync(join(first.dir, "skills/old/SKILL.md"), "utf8"), OLD);
     t.mock.method(globalThis, "fetch", async (...[, opts]: Parameters<typeof fetch>) => {
       assert.equal(new Headers(opts?.headers).get("If-None-Match"), '"real"');

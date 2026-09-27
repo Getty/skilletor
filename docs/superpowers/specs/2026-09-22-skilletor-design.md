@@ -302,7 +302,10 @@ its restoration and the sweep move both. The If-None-Match, the version a 304 re
 the label of a fallback to the cache are the cache's, never the lock's: `available` and
 `install` resolve too and may replace the cache between syncs, so the lock can lag behind
 it. A cache without the file (written by skilletor ≤ 0.3.0) has no known version: its
-first fetch is unconditional, a fallback to it offline is labelled `unknown`. An archive
+first fetch is unconditional, a fallback to it offline is labelled `unknown`. The file's
+first line is the format of the tree (k107), `format 2` since an entry's executable bit is
+kept (k99, §5); a cache of an earlier format – a file holding the version alone, skilletor
+≤ 0.4.1 – has no known version either, so its next fetch extracts it anew. An archive
 entry of that name is not extracted. The file belongs to no item (§4.1): a scan reads only
 the layout's own paths at the source root.
 
@@ -432,10 +435,15 @@ change in a source moves its version (a commit, a new archive; a `local` source 
 re-rendered), so the source test of §14.3 sees it; a `chmod` of an installed file is like
 a local edit, which `check` does not see either – it never reads installed files – and the
 next sync that runs undoes it. A hash over bytes and mode would have made every file an
-earlier version installed read as locally edited in the first sync. A script an earlier
-version installed without its bit gets it from the next sync that runs (a source moving, or
-`skilletor sync`); a `url` cache an earlier version extracted holds no bits until its
-archive changes.
+earlier version installed read as locally edited in the first sync. What an earlier version
+installed gets its bits in the first session after the upgrade (k107): the render format in
+the render-inputs record (§14.3) moved with k99, so `check` counts every scope in use once,
+and the sync it starts re-renders from each source as it stands – a git cache and a `local`
+source always held the bits, so no git cache is fetched anew for it. A `url` cache an
+earlier version extracted is of an earlier format (§4.4): that sync's GET is unconditional
+and extracts the archive anew, bits and all; served offline instead, the cache counts as
+one of unknown version, so `check` counts its source until a download succeeds. Once a sync
+has recorded the new format, no further sync runs for it.
 
 ### 6.3 Ownership and coexistence with your own files
 
@@ -960,6 +968,10 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
   apart from its source and its lock key – the config's merged `vars` (user < project <
   local; key order is no change) and, in the project scope, `project.dir`, `project.name`
   and `project.git_remote` – and `check` counts a scope whose inputs now hash differently.
+  The hash also takes a render format (k107), a number a release bumps when a sync makes
+  other output of the same sources and inputs (2: the executable bit, k99, §6.2): the
+  record an earlier version wrote then differs once, and one sync brings what that version
+  installed up to date.
   One hash per scope, not per item: a var no template uses costs one sync that writes
   nothing (and reports nothing); telling which vars a template reads would take more than
   Nunjucks reports. Not among the inputs: source defaults and bundle vars (they move with

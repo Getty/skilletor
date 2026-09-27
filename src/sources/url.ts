@@ -9,7 +9,9 @@
 // never the caller's lock – is the If-None-Match, the answer to a 304 and the label of a
 // fallback to the cache, since `available` and `install` replace the cache between syncs.
 // A cache without it (skilletor <= 0.3.0) has no known version: the GET is unconditional,
-// a fallback is labelled "unknown". An archive entry of that name is dropped.
+// a fallback is labelled "unknown". An archive entry of that name is dropped. Its first line
+// is the format of the tree (k107): a cache of an earlier format – extracted without the
+// executable bits k99 keeps – has no known version either, so it is extracted anew once.
 //
 // Unpacking is dependency-free: zlib gunzip + a minimal tar reader (no external
 // tar). Entries with `..`, absolute paths, symlinks or hardlinks are rejected; a
@@ -44,6 +46,11 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 
 /** The version of a cache's tree, at the root of the tree (reserved there). */
 export const URL_VERSION_FILE = ".skilletor-version";
+
+/** The first line of a version file: the format of its tree (k107). 2: an archive entry's
+ *  owner executable bit is kept (k99). A version file of skilletor <= 0.4.1 holds the version
+ *  alone. */
+export const URL_CACHE_FORMAT = "format 2";
 
 export class UrlSource implements Source {
   private readonly opts: UrlSourceOptions;
@@ -215,11 +222,13 @@ function stripTopLevel(entries: TarEntry[]): TarEntry[] {
     .filter((e) => e.name.length > 0);
 }
 
-/** The version of the tree in cache dir `dir`; undefined without a readable, well-formed one. */
+/** The version of the tree in cache dir `dir`; undefined without a readable, well-formed one of
+ *  the current format. */
 function cacheVersion(dir: string): string | undefined {
   try {
-    const version = readFileSync(join(dir, URL_VERSION_FILE), "utf8");
-    return /^(etag|sha256):[^\r\n]+$/.test(version) ? version : undefined;
+    const [format, version, ...rest] = readFileSync(join(dir, URL_VERSION_FILE), "utf8").split("\n");
+    if (format !== URL_CACHE_FORMAT || rest.length > 0) return undefined;
+    return /^(etag|sha256):[^\r\n]+$/.test(version ?? "") ? version : undefined;
   } catch {
     return undefined;
   }
@@ -243,7 +252,7 @@ function publishEntries(dir: string, entries: TarEntry[], version: string): stri
   const cleanupWarnings: string[] = [];
   try {
     writeEntries(staging, entries);
-    writeFileSync(join(staging, URL_VERSION_FILE), version);
+    writeFileSync(join(staging, URL_VERSION_FILE), `${URL_CACHE_FORMAT}\n${version}`);
     if (existsSync(dir)) {
       // A rename cannot replace a nonempty directory on supported filesystems.
       backup = mkdtempSync(`${dir}.backup-`);

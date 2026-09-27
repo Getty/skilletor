@@ -316,8 +316,17 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
+/**
+ * What a sync makes of unchanged sources and inputs, hashed with the inputs (k107): a release
+ * that changes it bumps it, so each scope's record from an earlier version differs once and
+ * `check` asks for one sync, which re-renders and records it. 2: a skill's files carry their
+ * source's executable bit (k99). Without it, what an earlier version installed would wait for
+ * a source to move.
+ */
+const RENDER_FORMAT = 2;
+
 function renderInputsHash(inputs: RenderInputs): string {
-  return hashBuffer(Buffer.from(canonicalJson(inputs), "utf8"));
+  return hashBuffer(Buffer.from(canonicalJson({ format: RENDER_FORMAT, ...inputs }), "utf8"));
 }
 
 /** The sources a scope renders items from: those it declares, and those its lock holds
