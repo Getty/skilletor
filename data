@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-27T03:42:29Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T03:42:20Z
+created: 2026-09-27T01:09:57Z
+id: 111
+priority: low
+started: 2026-09-27T03:02:09Z
+status: done
+tags:
+- add
+- spec
+- bug
+title: 'add: an empty spec ("") resolves to https://github.com//skills and is written'
+updated: 2026-09-27T03:42:29Z
+---
+
+Found during k95 (worker). `skilletor add ""` resolves to git https://github.com//skills and writes it. Expected: a SpecError for an empty (or whitespace-only) spec, nothing written.
+
+2026-09-27 03:39 Cause: resolveAddress trims the spec; "" / whitespace-only falls through every step to 5. (bare word) -> git https://github.com//skills, k95 names it "source", add writes + trusts it. CLI: `add ""` is NOT a usage error (parseFlags keeps "" in rest, rest.length 1), so it reaches cmdAdd; parsing left as is. Also: a blank github:/known-forge owner (`github: /karr`, `github.com/ /karr`) stored https://github.com/ /karr. "@" is not an empty owner: it gives https://github.com/@/skills named source, the k95 class pinned by "___" -> left alone. Red tests written (spec.test.ts k111, commands.test.ts k111), both failing before the fix.
+
+2026-09-27 03:40 Done. src/spec.ts: step 0 throws SpecError 'cannot resolve "<spec>": empty source; <FORMS>' when the trimmed spec is empty (k109 FORMS style); step 3 (github:) and step 4 (known forge) treat a whitespace-only owner as empty (!owner?.trim()), same 'expected …owner[/repo]' error. dist/skilletor.js rebuilt. test/spec.test.ts: k111 test ("", " ", "  \t\n " -> empty-source error; github: /karr, GitHub:\t/karr, github.com/ /karr, gitlab.com/ /r -> empty-owner error; github:, github: , github.com/ pinned); forms const hoisted to module level for k109+k111. test/commands.test.ts: k111 add test ("", " \t", name+"", --project "") -> SpecError, no user/project config, no trust.json. docs spec §4.2: paragraph on empty spec / blank owner. CLI parsing untouched: bin/skilletor add "" in a temp HOME -> exit 1, nothing written; add with no arg still exit 2. Verified: typecheck ok, npm test 760/760 pass, build ok, check-dist up to date. Also found (not fixed, for the dispatcher): "@" / "___" -> https://github.com/@/skills named source (k95-pinned class: owner chars GitHub rejects); inner whitespace in owner ("a b", "github: Getty") stored verbatim; a blank repo segment ("github:Getty/ /x" -> https://github.com/Getty/ ) is not skipped like k104's empty one; explicit URL https://github.com//skills kept verbatim by design.
+
+2026-09-27 03:42 Committed e7a27ae: spec: an empty spec, or a blank github: or forge owner, is an error (k111)
