@@ -13,6 +13,8 @@ interface Row {
   kind: "git" | "url" | "local";
   value: string;
   name: string;
+  /** The ref a GitHub tree link pins (k119); every other row has none. */
+  ref?: string;
 }
 
 // Deterministic rows: known forms that never hit the probe.
@@ -181,7 +183,56 @@ const k118Rows: Row[] = [
   { spec: "github::Getty", kind: "git", value: "github::Getty", name: "getty" },
 ];
 
-const allRows = [...rows, ...k101Rows, ...k104Rows, ...k109Rows, ...k109Pinned, ...k117Pinned, ...k117Rows, ...k118Rows];
+// k119: a GitHub browser link was an explicit URL kept verbatim (`https://github.com/Getty/karr/
+// tree/main`, a git source no fetch serves, named "main") or a known-forge shorthand whose
+// segments past the repo were dropped (`github.com/Getty/karr/tree/main` tracked HEAD). Asserts:
+// `[https://]github.com/<owner>/<repo>/tree/<ref>[/]` – scheme and host in any case, a blank
+// segment skipped, a `?query` or `#fragment` ignored – is git https://github.com/<owner>/<repo>
+// with that ref, named after the repo (k101), never probed; the ref is taken as written, config
+// load judges it (k110).
+const k119Rows: Row[] = [
+  { spec: "https://github.com/Getty/karr/tree/main", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main" },
+  { spec: "github.com/Getty/karr/tree/main", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main" },
+  { spec: "https://github.com/Getty/karr/tree/main/", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main" },
+  { spec: " github.com/Getty/karr/tree/v1.2.0/ ", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "v1.2.0" },
+  { spec: "HTTPS://GitHub.com/Getty/Karr/tree/v1", kind: "git", value: "https://github.com/Getty/Karr", name: "karr", ref: "v1" },
+  { spec: "GitHub.com/Getty/karr/tree/0f3a9c1", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "0f3a9c1" },
+  { spec: "github.com/Getty/skills/tree/main", kind: "git", value: "https://github.com/Getty/skills", name: "getty", ref: "main" },
+  { spec: "https://github.com/obra/superpowers/tree/release-1.x", kind: "git", value: "https://github.com/obra/superpowers", name: "superpowers", ref: "release-1.x" },
+  { spec: "github.com/Getty//karr/tree/main", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main" },
+  { spec: "https://github.com/Getty/karr/tree/main~1", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main~1" },
+  // A heading anchor or a view query is the page's, not the ref's: GitHub escapes "#" and "?" in a ref.
+  { spec: "https://github.com/Getty/karr/tree/main#installation", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main" },
+  { spec: "github.com/Getty/karr/tree/v1?tab=readme-ov-file", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "v1" },
+  { spec: "https://github.com/Getty/karr/tree/v1/?x=a/b#c/d", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "v1" },
+];
+
+// k119, pinned: forms next to a GitHub browser link keep their result – no ref, as before. Only
+// github.com links map to a ref: `http://`, `www.` and another forge's link (`/-/tree/` on
+// GitLab) stay what they were, as do the `github:` and owner/repo shorthands, a repo named
+// "tree" or "blob", and a GitHub archive tarball.
+// (`github:Getty/karr/tree/main` is pinned in k117Pinned.)
+const k119Pinned: Row[] = [
+  { spec: "Getty/karr/tree/main", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "github.com/Getty/karr/issues", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
+  { spec: "github.com/Getty/tree", kind: "git", value: "https://github.com/Getty/tree", name: "tree" },
+  { spec: "github.com/tree/blob", kind: "git", value: "https://github.com/tree/blob", name: "blob" },
+  { spec: "https://github.com/Getty/tree", kind: "git", value: "https://github.com/Getty/tree", name: "tree" },
+  { spec: "http://github.com/Getty/karr/tree/main", kind: "git", value: "http://github.com/Getty/karr/tree/main", name: "main" },
+  { spec: "https://www.github.com/Getty/karr/tree/main", kind: "git", value: "https://www.github.com/Getty/karr/tree/main", name: "main" },
+  { spec: "https://gitlab.com/u/r/-/tree/main", kind: "git", value: "https://gitlab.com/u/r/-/tree/main", name: "main" },
+  { spec: "gitlab.com/u/r/-/tree/main", kind: "git", value: "https://gitlab.com/u/r", name: "r" },
+  { spec: "codeberg.org/u/r/src/branch/main", kind: "git", value: "https://codeberg.org/u/r", name: "r" },
+  {
+    spec: "https://github.com/Getty/karr/archive/refs/tags/v1.tar.gz", kind: "url",
+    value: "https://github.com/Getty/karr/archive/refs/tags/v1.tar.gz", name: "github-com",
+  },
+];
+
+const allRows = [
+  ...rows, ...k101Rows, ...k104Rows, ...k109Rows, ...k109Pinned, ...k117Pinned, ...k117Rows, ...k118Rows, ...k119Rows,
+  ...k119Pinned,
+];
 
 for (const row of allRows) {
   test(`resolves ${row.spec}`, () => {
@@ -189,6 +240,7 @@ for (const row of allRows) {
     assert.equal(r.kind, row.kind, "kind");
     assert.equal(r.value, row.value, "value");
     assert.equal(r.derivedName, row.name, "derivedName");
+    assert.equal(r.ref, row.ref, "ref");
   });
 }
 
@@ -387,6 +439,39 @@ test("k118: a single colon, an empty address or no transport word stays an unkno
     ["codecommit:: ", "codecommit:"], ["1helper::x", "1helper:"], ["my_helper::x", "my_helper:"], ["::x", ":"],
   ];
   for (const [spec, prefix] of cases) refused(spec, `cannot resolve "${spec}": unknown prefix "${prefix}"; ${forms}`);
+});
+
+// k119: a GitHub link to a file, into a subdirectory or without a ref was kept verbatim as a git
+// source (https://…) or tracked the repo's HEAD (github.com/…). Asserts: each is a SpecError
+// naming the spec and what to add instead, never probed – a `blob` link is a file, a source a
+// whole repository; a `tree` link past its ref names a subdirectory (a ref with "/" cannot be
+// told from one, so the message says to add the repo and set "ref" by hand); a `tree` link
+// without a ref names none. Owner and repo keep GitHub's rules (k117).
+test("k119: a GitHub file link, a subdirectory link or a tree link without a ref is a SpecError, never probed", () => {
+  const repo = "https://github.com/Getty/karr";
+  const file = (ref?: string) => `a GitHub file link; a source is a whole repository: add ${repo}` +
+    (ref === undefined ? "" : `, or ${repo}/tree/${ref} to pin ref "${ref}"`);
+  const subdir = (sub: string, ref: string) => `skilletor installs a whole repository, not its subdirectory "${sub}"; ` +
+    `add ${repo}/tree/${ref} to pin ref "${ref}". A link cannot tell a ref with "/" from a subdirectory: ` +
+    `for such a ref, add ${repo} and set its "ref" by hand`;
+  const cases: [string, string][] = [
+    ["https://github.com/Getty/karr/blob/main/README.md", file("main")],
+    ["github.com/Getty/karr/blob/v1/skills/x/SKILL.md", file("v1")],
+    ["GITHUB.COM/Getty/karr/blob", file()],
+    ["https://github.com/Getty/karr/tree/main/skills/foo", subdir("skills/foo", "main")],
+    ["github.com/Getty/karr/tree/main/skills/", subdir("skills", "main")],
+    ["https://github.com/Getty/karr/tree/feature/x", subdir("x", "feature")],
+    ["https://github.com/Getty/karr/blob/main/README.md#L10", file("main")],
+    ["https://github.com/Getty/karr/tree", `a GitHub tree link without a ref; add ${repo}`],
+    ["github.com/Getty/karr/tree/", `a GitHub tree link without a ref; add ${repo}`],
+  ];
+  for (const [spec, why] of cases) refused(spec, `cannot resolve "${spec}": ${why}`);
+  refused("https://github.com/Get_ty/karr/tree/main",
+    `cannot resolve "https://github.com/Get_ty/karr/tree/main": GitHub owner "Get_ty" may only contain ASCII letters, ` +
+      `digits and "-"; ${forms}`);
+  refused("github.com/Getty/re:po/tree/main",
+    `cannot resolve "github.com/Getty/re:po/tree/main": GitHub repo "re:po" may only contain ASCII letters, digits, ` +
+      `".", "_" and "-"; ${forms}`);
 });
 
 test("known forges are never probed", () => {

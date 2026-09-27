@@ -59,6 +59,7 @@ shown here:
 | `Getty/repo` | `git: https://github.com/Getty/repo` | `repo` |
 | `hf.co/user` | `git: https://hf.co/user/skills` | `user` |
 | `gitlab.com/u/r` | `git: https://gitlab.com/u/r` | `r` |
+| `https://github.com/u/r/tree/<ref>` (a browser link) | `git: https://github.com/u/r` with `ref: <ref>` | `r` |
 | `host.tld/` | `https://host.tld/skills` (probed: git, then `.tar.gz`) | `host-tld` |
 | `https://…/x.tar.gz` | `url` (HTTPS tarball) | the host |
 | `~/dev/skills`, `./path`, `/abs` | `local` | the directory name |
@@ -70,7 +71,9 @@ the entry as it is (a `ref` or `local` you set stays) and syncs — unless that 
 config load refuses (a hand-written `"ref": ""`, say), which fails (exit 1, nothing trusted
 or changed) until you fix it; a name the config already gives another address fails (exit
 1, nothing changed) — pass a name (`skilletor add <name> <spec>`) or `skilletor source
-remove <name>` first.
+remove <name>` first. A GitHub tree link (`…/tree/<ref>`) pins that ref; the same address
+already configured without it or with another ref fails the same way — set `ref` by hand.
+A file (`…/blob/…`) or subdirectory link is refused: a source is a whole repository.
 
 A source's layout (convention, no manifest):
 
@@ -245,7 +248,8 @@ an item of another source by its address, so a bundle means the same on every ma
 `<spec>` is the `skilletor add` shorthand, limited to forms that need no network probe:
 `Getty`, `Getty/repo`, `gitlab.com/peter`, `hf.co/user`, full git URLs (a tarball only as
 `https://…`). A generic host must be written as a full `https://` URL, and local paths are
-not allowed; an address config load would refuse as a source is an error of the bundle. The entry
+not allowed; an address config load would refuse as a source, or a link carrying a ref
+(`…/tree/<ref>`), is an error of the bundle — an entry names a repository only. The entry
 is served by whichever configured source has the same resolved `git`/`url` — its config
 name does not matter, and a `local` override of it (authoring mode) still applies.
 

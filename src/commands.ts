@@ -69,7 +69,8 @@ const TYPE_DIR: Record<ItemType, string> = { skill: "skills", agent: "agents", r
  * before anything is written or trusted, when it has another one. Only that file counts.
  * A name config load would refuse (k95) is refused first, before the spec is resolved; a
  * definition it would refuse (k110: a `url` not https://) next, before that file is read;
- * a kept entry it would refuse (k116: a hand-written `ref: ""`) before it is trusted.
+ * a kept entry it would refuse (k116: a hand-written `ref: ""`) before it is trusted. A spec
+ * that pins a ref (k119: a GitHub tree link) writes it as `ref` and keeps an entry only at it.
  */
 export async function cmdAdd(
   ctx: CommandContext,
@@ -83,6 +84,7 @@ export async function cmdAdd(
   const name = args.name ?? resolved.derivedName;
   let def: SourceDef =
     resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };
+  if (resolved.ref !== undefined) def.ref = resolved.ref;
   const invalid = loadRefusal(name, def);
   if (invalid !== undefined) throw new CommandError(`cannot add ${args.spec}: ${invalid}; nothing was changed`);
 
@@ -94,6 +96,16 @@ export async function cmdAdd(
       throw new CommandError(
         `source "${name}" in ${path} is ${addressText(existing)}, not ${resolved.kind} ${resolved.value}; ` +
           `nothing was changed. Add it under another name (skilletor add <name> ${args.spec}${flag}) ` +
+          `or remove the source first (skilletor source remove ${name}${flag}).`,
+      );
+    }
+    // A spec's ref (k119) is what the user asked for: keeping the entry at another would drop it.
+    const has = (existing as Record<string, unknown>).ref;
+    if (resolved.ref !== undefined && has !== resolved.ref) {
+      throw new CommandError(
+        `source "${name}" in ${path} is ${addressText(existing)} ` +
+          `${has === undefined ? "with no ref" : `with ref ${JSON.stringify(has)}`}, not ref ${JSON.stringify(resolved.ref)}; ` +
+          `nothing was changed. Set its "ref" by hand, add it under another name (skilletor add <name> ${args.spec}${flag}) ` +
           `or remove the source first (skilletor source remove ${name}${flag}).`,
       );
     }

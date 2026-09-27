@@ -102,8 +102,9 @@ function stringList(value: YamlValue | undefined, key: string): string[] {
   });
 }
 
-/** Resolve `name@<spec>` without a probe; local paths, generic hosts and an address config
- *  load would refuse as a source (k115: a `url` not https://) are errors. */
+/** Resolve `name@<spec>` without a probe; local paths, generic hosts, an address config load
+ *  would refuse as a source (k115: a `url` not https://) and a ref (k119: a GitHub tree link –
+ *  an entry names a source by address alone, §15.6) are errors. */
 function foreignEntry(type: ItemType, entry: string, key: string): ForeignEntry {
   const at = entry.indexOf("@");
   const name = entry.slice(0, at);
@@ -116,6 +117,11 @@ function foreignEntry(type: ItemType, entry: string, key: string): ForeignEntry 
     const r = resolveSpec(spec, noProbe);
     if (r.kind === "local") {
       throw new BundleError(`${key}: "${entry}" names a local path; a bundle can only name remote sources`);
+    }
+    if (r.ref !== undefined) {
+      throw new BundleError(
+        `${key}: "${entry}" pins ref ${JSON.stringify(r.ref)}, but an entry names its source by address alone: write ${name}@${r.value}`,
+      );
     }
     url = r.value;
     kind = r.kind;

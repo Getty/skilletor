@@ -118,6 +118,38 @@ test("k118: parseBundle takes a transport::address entry as a full git address",
   assert.equal(sameIdentity("codecommit::us-east-1://my-repo", "CodeCommit::us-east-1://my-repo"), false);
 });
 
+// k119: a bundle entry naming its source by a GitHub tree link was served by whichever source had
+// the repo's address, at that source's ref (`x@github.com/o/r/tree/v1`, the ref dropped), or
+// named an address no source has (`x@https://github.com/o/r/tree/v1`, verbatim). An entry names a
+// source by address alone (§15.6), so it cannot carry a ref. Asserts: a tree link is a
+// BundleError naming the entry, the ref and the address to write instead; a file or
+// subdirectory link is the bundle error of add's own SpecError; the repo's own address in
+// either form still parses, without a ref.
+test("k119: parseBundle refuses an entry naming its source by a GitHub tree, file or subdirectory link", () => {
+  const tree: [string, string][] = [
+    ["x@github.com/Getty/karr/tree/v1", "v1"], ["r-*@https://github.com/Getty/karr/tree/main/", "main"],
+  ];
+  for (const [entry, ref] of tree) {
+    assert.throws(() => parseBundle(`description: D\nrules: [r1, "${entry}"]\n`), (e: unknown) => {
+      assert.ok(e instanceof BundleError, String(e));
+      assert.equal((e as Error).message, `rules: "${entry}" pins ref "${ref}", but an entry names its source by ` +
+        `address alone: write ${entry.slice(0, entry.indexOf("@"))}@https://github.com/Getty/karr`);
+      return true;
+    }, entry);
+  }
+  for (const entry of ["x@https://github.com/Getty/karr/blob/main/README.md", "x@github.com/Getty/karr/tree/main/skills"]) {
+    assert.throws(() => parseBundle(`description: D\nskills: ["${entry}"]\n`), (e: unknown) => {
+      assert.ok(e instanceof BundleError, String(e));
+      assert.ok((e as Error).message.startsWith(`skills: "${entry}": cannot resolve "${entry.slice(2)}": `), (e as Error).message);
+      return true;
+    }, entry);
+  }
+  const def = parseBundle("description: D\nskills: [a@github.com/Getty/karr, \"b@https://github.com/Getty/karr\"]\n");
+  assert.deepEqual(def.foreign.map((f) => [f.name, f.kind, f.url, f.derivedName]), [
+    ["a", "git", "https://github.com/Getty/karr", "karr"], ["b", "git", "https://github.com/Getty/karr", "karr"],
+  ]);
+});
+
 // ---- catalog scan -------------------------------------------------------------
 
 function source(layout: Record<string, string>): { dir: string; cleanup: () => void } {

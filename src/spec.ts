@@ -11,6 +11,8 @@ export interface ResolvedSpec {
   kind: SourceKind;
   value: string;
   derivedName: string;
+  /** The ref a GitHub tree link pins (k119); `add` stores it as the source's `ref`. */
+  ref?: string;
 }
 
 /** Result of probing a base URL: which of `git ls-remote` / `HEAD .tar.gz` responded. */
@@ -98,6 +100,31 @@ function checkGithub(spec: string, owner: string, repo: string | undefined): voi
   }
 }
 
+/** A GitHub browser link (k119), from `path`, what follows `github.com/`:
+ *  `<owner>/<repo>/tree/<ref>` is that repo at that ref. A `?query` or `#fragment` is the page's
+ *  (GitHub escapes both in a ref), a blank segment skipped (k104, k117). A source is a whole
+ *  repository, so a `blob` link (a file), a `tree` link past its ref (a subdirectory) and one
+ *  without a ref are errors; a ref with "/" cannot be told from a subdirectory, so the segment
+ *  after `tree` is the ref. Undefined for any other path. */
+function githubLink(spec: string, path: string): ResolvedSpec | undefined {
+  const [owner, repo, view, ref, ...sub] = path.split(/[?#]/, 1)[0]!.split("/").filter(filled);
+  if (owner === undefined || repo === undefined || (view !== "tree" && view !== "blob")) return undefined;
+  checkGithub(spec, owner, repo);
+  const value = `https://github.com/${owner}/${repo}`;
+  const pin = ref === undefined ? "" : `${value}/tree/${ref} to pin ref "${ref}"`;
+  if (view === "blob") {
+    throw new SpecError(`cannot resolve "${spec}": a GitHub file link; a source is a whole repository: add ${value}${pin && `, or ${pin}`}`);
+  }
+  if (ref === undefined) throw new SpecError(`cannot resolve "${spec}": a GitHub tree link without a ref; add ${value}`);
+  if (sub.length > 0) {
+    throw new SpecError(
+      `cannot resolve "${spec}": skilletor installs a whole repository, not its subdirectory "${sub.join("/")}"; add ${pin}. ` +
+        `A link cannot tell a ref with "/" from a subdirectory: for such a ref, add ${value} and set its "ref" by hand`,
+    );
+  }
+  return { kind: "git", value, derivedName: repoName(owner, repo), ref };
+}
+
 /** Another known forge's owner and repo (k117): only what none of them takes is refused. */
 function checkForge(spec: string, forge: string, owner: string, repo: string): void {
   for (const [what, seg] of [["owner", owner], ["repo", repo]] as const) {
@@ -181,11 +208,15 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
   // 2. Explicit URLs / scp-like git addresses: kept verbatim, but for a lower-case scheme. Any
   //    scheme is git's to judge: a remote helper (`codecommit://`, `s3://`) fetches its own (k117).
   //    git's `<transport>::<address>` comes first, as git reads it, and is kept exactly as
-  //    written, never a url: `codecommit::us-east-1://my-repo` (k118).
+  //    written, never a url: `codecommit::us-east-1://my-repo` (k118). A GitHub browser link
+  //    (https://github.com/o/r/tree/<ref>) is the repo at that ref, as in 4. (k119).
   const address = helperAddress(s);
   if (address !== undefined) return { kind: "git", value: s, derivedName: nameFromHelper(address) };
   if (hasScheme(s) || isScpLike(s)) {
     const value = lowerScheme(s);
+    const github = /^https:\/\/github\.com\//i.exec(value);
+    const link = github && githubLink(spec, value.slice(github[0].length));
+    if (link) return link;
     const kind: SourceKind = isTarball(value) ? "url" : "git";
     return { kind, value, derivedName: nameFromUrl(value, kind) };
   }
@@ -212,12 +243,16 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
 
   // 4. Known forge with an owner (never probed); github.com takes GitHub's characters, another
   //    forge whatever a URL path segment holds but whitespace, control characters, ":" and "@".
+  //    A GitHub browser link (github.com/o/r/tree/<ref>) is the repo at that ref (k119).
   if (KNOWN_FORGES.includes(firstSeg.toLowerCase()) && slash !== -1) {
     const segs = rest.split("/").filter(Boolean);
     const owner = segs[0];
     if (!owner?.trim()) throw new SpecError(`cannot resolve "${spec}": expected ${firstSeg}/owner[/repo]`);
+    const github = firstSeg.toLowerCase() === "github.com";
+    const link = github ? githubLink(spec, rest) : undefined;
+    if (link) return link;
     const repo = segs.slice(1).find(filled) ?? DEFAULT_REPO;
-    if (firstSeg.toLowerCase() === "github.com") checkGithub(spec, owner, repo);
+    if (github) checkGithub(spec, owner, repo);
     else checkForge(spec, firstSeg, owner, repo);
     return {
       kind: "git",

@@ -238,6 +238,7 @@ Hooks never guess or probe.
 | `github:Getty/repo` | as above (manage-skills compatibility) |
 | `github.com/u`, `gitlab.com/u`, `codeberg.org/u`, `hf.co/u`, `huggingface.co/u` | `git: https://<host>/u/skills` |
 | the same hosts with `u/repo` | `git: https://<host>/u/repo` |
+| `[https://]github.com/u/repo/tree/<ref>` (a GitHub browser link) | `git: https://github.com/u/repo` with `ref: <ref>` |
 | `host.tld` or `host.tld/` | `https://host.tld/skills` – probe below |
 | `host.tld/path` | `https://host.tld/path` – probe below |
 
@@ -295,6 +296,22 @@ unknown prefixes; `github::Getty` names a helper `github`, not the `github:` sho
 probe-free, the form is allowed in a bundle entry (`x@codecommit::us-east-1://my-repo`,
 §15.6).
 
+A GitHub browser link (k119) – `github.com/<owner>/<repo>/tree/<ref>`, with or without
+`https://`, scheme and host in any case, a trailing `/` allowed, a `?query` or `#fragment`
+ignored (a view or heading anchor of the page; GitHub escapes both in a ref) – is the
+repository at that ref, never probed: `https://github.com/Getty/karr/tree/main` → `git:
+https://github.com/Getty/karr`, `ref: main`, named after the repo (`karr`; a default repo its
+owner, as above). Owner and repo take GitHub's characters (k117); the ref is taken as written
+and goes through config load's check of a `ref` (§3) before anything is written (k110: `…/tree/-x`
+and `…/tree/main~1` fail with load's words). A source is a whole repository, so a file link
+(`…/blob/<ref>/<path>`), a link into a subdirectory (`…/tree/<ref>/<dir>`) and a tree link
+without a ref are errors naming what to add instead. A link cannot tell a ref with `/`
+(`feature/x`) from a subdirectory: the segment after `tree` is the ref and anything after it a
+subdirectory, so for such a ref add the repository and set `ref` by hand. Only github.com links
+are read this way; `http://github.com/…`, `www.github.com`, another forge's link
+(`gitlab.com/u/r/-/tree/main`, whose shape differs) and the `github:` and `owner/repo`
+shorthands keep their result above.
+
 **Probe for generic hosts:** first `git ls-remote <url>`; if that does not respond,
 `HEAD <url>.tar.gz`. The first hit decides `git` vs. `url`; no hit → error listing both
 attempted addresses.
@@ -325,7 +342,13 @@ sync, config byte-identical – and the error quotes load's own words for it and
 fix the entry by hand, or `skilletor source remove <name>` (`cannot add <spec>: <file>:
 sources.karr.ref "" must not be empty (omit "ref" for the remote's HEAD); nothing was
 changed. Source "karr" there already has this address: fix its entry by hand, or remove it
-(skilletor source remove karr).`).
+(skilletor source remove karr).`). A spec that pins a ref (a GitHub tree link, k119) keeps
+such an entry only at that ref – keeping it at another would drop the ref asked for: an
+entry without a `ref` or with another is an error before anything is written or trusted,
+naming both refs and the ways out (`source "karr" in <file> is git https://github.com/Getty/karr
+with no ref, not ref "main"; nothing was changed. Set its "ref" by hand, add it under another
+name (…) or remove the source first (…).`). A spec without a ref keeps an entry's `ref`, as
+before.
 
 **`add` writes only what config load takes** (k110). The source definition a spec resolves
 to goes through config load's own check of a source (§3) before the config is read or
@@ -1374,6 +1397,9 @@ installed before stay installed (kept like an unresolvable source's items, §6.1
   `.yaml` and `.yml`;
 - an entry's `@<spec>` is not a probe-free remote spec (bad shorthand, generic host
   without `https://`, local path);
+- an entry's `@<spec>` pins a ref (a GitHub tree link, §4.2; k119): an entry names its source
+  by address alone (§15.6), so the ref could only be dropped (`rules: "x@github.com/o/r/tree/v1"
+  pins ref "v1", but an entry names its source by address alone: write x@https://github.com/o/r`);
 - an entry's `@<spec>` resolves to a source config load would refuse (§3; k115): a
   `.tar.gz`/`.tgz` address that is not `https://` (`http://…`, `file://…`, `git@host:….tar.gz`)
   is a `url` (§4.2), and a `url` must be `https://`. Checked by load's own check, on the
@@ -1411,7 +1437,8 @@ another source by address. `<spec>` uses the shorthand of §4.2 (`Getty`, `Getty
 `gitlab.com/peter`, `https://…`, `…tar.gz`); the resolved URL is the source's identity.
 Only specs that resolve without a probe are allowed – a generic host (`host.tld/…`) must be
 written as a full `https://…` URL – and local paths are not allowed; both are bundle
-errors (§15.4).
+errors (§15.4). So is a spec that pins a ref (a GitHub tree link, §4.2, k119): the serving
+source's own `ref` applies, whatever an entry could say.
 
 - **Matching:** the entry is served by the configured source (any scope visible to the
   bundle's scope) whose resolved `git`/`url` identity equals the entry's. The config name

@@ -425,6 +425,121 @@ test("k118: add keeps transport::address verbatim as a git source and installs t
   }
 });
 
+// k119: `add https://github.com/Getty/karr/tree/main` stored that link as a git source no fetch
+// serves, and `add github.com/Getty/karr/tree/main` stored the repo without its ref (HEAD).
+// Asserts: both store git https://github.com/<owner>/<repo> with `ref` the link's ref, named
+// after the repo, in the user or the project config; config load reads that ref and the source
+// is trusted – no install entry, so no fetch.
+test("k119: add of a GitHub tree link stores the repo with the link's ref and trusts it", async () => {
+  const e = env();
+  try {
+    const res = await cmdAdd(e.ctx, { spec: "https://github.com/Getty/karr/tree/main" });
+    assert.equal(res.name, "karr");
+    assert.equal(res.kept, false);
+    assert.deepEqual(res.def, { git: "https://github.com/Getty/karr", ref: "main" });
+    assert.equal(res.report.error, undefined);
+    assert.deepEqual(e.readUserCfg().sources, { karr: { git: "https://github.com/Getty/karr", ref: "main" } });
+    const karr = loadConfig({ home: e.home }).sources.get("karr");
+    assert.deepEqual([karr?.git, karr?.ref], ["https://github.com/Getty/karr", "main"]);
+
+    const proj = await cmdAdd(e.ctx, { name: "t", spec: "github.com/Getty/tools/tree/v1.2.0", project: true });
+    assert.deepEqual(proj.def, { git: "https://github.com/Getty/tools", ref: "v1.2.0" });
+    const projCfg = JSON.parse(readFileSync(join(e.projectDir, ".claude/skilletor.json"), "utf8"));
+    assert.deepEqual(projCfg.sources, { t: { git: "https://github.com/Getty/tools", ref: "v1.2.0" } });
+    // Trust binds the address, never the ref (spec §4.3).
+    assert.deepEqual(JSON.parse(readFileSync(join(e.ctx.stateRoot, "trust.json"), "utf8")), {
+      karr: { kind: "git", address: "https://github.com/Getty/karr" },
+      t: { kind: "git", address: "https://github.com/Getty/tools" },
+    });
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k119: a GitHub file link, a subdirectory link or a tree link without a ref, and a link whose
+// ref config load refuses (k110: git would read "-x" as an option, "main~1" is revision syntax).
+// Asserts: the first three are the SpecError, the ref one the CommandError quoting load's own
+// error for sources.<name>.ref – each before anything is written or trusted (no user or project
+// config, no trust.json).
+test("k119: add refuses a GitHub file or subdirectory link and a link ref load refuses, before writing", async () => {
+  const e = env();
+  try {
+    for (const spec of [
+      "https://github.com/Getty/karr/blob/main/README.md", "github.com/Getty/karr/tree/main/skills/foo",
+      "https://github.com/Getty/karr/tree/",
+    ]) {
+      await assert.rejects(() => cmdAdd(e.ctx, { spec }), (err: unknown) => {
+        assert.ok(err instanceof SpecError, `${spec}: ${String(err)}`);
+        assert.ok((err as Error).message.startsWith(`cannot resolve "${spec}": `), (err as Error).message);
+        return true;
+      });
+    }
+    const refs: [string, string, boolean][] = [
+      ["github.com/Getty/karr/tree/-x", `sources.karr.ref "-x" must not start with "-" (git would read it as an option)`, false],
+      ["https://github.com/Getty/karr/tree/main~1", `sources.karr.ref "main~1" is not a git ref name ` +
+        `(no whitespace, control characters, ~ ^ : ? * [ \\, ".." or "@{")`, true],
+    ];
+    for (const [spec, problem, project] of refs) {
+      await assert.rejects(() => cmdAdd(e.ctx, { spec, project }), (err: unknown) => {
+        assert.ok(err instanceof CommandError, `${spec}: ${String(err)}`);
+        assert.equal((err as Error).message, `cannot add ${spec}: ${problem}; nothing was changed`);
+        return true;
+      });
+    }
+    assert.equal(existsSync(e.userCfgPath), false, "no user config written");
+    assert.equal(existsSync(join(e.projectDir, ".claude", "skilletor.json")), false, "no project config written");
+    assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k119 with k101/k116's keep path: a link carries a ref, which keeping an entry at another ref
+// would drop without a word. Asserts: a same-address entry without a ref or at another ref is a
+// CommandError naming both refs and the ways out (set "ref" by hand, another name, remove),
+// config byte-identical, nothing trusted; an entry at the link's ref – `.git` or not – is kept as
+// written and trusted; a spec without a ref still keeps an entry's ref (k101).
+test("k119: add of a GitHub tree link keeps a same-address entry only at the link's ref", async () => {
+  const e = env();
+  try {
+    const spec = "https://github.com/Getty/karr/tree/main";
+    const refused: [Record<string, unknown>, string][] = [
+      [{ git: "https://github.com/Getty/karr" }, "with no ref"],
+      [{ git: "https://github.com/Getty/karr", ref: "v1" }, `with ref "v1"`],
+      [{ git: "https://GitHub.com/Getty/karr.git", ref: "Main" }, `with ref "Main"`],
+    ];
+    for (const [entry, has] of refused) {
+      const raw = `{ "sources": { "karr": ${JSON.stringify(entry)} } }\n`;
+      writeFileSync(e.userCfgPath, raw);
+      await assert.rejects(() => cmdAdd(e.ctx, { spec }), (err: unknown) => {
+        assert.ok(err instanceof CommandError, String(err));
+        assert.equal((err as Error).message, `source "karr" in ${e.userCfgPath} is git ${entry.git} ${has}, ` +
+          `not ref "main"; nothing was changed. Set its "ref" by hand, add it under another name ` +
+          `(skilletor add <name> ${spec}) or remove the source first (skilletor source remove karr).`);
+        return true;
+      });
+      assert.equal(readFileSync(e.userCfgPath, "utf8"), raw, `${has}: config byte-identical`);
+      assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, `${has}: nothing trusted`);
+    }
+
+    const projPath = join(e.projectDir, ".claude/skilletor.json");
+    const praw = `{"sources":{"karr":{"ref":"main","git":"https://github.com/Getty/karr.git"}}}`;
+    writeFileSync(projPath, praw);
+    const kept = await cmdAdd(e.ctx, { spec: "github.com/Getty/karr/tree/main/", project: true });
+    assert.equal(kept.kept, true);
+    assert.deepEqual(kept.def, { ref: "main", git: "https://github.com/Getty/karr.git" });
+    assert.equal(readFileSync(projPath, "utf8"), praw, "kept entry byte-identical");
+    const trusted = { kind: "git" as const, address: "https://github.com/Getty/karr.git", origin: "project" as const };
+    assert.equal(new State(e.ctx.stateRoot).isTrusted("karr", trusted), true);
+
+    const noRef = await cmdAdd(e.ctx, { spec: "Getty/karr", project: true });
+    assert.equal(noRef.kept, true);
+    assert.deepEqual(noRef.def, { ref: "main", git: "https://github.com/Getty/karr.git" });
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("install adds the entry with an auto-detected type and syncs", async () => {
   const e = env();
   try {

@@ -6685,6 +6685,23 @@ function checkGithub(spec, owner, repo) {
     );
   }
 }
+function githubLink(spec, path) {
+  const [owner, repo, view, ref, ...sub] = path.split(/[?#]/, 1)[0].split("/").filter(filled);
+  if (owner === void 0 || repo === void 0 || view !== "tree" && view !== "blob") return void 0;
+  checkGithub(spec, owner, repo);
+  const value2 = `https://github.com/${owner}/${repo}`;
+  const pin = ref === void 0 ? "" : `${value2}/tree/${ref} to pin ref "${ref}"`;
+  if (view === "blob") {
+    throw new SpecError(`cannot resolve "${spec}": a GitHub file link; a source is a whole repository: add ${value2}${pin && `, or ${pin}`}`);
+  }
+  if (ref === void 0) throw new SpecError(`cannot resolve "${spec}": a GitHub tree link without a ref; add ${value2}`);
+  if (sub.length > 0) {
+    throw new SpecError(
+      `cannot resolve "${spec}": skilletor installs a whole repository, not its subdirectory "${sub.join("/")}"; add ${pin}. A link cannot tell a ref with "/" from a subdirectory: for such a ref, add ${value2} and set its "ref" by hand`
+    );
+  }
+  return { kind: "git", value: value2, derivedName: repoName(owner, repo), ref };
+}
 function checkForge(spec, forge, owner, repo) {
   for (const [what, seg] of [["owner", owner], ["repo", repo]]) {
     if (NOT_IN_SEGMENT.test(seg)) {
@@ -6742,6 +6759,9 @@ function resolveAddress(spec, probe) {
   if (address !== void 0) return { kind: "git", value: s, derivedName: nameFromHelper(address) };
   if (hasScheme(s) || isScpLike(s)) {
     const value2 = lowerScheme(s);
+    const github = /^https:\/\/github\.com\//i.exec(value2);
+    const link = github && githubLink(spec, value2.slice(github[0].length));
+    if (link) return link;
     const kind = isTarball(value2) ? "url" : "git";
     return { kind, value: value2, derivedName: nameFromUrl(value2, kind) };
   }
@@ -6764,8 +6784,11 @@ function resolveAddress(spec, probe) {
     const segs = rest.split("/").filter(Boolean);
     const owner = segs[0];
     if (!owner?.trim()) throw new SpecError(`cannot resolve "${spec}": expected ${firstSeg}/owner[/repo]`);
+    const github = firstSeg.toLowerCase() === "github.com";
+    const link = github ? githubLink(spec, rest) : void 0;
+    if (link) return link;
     const repo = segs.slice(1).find(filled) ?? DEFAULT_REPO;
-    if (firstSeg.toLowerCase() === "github.com") checkGithub(spec, owner, repo);
+    if (github) checkGithub(spec, owner, repo);
     else checkForge(spec, firstSeg, owner, repo);
     return {
       kind: "git",
@@ -6879,6 +6902,11 @@ function foreignEntry(type, entry, key) {
     const r = resolveSpec(spec, noProbe);
     if (r.kind === "local") {
       throw new BundleError(`${key}: "${entry}" names a local path; a bundle can only name remote sources`);
+    }
+    if (r.ref !== void 0) {
+      throw new BundleError(
+        `${key}: "${entry}" pins ref ${JSON.stringify(r.ref)}, but an entry names its source by address alone: write ${name}@${r.value}`
+      );
     }
     url = r.value;
     kind = r.kind;
@@ -10306,6 +10334,7 @@ async function cmdAdd(ctx, args) {
   const resolved = resolveSpec(args.spec, ctx.probe ?? makeProbe());
   const name = args.name ?? resolved.derivedName;
   let def = resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };
+  if (resolved.ref !== void 0) def.ref = resolved.ref;
   const invalid = loadRefusal(name, def);
   if (invalid !== void 0) throw new CommandError(`cannot add ${args.spec}: ${invalid}; nothing was changed`);
   const existing = sourceEntry(path, name);
@@ -10315,6 +10344,12 @@ async function cmdAdd(ctx, args) {
     if (!sameAddress(ctx, name, existing, resolved)) {
       throw new CommandError(
         `source "${name}" in ${path} is ${addressText(existing)}, not ${resolved.kind} ${resolved.value}; nothing was changed. Add it under another name (skilletor add <name> ${args.spec}${flag}) or remove the source first (skilletor source remove ${name}${flag}).`
+      );
+    }
+    const has = existing.ref;
+    if (resolved.ref !== void 0 && has !== resolved.ref) {
+      throw new CommandError(
+        `source "${name}" in ${path} is ${addressText(existing)} ${has === void 0 ? "with no ref" : `with ref ${JSON.stringify(has)}`}, not ref ${JSON.stringify(resolved.ref)}; nothing was changed. Set its "ref" by hand, add it under another name (skilletor add <name> ${args.spec}${flag}) or remove the source first (skilletor source remove ${name}${flag}).`
       );
     }
     const refused = loadRefusal(name, existing, path);
