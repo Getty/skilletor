@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
@@ -436,6 +436,79 @@ test("source list reports sources; remove refuses while items are installed", as
     await assert.rejects(() => cmdSourceRemove(e.ctx, { name: "mine" }), /still has installed/i);
     await cmdSourceRemove(e.ctx, { name: "mine", force: true });
     assert.equal(e.readUserCfg().sources, undefined);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k114: `source remove` of a name the target config lacks wrote nothing, synced and reported
+// "removed source". Asserts, like `uninstall` of an absent entry (spec §7): a CommandError,
+// `--force` or not, before anything else – the in-use check included – naming the target
+// config and file, then where else the name is declared (the other scope's config, the
+// project's skilletor.local.json), else that it is not a configured source; every config
+// byte-identical, no project config created, and no sync run (no lock in either scope).
+test("k114: source remove of a name the target config lacks fails and names where else it is declared", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => skill(d, "foo"));
+    const projCfg = join(e.projectDir, ".claude", "skilletor.json");
+    const localCfg = join(e.projectDir, ".claude", "skilletor.local.json");
+    // `mine` is only the user config's (and installed from), `team` only the project's, `loc` only the local file's.
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    writeFileSync(projCfg, JSON.stringify({ sources: { team: { local: src } } }, null, 2));
+    writeFileSync(localCfg, JSON.stringify({ sources: { loc: { local: src } } }, null, 2));
+    const files = [e.userCfgPath, projCfg, localCfg];
+    const before = files.map((f) => readFileSync(f));
+    const userWhere = `source "%s" is not declared in the user config (${e.userCfgPath})`;
+    const projWhere = `source "%s" is not declared in the project config (${projCfg})`;
+    const cases: [{ name: string; project?: boolean; force?: boolean }, string][] = [
+      [{ name: "nope" }, `${userWhere}; it is not a configured source`],
+      [{ name: "nope", force: true }, `${userWhere}; it is not a configured source`],
+      [{ name: "nope", project: true, force: true }, `${projWhere}; it is not a configured source`],
+      [{ name: "team" }, `${userWhere}; the project config declares it (use --project)`],
+      [{ name: "mine", project: true }, `${projWhere}; the user config declares it (run without --project)`],
+      [{ name: "mine", project: true, force: true }, `${projWhere}; the user config declares it (run without --project)`],
+      [{ name: "loc" }, `${userWhere}; ${localCfg} declares it (edit that file by hand)`],
+      [{ name: "loc", project: true }, `${projWhere}; ${localCfg} declares it (edit that file by hand)`],
+    ];
+    for (const [args, message] of cases) {
+      await assert.rejects(() => cmdSourceRemove(e.ctx, args), {
+        name: "CommandError",
+        message: message.replace("%s", args.name),
+      }, JSON.stringify(args));
+    }
+    assert.deepEqual(files.map((f) => readFileSync(f)), before, "every config byte-identical");
+    assert.equal(existsSync(join(e.home, ".claude", "skilletor.lock.json")), false, "no sync: no user lock");
+    assert.equal(existsSync(join(e.projectDir, ".claude", "skilletor.lock.json")), false, "no sync: no project lock");
+
+    // Only the project config and the local file declare `both`: each is named.
+    writeFileSync(projCfg, JSON.stringify({ sources: { both: { local: src } } }, null, 2));
+    writeFileSync(localCfg, JSON.stringify({ sources: { both: { local: src } } }, null, 2));
+    await assert.rejects(() => cmdSourceRemove(e.ctx, { name: "both" }), {
+      message: `${userWhere.replace("%s", "both")}; the project config declares it (use --project); ` +
+        `${localCfg} declares it (edit that file by hand)`,
+    });
+    // Without a project config at all, --project creates none.
+    rmSync(projCfg);
+    await assert.rejects(() => cmdSourceRemove(e.ctx, { name: "mine", project: true }), /user config declares it/);
+    assert.equal(existsSync(projCfg), false, "no project config created");
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k114: without a project scope (the project dir is the home dir) there is no other config to
+// name. Asserts: the plain error for the user config, the user config byte-identical.
+test("k114: source remove of an unknown name without a project scope says it is not a configured source", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({ sources: { mine: { local: e.home } } });
+    const before = readFileSync(e.userCfgPath);
+    await assert.rejects(() => cmdSourceRemove({ ...e.ctx, projectDir: e.home }, { name: "nope" }), {
+      name: "CommandError",
+      message: `source "nope" is not declared in the user config (${e.userCfgPath}); it is not a configured source`,
+    });
+    assert.deepEqual(readFileSync(e.userCfgPath), before);
   } finally {
     e.cleanup();
   }

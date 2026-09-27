@@ -832,6 +832,49 @@ test("k103: a config error in the sync after add, install, uninstall, source rem
   }
 });
 
+// k114: `source remove` of a name the target config lacks printed "removed source", exited 0
+// after a sync, and since k103 claimed "the config edit itself was saved" when that sync hit a
+// config error. Asserts, through the real binary: exit 1, nothing on stdout (no "removed"
+// line), the exact error on stderr naming the target config and where else the name is
+// declared; both configs byte-identical and no lock written (no sync ran). With no harness
+// detected – the sync would stop at a config error – still exit 1, never "saved".
+test("k114: source remove of a name the target config lacks exits 1, prints no removed line, writes nothing", () => {
+  const src = join(tmp.dir, "k114-src");
+  mkdirSync(join(src, "skills", "foo"), { recursive: true });
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), "---\nname: foo\ndescription: foo\n---\nFOO\n");
+  for (const harness of [true, false]) {
+    const home = join(tmp.dir, `k114-home-${harness}`);
+    const proj = join(tmp.dir, `k114-proj-${harness}`);
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    mkdirSync(join(proj, ".claude"), { recursive: true });
+    const env = harness ? claudeOnlyEnv(home) : { ...process.env, HOME: home, CODEX_HOME: join(home, ".no-codex") };
+    const common = ["--project-dir", proj];
+    const cfg = join(home, ".claude", "skilletor.json");
+    const projCfg = join(proj, ".claude", "skilletor.json");
+    writeFileSync(cfg, JSON.stringify({ sources: { shared: { local: src } }, install: { skills: ["foo@shared"] } }, null, 2) + "\n");
+    writeFileSync(projCfg, JSON.stringify({ sources: { team: { local: src } } }, null, 2) + "\n");
+    const before = [readFileSync(cfg), readFileSync(projCfg)];
+    const cases: [string[], string][] = [
+      [["source", "remove", "nope"], `source "nope" is not declared in the user config (${cfg}); it is not a configured source`],
+      [["source", "remove", "nope", "--project", "--force"],
+        `source "nope" is not declared in the project config (${projCfg}); it is not a configured source`],
+      [["source", "remove", "team"], `source "team" is not declared in the user config (${cfg}); the project config declares it (use --project)`],
+      [["source", "remove", "shared", "--project"],
+        `source "shared" is not declared in the project config (${projCfg}); the user config declares it (run without --project)`],
+    ];
+    for (const [args, message] of cases) {
+      const label = `${harness ? "" : "no harness: "}${args.join(" ")}`;
+      const r = runCli([...args, ...common], env);
+      assert.equal(r.status, 1, `${label}: ${r.stdout}${r.stderr}`);
+      assert.equal(r.stdout, "", label);
+      assert.equal(r.stderr, `skilletor: ${message}\n`, label);
+      assert.deepEqual([readFileSync(cfg), readFileSync(projCfg)], before, `${label}: configs byte-identical`);
+      assert.equal(existsSync(join(home, ".claude", "skilletor.lock.json")), false, `${label}: no sync, no user lock`);
+      assert.equal(existsSync(join(proj, ".claude", "skilletor.lock.json")), false, `${label}: no sync, no project lock`);
+    }
+  }
+});
+
 // k110: `add` of a spec that resolves to a url config load refuses (http://, file://) wrote it,
 // and the sync after it failed (exit 2 since k103, "the edit was saved") – a config every later
 // sync and `source remove` refused. Asserts, through the real binary: exit 1 as any refusal

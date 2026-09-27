@@ -165,11 +165,23 @@ function pickDef(s: { git?: string; ref?: string; url?: string; local?: string }
   return def;
 }
 
+/**
+ * Remove a source from one config (user, or project with --project), then sync. A name that
+ * config does not declare is an error before anything else, `--force` or not (k114, as
+ * `uninstall` of an absent entry): nothing edited, no sync; it names where else it is declared.
+ */
 export async function cmdSourceRemove(
   ctx: CommandContext,
   args: { name: string; project?: boolean; force?: boolean },
 ): Promise<SyncReport> {
-  const path = configPath(ctx, Boolean(args.project));
+  const project = Boolean(args.project);
+  const path = configPath(ctx, project);
+  if (sourceEntry(path, args.name) === undefined) {
+    throw new CommandError(
+      `source "${args.name}" is not declared in the ${project ? "project" : "user"} config (${path})` +
+        sourceElsewhere(ctx, args.name, project),
+    );
+  }
   const config = load(ctx);
   const inUse = usedSources(config).has(args.name);
   if (inUse && !args.force) {
@@ -177,6 +189,19 @@ export async function cmdSourceRemove(
   }
   removeSource(path, args.name);
   return sync(ctx);
+}
+
+/** Where else a source is declared: the other scope's config, the project's local file. */
+function sourceElsewhere(ctx: CommandContext, name: string, project: boolean): string {
+  const root = projectDirOf(ctx);
+  if (!root) return "; it is not a configured source";
+  const local = join(root, ".claude", "skilletor.local.json");
+  const hits: string[] = [];
+  if (sourceEntry(configPath(ctx, !project), name) !== undefined) {
+    hits.push(project ? "the user config declares it (run without --project)" : "the project config declares it (use --project)");
+  }
+  if (sourceEntry(local, name) !== undefined) hits.push(`${local} declares it (edit that file by hand)`);
+  return `; ${hits.length ? hits.join("; ") : "it is not a configured source"}`;
 }
 
 // ---- available --------------------------------------------------------------

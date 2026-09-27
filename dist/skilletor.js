@@ -10344,7 +10344,13 @@ function pickDef(s) {
   return def;
 }
 async function cmdSourceRemove(ctx, args) {
-  const path = configPath(ctx, Boolean(args.project));
+  const project = Boolean(args.project);
+  const path = configPath(ctx, project);
+  if (sourceEntry(path, args.name) === void 0) {
+    throw new CommandError(
+      `source "${args.name}" is not declared in the ${project ? "project" : "user"} config (${path})` + sourceElsewhere(ctx, args.name, project)
+    );
+  }
   const config = load(ctx);
   const inUse = usedSources(config).has(args.name);
   if (inUse && !args.force) {
@@ -10352,6 +10358,17 @@ async function cmdSourceRemove(ctx, args) {
   }
   removeSource(path, args.name);
   return sync(ctx);
+}
+function sourceElsewhere(ctx, name, project) {
+  const root = projectDirOf(ctx);
+  if (!root) return "; it is not a configured source";
+  const local = join15(root, ".claude", "skilletor.local.json");
+  const hits = [];
+  if (sourceEntry(configPath(ctx, !project), name) !== void 0) {
+    hits.push(project ? "the user config declares it (run without --project)" : "the project config declares it (use --project)");
+  }
+  if (sourceEntry(local, name) !== void 0) hits.push(`${local} declares it (edit that file by hand)`);
+  return `; ${hits.length ? hits.join("; ") : "it is not a configured source"}`;
 }
 async function cmdAvailable(ctx, args = {}) {
   const config = load(ctx);

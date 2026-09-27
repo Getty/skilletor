@@ -750,6 +750,13 @@ warning that the wildcard brings it back on the next sync. Bundles behave the sa
 an item that only a bundle declares cannot be uninstalled by name; the error names the
 bundle (§15).
 
+`source remove <name>` removes the source from that one config only (k114). A name that
+config does not declare fails the command before anything else, `--force` or not (exit 1,
+config untouched, no sync) – as `uninstall` of an absent entry. The error names that config
+and file, then where else the name is declared: the other scope's config (→ `--project`, or
+without it) or the project's `skilletor.local.json` (no command edits that file: by hand);
+otherwise it says the name is not a configured source.
+
 `status` shows a declared item that rendered empty at the last sync as skipped
 (`skipped: "renders-empty"` in `--json`, `installed: false`), distinct from an item that
 is not installed yet. It marks items that were declared through a wildcard (`via *@shared`, and a `via`

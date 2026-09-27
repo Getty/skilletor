@@ -673,8 +673,11 @@ count again until a sync runs anyway – also when nothing of that source got in
 error (exit 2, nothing runs). A config error (no harness detected, say) stops `sync` with
 exit 2, nothing changed; `add`, `install`, `uninstall` and `source remove` exit 2 too when
 the sync they run after their edit hits one — the edit itself is saved and stays, and the
-message names the config file. `-h`/`--help` anywhere prints the usage and runs nothing
-(`sync --help` does not sync); `-v`/`--version` only as the first argument.
+message names the config file. `source remove` of a name the target config (user, or project
+with `--project`) does not declare exits 1 and changes nothing, `--force` or not; the error
+names where else it is declared (the other config, `skilletor.local.json`), if anywhere.
+`-h`/`--help` anywhere prints the usage and runs nothing (`sync --help` does not sync);
+`-v`/`--version` only as the first argument.
 
 Every command that fetches sources — `sync`, `available`, `install`, and the sync that
 `add`, `uninstall` and `source remove` run — shares one lock with the hooks, so two runs
