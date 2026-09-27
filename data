@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-09-27T23:27:30Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T23:27:08Z
+created: 2026-09-27T23:03:07Z
+id: 123
+priority: medium
+started: 2026-09-27T23:18:10Z
+status: done
+tags:
+- test
+- bug
+title: 'test: cli tests at lines ~413 and ~637 read this repo''s real project config'
+updated: 2026-09-27T23:27:30Z
+---
+
+Found during k122 (worker). Since this repo has a real .claude/skilletor.json (k122), test/cli.test.ts ~637 (hook session-start --harness codex, stdin {}, no cwd) runs a real project pass against this checkout (reports trust requests, writes nothing), and ~413 (sync --scope user, no cwd) reads this repo's config before exiting 2. Tests must never depend on the dev checkout's config. Fix: give both a temp cwd / CLAUDE_PROJECT_DIR / --project-dir; add a guard (e.g. a helper that asserts every CLI spawn in tests has an isolated project dir) if cheap. Check test/hooks.test.ts and any other spawn of bin/skilletor for the same gap.
+
+2026-09-27 23:21 Audit: only src resolution points are cli.ts makeContext (flags.projectDir ?? projectRootOf(cwd)) and hooks.ts runHook (ctx.projectDir ?? projectRootOf(input.cwd || process.cwd())); the hook command reads SKILLETOR_PROJECT_DIR/CLAUDE_PROJECT_DIR from env. Spawn sites: cli.test.ts runCli, e2e.test.ts run; in-process runHook in hooks/briefing/check/modes/trust/gitenv tests. Proving the gap next in a scratch clone.
+
+2026-09-27 23:21 Gap proven in a scratch clone (git clone --no-hardlinks, node_modules symlinked; this checkout untouched), both tests instrumented to print their output. Valid clone config: ~637 hook stdout = 2 trust requests for getty and karr (the clone's .claude/skilletor.json); ~413 exit 2 with the expected no-harness error. Clone config set to '{ not json': ~413 FAILS (stderr is '<clone>/.claude/skilletor.json: invalid JSON' instead of 'no agent harness detected'); ~637 still exits 0 but its systemMessage is that invalid-JSON error. Both resolve the project root to the checkout via the spawn's inherited cwd (runCli passes no cwd).
+
+2026-09-27 23:23 Fix in place (uncommitted): test/cli.test.ts runCli defaults cwd to an empty non-git temp dir (guard); ~413 gets --project-dir <temp proj> (as k103); ~637 hook spawned with cwd ~ (as its neighbours' --project-dir ~); test/setup.ts also drops CLAUDE_PROJECT_DIR/SKILLETOR_PROJECT_DIR (a suite run from a Claude Code hook would aim every spawned hook at the checkout: shown in the clone, the ~637 hook read the clone config via an exported CLAUDE_PROJECT_DIR even with a temp spawn cwd); test/e2e.test.ts run() gets cwd: project (guard consistency, no bug). Clone with broken config: both tests pass with the fix, and with the guard alone. Full-suite runs waiting on loadguard (memory pressure).
+
+2026-09-27 23:25 Done (uncommitted, tests only). Files: test/cli.test.ts (runCli cwd defaults to an empty non-git temp dir 'no-project', made in before(); 'no harness on the machine' test gets --project-dir <tmp>/bare-proj; the hook in 'every documented option' is spawned with cwd ~ = h.home), test/setup.ts (drops CLAUDE_PROJECT_DIR and SKILLETOR_PROJECT_DIR, like the GIT_* vars), test/e2e.test.ts (run() spawns with cwd: project). Audit: in-process runHook calls in hooks/briefing/check/modes/trust/gitenv tests all set ctx.projectDir or pass input.cwd, so they are clean. e2e spawns all pass --project-dir or CLAUDE_PROJECT_DIR, so they are clean. cli.test.ts unknown-command/'source toString' spawns resolved the checkout as project root (a git rev-parse there) but read no config; the default cwd now covers them. Verified: checkout typecheck ok, npm test 846/846 pass, build ok, check-dist up to date (dist unchanged). Scratch clone with '{ not json' as .claude/skilletor.json and CLAUDE_PROJECT_DIR exported to the clone: npm test 846/846 pass, clone tree unchanged.
+
+2026-09-27 23:27 Committed ab5b65a968c6609d92b53ab5c7cee3da5dd9752d: test: no CLI or hook spawn takes this checkout as its project (k123)
