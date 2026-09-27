@@ -31,5 +31,10 @@ Repo truths that live in no skill:
   the source's `skilletor.json` or is documented as required.
 - The bundled `skills/skilletor/SKILL.md` ships in the plugin; a change there
   is user-facing and must match `README.md` and the CLI usage text.
-- Shared skills under `~/.claude/skills` are hardlinked: edit them in place
-  with a truncating write, never with `Edit`/`Write`.
+- The shared skills in `.claude/skills/` (all but `skilletor-core` and
+  `skill-assessment`) are copies skilletor installs from
+  `.claude/skilletor.json`: untracked, and the next sync reverts an edit.
+  Edit them in their source checkout (`~/dev/skills`, `~/dev/karr`, declared
+  `local` in the user config, so the next sync brings the change here — no
+  push). Those files, like `~/.claude/skills`, are hardlinked: edit them in
+  place with a truncating write, never with `Edit`/`Write`.

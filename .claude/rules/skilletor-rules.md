@@ -83,9 +83,9 @@ initiative; karr is the agent board.
   (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`); `npm test` is the check that counts.
 - **`dist/` is committed and CI diffs it.** Every `src/` change ships with a
   rebuilt `dist/skilletor.js` in the same commit or CI fails `check-dist`.
-- **The CLI writes to the real home.** `bin/skilletor sync` from this checkout
-  targets `~/.claude/` via `os.homedir()`; hand tests run with `HOME` pointed
-  at a temp directory.
+- **The CLI writes to the real home and this repo.** Run from here, `bin/skilletor`
+  and `claude --plugin-dir .` act on `~/.claude/` and this repo's real project config;
+  hand tests use a temp cwd (or `--project-dir`) with temp `HOME` and `CODEX_HOME`.
 - **Agent files: `tools:`, not `allowed-tools`.** Claude Code ignores unknown
   agent fields silently, so a misnamed key hands an auditor write access.
 - **Eval runs are billed** (`claude plugin eval` spawns full sessions). Start

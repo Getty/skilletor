@@ -29,5 +29,10 @@ Repo truths that live in no skill:
   start a `claude plugin eval` only when the ticket asks for it, and never with
   `-j` above 2.
 - Assess exactly the paths named in the ticket. "The skills" without a path
-  means this repo's `.claude/skills`, `.claude/agents`, `.claude/rules` and
-  `skills/skilletor`.
+  means this repo's own set: `.claude/skills/skilletor-core`,
+  `.claude/skills/skill-assessment`, `.claude/agents`, `.claude/rules` and
+  `skills/skilletor`. The other skills in `.claude/skills/` are copies
+  skilletor installs from `.claude/skilletor.json`: judge them as Getty/skills'
+  or Getty/karr's. File their fixes on that repo's board (from its checkout,
+  `~/dev/skills` or `~/dev/karr`: `karr create … --escalated-from
+  skilletor#<card>`); a repo without a board gets them in the scorecard only.

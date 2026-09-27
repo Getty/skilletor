@@ -129,18 +129,21 @@ npm run build && npm run check-dist  # dist/skilletor.js is committed; CI diffs 
 - Test git fixtures use `git init -b main` (the default branch name is not
   portable). Path comparisons go through `realpathSync` (macOS `/var` →
   `/private/var`). Several tests create symlinks — Windows is not in CI.
-- The CLI resolves `home` from `os.homedir()` and the Codex home from
-  `$CODEX_HOME`. A manual `skilletor sync` from the checkout touches the real
-  `~/.claude/`, `~/.agents/` and Codex home; for hand tests set **both** `HOME` and
-  `CODEX_HOME` to temp directories (an exported `CODEX_HOME` survives a changed
-  `HOME`), and create a marker (`$HOME/.claude.json`, `$CODEX_HOME/installation_id`)
-  or set `targets` — an empty temp home detects no harness and fails.
+- The CLI takes `home` from `os.homedir()`, the Codex home from `$CODEX_HOME` and
+  the project from `--project-dir`, else the cwd's git top level (a hook: stdin
+  `cwd`, unless `$CLAUDE_PROJECT_DIR` is set). So a sync, status or hook run from
+  the checkout touches the real `~/.claude/`, `~/.agents/`, Codex home **and this
+  repo** (its `.claude/skilletor.json` is real). Hand tests: a temp cwd (or
+  `--project-dir`), **both** `HOME` and `CODEX_HOME` temp (an exported `CODEX_HOME`
+  survives a changed `HOME`), and a marker (`$HOME/.claude.json`,
+  `$CODEX_HOME/installation_id`) or `targets` — else no harness is detected.
 - Hook tests are black-box: stdin JSON → stdout JSON via `runHook`. Drive the
-  real binary the same way:
-  `printf '{"cwd":"%s","hook_event_name":"SessionStart"}' "$PWD" | bin/skilletor hook session-start`.
-- Live check against Claude Code: `claude --plugin-dir .` in a throwaway
-  `HOME`, with a sentinel item in a local source; confirm the SessionStart
-  report and that the sentinel skill resolves in the same session.
+  real binary the same way, with a temp project as `cwd`:
+  `T=$(mktemp -d); mkdir -p "$T/home" "$T/proj"; touch "$T/home/.claude.json"`, then
+  `printf '{"cwd":"%s","hook_event_name":"SessionStart"}' "$T/proj" | HOME="$T/home" CODEX_HOME="$T/codex" bin/skilletor hook session-start`.
+- Live check against Claude Code: `claude --plugin-dir <checkout>` from a temp
+  project dir in a throwaway `HOME`, with a sentinel skill in a local source;
+  confirm the SessionStart report and that the sentinel resolves in the same session.
 
 ## Release surface (audit, never perform)
 
