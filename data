@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-27T00:54:53Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T00:54:43Z
+created: 2026-09-26T22:50:53Z
+id: 102
+priority: medium
+started: 2026-09-27T00:28:50Z
+status: done
+tags:
+- bundles
+- add
+- bug
+title: 'install bundle: the missing-source prompt can replace a source in the target
+  file'
+updated: 2026-09-27T00:54:53Z
+---
+
+Found during k101 (worker), same class as k101. The bundle missing-source prompt checks names against the merged config, not the file it writes: with peter: {local: X} in the user file and peter: {git: C} in the project file, a user-scope bundle naming C proposes [peter], and accepting overwrites the user entry, dropping its local override. Fix like k101: the prompt must never write over an existing entry of the target file (reuse the same-address check, propose another name otherwise).
+
+2026-09-27 00:53 Done. Cause: missingSources (src/commands.ts) judged a name free against the merged config only; in the card's case merged peter = {git: C, local: X} matched C, so [peter] was offered and addSource replaced the user file's {local: X}. The no-TTY path printed 'skilletor add peter C', which k101's add now refuses. Fix: missingSources gets the target config path; a name is free only if that file has no entry of it (k101's sourceEntry) AND no merged source holds it with another address (unchanged). A taken derived name falls to peter-2; a typed one is refused, the note naming the target file's own entry via k101's addressText. k101's sameAddress keep-branch was deliberately not reused: a target-file entry with the missing address would already serve the bundle, or the merged check rejects its name, so that branch is unreachable (or, via a local-file override, would keep an entry that still does not serve). Files: src/commands.ts, test/commands.test.ts (new k102 test: no-TTY prints add peter-2 with both files byte-identical; TTY offers [peter-2], refuses 'peter' with (local X), adds peter-2 with user peter and the project file untouched, trusted and installed from), docs/superpowers/specs/2026-09-22-skilletor-design.md §15.6 Name clash, dist/skilletor.js rebuilt. Verified: typecheck ok, npm test 708/708 pass, build ok, check-dist up to date. Test failed before the fix (no-TTY printed add peter); a scratch TTY repro showed the overwrite.
+
+2026-09-27 00:54 Committed 3b1cd9820363f24cb47bfa41792c8577879d0b91: install: a bundle's missing source never replaces one in the target config (k102)
