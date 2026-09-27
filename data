@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-27T04:21:27Z
+claimed_by: skilletor
+class: standard
+completed: 2026-09-27T04:21:20Z
+created: 2026-09-27T03:23:31Z
+id: 116
+priority: low
+started: 2026-09-27T03:25:14Z
+status: done
+tags:
+- add
+- bug
+title: 'add: the keep-existing path trusts and syncs an entry config load refuses'
+updated: 2026-09-27T04:21:27Z
+---
+
+Found during k110 (worker). k101's "same address, keep it" path in cmdAdd trusts and syncs an existing entry with the same address even when its other fields fail config load (e.g. a hand-written ref: ""), ending in exit 2 after trusting it. Expected: check the kept entry with sourceFields (k110) first and refuse (exit 1, nothing trusted). Only reachable by a hand edit.
+
+2026-09-27 04:18 Reproduced: new test k116 (test/commands.test.ts) failed with "Missing expected rejection" (keep path trusted + synced); new CLI test exited 2 against HEAD src. Fix in src/commands.ts cmdAdd: after sameAddress passes, the raw kept entry goes through loadRefusal (sourceFields, the check config load runs, with load's own "<file>: sources.<name>" prefix) before trustDef; refusal = CommandError, exit 1, nothing trusted, no sync, config byte-identical. loadRefusal gained an optional file arg; existing call sites unchanged. Spec §4.2/§7 updated. Full verification pending (loadguard memory pressure).
+
+2026-09-27 04:19 Done. src/commands.ts: cmdAdd keep path runs the raw kept entry through loadRefusal (sourceFields, config load's own check and "<file>: sources.<name>" wording) after sameAddress and before trustDef; refusal is a CommandError (exit 1): "cannot add <spec>: <load error>; nothing was changed. Source \"<name>\" there already has this address: fix its entry by hand, or remove it (skilletor source remove <name>[ --project])." Nothing trusted, no sync, config byte-identical. loadRefusal(name, def: unknown, file?) - existing call sites unchanged. dist/skilletor.js rebuilt. test/commands.test.ts + test/cli.test.ts: k116 regression tests (ref "", ref "-x", ref 5, unknown key; user and project config; fixed-by-hand entry is kept and trusted again); both failed against HEAD src (API: missing rejection; CLI: exit 2). Spec §4.2 + §7 updated. Verified: typecheck ok, npm test 794/794, build ok, check-dist up to date. Interplay with k120: the "source remove <name>" hint currently dead-ends (load refuses first, exit 1, nothing removed; hand-checked on the built binary); only fixing by hand works until k120 lands. Also found (docs, not fixed): README.md:68 and skills/skilletor/SKILL.md:68 describe the keep path without this exception.
+
+2026-09-27 04:21 Committed as 84183a9: add: refuse to keep an entry config load refuses, before trusting it (k116)
