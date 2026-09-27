@@ -55,7 +55,11 @@ fsutil.ts     hash, atomicWrite                       gitenv.ts    gitEnv(): the
 ## Invariants that must survive any change
 
 - **Render-and-compare, no invalidation.** Every sync builds every declared item
-  in memory and diffs against disk + lock. There is no cache of rendered output.
+  in memory and diffs against disk + lock. There is no cache of rendered output —
+  but `check` asks for a sync only when a source version or the render-inputs hash
+  moves, so a release that changes what a sync makes of unchanged sources and inputs
+  bumps `RENDER_FORMAT` (`engine.ts`), or earlier installs wait for a source to move.
+  A change to what a url cache tree holds bumps `URL_CACHE_FORMAT` (`sources/url.ts`).
 - **The lock is the ownership boundary.** One lock per scope, always
   `<scope>/.claude/skilletor.lock.json`, for every harness. Claude keys stay
   unprefixed (`skills/foo`); Codex keys are `codex:skills/foo`, paths relative to
@@ -77,7 +81,10 @@ fsutil.ts     hash, atomicWrite                       gitenv.ts    gitEnv(): the
   error, nothing touched); a project can only narrow it. Every item renders once
   per active target with `harness` in the context; empty render skips per target.
 - **Templating:** only `*.njk` is rendered (installed with `.njk` stripped);
-  everything else is copied byte for byte. Context has no `env.*`. An undefined
+  everything else is copied byte for byte. A skill's file keeps its source's owner
+  executable bit (a `.njk` passes its bit to what it renders); agents, rules and
+  generated files never carry it. The lock hashes bytes only (`check` sees no mode);
+  a sync rewrites a file whose bit is wrong. Context has no `env.*`. An undefined
   variable is an error, and a template error leaves that item at its old state.
 - **Trust:** a source declared only in a project config is not fetched until
   `skilletor trust <name>`; a changed URL lapses trust.
