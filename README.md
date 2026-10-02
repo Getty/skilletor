@@ -27,6 +27,8 @@ Using Codex? See [Codex](#codex) — the plugin works there too, with a few diff
 
 ## How it works
 
+![How skilletor works: sources (git, tarball, local dir) are rendered, diffed against disk and lock, and installed for Claude Code and Codex](assets/concept.png)
+
 ```
 source (git | https tarball | local dir)
         │  resolve + scan
