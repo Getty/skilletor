@@ -29,16 +29,17 @@ Using Codex? See [Codex](#codex) — the plugin works there too, with a few diff
 
 ![How skilletor works: sources (git, tarball, local dir) are rendered, diffed against disk and lock, and installed for Claude Code and Codex](assets/concept.png)
 
-```
-source (git | https tarball | local dir)
-        │  resolve + scan
-        ▼
-   render (.njk → Nunjucks, everything else copied)
-        │  diff against disk + lock
-        ▼
-   ~/.claude/{skills,agents,rules}   ·   <project>/.claude/{skills,agents,rules}
-   ~/.agents/skills, $CODEX_HOME/{agents,skilletor-rules.md}   ·   <project>/{.agents/skills,.codex/{agents,skilletor-rules.md}}
-```
+1. **Source** — a git repo, an HTTPS tarball or a local directory is resolved and scanned.
+2. **Render** — `.njk` files go through Nunjucks, everything else is copied.
+3. **Diff + lock** — the result is diffed against what is on disk and the lock.
+4. **Install** — into the user's or the project's directories:
+
+| | user | project |
+|---|---|---|
+| Claude Code | `~/.claude/{skills,agents,rules}` | `<project>/.claude/{skills,agents,rules}` |
+| Codex | `~/.agents/skills`, `$CODEX_HOME/{agents,skilletor-rules.md}` | `<project>/.agents/skills`, `<project>/.codex/{agents,skilletor-rules.md}` |
+
+Two hooks drive it:
 
 - **SessionStart** — check every source (5s timeout each) and compare the config with what
   is installed; on a change, sync and report. An untrusted project source is named every
