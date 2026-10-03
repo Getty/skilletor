@@ -147,7 +147,8 @@ test("gitTracked: the tracked ones of the given paths, literal, relative to dir;
     execFileSync("git", ["init", "-q", "-b", "main", repo]);
     for (const f of ["a.txt", "sub/b.txt", "starX.md", "sp ace.md"]) writeFileSync(join(repo, f), f);
     execFileSync("git", ["add", "."], { cwd: repo });
-    for (const f of ["c.txt", "star*.md"]) writeFileSync(join(repo, f), f); // untracked
+    // untracked; Windows allows no "*" in a file name, the question about it still stands there
+    for (const f of ["c.txt", ...(process.platform === "win32" ? [] : ["star*.md"])]) writeFileSync(join(repo, f), f);
     const asked = ["a.txt", "c.txt", "sub/b.txt", "star*.md", "sp ace.md", "missing.txt"];
     assert.deepEqual(gitTracked(repo, asked).sort(), ["a.txt", "sp ace.md", "sub/b.txt"]); // `star*.md` is no glob
     assert.deepEqual(gitTracked(join(repo, "sub"), ["b.txt"]), ["b.txt"]); // relative to dir, not the top level

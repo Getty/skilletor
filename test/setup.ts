@@ -6,6 +6,9 @@
 // code under test the environment of a shell outside any repository. A test that exports one on
 // purpose sets it around the call under test and restores it (test/gitenv.test.ts). A test file
 // run by hand gets this with `node --test --import ./test/setup.ts test/<file>.test.ts`.
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { REPO_LOCAL_VARS } from "../src/gitenv.ts";
 
 for (const name of REPO_LOCAL_VARS) delete process.env[name];
@@ -15,3 +18,15 @@ for (const name of REPO_LOCAL_VARS) delete process.env[name];
 // checkout, whose .claude/skilletor.json is real – and every hook a test spawns would sync it.
 // A test that needs one sets it in the env it spawns with (test/e2e.test.ts).
 for (const name of ["CLAUDE_PROJECT_DIR", "SKILLETOR_PROJECT_DIR"]) delete process.env[name];
+
+// On Windows os.homedir() reads USERPROFILE and ignores HOME, so a test that sets only HOME for
+// a spawned CLI still had it sync into the developer's real profile (~/.claude/skilletor.json,
+// skills, agents, ~/.codex). Every test process gets a throwaway home of its own there instead;
+// tests that want a specific one pass it through homeEnv() (test/helpers/harness.ts).
+if (process.platform === "win32") {
+  const home = mkdtempSync(join(tmpdir(), "skilletor-test-home-"));
+  process.env.USERPROFILE = home;
+  process.env.HOME = home;
+  delete process.env.HOMEDRIVE;
+  delete process.env.HOMEPATH;
+}

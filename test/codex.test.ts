@@ -14,6 +14,7 @@ import { State } from "../src/state.ts";
 import { SKILL_GITIGNORE } from "../src/gitignore.ts";
 import { hashBuffer } from "../src/fsutil.ts";
 import { parse as parseToml } from "smol-toml";
+import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
 function env(harnesses: Harness[]) {
   const tmp = makeTmpDir();
@@ -84,8 +85,8 @@ test("both harnesses: one skill is installed twice, rendered with its harness", 
     });
     e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
     await sync(e.ctx, { scope: "user" });
-    assert.match(readFileSync(join(e.home, ".claude/skills/foo/SKILL.md"), "utf8"), new RegExp(`for claude in ${join(e.home, ".claude")}`));
-    assert.match(readFileSync(join(e.home, ".agents/skills/foo/SKILL.md"), "utf8"), new RegExp(`for codex in ${join(e.home, ".agents")}`));
+    assert.ok(readFileSync(join(e.home, ".claude/skills/foo/SKILL.md"), "utf8").includes(`for claude in ${join(e.home, ".claude")}`));
+    assert.ok(readFileSync(join(e.home, ".agents/skills/foo/SKILL.md"), "utf8").includes(`for codex in ${join(e.home, ".agents")}`));
     const lock = readLock(join(e.home, ".claude/skilletor.lock.json"));
     assert.deepEqual(Object.keys(lock).sort(), ["codex:skills/foo", "skills/foo"]);
   } finally {
@@ -378,7 +379,7 @@ test("user agents follow CODEX_HOME, even outside the home directory", async () 
 });
 
 // k67 (spec §6.3): Codex roots follow the same link rules through the same apply.
-test("k67: a linked ~/.agents/skills/<name> is a conflict; a linked managed .local. TOML is replaced as a file", async () => {
+test("k67: a linked ~/.agents/skills/<name> is a conflict; a linked managed .local. TOML is replaced as a file", { skip: NO_SYMLINKS }, async () => {
   const e = env(["codex"]);
   try {
     const src = source(e.tmp.dir, "s", {
@@ -918,7 +919,7 @@ test("project rules: .codex/skilletor-rules.md, gitignored there; <repo>/AGENTS.
   }
 });
 
-test("a symlinked AGENTS.md is never written through: one warning, the rules file is still written", async () => {
+test("a symlinked AGENTS.md is never written through: one warning, the rules file is still written", { skip: NO_SYMLINKS }, async () => {
   const e = env(["claude", "codex"]);
   try {
     writeFileSync(join(e.projectDir, "CLAUDE.md"), "shared\n");
@@ -1121,7 +1122,7 @@ test("migration: old AGENTS.md rule sections become the rules file plus the poin
 // into, Claude would be sent to the Codex rules.
 const SAME_FILE = /AGENTS\.md is the same file as (\.claude\/)?CLAUDE\.md \(Claude Code would read it\); pointer to the Codex rules not written/;
 
-test("k46: CLAUDE.md -> AGENTS.md with Claude a target: pointer refused, --force too; rules file written", async () => {
+test("k46: CLAUDE.md -> AGENTS.md with Claude a target: pointer refused, --force too; rules file written", { skip: NO_SYMLINKS }, async () => {
   const layouts: [string, (p: string) => void][] = [
     ["CLAUDE.md symlink", (p) => symlinkSync("AGENTS.md", join(p, "CLAUDE.md"))],
     [".claude/CLAUDE.md symlink", (p) => symlinkSync("../AGENTS.md", join(p, ".claude", "CLAUDE.md"))],
@@ -1147,7 +1148,7 @@ test("k46: CLAUDE.md -> AGENTS.md with Claude a target: pointer refused, --force
   }
 });
 
-test("k46: a dangling CLAUDE.md -> AGENTS.md is refused too (the pointer would create it)", async () => {
+test("k46: a dangling CLAUDE.md -> AGENTS.md is refused too (the pointer would create it)", { skip: NO_SYMLINKS }, async () => {
   const e = env(["claude", "codex"]);
   try {
     symlinkSync("AGENTS.md", join(e.projectDir, "CLAUDE.md"));
@@ -1162,7 +1163,7 @@ test("k46: a dangling CLAUDE.md -> AGENTS.md is refused too (the pointer would c
   }
 });
 
-test("k46: CLAUDE.md -> AGENTS.md without Claude as a target: the pointer is written", async () => {
+test("k46: CLAUDE.md -> AGENTS.md without Claude as a target: the pointer is written", { skip: NO_SYMLINKS }, async () => {
   const e = env(["codex"]);
   try {
     writeFileSync(join(e.projectDir, "AGENTS.md"), "shared\n");
@@ -1178,7 +1179,7 @@ test("k46: CLAUDE.md -> AGENTS.md without Claude as a target: the pointer is wri
   }
 });
 
-test("k46: user scope ~/.claude/CLAUDE.md -> $CODEX_HOME/AGENTS.md: pointer untouched, rules file follows", async () => {
+test("k46: user scope ~/.claude/CLAUDE.md -> $CODEX_HOME/AGENTS.md: pointer untouched, rules file follows", { skip: NO_SYMLINKS }, async () => {
   const e = env(["claude", "codex"]);
   try {
     const src = source(e.tmp.dir, "s", { "rules/r.md": "R.\n" });

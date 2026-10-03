@@ -298,6 +298,9 @@ export class State {
       const code = errCode(err);
       if (code === "ENOENT") return true;
       if (code === "ENOTEMPTY" || code === "EEXIST") return false; // another waiter broke it
+      // Windows answers EPERM both for that and for a dir another process holds open; either
+      // way this waiter cannot move it, and a live holder keeps refreshing it.
+      if (code === "EPERM" && process.platform === "win32") return false;
       throw err;
     }
   }

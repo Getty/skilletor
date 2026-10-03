@@ -8,7 +8,7 @@ import { LocalSource, expandHome } from "../src/sources/local.ts";
 
 test("expandHome expands ~ and ~/path against the given home", () => {
   assert.equal(expandHome("~", "/home/x"), "/home/x");
-  assert.equal(expandHome("~/dev/skills", "/home/x"), "/home/x/dev/skills");
+  assert.equal(expandHome("~/dev/skills", "/home/x"), join("/home/x", "dev", "skills"));
   assert.equal(expandHome("/abs", "/home/x"), "/abs");
   assert.equal(expandHome("./rel", "/home/x"), "./rel");
 });

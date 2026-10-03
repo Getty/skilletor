@@ -4676,11 +4676,11 @@ var require_globals = __commonJS({
         }
       };
     }
-    function _joiner(sep5) {
-      sep5 = sep5 || ",";
+    function _joiner(sep6) {
+      sep6 = sep6 || ",";
       var first = true;
       return function() {
-        var val = first ? "" : sep5;
+        var val = first ? "" : sep6;
         first = false;
         return val;
       };
@@ -4710,8 +4710,8 @@ var require_globals = __commonJS({
         cycler: function cycler() {
           return _cycler(Array.prototype.slice.call(arguments));
         },
-        joiner: function joiner(sep5) {
-          return _joiner(sep5);
+        joiner: function joiner(sep6) {
+          return _joiner(sep6);
         }
       };
     }
@@ -5747,7 +5747,7 @@ import { join as join16 } from "node:path";
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname as hostname2, platform, userInfo } from "node:os";
 import { existsSync as existsSync11, readFileSync as readFileSync11, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync5 } from "node:fs";
-import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative4, resolve as resolvePath5, sep as sep4 } from "node:path";
+import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative4, resolve as resolvePath5, sep as sep5 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -5756,7 +5756,10 @@ import { join as join2 } from "node:path";
 // src/fsutil.ts
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync, rmSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
+function toPosix(p) {
+  return sep === "/" ? p : p.split(sep).join("/");
+}
 function hashBuffer(buf) {
   return "sha256:" + createHash("sha256").update(buf).digest("hex");
 }
@@ -6654,12 +6657,14 @@ var FALLBACK_NAME = "source";
 function normalizeName(raw) {
   return raw.toLowerCase().replace(/\.git$/, "").replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
 }
+var WIN32 = process.platform === "win32";
 function basename2(path) {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(WIN32 ? /[\\/]/ : "/").filter(Boolean);
   return parts.length ? parts[parts.length - 1] : path;
 }
 function isLocal(spec) {
-  return spec.startsWith("/") || spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("~");
+  if (spec.startsWith("/") || spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("~")) return true;
+  return WIN32 && (/^[A-Za-z]:[\\/]/.test(spec) || spec.startsWith("\\\\") || /^\.\.?\\/.test(spec));
 }
 var SCHEME = /^[a-z][a-z0-9+.-]*:(?=\/\/)/i;
 function hasScheme(spec) {
@@ -7543,7 +7548,9 @@ import { existsSync as existsSync3, statSync as statSync2 } from "node:fs";
 import { join as join5 } from "node:path";
 function expandHome(path, home) {
   if (path === "~") return home;
-  if (path.startsWith("~/")) return join5(home, path.slice(2));
+  if (path.startsWith("~/") || process.platform === "win32" && path.startsWith("~\\")) {
+    return join5(home, path.slice(2));
+  }
   return path;
 }
 var LocalSource = class {
@@ -7576,6 +7583,7 @@ import { createHash as createHash2 } from "node:crypto";
 import { existsSync as existsSync4, lstatSync as lstatSync3, mkdirSync as mkdirSync2, readdirSync, rmSync as rmSync2 } from "node:fs";
 import { join as join6, resolve as resolvePath } from "node:path";
 var DEFAULT_TIMEOUT_MS = 6e4;
+var CHECKOUT_AS_IS = process.platform === "win32" ? ["-c", "core.autocrlf=false", "-c", "core.eol=lf", "-c", "core.longpaths=true"] : [];
 var ORIGIN_REFSPEC = "+refs/heads/*:refs/remotes/origin/*";
 var CacheRejected = class extends Error {
 };
@@ -7593,7 +7601,7 @@ var GitSource = class {
     return new Promise((resolvePromise, reject) => {
       execFile(
         "git",
-        args,
+        [...CHECKOUT_AS_IS, ...args],
         {
           cwd: cwd || void 0,
           timeout: timeoutMs ?? this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -7806,7 +7814,7 @@ function samePrefix(a, b) {
 // src/sources/url.ts
 import { createHash as createHash3 } from "node:crypto";
 import { existsSync as existsSync5, lstatSync as lstatSync4, mkdirSync as mkdirSync3, mkdtempSync, readFileSync as readFileSync3, readdirSync as readdirSync2, renameSync as renameSync2, rmSync as rmSync3, writeFileSync as writeFileSync2 } from "node:fs";
-import { dirname as dirname2, join as join7, resolve as resolvePath2, sep } from "node:path";
+import { dirname as dirname2, join as join7, resolve as resolvePath2, sep as sep2 } from "node:path";
 import { gunzipSync } from "node:zlib";
 var TarError = class extends Error {
   name = "TarError";
@@ -8037,7 +8045,7 @@ function writeEntries(dir, entries) {
   const root = resolvePath2(dir);
   for (const e of entries) {
     const dest = resolvePath2(join7(dir, e.name));
-    if (dest !== root && !dest.startsWith(root + sep)) {
+    if (dest !== root && !dest.startsWith(root + sep2)) {
       throw new TarError(`unsafe tar entry (escapes target): ${e.name}`);
     }
     if (e.type === "dir") {
@@ -8051,12 +8059,12 @@ function writeEntries(dir, entries) {
 
 // src/catalog.ts
 import { existsSync as existsSync7, lstatSync as lstatSync5, readFileSync as readFileSync5, readdirSync as readdirSync3 } from "node:fs";
-import { basename as basename3, isAbsolute, join as join9, relative } from "node:path";
+import { basename as basename3, isAbsolute, join as join9, posix as posix2, relative } from "node:path";
 
 // src/gitignore.ts
 import { execFileSync } from "node:child_process";
 import { existsSync as existsSync6, readFileSync as readFileSync4, rmSync as rmSync4 } from "node:fs";
-import { join as join8 } from "node:path";
+import { join as join8, posix } from "node:path";
 var BEGIN2 = "# >>> skilletor >>>";
 var END2 = "# <<< skilletor <<<";
 var SKILL_GITIGNORE = '# installed by skilletor, not committed ("gitignore": false in skilletor.json to commit)\n*\n';
@@ -8109,7 +8117,7 @@ function hasBlock(dir) {
   }
 }
 function skillGitignorePath(name) {
-  return join8("skills", name, ".gitignore");
+  return posix.join("skills", name, ".gitignore");
 }
 function withSkillGitignore(output, name) {
   const out = new Map(output);
@@ -8173,7 +8181,7 @@ function walkFiles(dir, sourceDir) {
     const p = join9(dir, entry);
     const st = noSymlink(p);
     if (st.isDirectory()) out.push(...walkFiles(p, sourceDir));
-    else if (st.isFile()) out.push(relative(sourceDir, p));
+    else if (st.isFile()) out.push(toPosix(relative(sourceDir, p)));
   }
   return out.sort();
 }
@@ -8213,8 +8221,8 @@ function skillFile(dir) {
 function skillItem(dir, skillDir, file, files = walkFiles(skillDir, dir)) {
   const have = new Set(files);
   const twice = files.filter((f) => !f.endsWith(".njk") && have.has(`${f}.njk`));
-  const item = { type: "skill", name: basename3(skillDir), files, dir: relative(dir, skillDir) };
-  if (!twice.includes(relative(dir, file))) item.description = descriptionOf(file);
+  const item = { type: "skill", name: basename3(skillDir), files, dir: toPosix(relative(dir, skillDir)) };
+  if (!twice.includes(toPosix(relative(dir, file)))) item.description = descriptionOf(file);
   if (twice.length > 0) item.error = twice.map((f) => `both ${f} and ${f}.njk exist`).join("; ");
   return item;
 }
@@ -8241,7 +8249,7 @@ function scan(dir) {
         if (!st.isFile()) continue;
         const name = itemName(entry);
         if (name === void 0) continue;
-        byName.set(name, [...byName.get(name) ?? [], relative(dir, p)]);
+        byName.set(name, [...byName.get(name) ?? [], toPosix(relative(dir, p))]);
       }
     }
     for (const [name, files] of byName) {
@@ -8298,13 +8306,13 @@ function claudeItem(dir, typeDir, entry, type) {
     if (!file) return void 0;
     const files = walkFiles(p, dir);
     const gitignore = join9(p, ".gitignore");
-    if (files.includes(relative(dir, gitignore)) && readFileSync5(gitignore, "utf8") === SKILL_GITIGNORE) return void 0;
+    if (files.includes(toPosix(relative(dir, gitignore))) && readFileSync5(gitignore, "utf8") === SKILL_GITIGNORE) return void 0;
     return skillItem(dir, p, file, files);
   }
   if (!st.isFile()) return void 0;
   const name = itemName(entry);
   if (name === void 0 || name.startsWith(LOCAL_PREFIX2)) return void 0;
-  return { type, name, description: descriptionOf(p), files: [relative(dir, p)], dir: relative(dir, typeDir) };
+  return { type, name, description: descriptionOf(p), files: [toPosix(relative(dir, p))], dir: toPosix(relative(dir, typeDir)) };
 }
 function pluginSkills(dir, found) {
   const pdir = join9(dir, ".claude-plugin");
@@ -8326,10 +8334,10 @@ function pluginSkills(dir, found) {
     throw new CatalogError(`${p}: "skills" must be a string or an array of strings`);
   }
   const dirOf = /* @__PURE__ */ new Map();
-  for (const it of found) if (it.type === "skill") dirOf.set(it.name, it.dir ?? join9("skills", it.name));
+  for (const it of found) if (it.type === "skill") dirOf.set(it.name, it.dir ?? posix2.join("skills", it.name));
   const out = [];
   const add = (skillDir, file) => {
-    const rel = relative(dir, skillDir);
+    const rel = toPosix(relative(dir, skillDir));
     const name = basename3(skillDir);
     const known = dirOf.get(name);
     if (known === rel) return;
@@ -8396,7 +8404,7 @@ function scanBundles(dir) {
     if (!m) continue;
     const p = join9(bdir, entry);
     if (!noSymlink(p).isFile()) continue;
-    byName.set(m[1], [...byName.get(m[1]) ?? [], relative(dir, p)]);
+    byName.set(m[1], [...byName.get(m[1]) ?? [], toPosix(relative(dir, p))]);
   }
   const out = [];
   for (const [name, files] of byName) {
@@ -8434,7 +8442,7 @@ function readSourceMeta(dir) {
 // src/render.ts
 var import_nunjucks = __toESM(require_nunjucks(), 1);
 import { readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
-import { join as join10, relative as relative2, resolve as resolvePath3, sep as sep2 } from "node:path";
+import { join as join10, posix as posix3, resolve as resolvePath3, sep as sep3 } from "node:path";
 var RenderError = class extends Error {
   name = "RenderError";
 };
@@ -8444,7 +8452,7 @@ function makeLoader(root) {
     async: false,
     getSource(name) {
       const path = resolvePath3(base, name);
-      if (path !== base && !path.startsWith(base + sep2)) {
+      if (path !== base && !path.startsWith(base + sep3)) {
         throw new RenderError(`template escapes source root: ${name}`);
       }
       let src;
@@ -8492,12 +8500,12 @@ function executables(item, sourceDir) {
 }
 function installPath(item, file) {
   if (item.dir === void 0) return file;
-  const into = item.type === "skill" ? join10("skills", item.name) : `${item.type}s`;
-  return join10(into, relative2(item.dir, file));
+  const into = item.type === "skill" ? posix3.join("skills", item.name) : `${item.type}s`;
+  return posix3.join(into, posix3.relative(item.dir, file));
 }
 var FRONTMATTER = /^\s*---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
 function rendersEmpty(item, output) {
-  const src = item.type === "skill" ? join10(item.dir ?? join10("skills", item.name), "SKILL.md") : join10(item.dir ?? `${item.type}s`, `${item.name}.md`);
+  const src = item.type === "skill" ? posix3.join(item.dir ?? posix3.join("skills", item.name), "SKILL.md") : posix3.join(item.dir ?? `${item.type}s`, `${item.name}.md`);
   if (!item.files.includes(`${src}.njk`) || item.files.includes(src)) return false;
   const text = output.get(installPath(item, src))?.toString("utf8");
   if (text === void 0) return false;
@@ -8506,7 +8514,7 @@ function rendersEmpty(item, output) {
 
 // src/apply.ts
 import { existsSync as existsSync8, lstatSync as lstatSync6, readFileSync as readFileSync8, readdirSync as readdirSync4, rmdirSync, rmSync as rmSync6 } from "node:fs";
-import { dirname as dirname3, join as join11, relative as relative3, resolve as resolvePath4, sep as sep3 } from "node:path";
+import { dirname as dirname3, join as join11, relative as relative3, resolve as resolvePath4, sep as sep4 } from "node:path";
 
 // src/lock.ts
 import { readFileSync as readFileSync7, rmSync as rmSync5 } from "node:fs";
@@ -8742,7 +8750,7 @@ function withVia(entry, it) {
 }
 function safeJoin(root, rel) {
   const abs = resolvePath4(join11(root, rel));
-  if (abs !== root && !abs.startsWith(root + sep3)) {
+  if (abs !== root && !abs.startsWith(root + sep4)) {
     throw new ApplyError(`path escapes target: ${rel}`);
   }
   return abs;
@@ -8761,7 +8769,7 @@ function lstatOrUndefined(abs) {
   }
 }
 function inspect(root, rel, own) {
-  const parts = relative3(root, safeJoin(root, rel)).split(sep3);
+  const parts = relative3(root, safeJoin(root, rel)).split(sep4);
   const ownParts = own.split("/");
   const under2 = parts.length > ownParts.length && ownParts.every((p, i) => p === parts[i]);
   const first = under2 ? ownParts.length - 1 : parts.length - 1;
@@ -8804,7 +8812,7 @@ function removeFile(abs, dirsTouched) {
 function pruneEmptyDirs(dirs, root) {
   const sorted = [...dirs].sort((a, b) => b.length - a.length);
   for (let dir of sorted) {
-    while (dir !== root && dir.startsWith(root + sep3)) {
+    while (dir !== root && dir.startsWith(root + sep4)) {
       const st = lstatOrUndefined(dir);
       if (!st?.isDirectory() || readdirSync4(dir).length > 0) break;
       rmdirSync(dir);
@@ -9032,6 +9040,7 @@ var State = class {
       const code = errCode(err);
       if (code === "ENOENT") return true;
       if (code === "ENOTEMPTY" || code === "EEXIST") return false;
+      if (code === "EPERM" && process.platform === "win32") return false;
       throw err;
     }
   }
@@ -9449,7 +9458,7 @@ function checkedVersion(read, backend, lock, name) {
 function userClaudeEntries(claudeDir, stateRoot) {
   const rel = relative4(claudeDir, stateRoot);
   const under2 = rel !== "" && !rel.startsWith("..") && !isAbsolute2(rel);
-  return ["skilletor.lock.json", ...under2 ? [rel.split(sep4).join("/") + "/"] : [], ...LOCAL_ENTRIES];
+  return ["skilletor.lock.json", ...under2 ? [rel.split(sep5).join("/") + "/"] : [], ...LOCAL_ENTRIES];
 }
 function gitRemote(dir) {
   try {
@@ -9825,7 +9834,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   }
   const labelOf = (abs) => {
     const rel = relative4(base, abs);
-    return rel.startsWith("..") || isAbsolute2(rel) ? abs : rel;
+    return rel.startsWith("..") || isAbsolute2(rel) ? abs : toPosix(rel);
   };
   const result = apply(plan, {
     targetDir,
@@ -9914,7 +9923,7 @@ function projectInUse(targetDir, lock) {
 function scopeLabel(scope, base, abs) {
   const rel = relative4(base, abs);
   if (rel.startsWith("..") || isAbsolute2(rel)) return abs;
-  const shown = rel.split(sep4).join("/");
+  const shown = rel.split(sep5).join("/");
   return scope === "user" ? `~/${shown}` : shown;
 }
 function trackedWarnings(ctx, scope, base, written) {
@@ -10799,6 +10808,7 @@ function installedSet(ctx, config) {
 // src/hooks.ts
 import { execFileSync as execFileSync4, spawn } from "node:child_process";
 import { readFileSync as readFileSync12 } from "node:fs";
+import { resolve as resolvePath6 } from "node:path";
 var SESSION_START_TIMEOUT_MS = 5e3;
 var DEFAULT_INTERVAL = 600;
 function projectKeyOf(ctx, input) {
@@ -10823,7 +10833,7 @@ function projectRootOf(cwd) {
       timeout: 2e3,
       env: gitEnv()
     }).trim();
-    return top || cwd;
+    return top ? resolvePath6(top) : cwd;
   } catch {
     return cwd;
   }

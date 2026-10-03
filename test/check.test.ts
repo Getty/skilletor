@@ -10,12 +10,14 @@ import {
   existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
 import { check, status, sync } from "../src/engine.ts";
 import { cmdTrust } from "../src/commands.ts";
 import { readLock } from "../src/lock.ts";
 import { runHook, type HookContext } from "../src/hooks.ts";
+import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
 function env() {
   const tmp = makeTmpDir();
@@ -66,7 +68,7 @@ function gitSource(root: string, name: string, files: Record<string, string>) {
   execFileSync("git", ["init", "-q", "-b", "main", "--bare", bare], { env: GIT_ENV });
   mkdirSync(work, { recursive: true });
   git("init", "-q", "-b", "main");
-  const url = "file://" + realpathSync(bare);
+  const url = pathToFileURL(realpathSync(bare)).href;
   const push = (next: Record<string, string>): string => {
     writeFiles(work, next);
     git("add", ".");
@@ -383,7 +385,7 @@ test("k71: a session-start sync that fails midway warns; the next session resume
 // `check` quiet about it; once the link is gone, a sync that fails again leaves the entry
 // partial – and `check` must count that again, though no source moved and nothing else
 // differs, so the next session finishes it.
-test("k71: a sync that fails midway clears the unreached record; check counts the partial entry again", async () => {
+test("k71: a sync that fails midway clears the unreached record; check counts the partial entry again", { skip: NO_SYMLINKS }, async () => {
   const e = env();
   try {
     const repo = gitSource(e.tmp.dir, "g", { "skills/foo/SKILL.md": SKILL("foo"), "rules/r.md": "R\n", "agents/a.md": "---\nname: a\n---\nA\n" });
@@ -491,7 +493,7 @@ test("k80: a recorded version counts only for the backend that read it; a remove
     assert.equal((await e.session()).systemMessage, "skilletor: 1 warning(s)");
     assert.deepEqual(await e.session(), {});
 
-    for (const g of [{ git: "file://" + realpathSync(mirror) }, { git: "file://" + realpathSync(mirror), ref: "main" }]) {
+    for (const g of [{ git: pathToFileURL(realpathSync(mirror)).href }, { git: pathToFileURL(realpathSync(mirror)).href, ref: "main" }]) {
       declare(g);
       assert.deepEqual((await check(e.ctx)).sources, [{ name: "g", scope: "user", changed: true }], JSON.stringify(g));
       assert.equal((await e.session()).systemMessage, "skilletor: 1 warning(s)", JSON.stringify(g));

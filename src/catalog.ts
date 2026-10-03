@@ -33,7 +33,8 @@
 // which both install as `f`, carries an error naming every such pair – in `.claude/`
 // too, where one skill directory has no "which item wins" question (k113).
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
-import { basename, isAbsolute, join, relative } from "node:path";
+import { basename, isAbsolute, join, posix, relative } from "node:path";
+import { toPosix } from "./fsutil.ts";
 import type { ItemType } from "./config.ts";
 import { BundleError, parseBundle, type BundleDef } from "./bundles.ts";
 import { SKILL_GITIGNORE } from "./gitignore.ts";
@@ -101,7 +102,7 @@ function walkFiles(dir: string, sourceDir: string): string[] {
     const p = join(dir, entry);
     const st = noSymlink(p);
     if (st.isDirectory()) out.push(...walkFiles(p, sourceDir));
-    else if (st.isFile()) out.push(relative(sourceDir, p));
+    else if (st.isFile()) out.push(toPosix(relative(sourceDir, p)));
   }
   return out.sort();
 }
@@ -151,8 +152,8 @@ function skillFile(dir: string): string | undefined {
 function skillItem(dir: string, skillDir: string, file: string, files = walkFiles(skillDir, dir)): CatalogItem {
   const have = new Set(files);
   const twice = files.filter((f) => !f.endsWith(".njk") && have.has(`${f}.njk`));
-  const item: CatalogItem = { type: "skill", name: basename(skillDir), files, dir: relative(dir, skillDir) };
-  if (!twice.includes(relative(dir, file))) item.description = descriptionOf(file);
+  const item: CatalogItem = { type: "skill", name: basename(skillDir), files, dir: toPosix(relative(dir, skillDir)) };
+  if (!twice.includes(toPosix(relative(dir, file)))) item.description = descriptionOf(file);
   if (twice.length > 0) item.error = twice.map((f) => `both ${f} and ${f}.njk exist`).join("; ");
   return item;
 }
@@ -185,7 +186,7 @@ export function scan(dir: string): Catalog {
         if (!st.isFile()) continue;
         const name = itemName(entry);
         if (name === undefined) continue;
-        byName.set(name, [...(byName.get(name) ?? []), relative(dir, p)]);
+        byName.set(name, [...(byName.get(name) ?? []), toPosix(relative(dir, p))]);
       }
     }
     // Both `<name>.md` and `<name>.md.njk` is an error of that item, like a bundle's `.yaml`
@@ -264,13 +265,13 @@ function claudeItem(dir: string, typeDir: string, entry: string, type: ItemType)
     if (!file) return undefined;
     const files = walkFiles(p, dir);
     const gitignore = join(p, ".gitignore");
-    if (files.includes(relative(dir, gitignore)) && readFileSync(gitignore, "utf8") === SKILL_GITIGNORE) return undefined;
+    if (files.includes(toPosix(relative(dir, gitignore))) && readFileSync(gitignore, "utf8") === SKILL_GITIGNORE) return undefined;
     return skillItem(dir, p, file, files);
   }
   if (!st.isFile()) return undefined;
   const name = itemName(entry);
   if (name === undefined || name.startsWith(LOCAL_PREFIX)) return undefined;
-  return { type, name, description: descriptionOf(p), files: [relative(dir, p)], dir: relative(dir, typeDir) };
+  return { type, name, description: descriptionOf(p), files: [toPosix(relative(dir, p))], dir: toPosix(relative(dir, typeDir)) };
 }
 
 /** Skills listed in `.claude-plugin/plugin.json` `skills` that `found` does not
@@ -296,10 +297,10 @@ function pluginSkills(dir: string, found: CatalogItem[]): CatalogItem[] {
   }
 
   const dirOf = new Map<string, string>(); // skill name -> its dir, relative to the source
-  for (const it of found) if (it.type === "skill") dirOf.set(it.name, it.dir ?? join("skills", it.name));
+  for (const it of found) if (it.type === "skill") dirOf.set(it.name, it.dir ?? posix.join("skills", it.name));
   const out: CatalogItem[] = [];
   const add = (skillDir: string, file: string) => {
-    const rel = relative(dir, skillDir);
+    const rel = toPosix(relative(dir, skillDir));
     const name = basename(skillDir);
     const known = dirOf.get(name);
     if (known === rel) return;
@@ -374,7 +375,7 @@ function scanBundles(dir: string): CatalogBundle[] {
     if (!m) continue;
     const p = join(bdir, entry);
     if (!noSymlink(p).isFile()) continue;
-    byName.set(m[1]!, [...(byName.get(m[1]!) ?? []), relative(dir, p)]);
+    byName.set(m[1]!, [...(byName.get(m[1]!) ?? []), toPosix(relative(dir, p))]);
   }
   const out: CatalogBundle[] = [];
   for (const [name, files] of byName) {

@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
 import { check, status, sync } from "../src/engine.ts";
@@ -85,7 +86,7 @@ function gitSource(root: string, name: string, files: Record<string, string>) {
   execFileSync("git", ["init", "-q", "-b", "main", "--bare", bare], { env: GIT_ENV });
   mkdirSync(work, { recursive: true });
   git("init", "-q", "-b", "main");
-  const url = "file://" + realpathSync(bare);
+  const url = pathToFileURL(realpathSync(bare)).href;
   const push = (next: Record<string, string>): string => {
     writeFiles(work, next);
     git("add", ".");

@@ -9,6 +9,7 @@ import { scan, CatalogError } from "../src/catalog.ts";
 import { sync, type EngineContext } from "../src/engine.ts";
 import { readLock } from "../src/lock.ts";
 import type { Harness } from "../src/config.ts";
+import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
 const SKILL = (n: string, body = "BODY") => `---\nname: ${n}\ndescription: ${n} skill\n---\n${body}\n`;
 
@@ -119,7 +120,7 @@ test("a plugin.json whose top level is not an object is ignored", () => {
   }
 });
 
-test("a dangling symlink on a listed path is reported as a symlink", () => {
+test("a dangling symlink on a listed path is reported as a symlink", { skip: NO_SYMLINKS }, () => {
   const s = makeSource({}, { skills: ["gone"] });
   try {
     symlinkSync(join(s.dir, "nowhere"), join(s.dir, "gone"));
@@ -167,7 +168,7 @@ test("every invalid plugin.json makes the source unresolvable", () => {
   }
 });
 
-test("symlinks on a listed path are rejected: the path itself, a parent, plugin.json", () => {
+test("symlinks on a listed path are rejected: the path itself, a parent, plugin.json", { skip: NO_SYMLINKS }, () => {
   const outside = makeTmpDir();
   try {
     mkdirSync(join(outside.dir, "evil"), { recursive: true });

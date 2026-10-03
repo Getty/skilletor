@@ -5,7 +5,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildToString } from "../scripts/esbuild.config.mjs";
-import { claudeOnlyEnv } from "./helpers/harness.ts";
+import { claudeOnlyEnv, homeEnv } from "./helpers/harness.ts";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 
 let tmp: TmpDir;
@@ -366,7 +366,7 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
   writeFileSync(join(repo, ".claude", "skilletor.json"), JSON.stringify({ install: { skills: ["bar@s"] } }));
   writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } }, install: { agents: ["helper@s"], rules: ["style@s"] } }));
   execFileSync("git", ["init", "-q", "-b", "main", repo]);
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, CODEX_HOME: codexHome };
+  const env: NodeJS.ProcessEnv = { ...process.env, ...homeEnv(home), CODEX_HOME: codexHome };
   delete env.CLAUDE_PROJECT_DIR;
   delete env.SKILLETOR_PROJECT_DIR;
 
@@ -736,7 +736,8 @@ test("k87: status, source list and trust show a project source's address escaped
 
   const list = runCli(["source", "list", ...p.common], p.env);
   assert.equal(list.status, 0, list.stderr);
-  assert.equal(list.stdout, `team [project] {"local":"${p.payload}${SHOWN}"}\n`);
+  // The address as JSON writes it: a Windows path's backslashes doubled.
+  assert.equal(list.stdout, `team [project] {"local":${JSON.stringify(p.payload).slice(0, -1)}${SHOWN}"}\n`);
 
   const trust = runCli(["trust", "team", ...p.common], p.env);
   assert.equal(trust.status, 0, trust.stderr);

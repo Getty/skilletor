@@ -6,6 +6,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
+import { pathToFileURL } from "node:url";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
 import { loadConfig, ConfigError } from "../src/config.ts";
@@ -16,6 +17,7 @@ import { GitSource } from "../src/sources/git.ts";
 import { UrlSource } from "../src/sources/url.ts";
 import { State } from "../src/state.ts";
 import { sync, check, type EngineContext } from "../src/engine.ts";
+import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
 function ctx(vars: Record<string, unknown> = {}): RenderContext {
   return {
@@ -103,7 +105,7 @@ test("apply rejects an output path that escapes the target", () => {
 
 // ---- symlink rejection across source kinds ----------------------------------
 
-test("a symlink in a local source is rejected", () => {
+test("a symlink in a local source is rejected", { skip: NO_SYMLINKS }, () => {
   const tmp = makeTmpDir();
   try {
     mkdirSync(join(tmp.dir, "skills", "x"), { recursive: true });
@@ -115,7 +117,7 @@ test("a symlink in a local source is rejected", () => {
   }
 });
 
-test("a symlink committed in a git source is rejected after resolve", async () => {
+test("a symlink committed in a git source is rejected after resolve", { skip: NO_SYMLINKS }, async () => {
   const tmp = makeTmpDir();
   try {
     const G = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
@@ -128,9 +130,9 @@ test("a symlink committed in a git source is rejected after resolve", async () =
     symlinkSync("/etc/passwd", join(work, "skills/x/leak"));
     execFileSync("git", ["add", "."], { cwd: work, env: { ...process.env, ...G } });
     execFileSync("git", ["commit", "-qm", "x"], { cwd: work, env: { ...process.env, ...G } });
-    execFileSync("git", ["push", "-q", "file://" + resolvePath(bare), "main"], { cwd: work, env: { ...process.env, ...G } });
+    execFileSync("git", ["push", "-q", pathToFileURL(resolvePath(bare)).href, "main"], { cwd: work, env: { ...process.env, ...G } });
 
-    const src = new GitSource({ url: "file://" + resolvePath(bare), cacheRoot: join(tmp.dir, "cache") });
+    const src = new GitSource({ url: pathToFileURL(resolvePath(bare)).href, cacheRoot: join(tmp.dir, "cache") });
     const loc = await src.resolve();
     assert.throws(() => scan(loc.dir), (e: unknown) => e instanceof CatalogError);
   } finally {

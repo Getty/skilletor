@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join, resolve as resolvePath } from "node:path";
+import { pathToFileURL } from "node:url";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
 import { sync, check, status, type EngineContext } from "../src/engine.ts";
@@ -12,6 +13,7 @@ import { readLock } from "../src/lock.ts";
 import { SKILL_GITIGNORE } from "../src/gitignore.ts";
 import { hashBuffer } from "../src/fsutil.ts";
 import { GitSource } from "../src/sources/git.ts";
+import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
 function env() {
   const tmp = makeTmpDir();
@@ -299,7 +301,7 @@ test("k62: a foreign file at an agent's or rule's plain path is a conflict; --fo
   }
 });
 
-test("k62: a hand-written or linked skill of the same name gets no .gitignore; --force adopts it with one", async () => {
+test("k62: a hand-written or linked skill of the same name gets no .gitignore; --force adopts it with one", { skip: NO_SYMLINKS }, async () => {
   const e = env();
   try {
     const src = filesSource(e.tmp.dir, "k62g", { "skills/foo/SKILL.md": SKILL_MD, "skills/bar/SKILL.md": SKILL_MD });
@@ -337,7 +339,7 @@ test("k62: a hand-written or linked skill of the same name gets no .gitignore; -
 
 // k67 (audit probe 03): a linked foreign skill in ~/.claude/skills gets nothing written
 // through the link, not even files it does not have yet (spec §6.3).
-test("k67: a linked skill dir in the user scope: conflict at the link, nothing written through it; --force replaces the link", async () => {
+test("k67: a linked skill dir in the user scope: conflict at the link, nothing written through it; --force replaces the link", { skip: NO_SYMLINKS }, async () => {
   const e = env();
   try {
     const src = filesSource(e.tmp.dir, "k67", { "skills/foo/SKILL.md": SKILL_MD, "skills/foo/reference.md": "NEW SOURCE FILE\n" });
@@ -1001,7 +1003,7 @@ test("offline git source falls back to the cache and keeps the item", async () =
     writeFileSync(join(work, "skills/foo/SKILL.md"), "---\ndescription: foo\n---\nGIT-BODY\n");
     execFileSync("git", ["add", "."], { cwd: work, env: { ...process.env, ...G } });
     execFileSync("git", ["commit", "-qm", "init"], { cwd: work, env: { ...process.env, ...G } });
-    const url = "file://" + resolvePath(bare);
+    const url = pathToFileURL(resolvePath(bare)).href;
     execFileSync("git", ["push", "-q", url, "main"], { cwd: work, env: { ...process.env, ...G } });
 
     e.writeCfg("user", { sources: { g: { git: url } }, install: { skills: ["foo@g"] } });
@@ -1027,7 +1029,7 @@ test("k69: a pinned git source offline with only a URL-wide cache keeps its item
   execFileSync("git", ["init", "-q", "-b", "main", "--bare", bare]);
   mkdirSync(join(work, "skills", "foo"), { recursive: true });
   git("init", "-q", "-b", "main");
-  const url = "file://" + resolvePath(bare);
+  const url = pathToFileURL(resolvePath(bare)).href;
   const commit = (body: string) => {
     writeFileSync(join(work, "skills/foo/SKILL.md"), `---\ndescription: foo\n---\n${body}\n`);
     git("add", ".");
@@ -1511,7 +1513,7 @@ test("status tells a skipped item from one that is not installed, also when offl
 
 // k44: a project dir that is the home dir (session started in ~, or ~ is a git
 // checkout) must not read ~/.claude/skilletor.json a second time as project config.
-test("a project dir equal to home has no project scope (sync, check, status)", async () => {
+test("a project dir equal to home has no project scope (sync, check, status)", { skip: NO_SYMLINKS }, async () => {
   const e = env();
   try {
     const src = localSource(e.tmp.dir, "srcH", "foo", "FOO");
@@ -1942,7 +1944,7 @@ test("a foreign entry served by a file:// git source", async () => {
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: work });
     execFileSync("git", ["add", "."], { cwd: work, env: { ...process.env, ...G } });
     execFileSync("git", ["commit", "-qm", "init"], { cwd: work, env: { ...process.env, ...G } });
-    const url = "file://" + resolvePath(bare);
+    const url = pathToFileURL(resolvePath(bare)).href;
     execFileSync("git", ["push", "-q", url, "main"], { cwd: work, env: { ...process.env, ...G } });
 
     const own = bundleSource(e.tmp.dir, "gown", { b: `description: B\nrules: [g1@${url}]\n` });

@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
+import { pathToFileURL } from "node:url";
 import { claudeOnlyEnv } from "./helpers/harness.ts";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 import { buildToString } from "../scripts/esbuild.config.mjs";
@@ -50,7 +51,7 @@ test("full lifecycle: add, install, update, re-render, author mode, uninstall", 
     git(work, "init", "-q", "-b", "main");
     git(work, "add", ".");
     git(work, "commit", "-qm", "init");
-    const url = "file://" + resolvePath(bare);
+    const url = pathToFileURL(resolvePath(bare)).href;
     git(work, "push", "-q", url, "main");
 
     const run = (args: string[], input?: string) =>
