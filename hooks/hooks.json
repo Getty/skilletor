@@ -6,7 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor hook session-start",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor",
+            "args": ["hook", "session-start"],
             "timeout": 30
           }
         ]
@@ -17,7 +18,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor hook user-prompt-submit",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor",
+            "args": ["hook", "user-prompt-submit"],
             "timeout": 10
           }
         ]

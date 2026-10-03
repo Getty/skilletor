@@ -672,6 +672,12 @@ sync lock`; run it again.
 ## Requirements
 
 - Node.js ≥ 18 and `git`. The only bundled runtime dependency is Nunjucks.
+- Windows: the same, without Git Bash. Claude Code starts the hooks through
+  `bin/skilletor.exe`, a small launcher next to the sh script that runs the bundle with
+  the first `node.exe` on `PATH` (without one it exits silently). It is also the
+  `skilletor` command in PowerShell and cmd once `bin/` is on `PATH`. Sources are checked
+  out with the repository's line endings, whatever `core.autocrlf` says, so a project
+  synced on Windows and on Linux gets the same files and lock.
 
 ## License
 

@@ -1,5 +1,9 @@
 #!/bin/sh
 # skilletor launcher: require Node.js >= 18, then run the bundled CLI.
+#
+# On Windows, Claude Code and PowerShell/cmd start bin/skilletor.exe (winlaunch)
+# instead, which runs the bundle with the first node.exe on PATH:
+# winlaunch: run node {root}/dist/skilletor.js
 set -eu
 
 if ! command -v node >/dev/null 2>&1; then
