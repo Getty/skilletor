@@ -10,7 +10,7 @@
 // under `skills/<name>/`, an agent's or rule's file under `agents/` or `rules/`,
 // wherever the item sits in the source (spec §4.1).
 import { readFileSync } from "node:fs";
-import { join, relative, resolve as resolvePath, sep } from "node:path";
+import { join, posix, relative, resolve as resolvePath, sep } from "node:path";
 import nunjucks from "nunjucks";
 import type { Harness, ItemType } from "./config.ts";
 import type { CatalogItem } from "./catalog.ts";
@@ -93,8 +93,9 @@ export function build(
  *  `dir` the item lives where it installs. */
 function installPath(item: CatalogItem, file: string): string {
   if (item.dir === undefined) return file;
-  const into = item.type === "skill" ? join("skills", item.name) : `${item.type}s`;
-  return join(into, relative(item.dir, file));
+  // Paths inside an item are "/"-separated on every platform (catalog.ts).
+  const into = item.type === "skill" ? posix.join("skills", item.name) : `${item.type}s`;
+  return posix.join(into, posix.relative(item.dir, file));
 }
 
 /** A leading YAML frontmatter block (after optional whitespace), closed by `---`. */
@@ -107,8 +108,8 @@ const FRONTMATTER = /^\s*---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
  */
 export function rendersEmpty(item: CatalogItem, output: Map<string, Buffer>): boolean {
   const src = item.type === "skill"
-    ? join(item.dir ?? join("skills", item.name), "SKILL.md")
-    : join(item.dir ?? `${item.type}s`, `${item.name}.md`);
+    ? posix.join(item.dir ?? posix.join("skills", item.name), "SKILL.md")
+    : posix.join(item.dir ?? `${item.type}s`, `${item.name}.md`);
   if (!item.files.includes(`${src}.njk`) || item.files.includes(src)) return false;
   const text = output.get(installPath(item, src))?.toString("utf8");
   if (text === undefined) return false;

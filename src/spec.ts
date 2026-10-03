@@ -36,14 +36,18 @@ function normalizeName(raw: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-/** Last non-empty path segment. */
+const WIN32 = process.platform === "win32";
+
+/** Last non-empty path segment; on Windows "\" separates segments too. */
 function basename(path: string): string {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(WIN32 ? /[\\/]/ : "/").filter(Boolean);
   return parts.length ? parts[parts.length - 1]! : path;
 }
 
 function isLocal(spec: string): boolean {
-  return spec.startsWith("/") || spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("~");
+  if (spec.startsWith("/") || spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("~")) return true;
+  // Windows: a drive path (C:\x, C:/x), a UNC path, or .\x and ..\x.
+  return WIN32 && (/^[A-Za-z]:[\\/]/.test(spec) || spec.startsWith("\\\\") || /^\.\.?\\/.test(spec));
 }
 
 function hasScheme(spec: string): boolean {

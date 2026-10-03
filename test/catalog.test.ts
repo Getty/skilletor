@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { scan, CatalogError } from "../src/catalog.ts";
+import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
 /** Build a representative source tree; returns its dir. */
 function makeSource(): { dir: string; cleanup: () => void } {
@@ -111,7 +112,7 @@ test("missing or empty type directories are fine", () => {
   }
 });
 
-test("a symlink in the source is rejected", () => {
+test("a symlink in the source is rejected", { skip: NO_SYMLINKS }, () => {
   const tmp = makeTmpDir();
   try {
     mkdirSync(join(tmp.dir, "skills", "real"), { recursive: true });

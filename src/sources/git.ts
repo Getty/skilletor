@@ -33,6 +33,15 @@ export interface GitSourceOptions {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+/** Git for Windows installs with core.autocrlf=true: a cache checked out there carried CRLF,
+ *  every installed file differed from the same source on Linux, and a project synced on both
+ *  reported updates on each switch. There the cache holds the repository's bytes, as git gives
+ *  them on Linux and macOS, where nothing is added. core.longpaths: without it git stops at
+ *  260 characters, which a source's deep tree under ~/.claude/skilletor/cache reaches. */
+const CHECKOUT_AS_IS = process.platform === "win32"
+  ? ["-c", "core.autocrlf=false", "-c", "core.eol=lf", "-c", "core.longpaths=true"]
+  : [];
+
 /** The fetch refspec `git remote add` gives `origin`. */
 const ORIGIN_REFSPEC = "+refs/heads/*:refs/remotes/origin/*";
 
@@ -57,7 +66,7 @@ export class GitSource implements Source {
     return new Promise((resolvePromise, reject) => {
       execFile(
         "git",
-        args,
+        [...CHECKOUT_AS_IS, ...args],
         {
           cwd: cwd || undefined,
           timeout: timeoutMs ?? this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,

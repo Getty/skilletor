@@ -10,8 +10,14 @@ export function claudeOnly(home: string): HarnessMarkers {
   return { claude: [home], codex: [] };
 }
 
+/** The variables that name the home directory: HOME, and on Windows USERPROFILE, which is
+ *  what os.homedir() reads there. */
+export function homeEnv(home: string): NodeJS.ProcessEnv {
+  return process.platform === "win32" ? { HOME: home, USERPROFILE: home } : { HOME: home };
+}
+
 /** Env for a spawned CLI whose HOME looks like a Claude-only machine. */
 export function claudeOnlyEnv(home: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   writeFileSync(join(home, ".claude.json"), "{}\n");
-  return { ...process.env, HOME: home, CODEX_HOME: join(home, ".no-codex"), ...extra };
+  return { ...process.env, ...homeEnv(home), CODEX_HOME: join(home, ".no-codex"), ...extra };
 }

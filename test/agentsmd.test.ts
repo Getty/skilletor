@@ -10,6 +10,7 @@ import {
   BlockError, codexHookTrusted, inspectAgentsMd, parseBlock, parseRulesFile, pointerLines, projectDocLimit, rulesFileText,
   withBlock, type Section,
 } from "../src/agentsmd.ts";
+import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
 const A: Section = { name: "a", source: "s", text: "Rule A.\n" };
 const B: Section = { name: "b", source: "t", text: "Applies when working with files matching: `x`.\n\nRule B.\n" };
@@ -106,7 +107,7 @@ test("malformed markers are a BlockError", () => {
   }
 });
 
-test("inspect refuses symlinks, directories and malformed markers; a missing file is fine", () => {
+test("inspect refuses symlinks, directories and malformed markers; a missing file is fine", { skip: NO_SYMLINKS }, () => {
   const tmp = makeTmpDir();
   try {
     const f = join(tmp.dir, "AGENTS.md");

@@ -13,7 +13,7 @@
 // names (k91).
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { atomicWrite } from "./fsutil.ts";
 import { gitEnv } from "./gitenv.ts";
 
@@ -102,7 +102,7 @@ export function hasBlock(dir: string): boolean {
 
 /** Where skilletor's `.gitignore` of the skill `name` goes, relative to the skills' root. */
 export function skillGitignorePath(name: string): string {
-  return join("skills", name, ".gitignore");
+  return posix.join("skills", name, ".gitignore");
 }
 
 /** `output` of a skill named `name` with skilletor's `.gitignore` at the skill's root,

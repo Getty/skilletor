@@ -1,7 +1,13 @@
 // Small filesystem helpers shared by the engine.
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync, rmSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
+
+/** `p` with "/" between its parts: the form of every path inside an item, a lock key or a
+ *  `.gitignore` line, on Windows too. The identity where the separator already is "/". */
+export function toPosix(p: string): string {
+  return sep === "/" ? p : p.split(sep).join("/");
+}
 
 /** sha256 of a buffer, as "sha256:<hex>". */
 export function hashBuffer(buf: Buffer): string {

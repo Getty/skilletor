@@ -12,11 +12,14 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve as resolvePath } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 import { makeTarGz } from "./helpers/tar.ts";
 import { GitSource, sweepGitCache } from "../src/sources/git.ts";
 import { UrlSource } from "../src/sources/url.ts";
 import { sync, type EngineContext } from "../src/engine.ts";
+import { NO_SYMLINKS } from "./helpers/symlink.ts";
+import { toPosix } from "../src/fsutil.ts";
 
 const G = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, env: G, encoding: "utf8" }).trim();
@@ -29,7 +32,7 @@ function makeRepo(tmp: TmpDir) {
   git(tmp.dir, "init", "-q", "-b", "main", "--bare", bare);
   mkdirSync(join(work, "skills/foo"), { recursive: true });
   git(work, "init", "-q", "-b", "main");
-  const url = "file://" + resolvePath(bare);
+  const url = pathToFileURL(resolvePath(bare)).href;
   const commit = (body: string, files: Record<string, string | null> = {}, branch = "main") => {
     writeFileSync(join(work, "skills/foo/SKILL.md"), `---\ndescription: foo\n---\n${body}\n`);
     for (const [rel, data] of Object.entries(files)) {
@@ -115,7 +118,7 @@ test("k84: a sync clears the lock files a killed git left in its cache; the fetc
 // the checkout; a url cache's tree even when it carries files named like git's locks; a
 // repo in a dir not named like a cache; a `.git` or refs dir that is a symlink. The cache
 // still resolves afterwards.
-test("k84: the sweep removes stale git lock files in git caches and nothing else", async (t) => {
+test("k84: the sweep removes stale git lock files in git caches and nothing else", { skip: NO_SYMLINKS }, async (t) => {
   const tmp = makeTmpDir();
   t.after(tmp.cleanup);
   const repo = makeRepo(tmp);
@@ -257,7 +260,7 @@ for (const killed of KILLED) {
       const sha = git(tmp.dir, "ls-remote", repo.url, "HEAD").split("\t")[0]!;
       const src = new GitSource({ url: repo.url, ref: pinned ? sha : undefined, cacheRoot: join(tmp.dir, "cache") });
       plantKilledCache((await src.resolve()).dir, repo.url, killed);
-      rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+      rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
       await assert.rejects(() => src.resolve(), (err: Error) => {
         assert.match(err.message, /^git source .* failed: git fetch/);
         assert.doesNotMatch(err.message, /using cache|cache rejected|rev-parse/);
@@ -298,7 +301,7 @@ test("k90: a cache whose origin names another address is pointed back at the sou
   repo.commit("FIRST");
   const src = new GitSource({ url: repo.url, cacheRoot: join(tmp.dir, "cache") });
   const first = await src.resolve();
-  git(first.dir, "remote", "set-url", "origin", "file://" + join(tmp.dir, "elsewhere.git"));
+  git(first.dir, "remote", "set-url", "origin", pathToFileURL(join(tmp.dir, "elsewhere.git")).href);
   repo.commit("SECOND");
   const second = await src.resolve();
   assert.equal(second.warning, undefined);
@@ -324,7 +327,7 @@ for (const outerOrigin of [false, true]) {
     writeFileSync(join(outer, "mine.txt"), "mine\n");
     git(outer, "add", ".");
     git(outer, "commit", "-qm", "mine");
-    if (outerOrigin) git(outer, "remote", "add", "origin", "file://" + join(tmp.dir, "dotfiles.git"));
+    if (outerOrigin) git(outer, "remote", "add", "origin", pathToFileURL(join(tmp.dir, "dotfiles.git")).href);
     const remotes = git(outer, "remote", "-v");
     const head = git(outer, "rev-parse", "HEAD");
 
@@ -339,7 +342,8 @@ for (const outerOrigin of [false, true]) {
     assert.equal(loc.warning, undefined);
     assert.equal(loc.dir, dir);
     assert.match(readFileSync(join(dir, "skills/foo/SKILL.md"), "utf8"), /FIRST/);
-    assert.equal(git(dir, "rev-parse", "--absolute-git-dir"), join(realpathSync(dir), ".git"));
+    // resolvePath: git writes C:/... on Windows
+    assert.equal(resolvePath(git(dir, "rev-parse", "--absolute-git-dir")), join(realpathSync(dir), ".git"));
   });
 }
 
@@ -378,7 +382,7 @@ function checkout(dir: string): Record<string, string> {
       const path = join(d, e.name);
       if (path === join(dir, ".git")) continue;
       if (e.isDirectory()) walk(path);
-      else out[relative(dir, path)] = readFileSync(path, "utf8");
+      else out[toPosix(relative(dir, path))] = readFileSync(path, "utf8");
     }
   };
   walk(dir);
@@ -409,7 +413,7 @@ for (const killed of KILLED_RESET) {
     plantKilledReset(first.dir, killed);
     assert.equal(`git:${git(first.dir, "rev-parse", "--short", "HEAD")}`, first.version, "fixture: HEAD is the old commit");
     assert.match(readFileSync(join(first.dir, "skills/foo/SKILL.md"), "utf8"), /SECOND/, "fixture: the checkout is the new one's");
-    rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+    rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
 
     const offline = await src.resolve();
     assert.match(offline.warning ?? "", /using cache/);
@@ -434,7 +438,7 @@ test("k92: a killed reset's leftover that .gitignore covers is not served offlin
   repo.commit("FIRST", { "skills/foo/notes.log": "notes\n" }); // adds that one file, nothing else
   plantKilledReset(first.dir, "while it wrote the checkout");
   assert.equal(git(first.dir, "status", "--porcelain"), "", "fixture: only an ignored file differs");
-  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+  rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
 
   const offline = await src.resolve();
   assert.match(offline.warning ?? "", /using cache/);
@@ -461,7 +465,7 @@ test("k92: a clean cache, remote unreachable, is served without a git write", as
   for (const p of paths) utimesSync(p, TEN_MINUTES_AGO(), TEN_MINUTES_AGO());
   const snapshot = () => paths.map((p) => [relative(gitDir, p), readFileSync(p, "latin1"), statSync(p).mtimeMs]);
   const before = snapshot();
-  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+  rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
 
   const offline = await src.resolve();
   assert.match(offline.warning ?? "", /using cache/);
@@ -504,7 +508,7 @@ test("k92: a checkout the fallback cannot bring back to HEAD is refused, not ser
   repo.commit("SECOND", SECOND_FILES);
   plantKilledReset(first.dir, "while it wrote the checkout");
   plant(join(first.dir, ".git/index.lock"), false);
-  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+  rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
 
   await assert.rejects(() => src.resolve(), (err: Error) => {
     assert.match(err.message, /^git source .* failed: git fetch [^]*; cache rejected \([^]*index\.lock/);

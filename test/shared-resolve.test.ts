@@ -8,10 +8,14 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, resolve as resolvePath } from "node:path";
+import { pathToFileURL } from "node:url";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 import { makeTarGz } from "./helpers/tar.ts";
 import { sync, type EngineContext } from "../src/engine.ts";
 import { readLock } from "../src/lock.ts";
+
+// The fetch counts come from a logging `git` on PATH, a sh script: Windows does not run it.
+const LOGGING_GIT = process.platform === "win32" && "the logging git on PATH is a sh script, which Windows does not run";
 
 const G = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, env: G, encoding: "utf8" }).trim();
@@ -25,7 +29,7 @@ function makeRepo(tmp: TmpDir) {
   git(tmp.dir, "init", "-q", "-b", "main", "--bare", bare);
   mkdirSync(work);
   git(work, "init", "-q", "-b", "main");
-  const url = "file://" + resolvePath(bare);
+  const url = pathToFileURL(resolvePath(bare)).href;
   const commit = (body: string) => {
     for (const s of SKILLS) {
       mkdirSync(join(work, "skills", s), { recursive: true });
@@ -94,7 +98,7 @@ function setup(t: TestContext) {
 // skill installed from the one commit, the lock records one version per cache) and the report
 // has no warning. The next sync, after upstream moved on, fetches each cache once more:
 // the sharing never outlives the run.
-test("k83: names sharing a git cache are fetched once per sync; the next sync fetches again", async (t) => {
+test("k83: names sharing a git cache are fetched once per sync; the next sync fetches again", { skip: LOGGING_GIT }, async (t) => {
   const e = setup(t);
   const repo = makeRepo(e.tmp);
   repo.commit("FIRST");
@@ -130,7 +134,7 @@ test("k83: names sharing a git cache are fetched once per sync; the next sync fe
 // in a sync of both scopes (the scopes run one after the other, never at once; the run's
 // one resolve serves both), both scopes install from it with no warning; a later sync
 // fetches again.
-test("k83: one sync of both scopes fetches a shared source once", async (t) => {
+test("k83: one sync of both scopes fetches a shared source once", { skip: LOGGING_GIT }, async (t) => {
   const e = setup(t);
   const repo = makeRepo(e.tmp);
   repo.commit("FIRST");
@@ -156,7 +160,7 @@ test("k83: one sync of both scopes fetches a shared source once", async (t) => {
 // Asserts: when the one fetch of a shared git cache fails (the remote is gone), each name is
 // served from the cache – its item kept, no error – and the report names the failure once,
 // not once per name.
-test("k83: a failed shared fetch serves every name from the cache with one warning", async (t) => {
+test("k83: a failed shared fetch serves every name from the cache with one warning", { skip: LOGGING_GIT }, async (t) => {
   const e = setup(t);
   const repo = makeRepo(e.tmp);
   repo.commit("FIRST");

@@ -22,7 +22,7 @@ import {
   codexHookTrusted, inspectAgentsMd, parseRulesFile, pointerLines, projectDocLimit, rulesFileText, RULES_FILE, withBlock,
   type Inspection, type Section,
 } from "./agentsmd.ts";
-import { atomicWrite, hashBuffer, sameFile, samePath } from "./fsutil.ts";
+import { atomicWrite, hashBuffer, sameFile, samePath, toPosix } from "./fsutil.ts";
 import { gitEnv } from "./gitenv.ts";
 import { convertForTarget } from "./convert.ts";
 import { expandHome, LocalSource } from "./sources/local.ts";
@@ -779,7 +779,7 @@ async function syncScopeRun(
   /** A path for the report: relative to the scope base when under it, else absolute. */
   const labelOf = (abs: string): string => {
     const rel = relative(base, abs);
-    return rel.startsWith("..") || isAbsolute(rel) ? abs : rel;
+    return rel.startsWith("..") || isAbsolute(rel) ? abs : toPosix(rel);
   };
 
   const result = apply(plan, {

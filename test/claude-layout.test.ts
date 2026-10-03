@@ -15,6 +15,7 @@ import { readLock } from "../src/lock.ts";
 import { SKILL_GITIGNORE } from "../src/gitignore.ts";
 import type { Harness } from "../src/config.ts";
 import { parse as parseToml } from "smol-toml";
+import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
 const SKILL = (n: string, body = "BODY") => `---\nname: ${n}\ndescription: ${n} skill\n---\n${body}\n`;
 const AGENT = (n: string, body = "prompt") => `---\nname: ${n}\ndescription: ${n} agent\n---\n${body}\n`;
@@ -162,7 +163,7 @@ const PUBLISHED: Record<string, string> = {
   "skilletor.json": JSON.stringify({ description: "Getty skills", vars: { k: true } }),
 };
 
-test("a source scans the same with a .claude tree added whose every item is skipped", () => {
+test("a source scans the same with a .claude tree added whose every item is skipped", { skip: NO_SYMLINKS }, () => {
   const baseline = makeSource(PUBLISHED);
   const outside = makeTmpDir();
   try {
@@ -238,7 +239,7 @@ test("a source scans the same with a .claude tree added whose every item is skip
   }
 });
 
-test("a .claude item that is skipped leaves its siblings offered", () => {
+test("a .claude item that is skipped leaves its siblings offered", { skip: NO_SYMLINKS }, () => {
   const outside = makeTmpDir();
   const s = makeSource({
     ".claude/skills/ok/SKILL.md": SKILL("ok"),

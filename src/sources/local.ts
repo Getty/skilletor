@@ -9,7 +9,9 @@ import type { Source, SourceLocation } from "./types.ts";
 /** Expand a leading `~` / `~/` against `home`; other paths pass through. */
 export function expandHome(path: string, home: string): string {
   if (path === "~") return home;
-  if (path.startsWith("~/")) return join(home, path.slice(2));
+  if (path.startsWith("~/") || (process.platform === "win32" && path.startsWith("~\\"))) {
+    return join(home, path.slice(2));
+  }
   return path;
 }
 

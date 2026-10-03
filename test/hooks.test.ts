@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
+import { pathToFileURL } from "node:url";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
 import { runHook, type HookContext, type HookOutput } from "../src/hooks.ts";
 import { State } from "../src/state.ts";
+import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
 function env() {
   const tmp = makeTmpDir();
@@ -39,7 +41,7 @@ function localSkill(root: string, srcName: string, skill: string): string {
 }
 
 // k67 (spec §6.3): the hook's sync never writes through a linked skill dir, and says so.
-test("session-start with a linked skill dir of the same name: a conflict warning, nothing written through it", async () => {
+test("session-start with a linked skill dir of the same name: a conflict warning, nothing written through it", { skip: NO_SYMLINKS }, async () => {
   const e = env();
   try {
     const src = localSkill(e.tmp.dir, "s", "foo");
@@ -509,7 +511,7 @@ function gitSource(root: string, files: Record<string, string>): string {
   git(work, "init", "-q", "-b", "main");
   git(work, "add", ".");
   git(work, "commit", "-qm", "init");
-  const url = "file://" + resolvePath(bare);
+  const url = pathToFileURL(resolvePath(bare)).href;
   git(work, "push", "-q", url, "main");
   return url;
 }
@@ -933,7 +935,8 @@ test("k87: a git failure's multi-line stderr stays one context line", async () =
 
 // Asserts: a Codex rules file that cannot be read, in a project directory whose name carries
 // EVIL, is named in the systemMessage escaped, on its one line.
-test("k87: codex session-start names an unreadable rules file escaped", async () => {
+// Windows allows no control characters in a file name: the project directory cannot exist there.
+test("k87: codex session-start names an unreadable rules file escaped", { skip: process.platform === "win32" && "control characters in a directory name" }, async () => {
   const e = env();
   try {
     e.writeUserCfg({});

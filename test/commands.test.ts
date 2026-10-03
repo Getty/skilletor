@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
+import { pathToFileURL } from "node:url";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
 import {
@@ -864,7 +865,7 @@ function gitRepo(root: string, name: string, rules: string[]): string {
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: work });
   execFileSync("git", ["add", "."], { cwd: work, env: G });
   execFileSync("git", ["commit", "-qm", "init"], { cwd: work, env: G });
-  const url = "file://" + resolvePath(bare);
+  const url = pathToFileURL(resolvePath(bare)).href;
   execFileSync("git", ["push", "-q", url, "main"], { cwd: work, env: G });
   return url;
 }

@@ -13,6 +13,7 @@
 // the Codex rules files, ahead of its report (spec §14.8).
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import { loadConfig, type Harness } from "./config.ts";
 import { State, SyncLockTimeoutError } from "./state.ts";
 import { gitEnv } from "./gitenv.ts";
@@ -73,7 +74,9 @@ export function projectRootOf(cwd: string): string {
       timeout: 2_000,
       env: gitEnv(),
     }).trim();
-    return top || cwd;
+    // resolve: git writes C:/x on Windows, where every other path here reads C:\x; the
+    // project's key would differ between the two. A no-op for git's absolute POSIX path.
+    return top ? resolvePath(top) : cwd;
   } catch {
     return cwd;
   }

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 import { GitSource } from "../src/sources/git.ts";
 
@@ -25,7 +26,7 @@ function makeRepo(tmp: TmpDir) {
   git(tmp.dir, "init", "-q", "-b", "main", "--bare", bare);
   mkdirSync(work);
   git(work, "init", "-q", "-b", "main");
-  const url = "file://" + resolvePath(bare);
+  const url = pathToFileURL(resolvePath(bare)).href;
   const commit = (content: string, msg: string) => {
     writeFileSync(join(work, "file.txt"), content);
     git(work, "add", ".");
@@ -116,7 +117,7 @@ test("offline fallback: uses the cache with a warning when the remote is gone", 
     const src = new GitSource({ url: repo.url, cacheRoot: join(tmp.dir, "cache") });
     const first = await src.resolve();
     // Remove the remote so fetch fails.
-    rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+    rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
     const second = await src.resolve();
     assert.equal(readFileSync(join(second.dir, "file.txt"), "utf8"), "cached");
     assert.equal(second.version, first.version);
@@ -151,7 +152,7 @@ test("offline pin A after resolving B still returns A, including its version", a
   const cacheRoot = join(tmp.dir, "cache");
   const first = await new GitSource({ url: repo.url, ref: a, cacheRoot }).resolve();
   const second = await new GitSource({ url: repo.url, ref: b, cacheRoot }).resolve();
-  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+  rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
   const offline = await new GitSource({ url: repo.url, ref: a, cacheRoot }).resolve();
   assert.equal(readFileSync(join(offline.dir, "file.txt"), "utf8"), "A");
   assert.equal(offline.dir, first.dir);
@@ -171,7 +172,7 @@ for (const existing of ["other pin", "legacy unpinned"] as const) {
     const other = await new GitSource({
       url: repo.url, ref: existing === "other pin" ? b : undefined, cacheRoot,
     }).resolve();
-    rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+    rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
     const missing = new GitSource({ url: repo.url, ref: a, cacheRoot });
     await assert.rejects(() => missing.resolve(), /git source .* failed/);
     assert.equal(readFileSync(join(other.dir, "file.txt"), "utf8"), "B");
@@ -190,7 +191,7 @@ for (const abbreviated of [false, true]) {
     // Simulate a stale/misplaced checkout in the expected cache directory.
     git(first.dir, "fetch", "-q", "origin", b);
     git(first.dir, "reset", "--hard", b);
-    rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+    rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
     await assert.rejects(() => src.resolve(), /does not match requested pin/);
   });
 }
@@ -231,7 +232,7 @@ test("branch, tag and default HEAD caches are independent; branch updates and of
   assert.equal(readFileSync(join(updated.dir, "file.txt"), "utf8"), "B");
   assert.equal(readFileSync(join(tagLoc.dir, "file.txt"), "utf8"), "A");
   assert.equal(readFileSync(join(defaultLoc.dir, "file.txt"), "utf8"), "A");
-  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+  rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
   for (const [src, previous, content] of [[tagged, tagLoc, "A"], [branch, updated, "B"], [unpinned, defaultLoc, "A"]] as const) {
     const offline = await src.resolve();
     assert.equal(offline.dir, previous.dir);
@@ -253,7 +254,7 @@ test("abbreviated SHA pins resolve online and retain their own offline snapshot"
   assert.equal(first.warning, undefined);
   assert.equal(git(first.dir, "rev-parse", "HEAD").trim(), a);
   await new GitSource({ url: repo.url, ref: b, cacheRoot }).resolve();
-  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+  rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
   const offline = await src.resolve();
   assert.equal(offline.version, first.version);
   assert.equal(git(offline.dir, "rev-parse", "HEAD").trim(), a);
@@ -273,7 +274,7 @@ test("a full SHA pin cache moved to another commit is refused offline, even with
   git(first.dir, "reflog", "expire", "--expire=now", "--all");
   git(first.dir, "gc", "-q", "--prune=now");
   assert.throws(() => git(first.dir, "cat-file", "-e", a), "fixture: the pinned object is gone");
-  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+  rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
   await assert.rejects(() => src.resolve(), /does not match requested pin/);
 });
 
@@ -289,7 +290,7 @@ for (const kind of ["tag", "branch"] as const) {
     const online = await src.resolve();
     assert.equal(online.warning, undefined);
     assert.equal(git(online.dir, "rev-parse", "HEAD").trim(), named);
-    rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+    rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
     const offline = await src.resolve();
     assert.equal(offline.version, online.version);
     assert.match(offline.warning ?? "", /using cache/);
@@ -314,7 +315,7 @@ test("check on a SHA pin: changed with nothing installed or another commit locke
     assert.equal(await src.check(lockedB), true, `${ref}: the lock holds another commit`);
     assert.equal(await src.check(locked), false, `${ref}: the lock holds the pin`);
   }
-  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+  rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
   assert.equal(await pinA.check(locked), false, "a held pin is decided without the remote");
 });
 
@@ -329,7 +330,7 @@ test("check on a tag named like a SHA prefix compares by name, like any other re
   const loc = await src.resolve();
   assert.equal(await src.check(loc.version), false);
   // The tag moves to B: the name now points elsewhere.
-  git(tmp.dir, "--git-dir", new URL(repo.url).pathname, "tag", "-f", "20260926", b);
+  git(tmp.dir, "--git-dir", fileURLToPath(repo.url), "tag", "-f", "20260926", b);
   assert.equal(await src.check(loc.version), true);
 });
 
@@ -397,7 +398,7 @@ for (const ref of [undefined, "0123456789abcdef0123456789abcdef01234567"]) {
   test(`without a cache, an unreachable ${ref ? "pinned" : "unpinned"} remote names the fetch error, no cache`, async (t) => {
     const tmp = makeTmpDir();
     t.after(tmp.cleanup);
-    const url = "file://" + join(tmp.dir, "does-not-exist.git");
+    const url = pathToFileURL(join(tmp.dir, "does-not-exist.git")).href;
     const src = new GitSource({ url, ref, cacheRoot: join(tmp.dir, "cache") });
     await assert.rejects(() => src.resolve(), (err: Error) => {
       assert.match(err.message, /^git source .* failed: git fetch/);
@@ -411,7 +412,7 @@ test("no cache and an unreachable remote is an error", async () => {
   const tmp = makeTmpDir();
   try {
     const src = new GitSource({
-      url: "file://" + join(tmp.dir, "does-not-exist.git"),
+      url: pathToFileURL(join(tmp.dir, "does-not-exist.git")).href,
       cacheRoot: join(tmp.dir, "cache"),
     });
     await assert.rejects(() => src.resolve());
@@ -467,7 +468,7 @@ test("k87: a git failure's message ends in git's last word, not its trailing new
   repo.commit("A", "first");
   const cacheRoot = join(tmp.dir, "cache");
   await new GitSource({ url: repo.url, cacheRoot }).resolve();
-  rmSync(new URL(repo.url).pathname, { recursive: true, force: true });
+  rmSync(fileURLToPath(repo.url), { recursive: true, force: true });
 
   const offline = await new GitSource({ url: repo.url, cacheRoot }).resolve();
   assert.match(offline.warning ?? "", /using cache \(git fetch .*: fatal: [^]*\S\)$/);

@@ -10,7 +10,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
 import { gitEnv } from "../src/gitenv.ts";
@@ -47,7 +47,7 @@ function makeRepo(tmp: TmpDir, name = "repo") {
   git(tmp.dir, "init", "-q", "-b", "main", "--bare", bare);
   mkdirSync(work);
   git(work, "init", "-q", "-b", "main");
-  const url = "file://" + resolvePath(bare);
+  const url = pathToFileURL(resolvePath(bare)).href;
   const commit = (text: string) => {
     writeFileSync(join(work, "file.txt"), `${text}\n`);
     writeFileSync(join(work, "theirs.txt"), `${text}\n`);
@@ -133,7 +133,8 @@ for (const which of ["GIT_DIR + GIT_WORK_TREE", "GIT_WORK_TREE + GIT_INDEX_FILE"
       assert.equal(git(loc.dir, "rev-parse", "HEAD"), want, "the cache holds another commit");
       assert.equal(loc.version, `git:${git(loc.dir, "rev-parse", "--short", "HEAD")}`);
       assert.equal(readFileSync(join(loc.dir, "file.txt"), "utf8"), step === "update" ? "SECOND\n" : "FIRST\n");
-      assert.equal(git(loc.dir, "rev-parse", "--absolute-git-dir"), join(realpathSync(loc.dir), ".git"));
+      // resolvePath: git writes C:/... on Windows
+      assert.equal(resolvePath(git(loc.dir, "rev-parse", "--absolute-git-dir")), join(realpathSync(loc.dir), ".git"));
       assert.equal(git(loc.dir, "status", "--porcelain", "--untracked-files=all"), "", "the cache is not clean");
     });
   }
@@ -169,7 +170,7 @@ test("k91: the add probe with GIT_DIR exported asks the address it was given", a
   t.after(tmp.cleanup);
   const repo = makeRepo(tmp);
   repo.commit("FIRST");
-  const missing = "file://" + join(tmp.dir, "missing.git");
+  const missing = pathToFileURL(join(tmp.dir, "missing.git")).href;
   const victim = makeVictim(tmp);
   git(victim.dir, "config", `url.${repo.url}.insteadOf`, missing);
   const probe = makeProbe(5_000);
@@ -224,7 +225,7 @@ test("k91: session-start from a project subdirectory with GIT_DIR exported finds
   mkdirSync(join(home, ".claude"), { recursive: true });
   mkdirSync(join(project, ".claude"));
   writeFileSync(join(home, ".claude", "skilletor.json"), "{}\n");
-  const team = "file://" + join(tmp.dir, "team.git");
+  const team = pathToFileURL(join(tmp.dir, "team.git")).href;
   writeFileSync(join(project, ".claude", "skilletor.json"),
     JSON.stringify({ sources: { team: { git: team } }, install: { skills: ["foo@team"] } }));
   const ctx: HookContext = {

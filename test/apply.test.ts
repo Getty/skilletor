@@ -7,9 +7,10 @@ import {
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { apply, type PlanItem } from "../src/apply.ts";
-import { hashBuffer } from "../src/fsutil.ts";
+import { hashBuffer, toPosix } from "../src/fsutil.ts";
 import { readLock } from "../src/lock.ts";
 import type { ItemType } from "../src/config.ts";
+import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
 const TYPE_DIR: Record<ItemType, string> = { skill: "skills", agent: "agents", rule: "rules" };
 
@@ -374,14 +375,14 @@ test("written lists the paths written or adopted with force, never unchanged one
 function snapshot(dir: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const e of readdirSync(dir, { recursive: true, withFileTypes: true })) {
-    if (e.isFile()) out[join(e.parentPath, e.name).slice(dir.length + 1)] = readFileSync(join(e.parentPath, e.name), "utf8");
+    if (e.isFile()) out[toPosix(join(e.parentPath, e.name).slice(dir.length + 1))] = readFileSync(join(e.parentPath, e.name), "utf8");
   }
   return out;
 }
 
 const isLink = (p: string) => lstatSync(p).isSymbolicLink();
 
-test("k67: a linked skill dir is a conflict; nothing is written through it, new files neither", () => {
+test("k67: a linked skill dir is a conflict; nothing is written through it, new files neither", { skip: NO_SYMLINKS }, () => {
   const tmp = makeTmpDir();
   try {
     const target = join(tmp.dir, ".claude");
@@ -413,7 +414,7 @@ test("k67: a linked skill dir is a conflict; nothing is written through it, new 
   }
 });
 
-test("k67: a skill dir that became a link is a conflict although the lock owns files in it; the entry stays", () => {
+test("k67: a skill dir that became a link is a conflict although the lock owns files in it; the entry stays", { skip: NO_SYMLINKS }, () => {
   const tmp = makeTmpDir();
   try {
     apply([item("skill", "moo", { "skills/moo/SKILL.md": "S", "skills/moo/old.md": "O" })], { targetDir: tmp.dir });
@@ -436,7 +437,7 @@ test("k67: a skill dir that became a link is a conflict although the lock owns f
   }
 });
 
-test("k67: a directory inside the skill that is a link is a conflict, for a write and for a removal", () => {
+test("k67: a directory inside the skill that is a link is a conflict, for a write and for a removal", { skip: NO_SYMLINKS }, () => {
   const tmp = makeTmpDir();
   try {
     apply([item("skill", "moo", { "skills/moo/SKILL.md": "S", "skills/moo/sub/x.md": "X" })], { targetDir: tmp.dir });
@@ -499,7 +500,7 @@ test("k67: a partial conflict in a plain directory blocks the whole item; the in
   }
 });
 
-test("k67: a linked file the lock owns is replaced as a file; its target is unchanged", () => {
+test("k67: a linked file the lock owns is replaced as a file; its target is unchanged", { skip: NO_SYMLINKS }, () => {
   const tmp = makeTmpDir();
   try {
     const plan = () => [item("agent", "a", { "agents/a.md": "A" }), item("agent", "b", { "agents/b.md": "B" }),
@@ -529,7 +530,7 @@ test("k67: a linked file the lock owns is replaced as a file; its target is unch
   }
 });
 
-test("k67: a linked file the lock does not own is a conflict, a dangling one too; --force replaces the link only", () => {
+test("k67: a linked file the lock does not own is a conflict, a dangling one too; --force replaces the link only", { skip: NO_SYMLINKS }, () => {
   const tmp = makeTmpDir();
   try {
     const theirs = join(tmp.dir, "theirs");
@@ -555,7 +556,7 @@ test("k67: a linked file the lock does not own is a conflict, a dangling one too
   }
 });
 
-test("k67: a claimed plain path that is a (dangling) link is a conflict; --force removes the link only", () => {
+test("k67: a claimed plain path that is a (dangling) link is a conflict; --force removes the link only", { skip: NO_SYMLINKS }, () => {
   const tmp = makeTmpDir();
   try {
     mkdirSync(join(tmp.dir, "agents"));
@@ -572,7 +573,7 @@ test("k67: a claimed plain path that is a (dangling) link is a conflict; --force
   }
 });
 
-test("k67: links above the item path (a type dir, the root itself) are the user's setup: written through", () => {
+test("k67: links above the item path (a type dir, the root itself) are the user's setup: written through", { skip: NO_SYMLINKS }, () => {
   const tmp = makeTmpDir();
   try {
     const dotfiles = join(tmp.dir, "dotfiles");
@@ -606,7 +607,7 @@ test("k67: links above the item path (a type dir, the root itself) are the user'
   }
 });
 
-test("k67: removal never deletes through a link at or below the item path; it is reported and the files stay", () => {
+test("k67: removal never deletes through a link at or below the item path; it is reported and the files stay", { skip: NO_SYMLINKS }, () => {
   const tmp = makeTmpDir();
   try {
     const plan = [item("skill", "moo", { "skills/moo/SKILL.md": "S" }), item("skill", "cow", { "skills/cow/SKILL.md": "C" })];
@@ -648,7 +649,7 @@ test("k67: a directory where the item has a file is a conflict, with --force too
   }
 });
 
-test("k67: Codex roots follow the same rules (.agents/skills/<name>, .codex/agents/.local.<name>.toml)", () => {
+test("k67: Codex roots follow the same rules (.agents/skills/<name>, .codex/agents/.local.<name>.toml)", { skip: NO_SYMLINKS }, () => {
   const tmp = makeTmpDir();
   try {
     const claude = join(tmp.dir, ".claude");
