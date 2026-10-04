@@ -3,7 +3,8 @@
 //
 // Detection looks only at markers the harness itself creates (never at
 // `~/.claude/` alone: skilletor's own config lives there). The layout table is
-// the seam later phases extend (Codex agents as TOML, rules in a rules file).
+// the seam later phases extend (Codex agents as TOML, rules in a rules file;
+// Hermes Agent, spec §16: skills only).
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { HARNESSES, type Harness, type ItemType } from "./config.ts";
@@ -14,12 +15,14 @@ export class TargetError extends Error {
   override name = "TargetError";
 }
 
-/** Where a scope's roots live: its base (`~` or the project root), and the Codex home. */
+/** Where a scope's roots live: its base (`~` or the project root), and the Codex and Hermes homes. */
 export interface RootContext {
   base: string;
   scope: "user" | "project";
   /** `$CODEX_HOME`; unset or empty means `<home>/.codex` (only the user scope uses it). */
   codexHome?: string;
+  /** The Hermes home (spec §16.2); unset or empty means `<home>/.hermes` (only the user scope uses it). */
+  hermesHome?: string;
 }
 
 export interface TargetLayout {
@@ -35,10 +38,19 @@ export interface TargetLayout {
   /** Types whose files install as `.local.<file>` (spec §6.3, §6.4): the fixed ignore
    *  pattern `agents/**\/.local.*` covers them, and the plain name stays claimed. */
   localTypes?: readonly ItemType[];
+  /** Types this harness also reads from another harness's project root (spec §16.2): while
+   *  that harness is an active target of a project scope, this one gets no copy of its own
+   *  there – the harness refuses a name it finds in both roots. */
+  projectVia?: Partial<Record<ItemType, Harness>>;
+  /** No root of this harness ever holds a skilletor `.gitignore` block (its items carry
+   *  their own): the roots stay out of the per-root block pass, so a `.gitignore` there is
+   *  never read or rewritten (spec §16.2). */
+  noGitignoreBlock?: true;
 }
 
 const under = (dir: string) => (r: RootContext) => join(r.base, dir);
 const codexHomeDir = (r: RootContext) => r.codexHome || join(r.base, ".codex");
+const hermesHomeDir = (r: RootContext) => r.hermesHome || join(r.base, ".hermes");
 
 export const LAYOUTS: Record<Harness, TargetLayout> = {
   claude: {
@@ -59,6 +71,15 @@ export const LAYOUTS: Record<Harness, TargetLayout> = {
     },
     blockTypes: ["rule"],
     localTypes: ["agent"],
+  },
+  // Skills only (spec §16): Hermes has no agent files and no rules directory. It reads
+  // `<repo>/.agents/skills` as well, where the Codex copy of a project skill lives.
+  hermes: {
+    harness: "hermes",
+    keyPrefix: "hermes:",
+    roots: { skill: (r) => (r.scope === "user" ? hermesHomeDir(r) : join(r.base, ".hermes")) },
+    projectVia: { skill: "codex" },
+    noGitignoreBlock: true,
   },
 };
 
@@ -92,19 +113,23 @@ export function lacksLocalPrefix(harness: Harness, type: ItemType, paths: string
   return paths.some((rel) => !rel.slice(Math.max(rel.lastIndexOf("/"), rel.lastIndexOf("\\")) + 1).startsWith(LOCAL_PREFIX));
 }
 
-/** Per harness: absolute paths whose existence means the harness is in use. */
-export type HarnessMarkers = Record<Harness, string[]>;
+/** Per harness: absolute paths whose existence means the harness is in use. A set without
+ *  `hermes` (one written before that target, spec §16.2) means Hermes is not in use. */
+export type HarnessMarkers = { claude: string[]; codex: string[]; hermes?: string[] };
 
-export function defaultMarkers(home: string, codexHome: string | undefined): HarnessMarkers {
+export function defaultMarkers(home: string, codexHome: string | undefined, hermesHome?: string): HarnessMarkers {
   const cx = codexHome || join(home, ".codex");
+  const hh = hermesHome || join(home, ".hermes");
   return {
     claude: [join(home, ".claude.json"), join(home, ".claude", "settings.json"), join(home, ".claude", "projects")],
     codex: ["config.toml", "auth.json", "sessions", "installation_id"].map((f) => join(cx, f)),
+    // What Hermes creates and skilletor never does (`skills/` is no marker: skilletor makes it).
+    hermes: ["config.yaml", ".env", "SOUL.md", "sessions"].map((f) => join(hh, f)),
   };
 }
 
 export function detectHarnesses(markers: HarnessMarkers): Harness[] {
-  return HARNESSES.filter((h) => markers[h].some((p) => existsSync(p)));
+  return HARNESSES.filter((h) => (markers[h] ?? []).some((p) => existsSync(p)));
 }
 
 export interface TargetSelection {
@@ -126,10 +151,10 @@ export function selectTargets(
   const machine = configured.user ?? detected;
   if (machine.length === 0) {
     const looked = markers
-      ? ` (looked for ${HARNESSES.map((h) => `${h}: ${markers[h].join(", ")}`).join("; ")})`
+      ? ` (looked for ${HARNESSES.filter((h) => markers[h]).map((h) => `${h}: ${markers[h]!.join(", ")}`).join("; ")})`
       : "";
     throw new TargetError(
-      `no agent harness detected${looked}; set "targets": ["claude"] and/or "codex" in ~/.claude/skilletor.json`,
+      `no agent harness detected${looked}; set "targets": ["claude"], "codex" and/or "hermes" in ~/.claude/skilletor.json`,
     );
   }
   const warnings: string[] = [];
@@ -186,16 +211,34 @@ export function rootOfKey(r: RootContext, key: string): string | undefined {
   return k.harness ? rootOf(r, k.harness, k.type) : undefined;
 }
 
+/**
+ * The active harnesses that get a copy of their own of a type in a scope (spec §14.2,
+ * §16.2): those that have a place for the type, minus one that reads the type from another
+ * active harness's project root (Hermes: a project skill through the Codex copy).
+ */
+export function receivers(active: Harness[], type: ItemType, scope: "user" | "project"): Harness[] {
+  return active.filter((h) => supports(h, type) && servedVia(active, h, type, scope) === undefined);
+}
+
+/** The other active harness whose copy of a type serves `harness` in a scope (spec §16.2), if any. */
+export function servedVia(
+  active: Harness[], harness: Harness, type: ItemType, scope: "user" | "project",
+): Harness | undefined {
+  const via = scope === "project" ? LAYOUTS[harness].projectVia?.[type] : undefined;
+  return via !== undefined && active.includes(via) ? via : undefined;
+}
+
 /** Is this harness's copy of the type a section of a managed block (spec §14.8)? */
 export function isBlockType(harness: Harness, type: ItemType): boolean {
   return LAYOUTS[harness].blockTypes?.includes(type) ?? false;
 }
 
-/** Every distinct root of a scope (for per-root gitignore blocks), the root of
- *  the Codex rules file included. */
+/** Every distinct root of a scope that can hold a gitignore block, the root of the Codex
+ *  rules file included; never a root of a harness without blocks (Hermes, spec §16.2). */
 export function allRoots(r: RootContext): string[] {
   const roots = new Set<string>();
   for (const h of HARNESSES) {
+    if (LAYOUTS[h].noGitignoreBlock) continue;
     for (const f of Object.values(LAYOUTS[h].roots)) if (f) roots.add(f(r));
   }
   return [...roots];
@@ -203,22 +246,26 @@ export function allRoots(r: RootContext): string[] {
 
 /**
  * Where the lock disagrees with the active targets (spec §14.3), one gap each: an entry
- * of an inactive (known) harness (`key` alone), or an item locked for one target but
- * missing for another active target that supports its type (`missing`: the key it lacks).
+ * of a (known) harness that gets no copy in this scope – inactive, or served by another
+ * harness's copy (spec §16.2) – (`key` alone), or an item locked for one target but missing
+ * for another active target that gets a copy of its type (`missing`: the key it lacks).
  */
-export function targetGaps(keys: string[], active: Harness[]): { key: string; missing?: string }[] {
+export function targetGaps(
+  keys: string[], active: Harness[], scope: "user" | "project" = "user",
+): { key: string; missing?: string }[] {
   const set = new Set(keys);
   const gaps: { key: string; missing?: string }[] = [];
   for (const key of keys) {
     const k = parseLockKey(key);
     if (!k.harness || !supports(k.harness, k.type)) continue; // kept untouched, never drift
-    if (!active.includes(k.harness)) {
+    const receiving = receivers(active, k.type, scope);
+    if (!receiving.includes(k.harness)) {
       gaps.push({ key });
       continue;
     }
-    for (const h of active) {
+    for (const h of receiving) {
       const missing = lockKey(h, k.target);
-      if (supports(h, k.type) && !set.has(missing)) gaps.push({ key, missing });
+      if (!set.has(missing)) gaps.push({ key, missing });
     }
   }
   return gaps;

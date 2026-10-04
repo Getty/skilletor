@@ -15,7 +15,7 @@ import {
   BundleError, entryMiss, expandBundle, matchEntry, matchesPattern, sameIdentity, type Chain,
 } from "./bundles.ts";
 import {
-  defaultMarkers, detectHarnesses, lockKey, parseLockKey, placeOutput, rootOf, rootOfKey, selectTargets, supports,
+  defaultMarkers, detectHarnesses, lockKey, parseLockKey, placeOutput, receivers, rootOf, rootOfKey, selectTargets, servedVia, supports,
   targetGaps, allRoots, isBlockType, lacksLocalPrefix, type HarnessMarkers, type RootContext, type TargetSelection,
 } from "./targets.ts";
 import {
@@ -58,6 +58,9 @@ export interface EngineContext {
   markers?: HarnessMarkers;
   /** `$CODEX_HOME` (spec §14.2): root of user-scope Codex agents and markers; default from the env. */
   codexHome?: string;
+  /** `$HERMES_HOME` (spec §16.2): root of user-scope Hermes skills and markers; default from
+   *  the env, else the home the last user-scope sync recorded, else `~/.hermes`. */
+  hermesHome?: string;
   /** Does a user-scope root lie inside a git work tree (spec §6.4)? Default: ask git. */
   isGitWorkTree?: (dir: string) => boolean;
   /** Which of `paths` (relative to the target root `dir`) does git track (spec §6.4)?
@@ -117,9 +120,40 @@ function codexHomeOf(ctx: EngineContext): string | undefined {
   return (ctx.codexHome ?? process.env.CODEX_HOME) || undefined;
 }
 
+/** The default Hermes home, `~/.hermes`. */
+function defaultHermesHome(ctx: EngineContext): string {
+  return join(ctx.home, ".hermes");
+}
+
+/** The Hermes home the user scope's `hermes:` entries were last synced under (spec §16.2):
+ *  the recorded one, else the default. Never throws. */
+function recordedHermesHome(ctx: EngineContext): string {
+  try {
+    return new State(ctx.stateRoot).hermesHome() ?? defaultHermesHome(ctx);
+  } catch {
+    return defaultHermesHome(ctx); // the state dir cannot be read
+  }
+}
+
+/**
+ * The Hermes home this run serves (spec §16.2): `$HERMES_HOME`, injected or from the
+ * environment – the plugin passes the session's –, else the recorded one, else `~/.hermes`.
+ * So a run no Hermes started (a Claude Code session) sees the same home, and with it the
+ * same targets and root, as the Hermes session before it.
+ */
+function hermesHomeOf(ctx: EngineContext): string {
+  const given = ctx.hermesHome ?? process.env.HERMES_HOME;
+  return given ? resolvePath(expandHome(given, ctx.home)) : recordedHermesHome(ctx);
+}
+
+/** Where a scope's roots live (spec §14.2, §16.2). */
+function rootContextOf(ctx: EngineContext, scope: ScopeName): RootContext {
+  return { base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx), hermesHome: hermesHomeOf(ctx) };
+}
+
 /** Active targets per scope (spec §14.1); throws a TargetError when none apply. */
 export function targetsOf(ctx: EngineContext, config: LoadedConfig): TargetSelection {
-  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx));
+  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx), hermesHomeOf(ctx));
   return selectTargets({ user: config.user.targets, project: config.project?.targets }, detectHarnesses(markers), markers);
 }
 
@@ -444,17 +478,63 @@ async function syncInner(ctx: EngineContext, opts: SyncOptions, state: State): P
   const sel = opts.scope ?? "all";
   const report: SyncReport = { scopes: [] };
   const resolveSource = runResolver(cacheRootOf(ctx), ctx.timeoutMs);
+  const noCopy: NoCopy[] = []; // what an active harness got no copy of, named once per run
   if (sel === "user" || sel === "all") {
-    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, resolveSource));
+    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, resolveSource, noCopy));
+    // The record lives while Hermes is a target (spec §16.2); its entries went with it.
+    if (!targets.user.includes("hermes")) state.putHermesHome(undefined);
   }
   if ((sel === "project" || sel === "all") && config.project) {
-    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, resolveSource);
+    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, resolveSource, noCopy);
     rep.warnings.unshift(...targets.warnings);
     report.scopes.push(rep);
   }
   const trust = hookTrustWarning(ctx, targets);
   if (trust) report.warnings = [trust];
+  const notes = runNotes(noCopy);
+  if (notes.length) report.notes = notes;
   return report;
+}
+
+/** A declared item an active harness gets no copy of (spec §16.3): the harness has no place
+ *  for the type, or reads another harness's copy in this scope. */
+interface NoCopy {
+  harness: Harness;
+  type: ItemType;
+  scope: ScopeName;
+  /** The harness whose copy serves this one; absent: no counterpart. */
+  via?: Harness;
+}
+
+const HARNESS_LABEL: Record<Harness, string> = { claude: "Claude Code", codex: "Codex", hermes: "Hermes" };
+
+/** Why a harness has no place for the types it lacks, in a note's words. */
+const NO_COUNTERPART: Partial<Record<Harness, string>> = { hermes: "Hermes has no agent files and no rules directory" };
+
+/** Where a harness reads the copy of another, in a note's words. */
+const SERVED_FROM: Partial<Record<Harness, string>> = { codex: ".agents/skills" };
+
+/**
+ * The run's notes (spec §16.3): one line per harness for the types it has no counterpart of,
+ * one per harness and scope for what another harness's copy serves, each with a count per type.
+ */
+function runNotes(noCopy: NoCopy[]): string[] {
+  const groups = new Map<string, { first: NoCopy; counts: Map<ItemType, number> }>();
+  for (const n of noCopy) {
+    const id = n.via === undefined ? n.harness : `${n.harness} ${n.scope} ${n.via}`;
+    const g = groups.get(id) ?? { first: n, counts: new Map<ItemType, number>() };
+    g.counts.set(n.type, (g.counts.get(n.type) ?? 0) + 1);
+    groups.set(id, g);
+  }
+  return [...groups.values()].map(({ first, counts }) => {
+    const label = HARNESS_LABEL[first.harness];
+    const what = (["skill", "agent", "rule"] as const).filter((t) => counts.has(t)).map((t) => `${counts.get(t)} ${t}(s)`).join(" and ");
+    if (first.via === undefined) {
+      return `${what} not installed for ${label} (${NO_COUNTERPART[first.harness] ?? `${label} has no counterpart`})`;
+    }
+    return `${what} not installed for ${label} in the ${first.scope} scope ` +
+      `(${label} reads the ${HARNESS_LABEL[first.via]} copy in ${SERVED_FROM[first.via] ?? "its own root"})`;
+  });
 }
 
 /**
@@ -484,9 +564,10 @@ async function syncScope(
   opts: SyncOptions,
   state: State,
   resolveSource: Resolver,
+  noCopy: NoCopy[],
 ): Promise<ScopeReport> {
   try {
-    return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource);
+    return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource, noCopy);
   } catch (err) {
     try {
       const lockPath = join(targetDirOf(ctx, scope), "skilletor.lock.json");
@@ -509,12 +590,14 @@ async function syncScopeRun(
   opts: SyncOptions,
   state: State,
   resolveSource: Resolver,
+  noCopy: NoCopy[],
 ): Promise<ScopeReport> {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
   const base = baseOf(ctx, scope);
-  const rc: RootContext = { base, scope, codexHome: codexHomeOf(ctx) };
+  const rc = rootContextOf(ctx, scope);
   const lockPath = join(targetDir, "skilletor.lock.json");
+  if (scope === "user") moveHermesHome(ctx, state, targetDir, rc, harnesses, rep.warnings);
   const oldLock = readLock(lockPath);
   const gitignoreOn = scopeCfg.gitignore !== false;
   // Read once, when the first item renders: every item renders with the same, and the record
@@ -577,8 +660,8 @@ async function syncScopeRun(
     catalogs.set(source, cat);
     return cat;
   };
-  /** The active harnesses that receive this type (spec §14.2). */
-  const harnessesFor = (type: ItemType) => harnesses.filter((h) => supports(h, type));
+  /** The active harnesses that get a copy of this type (spec §14.2, §16.2). */
+  const harnessesFor = (type: ItemType) => receivers(harnesses, type, scope);
   /** Keep the item's lock entries, for every active target, untouched. */
   const keepIfLocked = (target: string, type: ItemType) => {
     for (const h of harnessesFor(type)) {
@@ -592,6 +675,11 @@ async function syncScopeRun(
     extra: { bundleVars?: Record<string, unknown>; via?: string[] } = {},
   ) => {
     const targets = harnessesFor(item.type);
+    for (const h of harnesses) {
+      if (targets.includes(h)) continue;
+      const via = servedVia(harnesses, h, item.type, scope);
+      noCopy.push(via === undefined ? { harness: h, type: item.type, scope } : { harness: h, type: item.type, scope, via });
+    }
     if (targets.length === 0) return;
     for (const h of targets) {
       const key = lockKey(h, item.target);
@@ -1011,7 +1099,7 @@ function shellWord(s: string): string {
 /** Installed agents of a scope's lock whose declared briefing skills do not resolve
  *  (spec §6.7). Reads only the disk; a file that cannot be parsed is skipped. */
 function briefingOf(ctx: EngineContext, scope: ScopeName, lock: Lock, only?: Set<string>): BriefingMissing[] {
-  const rc: RootContext = { base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) };
+  const rc = rootContextOf(ctx, scope);
   const roots = { home: ctx.home, codexHome: codexHomeOf(ctx), projectDir: scope === "project" ? ctx.projectDir : undefined };
   const rootsOf = new Map<Harness, string[]>();
   const out: BriefingMissing[] = [];
@@ -1160,7 +1248,7 @@ export function codexRulesFiles(given: EngineContext): string[] {
   const scopes: ScopeName[] = ctx.projectDir ? ["user", "project"] : ["user"];
   for (const scope of scopes) {
     if (!("error" in loaded) && !loaded.targets[scope].includes("codex")) continue;
-    const file = join(rootOf({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }, "codex", "rule")!, RULES_FILE);
+    const file = join(rootOf(rootContextOf(ctx, scope), "codex", "rule")!, RULES_FILE);
     if (existsSync(file)) out.push(file);
   }
   return out;
@@ -1289,14 +1377,57 @@ function scopeDrift(
   servedBy?: Map<string, string[]>,
 ): Drift[] {
   const out: Drift[] = [];
-  // An entry of an inactive target goes; a copy an active target lacks is added (§14.3).
-  for (const g of targetGaps(Object.keys(lock), harnesses)) {
+  // An entry of a target that gets no copy goes; a copy an active target lacks is added (§14.3).
+  for (const g of targetGaps(Object.keys(lock), harnesses, scope)) {
     const source = lock[g.key]!.source;
     out.push(g.missing === undefined
       ? { kind: "targets", id: `orphan:${g.key}`, sources: [] }
       : { kind: "targets", id: `missing:${g.missing}@${source}`, sources: [source] });
   }
-  return [...out, ...layoutDrift(ctx, scope, scopeCfg, lock), ...declaredDrift(scopeCfg, harnesses, lock, servedBy)];
+  // The run's Hermes home is not the one the user scope was last synced under (spec §16.2):
+  // a sync moves the lock's Hermes entries there, or just records the home Hermes now uses.
+  if (scope === "user") {
+    const home = hermesHomeOf(ctx);
+    if (!samePath(home, recordedHermesHome(ctx)) && (harnesses.includes("hermes") || holdsHermes(lock))) {
+      out.push({ kind: "targets", id: `hermes-home:${home}`, sources: [] });
+    }
+  }
+  return [...out, ...layoutDrift(ctx, scope, scopeCfg, lock), ...declaredDrift(scopeCfg, scope, harnesses, lock, servedBy)];
+}
+
+/** Does a lock hold entries of the Hermes target? */
+function holdsHermes(lock: Lock): boolean {
+  return Object.keys(lock).some((key) => parseLockKey(key).harness === "hermes");
+}
+
+/**
+ * A user-scope sync under another Hermes home than the last (spec §16.2): the lock's Hermes
+ * entries are paths under the old home, so what it owns there is deleted and the entries are
+ * dropped – the sync then installs under the new home by the ordinary rules, and a file
+ * already there is never taken for skilletor's own. The new home is recorded before anything
+ * is installed under it: a sync that stops later leaves a lock and a record that agree. With
+ * Hermes no target and nothing to move, the record stays as it is.
+ */
+function moveHermesHome(
+  ctx: EngineContext, state: State, targetDir: string, rc: RootContext, harnesses: Harness[], warnings: string[],
+): void {
+  const previous = recordedHermesHome(ctx);
+  const current = hermesHomeOf(ctx);
+  if (samePath(previous, current)) return;
+  const lock = readLock(join(targetDir, "skilletor.lock.json"));
+  const moved = Object.keys(lock).filter((key) => parseLockKey(key).harness === "hermes");
+  if (moved.length === 0 && !harnesses.includes("hermes")) return;
+  if (moved.length > 0) {
+    const old: RootContext = { ...rc, hermesHome: previous };
+    apply([], {
+      targetDir,
+      keep: Object.keys(lock).filter((key) => !moved.includes(key)),
+      rootOf: (key) => rootOfKey(old, key) ?? targetDir,
+    });
+    warnings.push(`Hermes home changed from ${previous} to ${current}: ${moved.length} item(s) removed from the old home; ` +
+      "what is declared installs anew under the new one");
+  }
+  state.putHermesHome(samePath(current, defaultHermesHome(ctx)) ? undefined : current);
 }
 
 /**
@@ -1322,7 +1453,7 @@ function layoutDrift(ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig
     }
   }
   if (scope === "project" && !projectInUse(targetDirOf(ctx, scope), lock) &&
-    allRoots({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }).some((dir) => hasBlock(dir))) {
+    allRoots(rootContextOf(ctx, scope)).some((dir) => hasBlock(dir))) {
     out.push({ kind: "layout", id: "layout:unused-project", sources: [] });
   }
   return out;
@@ -1337,14 +1468,14 @@ function layoutDrift(ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig
  * Entries of inactive targets and unknown harnesses are target drift or kept, not this.
  */
 function declaredDrift(
-  scopeCfg: ScopeConfig, harnesses: Harness[], lock: Lock, servedBy?: Map<string, string[]>,
+  scopeCfg: ScopeConfig, scope: ScopeName, harnesses: Harness[], lock: Lock, servedBy?: Map<string, string[]>,
 ): Drift[] {
   const out: Drift[] = [];
   const drift = (id: string, sources: string[]) => out.push({ kind: "declared", id, sources });
   const explicit = new Set<string>();
   for (const item of scopeCfg.install) {
     explicit.add(item.target);
-    for (const h of harnesses.filter((x) => supports(x, item.type))) {
+    for (const h of receivers(harnesses, item.type, scope)) {
       const key = lockKey(h, item.target);
       if (lock[key]?.source !== item.source) drift(`missing:${key}@${item.source}`, [item.source]);
     }
@@ -1352,7 +1483,7 @@ function declaredDrift(
   const covered = new Set<WildcardItem | BundleItem>();
   for (const [key, entry] of Object.entries(lock)) {
     const k = parseLockKey(key);
-    if (!k.harness || !harnesses.includes(k.harness) || !supports(k.harness, k.type)) continue;
+    if (!k.harness || !receivers(harnesses, k.type, scope).includes(k.harness)) continue;
     const by = coverOf(scopeCfg, k, entry);
     for (const c of by) covered.add(c);
     if (by.length === 0 && !explicit.has(k.target)) drift(`orphan:${key}`, []);
@@ -1420,9 +1551,9 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
   for (const [scope, scopeCfg] of scopes) {
     const lock = readLock(join(targetDirOf(ctx, scope), "skilletor.lock.json"));
     const active = targets[scope];
-    // One row per declared item and active target that receives its type.
+    // One row per declared item and active target that gets a copy of its type.
     const rows = scopeCfg.install.flatMap((i) =>
-      active.filter((h) => supports(h, i.type)).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
+      receivers(active, i.type, scope).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
     const declaredKeys = new Set(rows.map((r) => r.key));
     const sourceVersions: Record<string, string> = {};
     for (const entry of Object.values(lock)) sourceVersions[entry.source] = entry.version;

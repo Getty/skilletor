@@ -1,6 +1,7 @@
 // Harness fixtures (spec §14.1): tests never detect the real machine's Claude
-// Code or Codex. In-process tests inject markers; spawned CLIs get a temp HOME
-// with a Claude marker and a CODEX_HOME that does not exist.
+// Code, Codex or Hermes. In-process tests inject markers; spawned CLIs get a temp HOME
+// with a Claude marker, a CODEX_HOME that does not exist and no HERMES_HOME (so the
+// Hermes home is the temp HOME's `.hermes`, which does not exist either).
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HarnessMarkers } from "../../src/targets.ts";
@@ -19,5 +20,6 @@ export function homeEnv(home: string): NodeJS.ProcessEnv {
 /** Env for a spawned CLI whose HOME looks like a Claude-only machine. */
 export function claudeOnlyEnv(home: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   writeFileSync(join(home, ".claude.json"), "{}\n");
-  return { ...process.env, ...homeEnv(home), CODEX_HOME: join(home, ".no-codex"), ...extra };
+  const { HERMES_HOME: _hermes, ...rest } = process.env;
+  return { ...rest, ...homeEnv(home), CODEX_HOME: join(home, ".no-codex"), ...extra };
 }

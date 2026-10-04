@@ -16,8 +16,8 @@ export const ITEM_TYPES: readonly ItemType[] = ["skill", "agent", "rule"];
 /** Config install keys (`skills`/`agents`/`rules`) mapped to the item type. */
 const INSTALL_KEYS: Record<string, ItemType> = { skills: "skill", agents: "agent", rules: "rule" };
 /** Agent harnesses skilletor can install for (spec §14). */
-export type Harness = "claude" | "codex";
-export const HARNESSES: readonly Harness[] = ["claude", "codex"];
+export type Harness = "claude" | "codex" | "hermes";
+export const HARNESSES: readonly Harness[] = ["claude", "codex", "hermes"];
 /** The item name that declares every item of a type in a source (`*@source`); in a
  *  name it matches any run of characters, so `perl-*@source` is a pattern (spec §3). */
 export const WILDCARD = "*";

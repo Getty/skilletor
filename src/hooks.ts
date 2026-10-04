@@ -10,7 +10,8 @@
 // The same hooks serve Codex (spec §14.5). Codex sets no CLAUDE_PROJECT_DIR, so
 // without a project dir the git top level of the input's cwd (else cwd) is used.
 // With `--harness codex` (the Codex plugin's hooks file) SessionStart also injects
-// the Codex rules files, ahead of its report (spec §14.8).
+// the Codex rules files, ahead of its report (spec §14.8). The Hermes plugin runs the
+// same two events with `--harness hermes` and hands the output on (spec §16.4).
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";

@@ -2,8 +2,9 @@
 //
 // Per-item activation hints come from the spike (design §12): skills are active
 // immediately; agents and rules need /reload-plugins or a restart. Codex items
-// (lock key `codex:…`, spec §14.4) carry their own, unmeasured-so-conservative hint.
-import type { BackendKind, ItemType } from "./config.ts";
+// (lock key `codex:…`, spec §14.4) carry their own, unmeasured-so-conservative hint,
+// Hermes items (`hermes:…`, spec §16.2) theirs.
+import type { BackendKind, Harness, ItemType } from "./config.ts";
 import { parseLockKey } from "./targets.ts";
 import { briefingWarning, type BriefingMissing } from "./briefing.ts";
 
@@ -16,8 +17,15 @@ export const ACTIVATION: Record<ItemType, string> = {
 /** Codex: every item type, unmeasured, so conservatively the next session (spec §14.4). */
 export const CODEX_ACTIVATION = "active from the next Codex session";
 
+/** Hermes: its skill index is built before a session-start sync runs (spec §16.2). */
+export const HERMES_ACTIVATION = "active from the next Hermes session";
+
+/** The hint of every item of a harness other than Claude Code. */
+const HARNESS_ACTIVATION: Partial<Record<Harness, string>> = { codex: CODEX_ACTIVATION, hermes: HERMES_ACTIVATION };
+
 function activationOf(it: ItemChange): string {
-  return parseLockKey(it.key).harness === "codex" ? CODEX_ACTIVATION : ACTIVATION[it.type];
+  const harness = parseLockKey(it.key).harness;
+  return (harness && HARNESS_ACTIVATION[harness]) ?? ACTIVATION[it.type];
 }
 
 export interface ItemChange {
@@ -99,6 +107,9 @@ export interface SyncReport {
   /** Once per run, not per scope (the untrusted Codex hook, spec §14.8). Shown by
    *  `reportText`, never by the hooks (a hook that runs is trusted). Absent when empty. */
   warnings?: string[];
+  /** Informational, once per run: what an active harness got no copy of (spec §16.3).
+   *  Shown by `reportText`, never by the hooks. Absent when empty. */
+  notes?: string[];
   /** Config error: nothing was touched. */
   error?: string;
 }
@@ -157,6 +168,7 @@ export function reportText(r: SyncReport): string {
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
   for (const w of r.warnings ?? []) lines.push(`skilletor: warning: ${w}`);
+  for (const n of r.notes ?? []) lines.push(`skilletor: note: ${n}`);
   return lines.map(displaySafe).join("\n");
 }
 
@@ -205,8 +217,10 @@ export function reportHook(report: SyncReport): { systemMessage?: string; additi
   if (changed.length) {
     ctx.push("skilletor synced items:");
     for (const it of changed) {
-      const codex = parseLockKey(it.key).harness === "codex" ? " (codex)" : "";
-      ctx.push(`- ${it.type} ${it.name}@${it.source}${codex}: ${activationOf(it)}`);
+      // Claude Code's items are unmarked, as before targets; another harness's are named.
+      const harness = parseLockKey(it.key).harness;
+      const mark = harness && harness !== "claude" ? ` (${harness})` : "";
+      ctx.push(`- ${it.type} ${it.name}@${it.source}${mark}: ${activationOf(it)}`);
     }
   }
   // One line per counted warning. Claude paths are relative to `.claude`: the scope says which.

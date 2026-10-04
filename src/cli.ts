@@ -16,7 +16,7 @@ const VERSION =
   typeof __SKILLETOR_VERSION__ === "string" ? __SKILLETOR_VERSION__ : "0.0.0-dev";
 
 const USAGE = `skilletor ${VERSION}
-Remote skills, agents and rules for Claude Code and Codex.
+Remote skills, agents and rules for Claude Code, Codex and Hermes Agent.
 
 Usage:
   skilletor <command> [options]
@@ -174,10 +174,12 @@ function printText(stream: NodeJS.WritableStream, text: string): void {
 }
 
 /** The sync report, or "up to date" when no scope has anything to say; run-level
- *  warnings (the untrusted Codex hook) come in addition, never instead. */
+ *  warnings (the untrusted Codex hook) and notes (what Hermes gets no copy of, spec §16.3)
+ *  come in addition, never instead. */
 function syncText(r: SyncReport): string {
   const text = reportText(r);
-  if (r.warnings?.length && !reportText({ ...r, warnings: undefined })) return `skilletor: up to date\n${text}`;
+  const runLevel = Boolean(r.warnings?.length || r.notes?.length);
+  if (runLevel && !reportText({ ...r, warnings: undefined, notes: undefined })) return `skilletor: up to date\n${text}`;
   return text || "skilletor: up to date";
 }
 
@@ -359,9 +361,9 @@ function readStdin(): Promise<string> {
   });
 }
 
-/** `skilletor hook <event> [--harness codex]`: read stdin JSON, run the hook, print JSON,
- *  always exit 0. `--harness` is internal (the Codex plugin's hooks file, spec §14.8);
- *  any other value is Claude Code's behavior. */
+/** `skilletor hook <event> [--harness codex|hermes]`: read stdin JSON, run the hook, print
+ *  JSON, always exit 0. `--harness` is internal (the Codex plugin's hooks file, spec §14.8;
+ *  the Hermes plugin, spec §16.4); any other value is Claude Code's behavior. */
 async function runHookCommand(args: string[]): Promise<number> {
   const event = args[0];
   const at = args.indexOf("--harness");
@@ -383,7 +385,7 @@ async function runHookCommand(args: string[]): Promise<number> {
     stateRoot: join(home, ".claude", "skilletor"),
     binPath: fileURLToPath(import.meta.url),
   };
-  if (harness === "codex") ctx.harness = "codex";
+  if (harness === "codex" || harness === "hermes") ctx.harness = harness;
   try {
     const out = await runHook(event, input, ctx);
     if (out.systemMessage || out.hookSpecificOutput) {

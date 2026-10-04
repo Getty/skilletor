@@ -5824,7 +5824,7 @@ function sameFile(a, b) {
 // src/config.ts
 var ITEM_TYPES = ["skill", "agent", "rule"];
 var INSTALL_KEYS = { skills: "skill", agents: "agent", rules: "rule" };
-var HARNESSES = ["claude", "codex"];
+var HARNESSES = ["claude", "codex", "hermes"];
 var WILDCARD = "*";
 var ConfigError = class extends Error {
   name = "ConfigError";
@@ -7049,6 +7049,7 @@ var TargetError = class extends Error {
 };
 var under = (dir) => (r) => join3(r.base, dir);
 var codexHomeDir = (r) => r.codexHome || join3(r.base, ".codex");
+var hermesHomeDir = (r) => r.hermesHome || join3(r.base, ".hermes");
 var LAYOUTS = {
   claude: {
     harness: "claude",
@@ -7068,6 +7069,15 @@ var LAYOUTS = {
     },
     blockTypes: ["rule"],
     localTypes: ["agent"]
+  },
+  // Skills only (spec §16): Hermes has no agent files and no rules directory. It reads
+  // `<repo>/.agents/skills` as well, where the Codex copy of a project skill lives.
+  hermes: {
+    harness: "hermes",
+    keyPrefix: "hermes:",
+    roots: { skill: (r) => r.scope === "user" ? hermesHomeDir(r) : join3(r.base, ".hermes") },
+    projectVia: { skill: "codex" },
+    noGitignoreBlock: true
   }
 };
 var LOCAL_PREFIX = ".local.";
@@ -7086,22 +7096,25 @@ function lacksLocalPrefix(harness, type, paths) {
   if (!LAYOUTS[harness].localTypes?.includes(type)) return false;
   return paths.some((rel) => !rel.slice(Math.max(rel.lastIndexOf("/"), rel.lastIndexOf("\\")) + 1).startsWith(LOCAL_PREFIX));
 }
-function defaultMarkers(home, codexHome) {
+function defaultMarkers(home, codexHome, hermesHome) {
   const cx = codexHome || join3(home, ".codex");
+  const hh = hermesHome || join3(home, ".hermes");
   return {
     claude: [join3(home, ".claude.json"), join3(home, ".claude", "settings.json"), join3(home, ".claude", "projects")],
-    codex: ["config.toml", "auth.json", "sessions", "installation_id"].map((f) => join3(cx, f))
+    codex: ["config.toml", "auth.json", "sessions", "installation_id"].map((f) => join3(cx, f)),
+    // What Hermes creates and skilletor never does (`skills/` is no marker: skilletor makes it).
+    hermes: ["config.yaml", ".env", "SOUL.md", "sessions"].map((f) => join3(hh, f))
   };
 }
 function detectHarnesses(markers) {
-  return HARNESSES.filter((h) => markers[h].some((p) => existsSync2(p)));
+  return HARNESSES.filter((h) => (markers[h] ?? []).some((p) => existsSync2(p)));
 }
 function selectTargets(configured, detected, markers) {
   const machine = configured.user ?? detected;
   if (machine.length === 0) {
-    const looked = markers ? ` (looked for ${HARNESSES.map((h) => `${h}: ${markers[h].join(", ")}`).join("; ")})` : "";
+    const looked = markers ? ` (looked for ${HARNESSES.filter((h) => markers[h]).map((h) => `${h}: ${markers[h].join(", ")}`).join("; ")})` : "";
     throw new TargetError(
-      `no agent harness detected${looked}; set "targets": ["claude"] and/or "codex" in ~/.claude/skilletor.json`
+      `no agent harness detected${looked}; set "targets": ["claude"], "codex" and/or "hermes" in ~/.claude/skilletor.json`
     );
   }
   const warnings = [];
@@ -7143,29 +7156,38 @@ function rootOfKey(r, key) {
   const k = parseLockKey(key);
   return k.harness ? rootOf(r, k.harness, k.type) : void 0;
 }
+function receivers(active, type, scope) {
+  return active.filter((h) => supports(h, type) && servedVia(active, h, type, scope) === void 0);
+}
+function servedVia(active, harness, type, scope) {
+  const via = scope === "project" ? LAYOUTS[harness].projectVia?.[type] : void 0;
+  return via !== void 0 && active.includes(via) ? via : void 0;
+}
 function isBlockType(harness, type) {
   return LAYOUTS[harness].blockTypes?.includes(type) ?? false;
 }
 function allRoots(r) {
   const roots = /* @__PURE__ */ new Set();
   for (const h of HARNESSES) {
+    if (LAYOUTS[h].noGitignoreBlock) continue;
     for (const f of Object.values(LAYOUTS[h].roots)) if (f) roots.add(f(r));
   }
   return [...roots];
 }
-function targetGaps(keys, active) {
+function targetGaps(keys, active, scope = "user") {
   const set = new Set(keys);
   const gaps = [];
   for (const key of keys) {
     const k = parseLockKey(key);
     if (!k.harness || !supports(k.harness, k.type)) continue;
-    if (!active.includes(k.harness)) {
+    const receiving = receivers(active, k.type, scope);
+    if (!receiving.includes(k.harness)) {
       gaps.push({ key });
       continue;
     }
-    for (const h of active) {
+    for (const h of receiving) {
       const missing = lockKey(h, k.target);
-      if (supports(h, k.type) && !set.has(missing)) gaps.push({ key, missing });
+      if (!set.has(missing)) gaps.push({ key, missing });
     }
   }
   return gaps;
@@ -9021,6 +9043,21 @@ var State = class {
     else all[scopeKey] = hash;
     this.writeJson("render-inputs.json", all);
   }
+  // ---- Hermes home ----------------------------------------------------------
+  /** The Hermes home the user scope's `hermes:` entries live under, when it is not the
+   *  default (spec §16.2): what a run without `$HERMES_HOME` serves. A malformed record
+   *  counts as none. */
+  hermesHome() {
+    const home = this.readJson("hermes-home.json").home;
+    return typeof home === "string" && home !== "" ? home : void 0;
+  }
+  /** Record the Hermes home, or drop the record (undefined: the default home, or Hermes no
+   *  target); the file is written only when it changes. */
+  putHermesHome(home) {
+    if (this.hermesHome() === home) return;
+    if (home === void 0) rmSync7(this.path("hermes-home.json"), { force: true });
+    else this.writeJson("hermes-home.json", { home });
+  }
   // ---- pending report -------------------------------------------------------
   putPendingReport(projectKey, report) {
     const pending = this.readJson("pending-report.json");
@@ -9286,8 +9323,11 @@ var ACTIVATION = {
   rule: "active after /reload-plugins or restart"
 };
 var CODEX_ACTIVATION = "active from the next Codex session";
+var HERMES_ACTIVATION = "active from the next Hermes session";
+var HARNESS_ACTIVATION = { codex: CODEX_ACTIVATION, hermes: HERMES_ACTIVATION };
 function activationOf(it) {
-  return parseLockKey(it.key).harness === "codex" ? CODEX_ACTIVATION : ACTIVATION[it.type];
+  const harness = parseLockKey(it.key).harness;
+  return (harness && HARNESS_ACTIVATION[harness]) ?? ACTIVATION[it.type];
 }
 var UNSAFE = /(?!\t)[\p{Cc}\p{Bidi_Control}\u200B\u2028\u2029\u2060\uFEFF]/gu;
 function displaySafe(line) {
@@ -9351,6 +9391,7 @@ function reportText(r) {
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
   for (const w of r.warnings ?? []) lines.push(`skilletor: warning: ${w}`);
+  for (const n of r.notes ?? []) lines.push(`skilletor: note: ${n}`);
   return lines.map(displaySafe).join("\n");
 }
 function commitHint(file) {
@@ -9389,8 +9430,9 @@ function reportHook(report) {
   if (changed.length) {
     ctx.push("skilletor synced items:");
     for (const it of changed) {
-      const codex = parseLockKey(it.key).harness === "codex" ? " (codex)" : "";
-      ctx.push(`- ${it.type} ${it.name}@${it.source}${codex}: ${activationOf(it)}`);
+      const harness = parseLockKey(it.key).harness;
+      const mark = harness && harness !== "claude" ? ` (${harness})` : "";
+      ctx.push(`- ${it.type} ${it.name}@${it.source}${mark}: ${activationOf(it)}`);
     }
   }
   for (const s of r.scopes) {
@@ -9430,8 +9472,25 @@ function claudeMemoryFiles(ctx, scope) {
 function codexHomeOf(ctx) {
   return (ctx.codexHome ?? process.env.CODEX_HOME) || void 0;
 }
+function defaultHermesHome(ctx) {
+  return join14(ctx.home, ".hermes");
+}
+function recordedHermesHome(ctx) {
+  try {
+    return new State(ctx.stateRoot).hermesHome() ?? defaultHermesHome(ctx);
+  } catch {
+    return defaultHermesHome(ctx);
+  }
+}
+function hermesHomeOf(ctx) {
+  const given = ctx.hermesHome ?? process.env.HERMES_HOME;
+  return given ? resolvePath5(expandHome(given, ctx.home)) : recordedHermesHome(ctx);
+}
+function rootContextOf(ctx, scope) {
+  return { base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx), hermesHome: hermesHomeOf(ctx) };
+}
 function targetsOf2(ctx, config) {
-  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx));
+  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx), hermesHomeOf(ctx));
   return selectTargets({ user: config.user.targets, project: config.project?.targets }, detectHarnesses(markers), markers);
 }
 function loadWithTargets(ctx) {
@@ -9612,17 +9671,41 @@ async function syncInner(ctx, opts, state) {
   const sel = opts.scope ?? "all";
   const report = { scopes: [] };
   const resolveSource = runResolver(cacheRootOf(ctx), ctx.timeoutMs);
+  const noCopy = [];
   if (sel === "user" || sel === "all") {
-    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, resolveSource));
+    report.scopes.push(await syncScope(ctx, config, config.user, "user", targets.user, opts, state, resolveSource, noCopy));
+    if (!targets.user.includes("hermes")) state.putHermesHome(void 0);
   }
   if ((sel === "project" || sel === "all") && config.project) {
-    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, resolveSource);
+    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, resolveSource, noCopy);
     rep.warnings.unshift(...targets.warnings);
     report.scopes.push(rep);
   }
   const trust = hookTrustWarning(ctx, targets);
   if (trust) report.warnings = [trust];
+  const notes = runNotes(noCopy);
+  if (notes.length) report.notes = notes;
   return report;
+}
+var HARNESS_LABEL = { claude: "Claude Code", codex: "Codex", hermes: "Hermes" };
+var NO_COUNTERPART = { hermes: "Hermes has no agent files and no rules directory" };
+var SERVED_FROM = { codex: ".agents/skills" };
+function runNotes(noCopy) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const n of noCopy) {
+    const id = n.via === void 0 ? n.harness : `${n.harness} ${n.scope} ${n.via}`;
+    const g = groups.get(id) ?? { first: n, counts: /* @__PURE__ */ new Map() };
+    g.counts.set(n.type, (g.counts.get(n.type) ?? 0) + 1);
+    groups.set(id, g);
+  }
+  return [...groups.values()].map(({ first, counts }) => {
+    const label = HARNESS_LABEL[first.harness];
+    const what = ["skill", "agent", "rule"].filter((t) => counts.has(t)).map((t) => `${counts.get(t)} ${t}(s)`).join(" and ");
+    if (first.via === void 0) {
+      return `${what} not installed for ${label} (${NO_COUNTERPART[first.harness] ?? `${label} has no counterpart`})`;
+    }
+    return `${what} not installed for ${label} in the ${first.scope} scope (${label} reads the ${HARNESS_LABEL[first.via]} copy in ${SERVED_FROM[first.via] ?? "its own root"})`;
+  });
 }
 function hookTrustWarning(ctx, targets) {
   if (!targets.user.includes("codex")) return void 0;
@@ -9630,9 +9713,9 @@ function hookTrustWarning(ctx, targets) {
   if (codexHookTrusted(codexHome)) return void 0;
   return `Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${join14(codexHome, "config.toml")}); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules`;
 }
-async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource) {
+async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource, noCopy) {
   try {
-    return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource);
+    return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource, noCopy);
   } catch (err) {
     try {
       const lockPath = join14(targetDirOf(ctx, scope), "skilletor.lock.json");
@@ -9644,12 +9727,13 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, r
     throw err;
   }
 }
-async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource) {
+async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource, noCopy) {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
   const base = baseOf(ctx, scope);
-  const rc = { base, scope, codexHome: codexHomeOf(ctx) };
+  const rc = rootContextOf(ctx, scope);
   const lockPath = join14(targetDir, "skilletor.lock.json");
+  if (scope === "user") moveHermesHome(ctx, state, targetDir, rc, harnesses, rep.warnings);
   const oldLock = readLock(lockPath);
   const gitignoreOn = scopeCfg.gitignore !== false;
   let inputs;
@@ -9700,7 +9784,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
     catalogs.set(source, cat);
     return cat;
   };
-  const harnessesFor = (type) => harnesses.filter((h) => supports(h, type));
+  const harnessesFor = (type) => receivers(harnesses, type, scope);
   const keepIfLocked = (target, type) => {
     for (const h of harnessesFor(type)) {
       const key = lockKey(h, target);
@@ -9709,6 +9793,11 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   };
   const buildItem = (item, extra = {}) => {
     const targets = harnessesFor(item.type);
+    for (const h of harnesses) {
+      if (targets.includes(h)) continue;
+      const via = servedVia(harnesses, h, item.type, scope);
+      noCopy.push(via === void 0 ? { harness: h, type: item.type, scope } : { harness: h, type: item.type, scope, via });
+    }
     if (targets.length === 0) return;
     for (const h of targets) {
       const key = lockKey(h, item.target);
@@ -10027,7 +10116,7 @@ function shellWord(s) {
   return /^[\w./@%+=:,-]+$/.test(s) ? s : `'${s.replace(/'/g, "'\\''")}'`;
 }
 function briefingOf(ctx, scope, lock, only) {
-  const rc = { base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) };
+  const rc = rootContextOf(ctx, scope);
   const roots = { home: ctx.home, codexHome: codexHomeOf(ctx), projectDir: scope === "project" ? ctx.projectDir : void 0 };
   const rootsOf = /* @__PURE__ */ new Map();
   const out = [];
@@ -10137,7 +10226,7 @@ function codexRulesFiles(given) {
   const scopes = ctx.projectDir ? ["user", "project"] : ["user"];
   for (const scope of scopes) {
     if (!("error" in loaded) && !loaded.targets[scope].includes("codex")) continue;
-    const file = join14(rootOf({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }, "codex", "rule"), RULES_FILE);
+    const file = join14(rootOf(rootContextOf(ctx, scope), "codex", "rule"), RULES_FILE);
     if (existsSync11(file)) out.push(file);
   }
   return out;
@@ -10208,11 +10297,38 @@ async function check(given, opts = {}) {
 var SKILL_GITIGNORE_HASH = hashBuffer(Buffer.from(SKILL_GITIGNORE, "utf8"));
 function scopeDrift(ctx, scope, scopeCfg, harnesses, lock, servedBy) {
   const out = [];
-  for (const g of targetGaps(Object.keys(lock), harnesses)) {
+  for (const g of targetGaps(Object.keys(lock), harnesses, scope)) {
     const source = lock[g.key].source;
     out.push(g.missing === void 0 ? { kind: "targets", id: `orphan:${g.key}`, sources: [] } : { kind: "targets", id: `missing:${g.missing}@${source}`, sources: [source] });
   }
-  return [...out, ...layoutDrift(ctx, scope, scopeCfg, lock), ...declaredDrift(scopeCfg, harnesses, lock, servedBy)];
+  if (scope === "user") {
+    const home = hermesHomeOf(ctx);
+    if (!samePath(home, recordedHermesHome(ctx)) && (harnesses.includes("hermes") || holdsHermes(lock))) {
+      out.push({ kind: "targets", id: `hermes-home:${home}`, sources: [] });
+    }
+  }
+  return [...out, ...layoutDrift(ctx, scope, scopeCfg, lock), ...declaredDrift(scopeCfg, scope, harnesses, lock, servedBy)];
+}
+function holdsHermes(lock) {
+  return Object.keys(lock).some((key) => parseLockKey(key).harness === "hermes");
+}
+function moveHermesHome(ctx, state, targetDir, rc, harnesses, warnings) {
+  const previous = recordedHermesHome(ctx);
+  const current = hermesHomeOf(ctx);
+  if (samePath(previous, current)) return;
+  const lock = readLock(join14(targetDir, "skilletor.lock.json"));
+  const moved = Object.keys(lock).filter((key) => parseLockKey(key).harness === "hermes");
+  if (moved.length === 0 && !harnesses.includes("hermes")) return;
+  if (moved.length > 0) {
+    const old = { ...rc, hermesHome: previous };
+    apply([], {
+      targetDir,
+      keep: Object.keys(lock).filter((key) => !moved.includes(key)),
+      rootOf: (key) => rootOfKey(old, key) ?? targetDir
+    });
+    warnings.push(`Hermes home changed from ${previous} to ${current}: ${moved.length} item(s) removed from the old home; what is declared installs anew under the new one`);
+  }
+  state.putHermesHome(samePath(current, defaultHermesHome(ctx)) ? void 0 : current);
 }
 function layoutDrift(ctx, scope, scopeCfg, lock) {
   const gitignoreOn = scopeCfg.gitignore !== false;
@@ -10227,18 +10343,18 @@ function layoutDrift(ctx, scope, scopeCfg, lock) {
       drift(gitignoreOn ? "gitignore" : "no-gitignore");
     }
   }
-  if (scope === "project" && !projectInUse(targetDirOf(ctx, scope), lock) && allRoots({ base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx) }).some((dir) => hasBlock(dir))) {
+  if (scope === "project" && !projectInUse(targetDirOf(ctx, scope), lock) && allRoots(rootContextOf(ctx, scope)).some((dir) => hasBlock(dir))) {
     out.push({ kind: "layout", id: "layout:unused-project", sources: [] });
   }
   return out;
 }
-function declaredDrift(scopeCfg, harnesses, lock, servedBy) {
+function declaredDrift(scopeCfg, scope, harnesses, lock, servedBy) {
   const out = [];
   const drift = (id, sources) => out.push({ kind: "declared", id, sources });
   const explicit = /* @__PURE__ */ new Set();
   for (const item of scopeCfg.install) {
     explicit.add(item.target);
-    for (const h of harnesses.filter((x) => supports(x, item.type))) {
+    for (const h of receivers(harnesses, item.type, scope)) {
       const key = lockKey(h, item.target);
       if (lock[key]?.source !== item.source) drift(`missing:${key}@${item.source}`, [item.source]);
     }
@@ -10246,7 +10362,7 @@ function declaredDrift(scopeCfg, harnesses, lock, servedBy) {
   const covered = /* @__PURE__ */ new Set();
   for (const [key, entry] of Object.entries(lock)) {
     const k = parseLockKey(key);
-    if (!k.harness || !harnesses.includes(k.harness) || !supports(k.harness, k.type)) continue;
+    if (!k.harness || !receivers(harnesses, k.type, scope).includes(k.harness)) continue;
     const by = coverOf(scopeCfg, k, entry);
     for (const c of by) covered.add(c);
     if (by.length === 0 && !explicit.has(k.target)) drift(`orphan:${key}`, []);
@@ -10280,7 +10396,7 @@ function status(given, opts = {}) {
   for (const [scope, scopeCfg] of scopes) {
     const lock = readLock(join14(targetDirOf(ctx, scope), "skilletor.lock.json"));
     const active = targets[scope];
-    const rows = scopeCfg.install.flatMap((i) => active.filter((h) => supports(h, i.type)).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
+    const rows = scopeCfg.install.flatMap((i) => receivers(active, i.type, scope).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
     const declaredKeys = new Set(rows.map((r) => r.key));
     const sourceVersions = {};
     for (const entry of Object.values(lock)) sourceVersions[entry.source] = entry.version;
@@ -11052,7 +11168,7 @@ function defaultBackground(ctx) {
 // src/cli.ts
 var VERSION = true ? "0.5.0" : "0.0.0-dev";
 var USAGE = `skilletor ${VERSION}
-Remote skills, agents and rules for Claude Code and Codex.
+Remote skills, agents and rules for Claude Code, Codex and Hermes Agent.
 
 Usage:
   skilletor <command> [options]
@@ -11177,7 +11293,8 @@ function printText(stream, text) {
 }
 function syncText(r) {
   const text = reportText(r);
-  if (r.warnings?.length && !reportText({ ...r, warnings: void 0 })) return `skilletor: up to date
+  const runLevel = Boolean(r.warnings?.length || r.notes?.length);
+  if (runLevel && !reportText({ ...r, warnings: void 0, notes: void 0 })) return `skilletor: up to date
 ${text}`;
   return text || "skilletor: up to date";
 }
@@ -11364,7 +11481,7 @@ async function runHookCommand(args) {
     stateRoot: join16(home, ".claude", "skilletor"),
     binPath: fileURLToPath(import.meta.url)
   };
-  if (harness === "codex") ctx.harness = "codex";
+  if (harness === "codex" || harness === "hermes") ctx.harness = harness;
   try {
     const out = await runHook(event, input, ctx);
     if (out.systemMessage || out.hookSpecificOutput) {

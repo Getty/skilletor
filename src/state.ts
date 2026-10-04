@@ -213,6 +213,24 @@ export class State {
     this.writeJson("render-inputs.json", all);
   }
 
+  // ---- Hermes home ----------------------------------------------------------
+
+  /** The Hermes home the user scope's `hermes:` entries live under, when it is not the
+   *  default (spec §16.2): what a run without `$HERMES_HOME` serves. A malformed record
+   *  counts as none. */
+  hermesHome(): string | undefined {
+    const home = this.readJson("hermes-home.json").home;
+    return typeof home === "string" && home !== "" ? home : undefined;
+  }
+
+  /** Record the Hermes home, or drop the record (undefined: the default home, or Hermes no
+   *  target); the file is written only when it changes. */
+  putHermesHome(home: string | undefined): void {
+    if (this.hermesHome() === home) return;
+    if (home === undefined) rmSync(this.path("hermes-home.json"), { force: true });
+    else this.writeJson("hermes-home.json", { home });
+  }
+
   // ---- pending report -------------------------------------------------------
 
   putPendingReport(projectKey: string, report: unknown): void {
