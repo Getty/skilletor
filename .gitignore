@@ -11,3 +11,6 @@ config.yml
 
 # claude plugin eval output
 evals/results/
+
+# throwaway homes of the tests against real Hermes (test/hermes.test.ts)
+/.tmp-hermes/
