@@ -230,3 +230,27 @@ is what syncs on a machine, or in a session, where only Hermes runs.
   receives is the user's text followed by skilletor's report, and after `--resume` in a new
   process the first message is replayed with it while the new one carries nothing. No real
   model is called.
+
+### 16.7 Decisions taken alone, to be confirmed
+
+1. **Hermes is auto-detected** like the other two, so a machine with a Hermes home in use
+   gets its user-scope skills there with the first sync after the upgrade. The alternative
+   is opt-in only (`"targets"` must name `hermes`).
+2. **Every user-scope item goes to every machine target.** There is no way to say "this
+   skill for Claude Code, not for Hermes" except a template gate on `harness` in the source,
+   or a Hermes that runs under a `HOME` (and so a `~/.claude/skilletor.json`) of its own.
+   For a Hermes that is a different persona than the coding agents, that may be the wrong
+   default.
+3. **One Hermes home per lock, moved on change** (§16.2), rather than several homes side by
+   side.
+4. **A project skill reaches Hermes through the Codex copy** where both are active (§16.2),
+   rather than a `.hermes/skills` copy and none for Codex, or a warning and a broken name.
+5. **Rules wait for a second phase** (§16.5) instead of a plugin system-prompt section that
+   cuts at 4,000 characters.
+6. **The per-turn hook is a process per turn** (about 0.1 s here), as under Claude Code. A
+   busy gateway might want the plugin to space these calls itself.
+7. **Limits of 20 s and 5 s** (Claude Code's hook file: 30 s and 10 s).
+8. **A `systemMessage` without context goes to the model** (§16.4), for want of a channel to
+   the user.
+9. **Notes, not warnings**, for what Hermes gets no copy of (§16.3): `skilletor sync` says
+   it every time, the hooks never.
