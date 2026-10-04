@@ -14,3 +14,6 @@ evals/results/
 
 # throwaway homes of the tests against real Hermes (test/hermes.test.ts)
 /.tmp-hermes/
+
+# a Hermes that loads hermes/skilletor through a symlink compiles it here
+__pycache__/

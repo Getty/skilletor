@@ -1,0 +1,9 @@
+name: skilletor
+version: "0.4.1"
+description: "Syncs the skills skilletor manages when a session starts and tells the model what changed. Needs the skilletor CLI and Node.js >= 18."
+author: Torsten Raudssus
+license: MIT
+homepage: https://github.com/Getty/skilletor
+provides_hooks:
+  - on_session_start
+  - pre_llm_call
