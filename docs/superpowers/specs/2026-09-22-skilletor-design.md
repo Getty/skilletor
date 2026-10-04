@@ -765,8 +765,9 @@ the block is deleted. Content outside the block is never touched.
 `pending-report.json`, `unreached.json` (per lock, the drift the last sync could not reach,
 §14.3), `sources-read.json` (per lock, the version of each source the last sync read, the
 backend it read it through and the `path` it scanned it with, §14.3), `render-inputs.json` (per lock, a hash of the vars and
-project the last sync rendered the scope's items with, §14.3), `sync.lock/` (mkdir mutex
-against parallel sessions, refreshed while held; below).
+project the last sync rendered the scope's items with, §14.3), `hermes-home.json` (the
+Hermes home the user scope's `hermes:` entries live under, when not `~/.hermes`, §16.2),
+`sync.lock/` (mkdir mutex against parallel sessions, refreshed while held; below).
 `CLAUDE_PLUGIN_DATA` is not used, so the CLI runs identically without Claude Code.
 
 `sync.lock/` guards the locks, the target dirs and the source cache: every run that resolves
@@ -1005,6 +1006,7 @@ src/gitignore.ts                # managed .gitignore blocks (§6.4)
 src/briefing.ts                 # briefing check for installed agents (§6.7)
 src/lock.ts  src/state.ts       # lock; trust, last-check, pending-report, mutex
 src/hooks.ts  src/report.ts  src/fsutil.ts  src/gitenv.ts
+hermes/skilletor/               # native Hermes Agent plugin: plugin.yaml, __init__.py (§16.4)
 test/
 ```
 
@@ -1068,6 +1070,11 @@ Monitor-based timer instead of a prompt hook · checksum pins for tarballs · al
 manage-skills configuration. (The Codex target moved into scope: §14.)
 
 ## 14. Harness targets / Codex
+
+A third harness, Hermes Agent (`hermes`), is §16: its own document,
+`2026-10-04-hermes-target-design.md`. Where this section says "both harnesses" or lists
+two, it was written before it; detection, `targets`, the one lock per scope and the
+per-target rendering below hold for `hermes` as they stand.
 
 skilletor installs for one or both of two **harnesses**: Claude Code (`claude`) and the
 OpenAI Codex CLI (`codex`). Phase 1 covers detection, the per-target layout, skills for

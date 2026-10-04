@@ -24,6 +24,7 @@ skilletor add Getty && skilletor install getty-perl-moo@getty
 
 `add` registers (and trusts) a source; `install` declares an item and syncs it onto disk.
 Using Codex? See [Codex](#codex) — the plugin works there too, with a few differences.
+Using Hermes Agent? See [Hermes Agent](#hermes-agent) — skills, and a plugin of its own.
 
 ## How it works
 
@@ -480,8 +481,9 @@ harness itself creates (never `~/.claude/` alone — skilletor's own config live
 |---|---|
 | `claude` | `~/.claude.json`, `~/.claude/settings.json`, `~/.claude/projects/` |
 | `codex` | in `$CODEX_HOME` (default `~/.codex`): `config.toml`, `auth.json`, `sessions/`, `installation_id` |
+| `hermes` | in the [Hermes home](#the-hermes-home) (default `~/.hermes`): `config.yaml`, `.env`, `SOUL.md`, `sessions/` |
 
-`"targets": ["claude"]`, `["codex"]` or `["claude", "codex"]` overrides detection:
+`"targets"` – any of `"claude"`, `"codex"`, `"hermes"` – overrides detection:
 
 1. **Machine targets** = the user config's `targets` if set, else the detected set. If that
    is empty, `sync`, `check` and `status` stop with a config error naming the markers,
@@ -494,7 +496,8 @@ harness itself creates (never `~/.claude/` alone — skilletor's own config live
 
 Detection runs on every sync, so a harness that disappears (say `~/.codex` is deleted) has
 its items removed on the next sync — pin `targets` if that is not what you want. Items of
-a harness that is switched off are removed the same way.
+a harness that is switched off are removed the same way. What `hermes` gets is in
+[Hermes Agent](#hermes-agent).
 
 ### Where items go
 
@@ -663,6 +666,100 @@ plus the rules delivery.
 - Codex sets no `CLAUDE_PROJECT_DIR`; the hook takes the git top level of the session's
   working directory as the project root, so a session started in a subdirectory still
   finds `<repo>/.claude/skilletor.json`.
+
+## Hermes Agent
+
+skilletor also installs for NousResearch [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+(`hermes`), on Linux: **skills**, in both scopes, from the same sources and the same
+`skilletor.json`. Detection and `targets` work as [above](#which-harnesses-detection-and-targets).
+
+| Type | Hermes |
+|---|---|
+| skill, user scope | `<Hermes home>/skills/<name>/` |
+| skill, project scope | `<project>/.hermes/skills/<name>/` — not while `codex` is a target of that project, see below |
+| agent | not installed: Hermes has no agent files (`delegate_task` takes a goal, not a role file) |
+| rule | not installed: Hermes has no rules directory (see [what is missing](#what-is-missing)) |
+
+Lock keys are `hermes:skills/<name>`; `harness` is `hermes` in the template context; Hermes
+reads Claude's `SKILL.md` format as it is. Each installed skill carries its own `.gitignore`
+like everywhere else, and skilletor never writes a `.gitignore` of a Hermes directory. A
+skill is on disk — and reachable by `skill_view` — as soon as the sync ran, and in the
+skill index of the system prompt from the next Hermes session.
+
+What an active harness gets no copy of is said once per `skilletor sync`, as a note:
+
+```
+skilletor: note: 2 agent(s) and 1 rule(s) not installed for Hermes (Hermes has no agent files and no rules directory)
+```
+
+**Project skills need the project trusted.** Hermes loads `<project>/.hermes/skills` and
+`<project>/.agents/skills` only from a project root listed in `skills.trusted_project_dirs`
+— run `hermes skills trust` in the project once. skilletor does not touch that list.
+
+**With Codex in the same project, Hermes reads the Codex copy.** Hermes reads
+`<project>/.agents/skills` too, where the Codex copy of a project skill lives, and refuses
+to load a name it finds in both directories. So while `codex` is an active target of a
+project, skilletor installs no second copy under `.hermes/skills` there (and removes one it
+installed before); the note says so. That copy is rendered with `harness == "codex"`.
+
+### The Hermes home
+
+User-scope skills go to one Hermes home. Which one:
+
+1. `$HERMES_HOME`, when the run has it — the plugin passes the session's;
+2. else the home the last sync ran under (skilletor remembers it in
+   `~/.claude/skilletor/hermes-home.json` when it is not the default);
+3. else `~/.hermes`.
+
+So a Hermes started with a home of its own (a service unit, a development home) is served
+by every later sync, also by the one a Claude Code or Codex session start runs: you need
+the plugin below only where Hermes is the one harness that runs. A sync under **another**
+home moves the skills: it deletes what skilletor installed in the old home and installs
+in the new one, and warns once. One home at a time — two Hermes profiles that both enable
+the plugin move the user-scope skills back and forth; enable it in one.
+
+### The plugin under Hermes
+
+`hermes/skilletor/` in this repository is a native Hermes plugin. It runs the same two
+hooks as under Claude Code — a sync when a session starts, the throttled check on each
+later turn — and gives the report to the model with the turn (Hermes appends it to the
+user message). Install it by hand:
+
+```bash
+git clone https://github.com/Getty/skilletor ~/src/skilletor
+ln -s ~/src/skilletor/hermes/skilletor "${HERMES_HOME:-$HOME/.hermes}/plugins/skilletor"
+```
+
+and enable it in `$HERMES_HOME/config.yaml` (plugins are opt-in; do not copy a second
+`plugins:` key into a file that has one):
+
+```yaml
+plugins:
+  enabled:
+    - skilletor
+```
+
+Linked like this, the plugin runs `bin/skilletor` of that checkout (Node.js ≥ 18). A copy
+of the directory instead of a link needs `skilletor` on `PATH`, or `SKILLETOR_BIN` set to
+the CLI. `hermes plugins list` shows it; `hermes skilletor status` (any CLI command after
+`hermes skilletor`) runs the CLI with that Hermes' home as `HERMES_HOME`.
+
+The plugin never holds a session up for long and never fails one: it gives the sync 20 s
+and the per-turn check 5 s, and without a CLI, on an error or at the limit the turn simply
+runs without a message. A delegated subagent triggers nothing.
+
+### What is missing
+
+- **Rules.** Not delivered to Hermes yet. In a project where `codex` is a target too,
+  Hermes reads the pointer skilletor puts into `AGENTS.md` for Codex and finds
+  `.codex/skilletor-rules.md` through it — unless a `.hermes.md` shadows `AGENTS.md`.
+- **Agents.** No counterpart in Hermes.
+- **Several Hermes homes side by side** (see [the Hermes home](#the-hermes-home)).
+- **No look at Hermes' other skills.** A skill skilletor installs under a name a bundled or
+  hub skill of that Hermes home already has makes the name ambiguous, and Hermes loads
+  neither; rename or remove one.
+- No `hermes plugins install` path and no catalog entry; the plugin does not bundle the
+  `skilletor` skill — install that like any other skill.
 
 ## Security & trust
 

@@ -84,17 +84,21 @@ of an inactive target, and the next Hermes session would meet its own files as f
 ones. With it every session, whatever started it, agrees on the targets and the root, and
 a Claude Code or Codex SessionStart keeps the Hermes home current too.
 
-When a run's home differs from the recorded one, `check` reports a change, and the
-user-scope sync first **moves**: it deletes what the lock owns under the old home, drops
-those entries, records the new home, and then installs under the new home by the ordinary
-rules – so nothing skilletor did not install is ever taken for its own, and nothing is left
-behind. One warning names the move.
+When a run's home differs from the recorded one, `check` reports a change (target drift
+of the user scope), and the user-scope sync first **moves**: it deletes what the lock owns
+under the old home, drops those entries, records the new home, and then installs under the
+new home by the ordinary rules – so nothing skilletor did not install is ever taken for its
+own, and nothing is left behind. The record is written before anything is installed under
+the new home, so a sync that stops midway leaves a lock and a record that agree. One
+warning names the move. A project-scope sync alone leaves the record to the user scope.
+The record goes when Hermes is no target any more (its entries went with it).
 
 **Report.** Hermes items show under their lock key (`hermes:skills/foo`); the hook context
 marks them `(hermes)` with "active from the next Hermes session". Hermes builds its skill
 index into the system prompt before `on_session_start` fires
 (`agent/conversation_loop.py:849`, `:862-869`), so a skill synced at session start is on
-disk and reachable by `skill_view`, but not in that session's index.
+disk and reachable by `skill_view` (measured: `skills_list` and `skill_view` in the process
+that ran the hook see it), but not in that session's index.
 
 ### 16.3 What is skipped for Hermes
 
@@ -117,9 +121,14 @@ run, and hands their answer to Hermes. It decides nothing.
 | Hermes hook | Fires | skilletor call | Return |
 |---|---|---|---|
 | `on_session_start` | first turn of a new session, after the system prompt is built; return ignored (`agent/conversation_loop.py:862-869`; `website/docs/user-guide/features/hooks.md:902-924`) | `skilletor hook session-start --harness hermes`, input `{"hook_event_name":"SessionStart","source":"startup","cwd":…,"session_id":…}` | none; the answer is kept for the session |
-| `pre_llm_call` | once per user turn, after `on_session_start` on a first turn (`agent/turn_context.py:1159`, `:781-835`) | the kept session-start answer, if any; else, in a session this process has not started (a resumed one fires no `on_session_start`), `session-start` with `"source":"resume"`; else `skilletor hook user-prompt-submit --harness hermes` | `{"context": <text>}` or `None` |
+| `pre_llm_call` | once per user turn, after `on_session_start` on a first turn (`agent/turn_context.py:1159`, `:781-835`) | on the first turn the plugin sees of a session: nothing more if `on_session_start` ran, else (a resumed session fires none) `session-start` with `"source":"resume"`; on every later turn `skilletor hook user-prompt-submit --harness hermes` | `{"context": <text>}` or `None` |
 
-`pre_llm_call` is Hermes' one channel from a plugin into the conversation: a returned
+A delegated child is no session of the user's: `delegate_task` builds it with
+`platform="subagent"` and a parent session (`tools/delegate_tool.py:270-280`), it fires both
+hooks, and the plugin does nothing for it – else every subagent would start with a check of
+all sources.
+
+`pre_llm_call` is how a plugin speaks into the conversation: a returned
 `{"context": …}` is appended to the turn's user message and stays in the history
 (`agent/turn_context.py:108-127`, `:1268-1282`; `hooks.md:673-700`). The text is the hook
 answer's `additionalContext`; an answer with a `systemMessage` alone (a config error, a
@@ -152,9 +161,9 @@ without a message. A killed sync is what a Claude Code hook timeout already leav
 
 **`hermes skilletor …`.** The plugin registers a CLI subcommand
 (`ctx.register_cli_command`, `hermes_cli/plugins.py:664`; `hermes_cli/main.py:3402-3440`)
-that passes its arguments to the skilletor CLI with the active `HERMES_HOME`, so
-`hermes -p work skilletor status` answers for that profile. No slash command: `/skilletor`
-would collide with the `skilletor` skill's own command once that skill is installed.
+that passes its arguments to the skilletor CLI with the active Hermes home as
+`HERMES_HOME`, and exits with the CLI's code. No slash command: `/skilletor` would collide
+with the `skilletor` skill's own command once that skill is installed.
 
 **Install by hand.** Symlink (or copy) `hermes/skilletor` to
 `$HERMES_HOME/plugins/skilletor` and add `skilletor` to `plugins.enabled` in
@@ -182,6 +191,11 @@ is what syncs on a machine, or in a session, where only Hermes runs.
 - **Agents.** No counterpart (§16.1).
 - **Project trust.** skilletor does not read or edit `skills.trusted_project_dirs`. Hermes
   itself tells the user in its banner when a project holds skills it did not load.
+- **Name collisions inside the Hermes home.** skilletor owns `skills/<name>/` and looks at
+  nothing else there. A bundled or hub skill of the same `name` in a category directory
+  (`skills/<category>/<name>/`) is a second skill of that name in the same tier and root, and
+  Hermes then refuses both (§16.1). Finding that would mean reading every `SKILL.md` of the
+  home at each sync.
 - **Several Hermes homes at once.** One lock serves one home (§16.2). Two profiles that
   both enable the plugin move the user-scope skills back and forth at each session start.
   Serving them side by side needs ownership per home – a lock per Hermes home, or lock keys

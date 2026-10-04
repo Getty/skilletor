@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
@@ -126,7 +126,7 @@ test("a session start runs session-start; its context goes to the model with the
     assert.deepEqual(JSON.parse(f.read("stdin.user-prompt-submit")!),
       { hook_event_name: "UserPromptSubmit", session_id: "s1", cwd: f.cwd });
     assert.match(f.read("env")!, /^HERMES_HOME=\/srv\/hermes-home$/m);
-    assert.equal(f.read("pwd")!.trim(), f.cwd);
+    assert.equal(realpathSync(f.read("pwd")!.trim()), realpathSync(f.cwd)); // the child runs where the session works
     assert.equal(out.kept, 0);
   } finally {
     f.cleanup();
