@@ -1,13 +1,15 @@
 // The `hermes` target and the Hermes plugin against real Hermes Agent (spec §16.6): the built
 // CLI installs into a throwaway HERMES_HOME, and a fresh Hermes process per step looks at it
-// through Hermes' own skill listing, plugin loader and hook dispatch. No model is called.
+// through Hermes' own skill listing, plugin loader and hook dispatch. No real model is called:
+// the one case that runs a whole turn (`hermes chat -q`) answers it from a stub endpoint here.
 //
 // $HERMES_PYTHON, else ~/dev/hermes-citiai/.dev/venv/bin/python; skipped without it. The
 // throwaway homes live under <checkout>/.tmp-hermes (gitignored), never under the system temp
 // directory – a tmpfs on the machine this was written on – and are removed afterwards.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import {
   accessSync, chmodSync, constants, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, symlinkSync,
   writeFileSync,
@@ -73,10 +75,15 @@ function machine(opts: { enabled?: string[]; trustProject?: boolean } = {}) {
   for (const d of [join(home, ".claude"), join(hermesHome, "plugins"), join(project, ".claude"), join(dir, "tmp")]) {
     mkdirSync(d, { recursive: true });
   }
+  // A repository of its own: every process below runs in it, and skilletor takes the git top
+  // level of where it runs as the project. Without it that would be this checkout, whose
+  // .claude/skilletor.json is real (k123) – on a machine where only Hermes is in use, a sync
+  // there removes what skilletor installed for Claude Code.
   execFileSync("git", ["init", "-q", project], { env: gitEnv() });
-  const config = (enabled: string[], trust: boolean) => writeFileSync(join(hermesHome, "config.yaml"), [
+  assert.ok(existsSync(join(project, ".git")));
+  const config = (enabled: string[], trust: boolean, more: string[] = []) => writeFileSync(join(hermesHome, "config.yaml"), [
     "plugins:", enabled.length ? "  enabled:" : "  enabled: []", ...enabled.map((p) => `    - ${p}`),
-    ...(trust ? ["skills:", "  trusted_project_dirs:", `    - ${project}`] : []), "",
+    ...(trust ? ["skills:", "  trusted_project_dirs:", `    - ${project}`] : []), ...more, "",
   ].join("\n"));
   config(opts.enabled ?? ["skilletor"], opts.trustProject ?? false);
   const skill = (name: string, body?: string) => {
@@ -315,9 +322,93 @@ test("hermes skilletor …: the CLI, for this Hermes home", { skip }, () => {
 
 test("hermes plugins doctor --ci passes without a finding", { skip }, () => {
   const m = machine();
-  const r = m.hermes(["plugins", "doctor", PLUGIN, "--ci"], m.dir);
+  const r = m.hermes(["plugins", "doctor", PLUGIN, "--ci"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.doesNotMatch(r.stdout, /warning|error/i);
   // Doctor's own temporary Hermes home went to this machine's TMPDIR, on disk, and is gone.
   assert.deepEqual(readdirSync(join(m.dir, "tmp")).filter((n) => n.startsWith("hermes-plugin-doctor-")), []);
+});
+
+/** An OpenAI-compatible endpoint that answers every chat request with `STUB-ANSWER` and keeps
+ *  what it was sent. Hermes probes a few other paths first; each gets some JSON. */
+function modelStub() {
+  const chats: { messages: { role: string; content: unknown }[] }[] = [];
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      res.setHeader("content-type", "application/json");
+      if (req.method === "GET") {
+        res.end(JSON.stringify({ object: "list", data: [{ id: "stub", object: "model" }] }));
+        return;
+      }
+      if (req.url?.endsWith("/chat/completions")) chats.push(JSON.parse(body));
+      res.end(JSON.stringify({
+        id: "chatcmpl-1", object: "chat.completion", created: 1, model: "stub",
+        choices: [{ index: 0, message: { role: "assistant", content: "STUB-ANSWER" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }));
+    });
+  });
+  return new Promise<{ url: string; chats: typeof chats; close: () => void }>((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address() as { port: number };
+      resolve({ url: `http://127.0.0.1:${port}/v1`, chats, close: () => server.close() });
+    });
+  });
+}
+
+/** The user messages of the first chat request that carries tools – the agent's own turn,
+ *  not the title or another auxiliary call. */
+function userMessages(chats: { messages: { role: string; content: unknown }[]; tools?: unknown[] }[]): string[] {
+  const turn = chats.find((c) => Array.isArray(c.tools) && c.tools.length > 0);
+  assert.ok(turn, "no agent turn reached the model");
+  return turn.messages.filter((m) => m.role === "user").map((m) => String(m.content));
+}
+
+test("a real turn: `hermes chat -q` syncs at the session's start and the model reads the report with the user's message", { skip }, async () => {
+  const stub = await modelStub();
+  try {
+    const m = machine();
+    m.config(["skilletor"], false, [
+      "model:", "  provider: custom", "  default: stub", `  base_url: ${stub.url}`, "  api_key: test-key", "  streaming: false",
+    ]);
+    m.installPlugin("link");
+    m.skill("sk-demo");
+    m.declare(["sk-demo"]);
+    /** `hermes chat -q … -Q`: one turn in a fresh Hermes process, the stub as its model. */
+    const chat = (args: string[]) => new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn(HERMES, ["chat", "-Q", ...args], { env: m.env(), cwd: m.project, stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (d) => (stdout += d));
+      child.stderr.on("data", (d) => (stderr += d));
+      const timer = setTimeout(() => child.kill("SIGKILL"), 240_000);
+      child.on("close", (status) => {
+        clearTimeout(timer);
+        resolve({ status, stdout, stderr });
+      });
+    });
+
+    const first = await chat(["-q", "hello there"]);
+    assert.equal(first.status, 0, first.stderr.slice(-3000));
+    assert.match(first.stdout, /STUB-ANSWER/);
+    assert.equal(readFileSync(join(m.hermesHome, "skills", "sk-demo", "SKILL.md"), "utf8"), SKILL("sk-demo"));
+    const sent = userMessages(stub.chats);
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!,
+      /^hello there\n\nskilletor synced items:\n- skill sk-demo@mine \(hermes\): active from the next Hermes session(\n|$)/);
+
+    // The session resumed in a new process: nothing changed, so the new turn carries nothing –
+    // and the first message is replayed with the report it was sent with.
+    const id = /session_id: (\S+)/.exec(first.stdout + first.stderr)?.[1];
+    assert.ok(id, first.stdout + first.stderr);
+    stub.chats.length = 0;
+    const second = await chat(["--resume", id, "-q", "and again"]);
+    assert.equal(second.status, 0, second.stderr.slice(-3000));
+    const replayed = userMessages(stub.chats);
+    assert.deepEqual([replayed.length, replayed[0], replayed.at(-1)], [2, sent[0], "and again"]);
+  } finally {
+    stub.close();
+  }
 });

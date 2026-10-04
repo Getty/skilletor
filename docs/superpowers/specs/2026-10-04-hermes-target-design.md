@@ -5,7 +5,7 @@ Status: phase 1 built on branch `hermes-target` (2026-10-04). Extends §14 of
 
 Hermes facts are quoted from the Hermes Agent checkout at commit `ea81748579ee`
 (`~/dev/hermes-citiai/.dev/hermes-agent`), as `file:line`. "Measured" means: run against
-that Hermes in a throwaway `HERMES_HOME`, no model called.
+that Hermes in a throwaway `HERMES_HOME`, no real model called.
 
 ## 16. Harness target `hermes`
 
@@ -201,6 +201,11 @@ is what syncs on a machine, or in a session, where only Hermes runs.
   both enable the plugin move the user-scope skills back and forth at each session start.
   Serving them side by side needs ownership per home – a lock per Hermes home, or lock keys
   that name the home.
+- **One checkout, two homes.** Detection is per machine and per `HOME` (§14.6). A Hermes
+  that runs under another `HOME` than the user's Claude Code – a service account – and
+  works in the same checkout sees only itself in use, and its project-scope sync removes
+  the checkout's Claude Code items as those of an inactive target; the next Claude Code
+  session puts them back. Not new with Hermes, but a Hermes service is the likelier case.
 - **The `skilletor` skill for Hermes.** The plugin does not bundle `skills/skilletor`
   (`ctx.register_skill`); install it like any other skill.
 - **Distribution.** No catalog entry, no `hermes plugins install` path, no marketplace
@@ -220,4 +225,8 @@ is what syncs on a machine, or in a session, where only Hermes runs.
   the plugin loads through `plugins.enabled`, its hooks are registered, Hermes'
   `invoke_hook("on_session_start")` triggers the sync and `invoke_hook("pre_llm_call")`
   returns the report as context; `hermes skilletor status` reaches the CLI;
-  `hermes plugins doctor hermes/skilletor --ci` passes. No model is called.
+  `hermes plugins doctor hermes/skilletor --ci` passes. One case runs a whole turn,
+  `hermes chat -q` with a local stub as the model endpoint: the user message the stub
+  receives is the user's text followed by skilletor's report, and after `--resume` in a new
+  process the first message is replayed with it while the new one carries nothing. No real
+  model is called.
