@@ -193,9 +193,10 @@ is what syncs on a machine, or in a session, where only Hermes runs.
   itself tells the user in its banner when a project holds skills it did not load.
 - **Name collisions inside the Hermes home.** skilletor owns `skills/<name>/` and looks at
   nothing else there. A bundled or hub skill of the same `name` in a category directory
-  (`skills/<category>/<name>/`) is a second skill of that name in the same tier and root, and
-  Hermes then refuses both (§16.1). Finding that would mean reading every `SKILL.md` of the
-  home at each sync.
+  (`skills/<category>/<name>/`) is a second skill of that name in the same tier and root.
+  Measured: Hermes then refuses the bare name ("Ambiguous skill name … use one of
+  `<category>/<name>`"), lists the other skill under that path, and skilletor's copy cannot
+  be loaded at all. Finding that would mean reading every `SKILL.md` of the home at each sync.
 - **Several Hermes homes at once.** One lock serves one home (§16.2). Two profiles that
   both enable the plugin move the user-scope skills back and forth at each session start.
   Serving them side by side needs ownership per home – a lock per Hermes home, or lock keys

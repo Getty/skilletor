@@ -755,9 +755,10 @@ runs without a message. A delegated subagent triggers nothing.
   `.codex/skilletor-rules.md` through it — unless a `.hermes.md` shadows `AGENTS.md`.
 - **Agents.** No counterpart in Hermes.
 - **Several Hermes homes side by side** (see [the Hermes home](#the-hermes-home)).
-- **No look at Hermes' other skills.** A skill skilletor installs under a name a bundled or
-  hub skill of that Hermes home already has makes the name ambiguous, and Hermes loads
-  neither; rename or remove one.
+- **No look at Hermes' other skills.** If a bundled or hub skill of that Hermes home
+  already has the name (in `skills/<category>/<name>/`), Hermes calls the name ambiguous:
+  the other skill stays reachable as `<category>/<name>`, the one skilletor installed does
+  not load. Rename or remove one.
 - No `hermes plugins install` path and no catalog entry; the plugin does not bundle the
   `skilletor` skill — install that like any other skill.
 
