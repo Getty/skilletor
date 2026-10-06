@@ -33,7 +33,7 @@ code goes back to the worker as a note on its card, not as your own fix. **Never
 4. `docs/release.md` steps still describe the current release path; the
    marketplace entry's `description` matches `plugin.json`.
 5. `git log --oneline v<last>..` — every user-visible change is reflected in
-   `README.md` (there is no separate changelog).
+   `README.md` and has its entry under the `{{$NEXT}}` line of `Changes`.
 
 Report: ready, or a concise list of blockers, each with the file and the
 command that showed it. Report blockers back; the dispatching agent turns them into cards.

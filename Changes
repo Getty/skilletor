@@ -1,0 +1,39 @@
+Revision history for skilletor
+
+{{$NEXT}}
+
+0.4.2     2026-10-06 05:28:16Z
+  - Windows: hooks and the CLI start without Git Bash. `bin/skilletor.exe`, a
+    small launcher next to the sh script, runs the bundle with the first
+    `node.exe` on `PATH` and is the `skilletor` command in PowerShell and cmd.
+  - Windows: a project synced there and on Linux gets the same files and the
+    same lock. Sources are checked out with the repository's line endings,
+    whatever `core.autocrlf` says, and paths inside an item, a lock key or a
+    `.gitignore` line use `/`.
+  - The Claude Code hooks are declared in exec form and start `bin/skilletor`
+    without a shell.
+  - A source name outside `^[A-Za-z0-9][A-Za-z0-9._-]*$` is a config error.
+  - Specs: an empty spec, a blank `github:` or forge owner, a shorthand owner,
+    repo or port no forge takes, and an unknown `word:` prefix are errors. A
+    scheme and `github:` match in any case, `.TAR.GZ` is a url, an empty repo
+    segment in `github:` means the default repo, and git's
+    `transport::address` form is a git source kept as written. A GitHub tree
+    link is the repo at that ref; a file or subdirectory link is an error.
+  - `add` refuses a non-https url source before writing anything, and refuses
+    to keep an entry the config loader rejects, before trusting it.
+  - `source remove`: a name the target config lacks is an error that names
+    where else it is declared; an entry the config loader rejects can be
+    removed when nothing else is refused.
+  - Bundles: an entry address the config loader rejects is a bundle error, not
+    a missing source, and a bundle's missing source never replaces one in the
+    target config.
+  - Catalog: `x.md` beside `x.md.njk` is an error of that agent or rule, and
+    `f` beside `f.njk` inside a skill is an error of that skill.
+  - `add`, `install`, `uninstall` and `source remove` exit 2 when their sync
+    hits a config error.
+  - A skill's scripts keep their executable bit. After the upgrade, one sync
+    gives earlier installs and url caches theirs.
+
+0.4.1     2026-09-26 22:58:47Z
+  - First published release. The versions before it, 0.1.0 to 0.4.0, were
+    development builds listed in the marketplace.
