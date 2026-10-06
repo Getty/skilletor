@@ -316,7 +316,9 @@ test("k109: an unknown word: prefix is a SpecError, never a GitHub owner, never 
   const cases: [string, string][] = [
     ["gitlab:u/r", "gitlab:"], ["Gitlab:u/r", "Gitlab:"], ["gitlab:u", "gitlab:"], ["bitbucket:team/repo", "bitbucket:"],
     ["HTTPS:/host", "HTTPS:"], ["https:host", "https:"], ["localhost:8080", "localhost:"], ["localhost:8080/x", "localhost:"],
-    ["C:\\skills", "C:"], [":foo", ":"], ["user:pw@localhost/x", "user:"],
+    [":foo", ":"], ["user:pw@localhost/x", "user:"],
+    // On Windows a drive path is a local source.
+    ...(process.platform === "win32" ? [] : [["C:\\skills", "C:"] as [string, string]]),
   ];
   for (const [spec, prefix] of cases) {
     assert.throws(() => resolveSpec(spec, noProbe), (e: unknown) => {

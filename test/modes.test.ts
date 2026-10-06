@@ -48,6 +48,9 @@ const INSTALLED: [string, boolean][] = [
 
 const INSTALL = { skills: ["pub@s", "proj@s"] };
 
+/** Windows files carry no executable bit: a mode read there never has one, chmod sets none. */
+const NO_EXEC_BIT = process.platform === "win32" && "Windows files have no executable bit";
+
 /** The owner's executable bit – the one git records. */
 const isExec = (path: string) => (statSync(path).mode & 0o100) !== 0;
 
@@ -84,7 +87,7 @@ function writeSource(dir: string): string {
   return resolvePath(dir);
 }
 
-test("k99: a local source's executable scripts install executable, in both layouts and from a template", async (t) => {
+test("k99: a local source's executable scripts install executable, in both layouts and from a template", { skip: NO_EXEC_BIT }, async (t) => {
   const e = env(t);
   const src = writeSource(join(e.tmp.dir, "src"));
   e.writeCfg({ local: src });
@@ -94,7 +97,7 @@ test("k99: a local source's executable scripts install executable, in both layou
   e.assertModes();
 });
 
-test("k99: a mode change in the source reaches the installed file; the lock hash stays the content's", async (t) => {
+test("k99: a mode change in the source reaches the installed file; the lock hash stays the content's", { skip: NO_EXEC_BIT }, async (t) => {
   const e = env(t);
   const src = writeSource(join(e.tmp.dir, "src"));
   e.writeCfg({ local: src });
@@ -118,7 +121,7 @@ test("k99: a mode change in the source reaches the installed file; the lock hash
   assert.deepEqual(again.scopes[0]!.updated, []);
 });
 
-test("k99: a git source's executable scripts install executable; a local chmod is no check drift, the next sync restores it", async (t) => {
+test("k99: a git source's executable scripts install executable; a local chmod is no check drift, the next sync restores it", { skip: NO_EXEC_BIT }, async (t) => {
   const e = env(t);
   const bare = join(e.tmp.dir, "repo.git");
   const work = join(e.tmp.dir, "work");
@@ -150,7 +153,7 @@ test("k99: a git source's executable scripts install executable; a local chmod i
   assert.deepEqual(s.overwritten, []);
 });
 
-test("k99: a url source's executable tar entries install executable", async (t) => {
+test("k99: a url source's executable tar entries install executable", { skip: NO_EXEC_BIT }, async (t) => {
   const e = env(t);
   const archive = makeTarGz(FILES.map((f) => ({ name: `pkg/${f.path}`, data: f.data, mode: f.exec ? 0o755 : 0o644 })));
   t.mock.method(globalThis, "fetch", async () => new Response(new Uint8Array(archive), { headers: { etag: '"v1"' } }));
@@ -189,7 +192,7 @@ function cacheDir(e: ReturnType<typeof env>): string {
 // (varsChanged; the git source did not move), and the sync it starts gives the scripts their
 // bit from the git cache as it stands (the same cache dir, no new pack), reporting both skills
 // updated and nothing overwritten. It fires once: the next check, session and sync change nothing.
-test("k107: scripts an earlier version installed from git get their bit in the first session after the upgrade, once", async (t) => {
+test("k107: scripts an earlier version installed from git get their bit in the first session after the upgrade, once", { skip: NO_EXEC_BIT }, async (t) => {
   const e = env(t);
   const bare = join(e.tmp.dir, "repo.git");
   const work = join(e.tmp.dir, "work");
@@ -264,7 +267,7 @@ const lockVersion = (e: ReturnType<typeof env>) => readLock(join(e.home, ".claud
 // (varsChanged; the archive did not change), and the sync's GET carries no If-None-Match, so
 // the server's 200 is extracted anew, bits and all. It fires once: the next check is quiet and
 // the next sync asks with "v1", gets a 304 and changes nothing.
-test("k107: a url cache an earlier version extracted without modes is extracted anew once; its scripts get their bit", async (t) => {
+test("k107: a url cache an earlier version extracted without modes is extracted anew once; its scripts get their bit", { skip: NO_EXEC_BIT }, async (t) => {
   const e = env(t);
   const net = serveUrl(t, ARCHIVE());
   e.writeCfg({ url: "https://example.invalid/skills.tar.gz" });
@@ -297,7 +300,7 @@ test("k107: a url cache an earlier version extracted without modes is extracted 
 // earlier format as a cache of unknown version (k82), so the lock and the record of what it
 // read say "unknown"; the next check online counts the url source as changed, and its sync
 // extracts the archive anew and gives the scripts their bit – once.
-test("k107: a url cache of an earlier format served offline counts as changed until a download gives the bits", async (t) => {
+test("k107: a url cache of an earlier format served offline counts as changed until a download gives the bits", { skip: NO_EXEC_BIT }, async (t) => {
   const e = env(t);
   const net = serveUrl(t, ARCHIVE());
   e.writeCfg({ url: "https://example.invalid/skills.tar.gz" });

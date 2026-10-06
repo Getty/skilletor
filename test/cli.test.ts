@@ -731,7 +731,7 @@ test("k87: status, source list and trust show a project source's address escaped
   const json = runCli(["status", "--scope", "project", "--json", ...p.common], p.env);
   assert.equal(json.status, 0, json.stderr);
   assert.doesNotMatch(json.stdout, RAW);
-  assert.ok(json.stdout.includes(`"url": "${p.payload}${SHOWN}"`), json.stdout);
+  assert.ok(json.stdout.includes(`"url": ${JSON.stringify(p.payload).slice(0, -1)}${SHOWN}"`), json.stdout);
   assert.deepEqual(JSON.parse(json.stdout).scopes[0].trustRequests, [{ name: "team", kind: "local", url: p.payload + EVIL }]);
 
   const list = runCli(["source", "list", ...p.common], p.env);
@@ -874,7 +874,7 @@ test("k103: a config error in the sync after add, install, uninstall, source rem
     const cfg = join(home, ".claude", "skilletor.json");
     writeFileSync(cfg, JSON.stringify(c.config, null, 2) + "\n");
     // No harness marker in this HOME: every sync stops at a config error.
-    const env = { ...process.env, HOME: home, CODEX_HOME: join(home, ".no-codex") };
+    const env = { ...process.env, ...homeEnv(home), CODEX_HOME: join(home, ".no-codex") };
     const common = ["--project-dir", proj];
     if (c.trust) assert.equal(runCli(["trust", "shared", ...common], env).status, 0, `${c.label}: trust`);
     const before = readFileSync(cfg);
@@ -910,7 +910,7 @@ test("k114: source remove of a name the target config lacks exits 1, prints no r
     const proj = join(tmp.dir, `k114-proj-${harness}`);
     mkdirSync(join(home, ".claude"), { recursive: true });
     mkdirSync(join(proj, ".claude"), { recursive: true });
-    const env = harness ? claudeOnlyEnv(home) : { ...process.env, HOME: home, CODEX_HOME: join(home, ".no-codex") };
+    const env = harness ? claudeOnlyEnv(home) : { ...process.env, ...homeEnv(home), CODEX_HOME: join(home, ".no-codex") };
     const common = ["--project-dir", proj];
     const cfg = join(home, ".claude", "skilletor.json");
     const projCfg = join(proj, ".claude", "skilletor.json");
@@ -1018,7 +1018,7 @@ test("k110: add of an http:// or file:// tarball exits 1 before writing, config 
   const env = claudeOnlyEnv(home);
   const common = ["--project-dir", proj];
   const cfg = join(home, ".claude", "skilletor.json");
-  writeFileSync(cfg, `{ "sources": { "keep": { "local": "${home}" } } }\n`);
+  writeFileSync(cfg, `{ "sources": { "keep": { "local": ${JSON.stringify(home)} } } }\n`);
   const written = readFileSync(cfg);
   const cases: [string[], string][] = [
     [["add", "http://host/x.tar.gz"], `skilletor: cannot add http://host/x.tar.gz: sources.host.url "http://host/x.tar.gz" must be an https:// URL; nothing was changed\n`],
