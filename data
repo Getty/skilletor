@@ -1,0 +1,57 @@
+---
+claimed_at: 2026-10-13T05:17:21Z
+claimed_by: skilletor
+class: standard
+completed: 2026-10-13T05:17:27Z
+created: 2026-10-13T04:35:03Z
+id: 126
+priority: medium
+started: 2026-10-13T04:51:55Z
+status: done
+tags:
+- spec
+- feature
+- sources
+title: 'source field "path": where a source''s skills lie (category-nested repos like
+  NousResearch/hermes-agent)'
+updated: 2026-10-13T05:17:27Z
+---
+
+Agreed with the maintainer 2026-10-13. A repo that keeps its skills outside skills/<name>/ offers nothing today: NousResearch/hermes-agent has skills/<category>/<name>/SKILL.md (58 skills, 12 categories) and optional-skills/<category>/[<sub>/]<name>/SKILL.md (155 more), no .claude-plugin/plugin.json. scan() reads skills/ one level deep and skips a directory without SKILL.md (src/catalog.ts:179), so `skilletor available` is empty, without an error (measured on a local replica of the layout).
+
+Wanted: an optional "path" on a source entry, a string or an array of strings, relative to the source root:
+
+    "hermes": { "git": "https://github.com/NousResearch/hermes-agent", "path": ["skills", "optional-skills"] }
+
+Rules:
+- "path" says where skills lie, it is NOT a new source root (no skills/agents/rules layout expected beneath it).
+- Descend until a SKILL.md[.njk]: a directory holding one is one skill and is not searched further; any other directory is walked. Covers a category path (skills/research), a single skill (skills/research/arxiv), the whole of skills/ and the deeper optional-skills/ entries.
+- Name = the skill directory basename. Two directories yielding one name: error, as for plugin.json skills (§4.1).
+- Same refusals as a plugin.json skills path (§4.1): absolute, "..", a symlink (dangling included), missing, not a directory, the source root itself. Nothing is followed.
+- "path" replaces the default scan of that source: no skills/, agents/, rules/, plugin.json or .claude/ items, no bundles — decide and say so for bundles and skilletor.json meta.
+- Not part of the source identity: cache and trust stay bound to address and ref, like "ref" (§3 merging, §4.3). Say how "path" merges across project/user/local.
+- Config load validates it (type, non-empty) with an error naming file, source and key (k88 style).
+- plugin.json skills paths stay one level deep: going deeper there would change what existing sources offer to a wildcard.
+
+Follow-ups to decide in the card:
+- `add` of a GitHub subdirectory link (…/tree/<ref>/<dir>, refused since k119) could resolve to ref + path instead. Touches k119 wording and k125.
+- The whole repo is still cloned (GitHub reports ~1.2 GB for hermes-agent, full history; the shallow clone size is not measured). Sparse checkout only if that hurts.
+- Hermes target: these skills already sit in the Hermes home under skills/<category>/<name>/, so installing them for target hermes hits the ambiguous-name refusal of §16.5. Worth a README line.
+
+Done: spec §3/§4.1 updated, catalog + config implemented with tests (nested categories, single skill, array, duplicate name, each refusal, replace-not-add), README source section, dist rebuilt. Not for branch hermes-target.
+
+2026-10-13 04:55 Worker start: reading done. Plan: path on SourceDef/ResolvedSource (as written) and on ResolvedBackend (list, not identity); scan(dir, paths) replaces the item scan; fs-free refusals reported at config load (as ref is), all refusals again at scan; SourceRead gets path so check asks for a sync when path changes; add has no --ref precedent, so no --path.
+
+2026-10-13 05:03 Engine done, 885 tests green (17 new in test/source-path.test.ts plus config/spec/commands/bundles): scan(dir, paths) in catalog.ts, path on SourceDef/ResolvedSource/ResolvedBackend/SourceRead, add link -> ref+path with the k101 keep rule. Open: docs (spec, README, bundled skill), dist rebuild, hand test on the real clone.
+
+2026-10-13 05:08 Decisions taken. (9) The refusals that need no file system (absolute, '..', the source root) are config errors at load, as a ref git cannot take is; the scan checks all six again. So add's k110 check covers a link's path. (11) path is carried where ref is: source list (text and --json), add's printed definition, ResolvedBackend, and the sources-read record, so check asks for one sync when path changes although the source did not move. status shows no ref and so no path. (14) add has no --ref, so no --path: a link into a directory sets it, anything else is hand-edited. RENDER_FORMAT not bumped: a config without path syncs as before, one with path was a config error before.
+
+2026-10-13 05:08 Measured on the shallow clone of NousResearch/hermes-agent used as a local source (temp HOME, CODEX_HOME, cwd): path [skills, optional-skills] offers 213 skills, path skills 58, path optional-skills 155, no path 0; no duplicate names, no symlinks or .njk beneath either; sync of skill:*@hermes installed 213 with 0 warnings. Shallow clone size (card follow-up): 245 MB on disk, 86 MB of it .git; skills/ is 3.7 MB and optional-skills/ 14 MB. Sparse checkout would save most of that.
+
+2026-10-13 05:09 Also found (not fixed, for the dispatcher to file): (a) a GitHub link's %-escapes are not decoded - the ref since k119, now the path too: .../tree/main/my%20skills stores path my%20skills, which a sync reports as not existing. (b) two skills whose names differ only in case (a/Foo, b/foo) are two items to the scan but one directory on a case-insensitive file system (macOS, Windows); path makes that reachable from one source. (c) a config file cannot give ref or path alone for a source another file declares: every entry needs its own git/url/local, so a skilletor.local.json overriding only path must restate the backend - existing behaviour for ref, spec 3 reads as if fields merged freely. (d) path .claude/skills offers skilletor's own installed copies; the .gitignore/.local. filter of the .claude best-effort scan is not applied under a path. (e) .claude/skills/skilletor-core does not yet mention scan(dir, paths), ResolvedBackend.path or the sources-read path - skill-author lane. (f) skilletor <= 0.4.2 reads a config with path as an unknown key, a config error: a committed project config with path needs every machine on the new version - for the Changes entry. (g) the Hermes-target README line of the card is left out as instructed.
+
+2026-10-13 05:09 Done: source field path (string or array) implemented, tested and documented; tree is commit-ready, nothing committed. Changed: src/{catalog,config,engine,commands,spec,bundles,state,fsutil}.ts, dist/skilletor.js rebuilt, test/source-path.test.ts (new, 18 tests) plus config/spec/commands/bundles tests, spec 3/4.1/4.2/4.3/4.4/6.5/9/14.3/15.1/15.4/15.6, README (Sources, Skills elsewhere: path, config, trust), skills/skilletor/SKILL.md. Verified: npm run typecheck, npm test (886 pass, 0 fail, 0 skipped), npm run build, npm run check-dist (up to date); every new test seen failing without the implementation; hand test of available, sync, check, add and the SessionStart hook on the real hermes-agent clone in a temp home (213 skills = 58 + 155). Not touched: Changes, versions, anything Hermes-target.
+
+2026-10-13 05:11 Reviewed by the coordinating agent: typecheck, 886/886 tests, build and check-dist green on a re-run; end to end in a throwaway HOME over git, `skilletor add https://github.com/NousResearch/hermes-agent/tree/main/skills` stored ref main + path skills, `available` listed 58 skills, `install arxiv@hermes-agent` installed skills/arxiv. Sparse checkout: NOT built. Measured shallow clone of hermes-agent: 11 s, 86 MB .git, 331 MB checked out (skills/ 3.7 MB, optional-skills/ 14 MB) — acceptable; it would only save cache disk space. Follow-ups filed as their own cards; the percent-escape point is appended to k125.
+
+2026-10-13 05:17 Committed: 3c98f3e (feat: Offer skills from any directory with a source's path), c7033cd (release: bump to 0.5.0). Checks green, 886/886.
