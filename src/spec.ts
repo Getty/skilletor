@@ -13,6 +13,9 @@ export interface ResolvedSpec {
   derivedName: string;
   /** The ref a GitHub tree link pins (k119); `add` stores it as the source's `ref`. */
   ref?: string;
+  /** The directory a GitHub tree link leads into (k126), "/"-joined; `add` stores it as the
+   *  source's `path`. Only ever beside a `ref`. */
+  path?: string;
 }
 
 /** Result of probing a base URL: which of `git ls-remote` / `HEAD .tar.gz` responded. */
@@ -105,11 +108,12 @@ function checkGithub(spec: string, owner: string, repo: string | undefined): voi
 }
 
 /** A GitHub browser link (k119), from `path`, what follows `github.com/`:
- *  `<owner>/<repo>/tree/<ref>` is that repo at that ref. A `?query` or `#fragment` is the page's
- *  (GitHub escapes both in a ref), a blank segment skipped (k104, k117). A source is a whole
- *  repository, so a `blob` link (a file), a `tree` link past its ref (a subdirectory) and one
- *  without a ref are errors; a ref with "/" cannot be told from a subdirectory, so the segment
- *  after `tree` is the ref. Undefined for any other path. */
+ *  `<owner>/<repo>/tree/<ref>` is that repo at that ref, `<owner>/<repo>/tree/<ref>/<dir…>` that
+ *  repo at that ref with its skills beneath `<dir…>` (k126: the source's `path`, taken as
+ *  written). A `?query` or `#fragment` is the page's (GitHub escapes both in a ref), a blank
+ *  segment skipped (k104, k117). A `blob` link (a file) and a `tree` link without a ref are
+ *  errors; a ref with "/" cannot be told from a directory, so the segment after `tree` is the
+ *  ref and what follows it the path. Undefined for any other path. */
 function githubLink(spec: string, path: string): ResolvedSpec | undefined {
   const [owner, repo, view, ref, ...sub] = path.split(/[?#]/, 1)[0]!.split("/").filter(filled);
   if (owner === undefined || repo === undefined || (view !== "tree" && view !== "blob")) return undefined;
@@ -117,16 +121,12 @@ function githubLink(spec: string, path: string): ResolvedSpec | undefined {
   const value = `https://github.com/${owner}/${repo}`;
   const pin = ref === undefined ? "" : `${value}/tree/${ref} to pin ref "${ref}"`;
   if (view === "blob") {
-    throw new SpecError(`cannot resolve "${spec}": a GitHub file link; a source is a whole repository: add ${value}${pin && `, or ${pin}`}`);
+    throw new SpecError(`cannot resolve "${spec}": a GitHub file link; a source is a repository, not a file: add ${value}${pin && `, or ${pin}`}`);
   }
   if (ref === undefined) throw new SpecError(`cannot resolve "${spec}": a GitHub tree link without a ref; add ${value}`);
-  if (sub.length > 0) {
-    throw new SpecError(
-      `cannot resolve "${spec}": skilletor installs a whole repository, not its subdirectory "${sub.join("/")}"; add ${pin}. ` +
-        `A link cannot tell a ref with "/" from a subdirectory: for such a ref, add ${value} and set its "ref" by hand`,
-    );
-  }
-  return { kind: "git", value, derivedName: repoName(owner, repo), ref };
+  const link: ResolvedSpec = { kind: "git", value, derivedName: repoName(owner, repo), ref };
+  if (sub.length > 0) link.path = sub.join("/");
+  return link;
 }
 
 /** Another known forge's owner and repo (k117): only what none of them takes is refused. */
@@ -213,7 +213,7 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
   //    scheme is git's to judge: a remote helper (`codecommit://`, `s3://`) fetches its own (k117).
   //    git's `<transport>::<address>` comes first, as git reads it, and is kept exactly as
   //    written, never a url: `codecommit::us-east-1://my-repo` (k118). A GitHub browser link
-  //    (https://github.com/o/r/tree/<ref>) is the repo at that ref, as in 4. (k119).
+  //    (https://github.com/o/r/tree/<ref>[/<dir>]) is the repo at that ref, as in 4. (k119, k126).
   const address = helperAddress(s);
   if (address !== undefined) return { kind: "git", value: s, derivedName: nameFromHelper(address) };
   if (hasScheme(s) || isScpLike(s)) {
@@ -247,7 +247,8 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
 
   // 4. Known forge with an owner (never probed); github.com takes GitHub's characters, another
   //    forge whatever a URL path segment holds but whitespace, control characters, ":" and "@".
-  //    A GitHub browser link (github.com/o/r/tree/<ref>) is the repo at that ref (k119).
+  //    A GitHub browser link (github.com/o/r/tree/<ref>[/<dir>]) is the repo at that ref, its
+  //    skills beneath <dir> when the link names one (k119, k126).
   if (KNOWN_FORGES.includes(firstSeg.toLowerCase()) && slash !== -1) {
     const segs = rest.split("/").filter(Boolean);
     const owner = segs[0];

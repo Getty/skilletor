@@ -60,11 +60,13 @@ nothing; non-zero = a sync is due. An option the command does not take → exit 
 `add` without a name takes the repo's for a git repo other than `skills` (`Getty/karr`,
 `https://github.com/Getty/karr.git` → `karr`), else the owner's (`Getty` → `getty`), the
 host's or the directory's. A GitHub tree link (`github.com/o/r/tree/<ref>`) adds the repo
-pinned to `<ref>`; a file or subdirectory link is refused. `add` never replaces a source: the
-same address again keeps the entry as written (`ref`, `local` stay) and syncs. Exit 1, nothing
-changed or trusted, when config load refuses that entry (a hand-written `"ref": ""`: fix it by
-hand), a tree link pins a ref the entry lacks (set it by hand or use another name) or the name
-has another address (use another name); `source remove <name>` first gets past all three.
+pinned to `<ref>`, one into a directory (`…/tree/<ref>/<dir>`) with `path: <dir>` as well; the
+segment after `tree` is always the ref (a ref with `/`: set `ref` by hand); a file link is
+refused. `add` never replaces a source: the same address again keeps the entry as written
+(`ref`, `path`, `local` stay) and syncs. Exit 1, nothing changed or trusted, when config load
+refuses that entry (a hand-written `"ref": ""`: fix it by hand), a tree link pins a ref or
+path the entry lacks (set it by hand or use another name) or the name has another address
+(use another name); `source remove <name>` first gets past all three.
 
 Sources use `skills/<name>/`, `agents/<name>.md`, `rules/<name>.md`. Claude plugin repos
 work too, the skills their `.claude-plugin/plugin.json` lists installed as `skills/<name>/`:
@@ -73,6 +75,20 @@ own `.claude/skills/<name>/`, `.claude/agents/<name>.md[.njk]` and `.claude/rule
 install like published ones (`skilletor add Getty/karr`), read last, best effort: a name
 found above wins; a symlink and skilletor's installed copies (`.local.` files, a skill
 carrying skilletor's `.gitignore`) are skipped.
+
+A repo with its skills elsewhere (by category, no `plugin.json`) offers nothing that way: set
+`path` on its source entry — a directory or a list, relative to the repo root —
+
+```json
+"hermes": { "git": "https://github.com/NousResearch/hermes-agent", "path": ["skills", "optional-skills"] }
+```
+
+and every directory beneath it holding a `SKILL.md[.njk]`, at any depth, is one skill named
+after that directory (a category `skills/research` or one skill `skills/research/arxiv` works
+too). `path` replaces the layout above: that source then offers those skills only — no
+agents, rules, bundles, `plugin.json` or `.claude/` items. The same name in two directories
+is an error of that skill alone (as `f` beside `f.njk`, below). `add` has no option for it:
+a link into a directory sets it, anything else is edited into the entry.
 
 ## Config
 
@@ -97,8 +113,12 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
 - A source name (its key) is ASCII letters, digits, `.`, `_`, `-`, starting with a letter or
   digit; `git`/`local` are non-empty strings; `url` is `https://`; `ref` (git) is a plain
   branch, tag or commit name (no leading `-`, whitespace, `~ ^ : ? * [ \`, `..`, `@{`) —
-  omit it, never `""`, for the remote's HEAD. Anything else is a config error; `add` refuses
-  such a name or address (an `http://…`/`file://…` tarball too) before writing: exit 1.
+  omit it, never `""`, for the remote's HEAD; `path` is a non-empty string or list of them,
+  relative, without `..`, not the root (`.`). Anything else is a config error; `add` refuses
+  such a name or address (an `http://…`/`file://…` tarball too) before writing: exit 1. A
+  `path` that is missing, no directory or a symlink leaves the source unresolved for that
+  sync: a warning, installed items stay. `ref` and `path` are not part of a source's
+  identity (cache, trust) and merge project < user < local, replaced whole.
 - `gitignore` (default true: commit `skilletor.json` and each `.gitignore` the report names)
   and `checkInterval` (user file only): [references/sync.md](references/sync.md).
 - `targets` (`["claude"]`, `["codex"]` or both; unset = auto-detected): the user file sets

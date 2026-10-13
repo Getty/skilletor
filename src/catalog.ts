@@ -25,6 +25,11 @@
 // found there carry `dir` too; every item installs as skills/<name>/, agents/<name>.md,
 // rules/<name>.md, whatever its source path.
 //
+// A source entry's `path` (config, spec §3; k126) says where the source's skills lie
+// instead: `scan(dir, paths)` walks each path down to the directories holding
+// SKILL.md[.njk] and offers those skills and nothing else – none of the layout above
+// but skilletor.json, and no bundles.
+//
 // Names come from the path; descriptions from item frontmatter (read raw for
 // .njk, never rendered). Symlinks anywhere in the tree are rejected (spec §9); in
 // `.claude/` they are skipped, never followed. An agent or rule with both `<name>.md`
@@ -33,8 +38,8 @@
 // which both install as `f`, carries an error naming every such pair – in `.claude/`
 // too, where one skill directory has no "which item wins" question (k113).
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
-import { basename, isAbsolute, join, posix, relative } from "node:path";
-import { toPosix } from "./fsutil.ts";
+import { basename, join, posix, relative } from "node:path";
+import { innerSegments, toPosix } from "./fsutil.ts";
 import type { ItemType } from "./config.ts";
 import { BundleError, parseBundle, type BundleDef } from "./bundles.ts";
 import { SKILL_GITIGNORE } from "./gitignore.ts";
@@ -53,9 +58,10 @@ export interface CatalogItem {
    *  `skills/<name>`), the directory holding an agent's or rule's file (default `agents`,
    *  `rules`). Its files install under `skills/<name>/`, `agents/`, `rules/` (render.ts). */
   dir?: string;
-  /** Why the item cannot be built: both `<name>.md` and `<name>.md.njk` exist (k100), or a
-   *  skill holds `f` beside `f.njk` (k113). That error belongs to the item, never to the scan
-   *  (spec §4.1); `files` holds both. */
+  /** Why the item cannot be built: both `<name>.md` and `<name>.md.njk` exist (k100), a
+   *  skill holds `f` beside `f.njk` (k113), or a source's `path` yields the name from several
+   *  directories (k126; no `dir` then). That error belongs to the item, never to the scan
+   *  (spec §4.1); `files` holds both, or every directory's. */
   error?: string;
 }
 
@@ -164,7 +170,11 @@ function itemName(fileName: string): string | undefined {
   return m ? m[1] : undefined;
 }
 
-export function scan(dir: string): Catalog {
+/** The catalog of the source tree at `dir`. With `paths` – a source entry's `path` (spec §3,
+ *  §4.1; k126) – the items are the skills lying beneath those paths and nothing else: the
+ *  layout's own directories, plugin.json, `.claude/` and bundles are not read. */
+export function scan(dir: string, paths?: string[]): Catalog {
+  if (paths !== undefined) return { items: pathSkills(dir, paths), bundles: [], meta: readSourceMeta(dir) };
   const items: CatalogItem[] = [];
 
   for (const { dir: sub, type } of TYPE_DIRS) {
@@ -312,7 +322,7 @@ function pluginSkills(dir: string, found: CatalogItem[]): CatalogItem[] {
   };
 
   for (const entry of paths as string[]) {
-    const target = pluginPath(dir, p, entry);
+    const target = innerDir(dir, `${p}: skills path`, entry);
     const file = skillFile(target);
     if (file) {
       add(target, file);
@@ -328,30 +338,74 @@ function pluginSkills(dir: string, found: CatalogItem[]): CatalogItem[] {
   return out;
 }
 
-/** Resolve one plugin.json skills path to a directory inside the source; every
- *  segment is checked, so neither `..` nor a symlink can leave the source root. */
-function pluginPath(dir: string, pluginFile: string, entry: string): string {
-  if (isAbsolute(entry) || entry.startsWith("/") || entry.startsWith("\\")) {
-    throw new CatalogError(`${pluginFile}: skills path must not be absolute: ${entry}`);
+/**
+ * The skills beneath a source entry's `path` values (spec §4.1, k126), sorted by name. Each
+ * value is held to what a plugin.json `skills` path is (`innerDir`); from there the walk goes
+ * down to any depth: a directory holding SKILL.md[.njk] is one skill, named by its basename,
+ * and is not searched further; any other directory is walked. On the way down nothing is
+ * followed and nothing fails – a symlinked entry and a dot-directory that is no skill (`.git`)
+ * are passed over – while a skill directory keeps every skill's rules (a symlink in it fails
+ * the scan). A directory reached through two overlapping paths counts once; a name two
+ * directories yield is one item carrying an error naming them in sorted order, never a
+ * failed scan: an addition in a foreign repository must not take the whole source down.
+ */
+function pathSkills(dir: string, paths: string[]): CatalogItem[] {
+  const found = new Map<string, Map<string, CatalogItem>>(); // skill name -> its dir(s), relative to the source
+  const visit = (cur: string, named: boolean): void => {
+    const file = skillFile(cur);
+    if (file) {
+      const item = skillItem(dir, cur, file);
+      const dirs = found.get(item.name) ?? new Map<string, CatalogItem>();
+      if (!dirs.has(item.dir!)) dirs.set(item.dir!, item);
+      found.set(item.name, dirs);
+      return;
+    }
+    if (!named && basename(cur).startsWith(".")) return;
+    for (const entry of readdirSync(cur).sort()) {
+      const p = join(cur, entry);
+      if (isPlainDir(p)) visit(p, false);
+    }
+  };
+  for (const entry of paths) visit(innerDir(dir, '"path"', entry), true);
+
+  const out: CatalogItem[] = [];
+  for (const [name, dirs] of found) {
+    if (dirs.size === 1) {
+      out.push([...dirs.values()][0]!);
+      continue;
+    }
+    const where = [...dirs.keys()].sort();
+    out.push({
+      type: "skill",
+      name,
+      files: [...dirs.values()].flatMap((i) => i.files).sort(),
+      error: `found in ${where.length} directories: ${where.slice(0, -1).join(", ")} and ${where.at(-1)}`,
+    });
   }
-  const segments = entry.split(/[\\/]/).filter((s) => s !== "" && s !== ".");
-  if (segments.includes("..")) {
-    throw new CatalogError(`${pluginFile}: skills path must not contain "..": ${entry}`);
-  }
-  if (segments.length === 0) {
+  return out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+/** Resolve one path of a source – a plugin.json `skills` path, a source entry's `path` – to a
+ *  directory inside the source; every segment is checked, so neither `..` nor a symlink can
+ *  leave the source root. `what` names it in the error. */
+function innerDir(dir: string, what: string, entry: string): string {
+  const segments = innerSegments(entry);
+  if (segments === "absolute") throw new CatalogError(`${what} must not be absolute: ${entry}`);
+  if (segments === "dotdot") throw new CatalogError(`${what} must not contain "..": ${entry}`);
+  if (segments === "root") {
     // Its name would be the source root's basename, i.e. the cache directory's.
-    throw new CatalogError(`${pluginFile}: skills path must not be the source root: ${JSON.stringify(entry)}`);
+    throw new CatalogError(`${what} must not be the source root: ${JSON.stringify(entry)}`);
   }
   let cur = dir;
   for (const seg of segments) {
     cur = join(cur, seg);
     if (!existsSync(cur) && !isDanglingLink(cur)) {
-      throw new CatalogError(`${pluginFile}: skills path does not exist: ${entry}`);
+      throw new CatalogError(`${what} does not exist: ${entry}`);
     }
     noSymlink(cur);
   }
   if (!lstatSync(cur).isDirectory()) {
-    throw new CatalogError(`${pluginFile}: skills path is not a directory: ${entry}`);
+    throw new CatalogError(`${what} is not a directory: ${entry}`);
   }
   return cur;
 }

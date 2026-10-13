@@ -735,3 +735,133 @@ test("targets: must be a non-empty array of known harnesses without duplicates",
     }
   }
 });
+
+// ---- sources: path (k126) -----------------------------------------------------
+
+// k126: `path` on a source entry – where its skills lie (spec §3, §4.1). Asserts: a string and
+// an array of strings load as written, in each of the three files and beside every backend;
+// a source without one has none.
+test("k126: a source's path loads as written, a string or an array of strings", () => {
+  const { home, projectDir, cleanup } = setup({
+    user: { sources: { a: { git: "https://example.com/a", ref: "v1", path: "skills" }, plain: { git: "https://example.com/p" } } },
+    project: { sources: { b: { url: "https://example.com/b.tar.gz", path: ["skills", "optional-skills/mlops", "./x/"] } } },
+    local: { sources: { c: { local: "~/dev/c", path: ["one"] } } },
+  });
+  try {
+    const cfg = loadConfig({ home, projectDir });
+    assert.deepEqual([cfg.sources.get("a")?.path, cfg.sources.get("a")?.ref], ["skills", "v1"]);
+    assert.deepEqual(cfg.sources.get("b")?.path, ["skills", "optional-skills/mlops", "./x/"]);
+    assert.deepEqual(cfg.sources.get("c")?.path, ["one"]);
+    assert.equal(cfg.sources.get("plain")?.path, undefined);
+    assert.equal("path" in cfg.sources.get("plain")!, false);
+    assert.equal(cfg.userSources.get("a")?.path, "skills");
+  } finally {
+    cleanup();
+  }
+});
+
+// k126: a `path` of another shape would have to be read as absent – the whole default layout
+// offered where one directory was meant – or guessed at. Asserts: in each file, anything but a
+// non-empty string or a non-empty array of non-empty strings is a ConfigError naming file,
+// source and key (the array index for an element), with the value as JSON (the k88 style).
+test("k126: a path that is no non-empty string or array of them is refused, naming file, source and key", () => {
+  const omit = ` (omit "path" for the default layout)`;
+  const cases: [unknown, string][] = [
+    [123, `.path 123 must be a string or an array of strings`],
+    [true, `.path true must be a string or an array of strings`],
+    [null, `.path null must be a string or an array of strings`],
+    [{ dir: "skills" }, `.path {"dir":"skills"} must be a string or an array of strings`],
+    ["", `.path "" must not be empty${omit}`],
+    [[], `.path [] must not be empty${omit}`],
+    [["skills", 7], `.path[1] 7 must be a string`],
+    [[["skills"]], `.path[0] ["skills"] must be a string`],
+    [[null], `.path[0] null must be a string`],
+    [["skills", ""], `.path[1] "" must not be empty`],
+  ];
+  const files = ["user", "project", "local"] as const;
+  for (const [i, [value, problem]] of cases.entries()) {
+    const file = files[i % files.length]!;
+    const { home, projectDir, cleanup } = setup({ [file]: { sources: { team: { git: "https://example.com/s", path: value } } } });
+    try {
+      assert.throws(() => loadConfig({ home, projectDir }), (e: unknown) => {
+        assert.ok(e instanceof ConfigError, String(e));
+        assert.equal((e as Error).message, `${configPath(file, home, projectDir)}: sources.team${problem}`);
+        return true;
+      }, JSON.stringify(value));
+    } finally {
+      cleanup();
+    }
+  }
+});
+
+// k126: what a path may not be whatever the source holds – absolute, with "..", the source
+// root itself – needs no file system, so config load says it, as it does for a `ref` git could
+// not take (and `add` then never writes one, k110). Asserts: each is a ConfigError naming file,
+// source, key and value; "\" separates like "/" (a Windows-written config); a path that merely
+// does not exist loads – that is the scan's to say.
+test('k126: a path that is absolute, contains ".." or is the source root is a config error', () => {
+  const abs = "must not be absolute (it is relative to the source root)";
+  const root = "must not be the source root (name the directories its skills lie in)";
+  const cases: [unknown, string][] = [
+    ["/etc/skills", `.path "/etc/skills" ${abs}`],
+    ["\\skills", `.path "\\\\skills" ${abs}`],
+    [["skills", "/abs"], `.path[1] "/abs" ${abs}`],
+    ["../other", `.path "../other" must not contain ".."`],
+    ["skills/../../x", `.path "skills/../../x" must not contain ".."`],
+    [["a", "b\\..\\c"], `.path[1] "b\\\\..\\\\c" must not contain ".."`],
+    [".", `.path "." ${root}`],
+    ["./", `.path "./" ${root}`],
+    [["skills", "././"], `.path[1] "././" ${root}`],
+  ];
+  const files = ["user", "project", "local"] as const;
+  for (const [i, [value, problem]] of cases.entries()) {
+    const file = files[i % files.length]!;
+    const { home, projectDir, cleanup } = setup({ [file]: { sources: { team: { local: "~/dev/s", path: value } } } });
+    try {
+      assert.throws(() => loadConfig({ home, projectDir }), (e: unknown) => {
+        assert.ok(e instanceof ConfigError, String(e));
+        assert.equal((e as Error).message, `${configPath(file, home, projectDir)}: sources.team${problem}`);
+        return true;
+      }, JSON.stringify(value));
+    } finally {
+      cleanup();
+    }
+  }
+  const { home, projectDir, cleanup } = setup({ user: { sources: { team: { local: "~/dev/s", path: ["no/such/dir", "a..b", "..."] } } } });
+  try {
+    assert.deepEqual(loadConfig({ home, projectDir }).sources.get("team")?.path, ["no/such/dir", "a..b", "..."]);
+  } finally {
+    cleanup();
+  }
+});
+
+// k126: `path` merges like `ref` (spec §3): same name, the user's value over the project's,
+// the local file's over both – the whole value, never a concatenation – and a file that gives
+// none keeps the one below. It is no backend field: it has no origin, and the user scope's
+// sources are the user config's alone.
+test("k126: path merges project < user < local, replaced whole; the user scope keeps the user config's", () => {
+  const git = "https://example.com/s";
+  const { home, projectDir, cleanup } = setup({
+    project: { sources: {
+      both: { git, path: ["p1", "p2"] }, onlyProject: { git, path: "p" }, userNone: { git, path: ["p1"] }, all: { git, path: "p" },
+    } },
+    user: { sources: { both: { git, path: "u" }, userNone: { git, ref: "v2" }, all: { git, path: ["u1", "u2"] }, onlyUser: { git, path: "u" } } },
+    local: { sources: { all: { git, path: ["l"] }, onlyUser: { git } } },
+  });
+  try {
+    const cfg = loadConfig({ home, projectDir });
+    const merged = (name: string) => cfg.sources.get(name)?.path;
+    assert.deepEqual(merged("both"), "u");
+    assert.deepEqual(merged("onlyProject"), "p");
+    assert.deepEqual(merged("userNone"), ["p1"]); // the user gives none: the project's stays
+    assert.equal(cfg.sources.get("userNone")?.ref, "v2");
+    assert.deepEqual(merged("all"), ["l"]);
+    assert.deepEqual(merged("onlyUser"), "u"); // the local file gives none: the user's stays
+    const user = (name: string) => cfg.userSources.get(name)?.path;
+    assert.deepEqual([user("both"), user("userNone"), user("all"), user("onlyUser")], ["u", undefined, ["u1", "u2"], "u"]);
+    assert.equal(cfg.userSources.has("onlyProject"), false);
+    assert.deepEqual(cfg.sources.get("all")?.origins, { git: "user" }); // no origin for path
+  } finally {
+    cleanup();
+  }
+});

@@ -457,18 +457,15 @@ test("k119: add of a GitHub tree link stores the repo with the link's ref and tr
   }
 });
 
-// k119: a GitHub file link, a subdirectory link or a tree link without a ref, and a link whose
-// ref config load refuses (k110: git would read "-x" as an option, "main~1" is revision syntax).
-// Asserts: the first three are the SpecError, the ref one the CommandError quoting load's own
-// error for sources.<name>.ref – each before anything is written or trusted (no user or project
-// config, no trust.json).
-test("k119: add refuses a GitHub file or subdirectory link and a link ref load refuses, before writing", async () => {
+// k119: a GitHub file link or a tree link without a ref, and a link whose ref config load
+// refuses (k110: git would read "-x" as an option, "main~1" is revision syntax). Asserts: the
+// first two are the SpecError, the ref one the CommandError quoting load's own error for
+// sources.<name>.ref – each before anything is written or trusted (no user or project config,
+// no trust.json). (A link into a subdirectory, refused here until k126, is added with a `path`.)
+test("k119: add refuses a GitHub file link, a tree link without a ref and a link ref load refuses, before writing", async () => {
   const e = env();
   try {
-    for (const spec of [
-      "https://github.com/Getty/karr/blob/main/README.md", "github.com/Getty/karr/tree/main/skills/foo",
-      "https://github.com/Getty/karr/tree/",
-    ]) {
+    for (const spec of ["https://github.com/Getty/karr/blob/main/README.md", "https://github.com/Getty/karr/tree/"]) {
       await assert.rejects(() => cmdAdd(e.ctx, { spec }), (err: unknown) => {
         assert.ok(err instanceof SpecError, `${spec}: ${String(err)}`);
         assert.ok((err as Error).message.startsWith(`cannot resolve "${spec}": `), (err as Error).message);
@@ -536,6 +533,145 @@ test("k119: add of a GitHub tree link keeps a same-address entry only at the lin
     const noRef = await cmdAdd(e.ctx, { spec: "Getty/karr", project: true });
     assert.equal(noRef.kept, true);
     assert.deepEqual(noRef.def, { ref: "main", git: "https://github.com/Getty/karr.git" });
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k126: `add …/tree/<ref>/<dir…>` was refused (k119: a source was a whole repository). A source
+// entry's `path` now says where its skills lie. Asserts: the link stores git
+// https://github.com/<owner>/<repo>, `ref` the link's ref and `path` the rest as one string,
+// named after the repo, in the user or the project config; config load reads it back; trust
+// binds the address alone – neither ref nor path.
+test("k126: add of a GitHub subdirectory link stores the repo with the link's ref and path", async () => {
+  const e = env();
+  try {
+    const git = "https://github.com/NousResearch/hermes-agent";
+    const res = await cmdAdd(e.ctx, { spec: `${git}/tree/main/optional-skills` });
+    assert.equal(res.name, "hermes-agent");
+    assert.equal(res.kept, false);
+    assert.deepEqual(res.def, { git, ref: "main", path: "optional-skills" });
+    assert.equal(res.report.error, undefined);
+    assert.deepEqual(e.readUserCfg().sources, { "hermes-agent": { git, ref: "main", path: "optional-skills" } });
+    const src = loadConfig({ home: e.home }).sources.get("hermes-agent");
+    assert.deepEqual([src?.git, src?.ref, src?.path], [git, "main", "optional-skills"]);
+
+    const proj = await cmdAdd(e.ctx, { name: "mlops", spec: "github.com/NousResearch/hermes-agent/tree/v1.2.0/optional-skills/mlops/", project: true });
+    assert.deepEqual(proj.def, { git, ref: "v1.2.0", path: "optional-skills/mlops" });
+    const projCfg = JSON.parse(readFileSync(join(e.projectDir, ".claude/skilletor.json"), "utf8"));
+    assert.deepEqual(projCfg.sources, { mlops: { git, ref: "v1.2.0", path: "optional-skills/mlops" } });
+    assert.deepEqual(JSON.parse(readFileSync(join(e.ctx.stateRoot, "trust.json"), "utf8")), {
+      "hermes-agent": { kind: "git", address: git }, mlops: { kind: "git", address: git },
+    });
+    assert.deepEqual(cmdSourceList(e.ctx).map((x) => [x.name, x.def]), [
+      ["mlops", { git, ref: "v1.2.0", path: "optional-skills/mlops" }], ["hermes-agent", { git, ref: "main", path: "optional-skills" }],
+    ]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k126 with k110: a link's path goes through config load's own check of a `path` before
+// anything is written. Asserts: a path with ".." or naming the source root is the CommandError
+// quoting load's words for sources.<name>.path; no config, no trust.
+test("k126: add refuses a GitHub link whose path config load refuses, before writing", async () => {
+  const e = env();
+  try {
+    const cases: [string, string, boolean][] = [
+      ["https://github.com/Getty/karr/tree/main/skills/../../etc", `sources.karr.path "skills/../../etc" must not contain ".."`, false],
+      ["github.com/Getty/karr/tree/main/./", `sources.karr.path "." must not be the source root (name the directories its skills lie in)`, true],
+    ];
+    for (const [spec, problem, project] of cases) {
+      await assert.rejects(() => cmdAdd(e.ctx, { spec, project }), (err: unknown) => {
+        assert.ok(err instanceof CommandError, `${spec}: ${String(err)}`);
+        assert.equal((err as Error).message, `cannot add ${spec}: ${problem}; nothing was changed`);
+        return true;
+      });
+    }
+    assert.equal(existsSync(e.userCfgPath), false, "no user config written");
+    assert.equal(existsSync(join(e.projectDir, ".claude", "skilletor.json")), false, "no project config written");
+    assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k126 with k101's keep path: a link into a subdirectory carries a path, which keeping an entry
+// with another one – or none: the whole default layout – would drop without a word. Asserts: a
+// same-address entry at the link's ref without a `path` or with another is a CommandError
+// naming both paths and the ways out (set "path" by hand, another name, remove), config
+// byte-identical, nothing trusted; another ref is k119's error first; an entry with that path –
+// a string, a list of one, written with "./" or a trailing "/" – is kept as written and
+// trusted; a spec without a path (the repo, or a link to its ref) keeps an entry's path.
+test("k126: add of a GitHub subdirectory link keeps a same-address entry only with the link's path", async () => {
+  const e = env();
+  try {
+    const git = "https://github.com/Getty/karr";
+    const spec = `${git}/tree/main/skills/research`;
+    const out = `nothing was changed. Set its "path" by hand, add it under another name ` +
+      `(skilletor add <name> ${spec}) or remove the source first (skilletor source remove karr).`;
+    const refused: [Record<string, unknown>, string][] = [
+      [{ git, ref: "main" }, "with no path"],
+      [{ git, ref: "main", path: "skills" }, `with path "skills"`],
+      [{ git: `${git}.git`, ref: "main", path: "Skills/Research" }, `with path "Skills/Research"`],
+      [{ git, ref: "main", path: ["skills/research", "optional-skills"] }, `with path ["skills/research","optional-skills"]`],
+      [{ git, ref: "main", path: "" }, `with path ""`],
+    ];
+    for (const [entry, has] of refused) {
+      const raw = `{ "sources": { "karr": ${JSON.stringify(entry)} } }\n`;
+      writeFileSync(e.userCfgPath, raw);
+      await assert.rejects(() => cmdAdd(e.ctx, { spec }), (err: unknown) => {
+        assert.ok(err instanceof CommandError, String(err));
+        assert.equal((err as Error).message, `source "karr" in ${e.userCfgPath} is git ${entry.git} ${has}, not path "skills/research"; ${out}`);
+        return true;
+      });
+      assert.equal(readFileSync(e.userCfgPath, "utf8"), raw, `${has}: config byte-identical`);
+      assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, `${has}: nothing trusted`);
+    }
+    // The ref is asked first: an entry with the path at another ref is k119's error.
+    const other = `{ "sources": { "karr": ${JSON.stringify({ git, ref: "v1", path: "skills/research" })} } }\n`;
+    writeFileSync(e.userCfgPath, other);
+    await assert.rejects(() => cmdAdd(e.ctx, { spec }), (err: unknown) => {
+      assert.ok(err instanceof CommandError, String(err));
+      assert.ok((err as Error).message.startsWith(`source "karr" in ${e.userCfgPath} is git ${git} with ref "v1", not ref "main"; `), (err as Error).message);
+      return true;
+    });
+    assert.equal(readFileSync(e.userCfgPath, "utf8"), other);
+    assert.equal(existsSync(join(e.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+
+    const projPath = join(e.projectDir, ".claude/skilletor.json");
+    const trusted = { kind: "git" as const, address: git, origin: "project" as const };
+    for (const path of ["skills/research", ["skills/research"], "./skills//research/", ["skills\\research"]]) {
+      const entry = { path, ref: "main", git };
+      const praw = JSON.stringify({ sources: { karr: entry } });
+      writeFileSync(projPath, praw);
+      const kept = await cmdAdd(e.ctx, { spec: "github.com/Getty/karr/tree/main/skills/research/", project: true });
+      assert.equal(kept.kept, true, JSON.stringify(path));
+      assert.deepEqual(kept.def, entry);
+      assert.deepEqual(Object.keys(kept.def), ["path", "ref", "git"], "the entry's key order");
+      assert.equal(readFileSync(projPath, "utf8"), praw, "kept entry byte-identical");
+      assert.equal(new State(e.ctx.stateRoot).isTrusted("karr", trusted), true);
+    }
+
+    // A spec without a path keeps the entry's: the repo itself, and a link to its ref.
+    const listed = { git, ref: "main", path: ["skills", "optional-skills"] };
+    writeFileSync(projPath, JSON.stringify({ sources: { karr: listed } }));
+    for (const noPath of ["Getty/karr", `${git}/tree/main`]) {
+      const kept = await cmdAdd(e.ctx, { spec: noPath, project: true });
+      assert.equal(kept.kept, true, noPath);
+      assert.deepEqual(kept.def, listed, noPath);
+    }
+    // … unless load refuses it as written (k116): never kept, load's own words.
+    const broken = JSON.stringify({ sources: { karr: { git, path: [] } } });
+    writeFileSync(projPath, broken);
+    await assert.rejects(() => cmdAdd(e.ctx, { spec: "Getty/karr", project: true }), (err: unknown) => {
+      assert.ok(err instanceof CommandError, String(err));
+      assert.equal((err as Error).message, `cannot add Getty/karr: ${projPath}: sources.karr.path [] must not be empty ` +
+        `(omit "path" for the default layout); nothing was changed. Source "karr" there already has this address: ` +
+        `fix its entry by hand, or remove it (skilletor source remove karr --project).`);
+      return true;
+    });
+    assert.equal(readFileSync(projPath, "utf8"), broken);
   } finally {
     e.cleanup();
   }

@@ -1,12 +1,23 @@
 // Small filesystem helpers shared by the engine.
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync, rmSync } from "node:fs";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 /** `p` with "/" between its parts: the form of every path inside an item, a lock key or a
  *  `.gitignore` line, on Windows too. The identity where the separator already is "/". */
 export function toPosix(p: string): string {
   return sep === "/" ? p : p.split(sep).join("/");
+}
+
+/** The segments of `entry`, a path relative to some root ("\" separates like "/", empty and
+ *  "." segments are dropped) – or why it names nothing beneath that root: it is absolute,
+ *  contains "..", or is the root itself ("", "."). What a plugin.json `skills` path and a
+ *  source's `path` are held to before the file system is asked (spec §3, §4.1). */
+export function innerSegments(entry: string): string[] | "absolute" | "dotdot" | "root" {
+  if (isAbsolute(entry) || entry.startsWith("/") || entry.startsWith("\\")) return "absolute";
+  const segments = entry.split(/[\\/]/).filter((s) => s !== "" && s !== ".");
+  if (segments.includes("..")) return "dotdot";
+  return segments.length === 0 ? "root" : segments;
 }
 
 /** sha256 of a buffer, as "sha256:<hex>". */

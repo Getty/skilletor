@@ -4,7 +4,7 @@
 import { dirname, join } from "node:path";
 import {
   addBundleEntry, addInstallEntry, addSource, bundleEntries, ConfigError, findInstallEntries, findWildcardEntries,
-  isSourceName, loadConfig, removeBundleEntries, removeInstallEntries, removeSource, SOURCE_NAME_RULE, sourceEntry,
+  isSourceName, loadConfig, pathList, removeBundleEntries, removeInstallEntries, removeSource, SOURCE_NAME_RULE, sourceEntry,
   sourceFields, WILDCARD, type BackendKind, type ItemType, type LoadedConfig, type Origin, type SourceDef,
 } from "./config.ts";
 import { BundleError, expandBundle, matchesPattern, sameIdentity, type ForeignEntry } from "./bundles.ts";
@@ -16,6 +16,7 @@ import {
 } from "./engine.ts";
 import type { SyncReport } from "./report.ts";
 import { scan, type Catalog } from "./catalog.ts";
+import { innerSegments } from "./fsutil.ts";
 import { State } from "./state.ts";
 import { readLock, type Lock } from "./lock.ts";
 import { parseLockKey } from "./targets.ts";
@@ -70,7 +71,9 @@ const TYPE_DIR: Record<ItemType, string> = { skill: "skills", agent: "agents", r
  * A name config load would refuse (k95) is refused first, before the spec is resolved; a
  * definition it would refuse (k110: a `url` not https://) next, before that file is read;
  * a kept entry it would refuse (k116: a hand-written `ref: ""`) before it is trusted. A spec
- * that pins a ref (k119: a GitHub tree link) writes it as `ref` and keeps an entry only at it.
+ * that pins a ref (k119: a GitHub tree link) writes it as `ref` and keeps an entry only at it;
+ * one that names a path too (k126: a link into a subdirectory) writes it as `path` and keeps
+ * an entry only with that `path`.
  */
 export async function cmdAdd(
   ctx: CommandContext,
@@ -85,6 +88,7 @@ export async function cmdAdd(
   let def: SourceDef =
     resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };
   if (resolved.ref !== undefined) def.ref = resolved.ref;
+  if (resolved.path !== undefined) def.path = resolved.path;
   const invalid = loadRefusal(name, def);
   if (invalid !== undefined) throw new CommandError(`cannot add ${args.spec}: ${invalid}; nothing was changed`);
 
@@ -109,6 +113,16 @@ export async function cmdAdd(
           `or remove the source first (skilletor source remove ${name}${flag}).`,
       );
     }
+    // So is a spec's path (k126): the entry would go on offering what lies elsewhere in the repo.
+    const lies = (existing as Record<string, unknown>).path;
+    if (resolved.path !== undefined && !samePaths(lies, resolved.path)) {
+      throw new CommandError(
+        `source "${name}" in ${path} is ${addressText(existing)} ` +
+          `${lies === undefined ? "with no path" : `with path ${JSON.stringify(lies)}`}, not path ${JSON.stringify(resolved.path)}; ` +
+          `nothing was changed. Set its "path" by hand, add it under another name (skilletor add <name> ${args.spec}${flag}) ` +
+          `or remove the source first (skilletor source remove ${name}${flag}).`,
+      );
+    }
     // Kept as written, so checked as load reads it: an entry the sync would refuse is not trusted.
     const refused = loadRefusal(name, existing, path);
     if (refused !== undefined) {
@@ -128,7 +142,22 @@ export async function cmdAdd(
   return { name, def, kept, report };
 }
 
-const DEF_KEYS = ["git", "ref", "url", "local"];
+const DEF_KEYS = ["git", "ref", "url", "local", "path"];
+/** The keys of an entry that name a backend's address. */
+const ADDRESS_KEYS = ["git", "url", "local"];
+
+/** Does an entry's `path`, as written, name the one directory `path`? A string or a list of
+ *  one, compared by segments (`./skills/` is `skills`); anything else – a longer list, a value
+ *  load refuses – does not. */
+function samePaths(entry: unknown, path: string): boolean {
+  if (typeof entry !== "string" && !(Array.isArray(entry) && entry.length === 1 && typeof entry[0] === "string")) return false;
+  const segments = (p: string) => {
+    const s = innerSegments(p);
+    return typeof s === "string" ? undefined : s.join("/");
+  };
+  const mine = segments(pathList(entry as string | string[])[0]!);
+  return mine !== undefined && mine === segments(path);
+}
 
 /** Why config load would refuse source `name` defined as `def` (`sources.<name>.url … must be
  *  an https:// URL`; with `file`, load's own `<file>: sources.<name>…`), by load's own check
@@ -157,13 +186,15 @@ function sameAddress(ctx: CommandContext, name: string, entry: unknown, resolved
 /** An entry's backends as written (`git https://…, local ~/dev/x`), else the entry as JSON. */
 function addressText(entry: unknown): string {
   const e = entry !== null && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
-  const parts = Object.entries(e).filter(([k, v]) => k !== "ref" && DEF_KEYS.includes(k) && typeof v === "string");
+  const parts = Object.entries(e).filter(([k, v]) => ADDRESS_KEYS.includes(k) && typeof v === "string");
   return parts.length ? parts.map(([k, v]) => `${k} ${v}`).join(", ") : JSON.stringify(entry);
 }
 
-/** The source fields of an entry as written, in its key order. */
+/** The source fields of an entry as written, in its key order (`path` a string or a list). */
 function entryDef(entry: Record<string, unknown>): SourceDef {
-  return Object.fromEntries(Object.entries(entry).filter(([k, v]) => DEF_KEYS.includes(k) && typeof v === "string"));
+  return Object.fromEntries(
+    Object.entries(entry).filter(([k, v]) => DEF_KEYS.includes(k) && (typeof v === "string" || k === "path")),
+  );
 }
 
 // ---- source list / remove ---------------------------------------------------
@@ -178,12 +209,13 @@ export function cmdSourceList(ctx: CommandContext): { name: string; def: SourceD
   }));
 }
 
-function pickDef(s: { git?: string; ref?: string; url?: string; local?: string }): SourceDef {
+function pickDef(s: SourceDef): SourceDef {
   const def: SourceDef = {};
   if (s.git) def.git = s.git;
   if (s.ref) def.ref = s.ref;
   if (s.url) def.url = s.url;
   if (s.local) def.local = s.local;
+  if (s.path !== undefined) def.path = s.path;
   return def;
 }
 
@@ -280,7 +312,7 @@ async function listAvailable(
     const backend = resolveBackend(src, ctx.home);
     if (!state.isTrusted(name, backend)) continue; // only trusted
     const loc = await makeBackend(backend, cacheRootOf(ctx)).resolve();
-    const cat = scan(loc.dir);
+    const cat = scan(loc.dir, backend.path);
     for (const item of cat.items) {
       const entry: AvailableItem = {
         type: item.type,
@@ -328,7 +360,7 @@ export async function cmdInstall(
   const catalogOf = async (source: string, backend: ResolvedBackend): Promise<Catalog> => {
     let cat = catalogs.get(source);
     if (!cat) {
-      cat = scan((await makeBackend(backend, cacheRootOf(ctx)).resolve()).dir);
+      cat = scan((await makeBackend(backend, cacheRootOf(ctx)).resolve()).dir, backend.path);
       catalogs.set(source, cat);
     }
     return cat;

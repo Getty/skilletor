@@ -121,23 +121,26 @@ test("k118: parseBundle takes a transport::address entry as a full git address",
 // k119: a bundle entry naming its source by a GitHub tree link was served by whichever source had
 // the repo's address, at that source's ref (`x@github.com/o/r/tree/v1`, the ref dropped), or
 // named an address no source has (`x@https://github.com/o/r/tree/v1`, verbatim). An entry names a
-// source by address alone (§15.6), so it cannot carry a ref. Asserts: a tree link is a
-// BundleError naming the entry, the ref and the address to write instead; a file or
-// subdirectory link is the bundle error of add's own SpecError; the repo's own address in
-// either form still parses, without a ref.
+// source by address alone (§15.6), so it cannot carry a ref – nor, since a link into a
+// subdirectory is the repo with a `path` (k126), a path: the serving source's own apply.
+// Asserts: a tree link is a BundleError naming the entry, the ref (and the path) and the
+// address to write instead; a file link is the bundle error of add's own SpecError; the
+// repo's own address in either form still parses, without a ref.
 test("k119: parseBundle refuses an entry naming its source by a GitHub tree, file or subdirectory link", () => {
   const tree: [string, string][] = [
-    ["x@github.com/Getty/karr/tree/v1", "v1"], ["r-*@https://github.com/Getty/karr/tree/main/", "main"],
+    ["x@github.com/Getty/karr/tree/v1", `ref "v1"`], ["r-*@https://github.com/Getty/karr/tree/main/", `ref "main"`],
+    ["x@github.com/Getty/karr/tree/main/skills", `ref "main" and path "skills"`],
+    ["r-*@https://github.com/Getty/karr/tree/v1/skills/research/", `ref "v1" and path "skills/research"`],
   ];
-  for (const [entry, ref] of tree) {
+  for (const [entry, pins] of tree) {
     assert.throws(() => parseBundle(`description: D\nrules: [r1, "${entry}"]\n`), (e: unknown) => {
       assert.ok(e instanceof BundleError, String(e));
-      assert.equal((e as Error).message, `rules: "${entry}" pins ref "${ref}", but an entry names its source by ` +
+      assert.equal((e as Error).message, `rules: "${entry}" pins ${pins}, but an entry names its source by ` +
         `address alone: write ${entry.slice(0, entry.indexOf("@"))}@https://github.com/Getty/karr`);
       return true;
     }, entry);
   }
-  for (const entry of ["x@https://github.com/Getty/karr/blob/main/README.md", "x@github.com/Getty/karr/tree/main/skills"]) {
+  for (const entry of ["x@https://github.com/Getty/karr/blob/main/README.md", "x@github.com/Getty/karr/tree/"]) {
     assert.throws(() => parseBundle(`description: D\nskills: ["${entry}"]\n`), (e: unknown) => {
       assert.ok(e instanceof BundleError, String(e));
       assert.ok((e as Error).message.startsWith(`skills: "${entry}": cannot resolve "${entry.slice(2)}": `), (e as Error).message);

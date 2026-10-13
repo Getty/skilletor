@@ -5756,9 +5756,15 @@ import { join as join2 } from "node:path";
 // src/fsutil.ts
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync, rmSync } from "node:fs";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 function toPosix(p) {
   return sep === "/" ? p : p.split(sep).join("/");
+}
+function innerSegments(entry) {
+  if (isAbsolute(entry) || entry.startsWith("/") || entry.startsWith("\\")) return "absolute";
+  const segments = entry.split(/[\\/]/).filter((s) => s !== "" && s !== ".");
+  if (segments.includes("..")) return "dotdot";
+  return segments.length === 0 ? "root" : segments;
 }
 function hashBuffer(buf) {
   return "sha256:" + createHash("sha256").update(buf).digest("hex");
@@ -5830,7 +5836,7 @@ function isSourceName(name) {
 }
 var BACKEND_KINDS = ["git", "url", "local"];
 var ALLOWED_KEYS = /* @__PURE__ */ new Set(["sources", "install", "vars", "gitignore", "checkInterval", "targets"]);
-var SOURCE_KEYS = /* @__PURE__ */ new Set(["git", "ref", "url", "local"]);
+var SOURCE_KEYS = /* @__PURE__ */ new Set(["git", "ref", "url", "local", "path"]);
 function readConfigFile(path) {
   let text;
   try {
@@ -5902,10 +5908,32 @@ function sourceFields(def, at) {
     }
     src.url = d.url;
   }
+  if (d.path !== void 0) src.path = pathField(d.path, at);
   if (src.git === void 0 && src.url === void 0 && src.local === void 0) {
     throw new ConfigError(`${at} needs one of "git", "url" or "local"`);
   }
   return src;
+}
+function pathList(path) {
+  return typeof path === "string" ? [path] : path;
+}
+function pathField(value2, at) {
+  const where = `${at}.path`;
+  const omit = ` (omit "path" for the default layout)`;
+  if (typeof value2 !== "string" && !Array.isArray(value2)) {
+    throw new ConfigError(`${where} ${JSON.stringify(value2)} must be a string or an array of strings`);
+  }
+  if (value2.length === 0) throw new ConfigError(`${where} ${JSON.stringify(value2)} must not be empty${omit}`);
+  pathList(value2).forEach((entry, i) => {
+    const w = `${where}${Array.isArray(value2) ? `[${i}]` : ""} ${JSON.stringify(entry)}`;
+    if (typeof entry !== "string") throw new ConfigError(`${w} must be a string`);
+    if (entry === "") throw new ConfigError(`${w} must not be empty`);
+    const segments = innerSegments(entry);
+    if (segments === "absolute") throw new ConfigError(`${w} must not be absolute (it is relative to the source root)`);
+    if (segments === "dotdot") throw new ConfigError(`${w} must not contain ".."`);
+    if (segments === "root") throw new ConfigError(`${w} must not be the source root (name the directories its skills lie in)`);
+  });
+  return value2;
 }
 function stringField(value2, key, at) {
   const where = `${at}.${key} ${JSON.stringify(value2)}`;
@@ -5925,6 +5953,7 @@ function gitField(value2, key, at) {
 function mergeSource(base, incoming) {
   const merged = { ...base ?? incoming, origins: { ...base?.origins } };
   if (incoming.ref !== void 0) merged.ref = incoming.ref;
+  if (incoming.path !== void 0) merged.path = incoming.path;
   for (const kind of BACKEND_KINDS) {
     if (incoming[kind] === void 0) continue;
     merged[kind] = incoming[kind];
@@ -6702,15 +6731,12 @@ function githubLink(spec, path) {
   const value2 = `https://github.com/${owner}/${repo}`;
   const pin = ref === void 0 ? "" : `${value2}/tree/${ref} to pin ref "${ref}"`;
   if (view === "blob") {
-    throw new SpecError(`cannot resolve "${spec}": a GitHub file link; a source is a whole repository: add ${value2}${pin && `, or ${pin}`}`);
+    throw new SpecError(`cannot resolve "${spec}": a GitHub file link; a source is a repository, not a file: add ${value2}${pin && `, or ${pin}`}`);
   }
   if (ref === void 0) throw new SpecError(`cannot resolve "${spec}": a GitHub tree link without a ref; add ${value2}`);
-  if (sub.length > 0) {
-    throw new SpecError(
-      `cannot resolve "${spec}": skilletor installs a whole repository, not its subdirectory "${sub.join("/")}"; add ${pin}. A link cannot tell a ref with "/" from a subdirectory: for such a ref, add ${value2} and set its "ref" by hand`
-    );
-  }
-  return { kind: "git", value: value2, derivedName: repoName(owner, repo), ref };
+  const link = { kind: "git", value: value2, derivedName: repoName(owner, repo), ref };
+  if (sub.length > 0) link.path = sub.join("/");
+  return link;
 }
 function checkForge(spec, forge, owner, repo) {
   for (const [what, seg] of [["owner", owner], ["repo", repo]]) {
@@ -6914,9 +6940,8 @@ function foreignEntry(type, entry, key) {
       throw new BundleError(`${key}: "${entry}" names a local path; a bundle can only name remote sources`);
     }
     if (r.ref !== void 0) {
-      throw new BundleError(
-        `${key}: "${entry}" pins ref ${JSON.stringify(r.ref)}, but an entry names its source by address alone: write ${name}@${r.value}`
-      );
+      const pins = `ref ${JSON.stringify(r.ref)}${r.path === void 0 ? "" : ` and path ${JSON.stringify(r.path)}`}`;
+      throw new BundleError(`${key}: "${entry}" pins ${pins}, but an entry names its source by address alone: write ${name}@${r.value}`);
     }
     url = r.value;
     kind = r.kind;
@@ -8059,7 +8084,7 @@ function writeEntries(dir, entries) {
 
 // src/catalog.ts
 import { existsSync as existsSync7, lstatSync as lstatSync5, readFileSync as readFileSync5, readdirSync as readdirSync3 } from "node:fs";
-import { basename as basename3, isAbsolute, join as join9, posix as posix2, relative } from "node:path";
+import { basename as basename3, join as join9, posix as posix2, relative } from "node:path";
 
 // src/gitignore.ts
 import { execFileSync } from "node:child_process";
@@ -8230,7 +8255,8 @@ function itemName(fileName) {
   const m = /^(.+?)\.md(\.njk)?$/.exec(fileName);
   return m ? m[1] : void 0;
 }
-function scan(dir) {
+function scan(dir, paths) {
+  if (paths !== void 0) return { items: pathSkills(dir, paths), bundles: [], meta: readSourceMeta(dir) };
   const items = [];
   for (const { dir: sub, type } of TYPE_DIRS) {
     const typeDir = join9(dir, sub);
@@ -8348,7 +8374,7 @@ function pluginSkills(dir, found) {
     out.push(skillItem(dir, skillDir, file));
   };
   for (const entry of paths) {
-    const target = pluginPath(dir, p, entry);
+    const target = innerDir(dir, `${p}: skills path`, entry);
     const file = skillFile(target);
     if (file) {
       add(target, file);
@@ -8363,27 +8389,57 @@ function pluginSkills(dir, found) {
   }
   return out;
 }
-function pluginPath(dir, pluginFile, entry) {
-  if (isAbsolute(entry) || entry.startsWith("/") || entry.startsWith("\\")) {
-    throw new CatalogError(`${pluginFile}: skills path must not be absolute: ${entry}`);
+function pathSkills(dir, paths) {
+  const found = /* @__PURE__ */ new Map();
+  const visit = (cur, named) => {
+    const file = skillFile(cur);
+    if (file) {
+      const item = skillItem(dir, cur, file);
+      const dirs = found.get(item.name) ?? /* @__PURE__ */ new Map();
+      if (!dirs.has(item.dir)) dirs.set(item.dir, item);
+      found.set(item.name, dirs);
+      return;
+    }
+    if (!named && basename3(cur).startsWith(".")) return;
+    for (const entry of readdirSync3(cur).sort()) {
+      const p = join9(cur, entry);
+      if (isPlainDir(p)) visit(p, false);
+    }
+  };
+  for (const entry of paths) visit(innerDir(dir, '"path"', entry), true);
+  const out = [];
+  for (const [name, dirs] of found) {
+    if (dirs.size === 1) {
+      out.push([...dirs.values()][0]);
+      continue;
+    }
+    const where = [...dirs.keys()].sort();
+    out.push({
+      type: "skill",
+      name,
+      files: [...dirs.values()].flatMap((i) => i.files).sort(),
+      error: `found in ${where.length} directories: ${where.slice(0, -1).join(", ")} and ${where.at(-1)}`
+    });
   }
-  const segments = entry.split(/[\\/]/).filter((s) => s !== "" && s !== ".");
-  if (segments.includes("..")) {
-    throw new CatalogError(`${pluginFile}: skills path must not contain "..": ${entry}`);
-  }
-  if (segments.length === 0) {
-    throw new CatalogError(`${pluginFile}: skills path must not be the source root: ${JSON.stringify(entry)}`);
+  return out.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+}
+function innerDir(dir, what, entry) {
+  const segments = innerSegments(entry);
+  if (segments === "absolute") throw new CatalogError(`${what} must not be absolute: ${entry}`);
+  if (segments === "dotdot") throw new CatalogError(`${what} must not contain "..": ${entry}`);
+  if (segments === "root") {
+    throw new CatalogError(`${what} must not be the source root: ${JSON.stringify(entry)}`);
   }
   let cur = dir;
   for (const seg of segments) {
     cur = join9(cur, seg);
     if (!existsSync7(cur) && !isDanglingLink(cur)) {
-      throw new CatalogError(`${pluginFile}: skills path does not exist: ${entry}`);
+      throw new CatalogError(`${what} does not exist: ${entry}`);
     }
     noSymlink(cur);
   }
   if (!lstatSync5(cur).isDirectory()) {
-    throw new CatalogError(`${pluginFile}: skills path is not a directory: ${entry}`);
+    throw new CatalogError(`${what} is not a directory: ${entry}`);
   }
   return cur;
 }
@@ -8926,9 +8982,10 @@ var State = class {
     for (const [name, value2] of Object.entries(record)) {
       if (value2 === null || typeof value2 !== "object") continue;
       const v = value2;
-      if (v.kind !== "git" && v.kind !== "url" && v.kind !== "local" || typeof v.address !== "string" || typeof v.version !== "string" || v.ref !== void 0 && typeof v.ref !== "string") continue;
+      if (v.kind !== "git" && v.kind !== "url" && v.kind !== "local" || typeof v.address !== "string" || typeof v.version !== "string" || v.ref !== void 0 && typeof v.ref !== "string" || v.path !== void 0 && !(Array.isArray(v.path) && v.path.every((x) => typeof x === "string"))) continue;
       out[name] = { kind: v.kind, address: v.address, version: v.version };
       if (typeof v.ref === "string") out[name].ref = v.ref;
+      if (v.path !== void 0) out[name].path = v.path;
     }
     return out;
   }
@@ -8940,6 +8997,7 @@ var State = class {
       const r = record[name];
       next[name] = { kind: r.kind, address: r.address, version: r.version };
       if (r.ref !== void 0) next[name].ref = r.ref;
+      if (r.path !== void 0) next[name].path = r.path;
     }
     if (JSON.stringify(all[scopeKey] ?? {}) === JSON.stringify(next)) return;
     if (Object.keys(next).length > 0) all[scopeKey] = next;
@@ -9393,6 +9451,11 @@ function localDir(path, home) {
   return { path: abs, exists: false };
 }
 function resolveBackend(src, home) {
+  const b = chosenBackend(src, home);
+  if (src.path !== void 0) b.path = pathList(src.path);
+  return b;
+}
+function chosenBackend(src, home) {
   const origin = (kind) => src.origins[kind] ?? "project";
   const local = src.local === void 0 ? void 0 : localDir(src.local, home);
   if (local?.exists) return { kind: "local", address: local.path, origin: origin("local") };
@@ -9448,11 +9511,12 @@ function sourceVersion(lock, sourceName) {
 function sourceRead(backend, version) {
   const read = { kind: backend.kind, address: backend.address, version };
   if (backend.ref !== void 0) read.ref = backend.ref;
+  if (backend.path !== void 0) read.path = backend.path;
   return read;
 }
 function checkedVersion(read, backend, lock, name) {
   if (!read) return sourceVersion(lock, name);
-  const same = read.kind === backend.kind && read.address === backend.address && read.ref === backend.ref;
+  const same = read.kind === backend.kind && read.address === backend.address && read.ref === backend.ref && JSON.stringify(read.path ?? null) === JSON.stringify(backend.path ?? null);
   return same ? read.version : void 0;
 }
 function userClaudeEntries(claudeDir, stateRoot) {
@@ -9628,7 +9692,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
     let cat = null;
     if (r) {
       try {
-        cat = scan(r.dir);
+        cat = scan(r.dir, r.backend.path);
       } catch (err) {
         rep.warnings.push(`source ${source}: ${err.message}`);
       }
@@ -10349,6 +10413,7 @@ async function cmdAdd(ctx, args) {
   const name = args.name ?? resolved.derivedName;
   let def = resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };
   if (resolved.ref !== void 0) def.ref = resolved.ref;
+  if (resolved.path !== void 0) def.path = resolved.path;
   const invalid = loadRefusal(name, def);
   if (invalid !== void 0) throw new CommandError(`cannot add ${args.spec}: ${invalid}; nothing was changed`);
   const existing = sourceEntry(path, name);
@@ -10366,6 +10431,12 @@ async function cmdAdd(ctx, args) {
         `source "${name}" in ${path} is ${addressText(existing)} ${has === void 0 ? "with no ref" : `with ref ${JSON.stringify(has)}`}, not ref ${JSON.stringify(resolved.ref)}; nothing was changed. Set its "ref" by hand, add it under another name (skilletor add <name> ${args.spec}${flag}) or remove the source first (skilletor source remove ${name}${flag}).`
       );
     }
+    const lies = existing.path;
+    if (resolved.path !== void 0 && !samePaths(lies, resolved.path)) {
+      throw new CommandError(
+        `source "${name}" in ${path} is ${addressText(existing)} ${lies === void 0 ? "with no path" : `with path ${JSON.stringify(lies)}`}, not path ${JSON.stringify(resolved.path)}; nothing was changed. Set its "path" by hand, add it under another name (skilletor add <name> ${args.spec}${flag}) or remove the source first (skilletor source remove ${name}${flag}).`
+      );
+    }
     const refused = loadRefusal(name, existing, path);
     if (refused !== void 0) {
       throw new CommandError(
@@ -10380,7 +10451,17 @@ async function cmdAdd(ctx, args) {
   const report = await sync(ctx);
   return { name, def, kept, report };
 }
-var DEF_KEYS = ["git", "ref", "url", "local"];
+var DEF_KEYS = ["git", "ref", "url", "local", "path"];
+var ADDRESS_KEYS = ["git", "url", "local"];
+function samePaths(entry, path) {
+  if (typeof entry !== "string" && !(Array.isArray(entry) && entry.length === 1 && typeof entry[0] === "string")) return false;
+  const segments = (p) => {
+    const s = innerSegments(p);
+    return typeof s === "string" ? void 0 : s.join("/");
+  };
+  const mine = segments(pathList(entry)[0]);
+  return mine !== void 0 && mine === segments(path);
+}
 function loadRefusal(name, def, file) {
   try {
     sourceFields(def, `${file === void 0 ? "" : `${file}: `}sources.${name}`);
@@ -10400,11 +10481,13 @@ function sameAddress(ctx, name, entry, resolved) {
 }
 function addressText(entry) {
   const e = entry !== null && typeof entry === "object" ? entry : {};
-  const parts = Object.entries(e).filter(([k, v]) => k !== "ref" && DEF_KEYS.includes(k) && typeof v === "string");
+  const parts = Object.entries(e).filter(([k, v]) => ADDRESS_KEYS.includes(k) && typeof v === "string");
   return parts.length ? parts.map(([k, v]) => `${k} ${v}`).join(", ") : JSON.stringify(entry);
 }
 function entryDef(entry) {
-  return Object.fromEntries(Object.entries(entry).filter(([k, v]) => DEF_KEYS.includes(k) && typeof v === "string"));
+  return Object.fromEntries(
+    Object.entries(entry).filter(([k, v]) => DEF_KEYS.includes(k) && (typeof v === "string" || k === "path"))
+  );
 }
 function cmdSourceList(ctx) {
   const config = load(ctx);
@@ -10420,6 +10503,7 @@ function pickDef(s) {
   if (s.ref) def.ref = s.ref;
   if (s.url) def.url = s.url;
   if (s.local) def.local = s.local;
+  if (s.path !== void 0) def.path = s.path;
   return def;
 }
 async function cmdSourceRemove(ctx, args) {
@@ -10472,7 +10556,7 @@ async function listAvailable(ctx, config, state, names, installedKeys, declaredB
     const backend = resolveBackend(src, ctx.home);
     if (!state.isTrusted(name, backend)) continue;
     const loc = await makeBackend(backend, cacheRootOf(ctx)).resolve();
-    const cat = scan(loc.dir);
+    const cat = scan(loc.dir, backend.path);
     for (const item of cat.items) {
       const entry = {
         type: item.type,
@@ -10514,7 +10598,7 @@ async function cmdInstall(ctx, args) {
   const catalogOf = async (source, backend) => {
     let cat = catalogs.get(source);
     if (!cat) {
-      cat = scan((await makeBackend(backend, cacheRootOf(ctx)).resolve()).dir);
+      cat = scan((await makeBackend(backend, cacheRootOf(ctx)).resolve()).dir, backend.path);
       catalogs.set(source, cat);
     }
     return cat;

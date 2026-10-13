@@ -8,7 +8,7 @@ import { hostname, platform, userInfo } from "node:os";
 import { existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import {
-  loadConfig, WILDCARD, type BackendKind, type BundleItem, type Harness, type ItemType, type LoadedConfig, type Origin,
+  loadConfig, pathList, WILDCARD, type BackendKind, type BundleItem, type Harness, type ItemType, type LoadedConfig, type Origin,
   type ResolvedSource, type ScopeConfig, type WildcardItem,
 } from "./config.ts";
 import {
@@ -146,6 +146,10 @@ export interface ResolvedBackend {
   origin: Origin;
   /** git only: the ref to check out (not part of the identity). */
   ref?: string;
+  /** Where the source's skills lie, for the scan of what the backend resolves to (spec §4.1,
+   *  k126); absent: the source layout. Not part of the identity either – it picks no cache
+   *  and binds no trust. */
+  path?: string[];
 }
 
 /** A `local` field as an absolute path: the real path when it is an existing directory. */
@@ -163,8 +167,15 @@ function localDir(path: string, home: string): { path: string; exists: boolean }
  * Choose a source's backend (spec §3, author mode): `local` if that directory exists, else
  * `git`, else `url`; a `local` alone whose directory is missing stays `local` (resolving
  * it errors). The origin is the chosen field's; a field without one counts as `project`.
+ * Whichever is chosen, the source's `path` goes with it (k126).
  */
 export function resolveBackend(src: ResolvedSource, home: string): ResolvedBackend {
+  const b = chosenBackend(src, home);
+  if (src.path !== undefined) b.path = pathList(src.path);
+  return b;
+}
+
+function chosenBackend(src: ResolvedSource, home: string): ResolvedBackend {
   const origin = (kind: BackendKind): Origin => src.origins[kind] ?? "project";
   const local = src.local === undefined ? undefined : localDir(src.local, home);
   if (local?.exists) return { kind: "local", address: local.path, origin: origin("local") };
@@ -247,6 +258,7 @@ function sourceVersion(lock: Lock, sourceName: string): string | undefined {
 function sourceRead(backend: ResolvedBackend, version: string): SourceRead {
   const read: SourceRead = { kind: backend.kind, address: backend.address, version };
   if (backend.ref !== undefined) read.ref = backend.ref;
+  if (backend.path !== undefined) read.path = backend.path;
   return read;
 }
 
@@ -254,12 +266,15 @@ function sourceRead(backend: ResolvedBackend, version: string): SourceRead {
  * The version `check` compares a source with (spec §14.3, k80): the one the last sync read, so
  * a source with nothing in the lock, or with entries kept at an older version, is not
  * "changed" every session. A version read through another backend (kind, address, ref)
- * proves nothing for this one: none, so the source counts as changed. With no record – no
- * sync since k80, or the last one failed – the lock's, as before.
+ * proves nothing for this one: none, so the source counts as changed. Nor does one read with
+ * another `path` (k126): the same tree offered other items, so a changed `path` is one sync,
+ * like a changed `ref`. With no record – no sync since k80, or the last one failed – the
+ * lock's, as before.
  */
 function checkedVersion(read: SourceRead | undefined, backend: ResolvedBackend, lock: Lock, name: string): string | undefined {
   if (!read) return sourceVersion(lock, name);
-  const same = read.kind === backend.kind && read.address === backend.address && read.ref === backend.ref;
+  const same = read.kind === backend.kind && read.address === backend.address && read.ref === backend.ref &&
+    JSON.stringify(read.path ?? null) === JSON.stringify(backend.path ?? null);
   return same ? read.version : undefined;
 }
 
@@ -554,7 +569,7 @@ async function syncScopeRun(
     let cat: Catalog | null = null;
     if (r) {
       try {
-        cat = scan(r.dir);
+        cat = scan(r.dir, r.backend.path);
       } catch (err) {
         rep.warnings.push(`source ${source}: ${(err as Error).message}`);
       }

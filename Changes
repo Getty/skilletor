@@ -1,6 +1,15 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - A source entry takes an optional `path`, a directory or a list of them
+    relative to the source root, for repositories that keep skills outside
+    `skills/<name>/`, such as `"path": ["skills", "optional-skills"]` for
+    NousResearch/hermes-agent. Every directory beneath it that holds a
+    `SKILL.md` is one skill, and the source then offers those skills only. A
+    name found in two directories is an error of that skill alone. A config
+    with `path` is a config error for skilletor 0.4.2 and earlier.
+  - `skilletor add` of a GitHub link into a directory (`.../tree/<ref>/<dir>`)
+    sets `ref` and `path` instead of being refused.
 
 0.4.2     2026-10-06 05:28:16Z
   - Windows: hooks and the CLI start without Git Bash. `bin/skilletor.exe`, a

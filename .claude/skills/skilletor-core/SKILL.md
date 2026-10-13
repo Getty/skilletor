@@ -16,7 +16,7 @@ read it instead of re-deriving the config format.
 
 ```
 cli.ts        arguments, dispatch                     commands.ts  add/install/… edit config, then sync
-config.ts     load/merge/validate + edit operations   spec.ts      shorthand → {git|url|local}
+config.ts     load/merge/validate + edit operations   spec.ts      shorthand → {git|url|local} + a GitHub link's ref, path
 probe.ts      real probe for `add` (ls-remote, HEAD)  sources/*    resolve(), check() per backend
 catalog.ts    scan a source dir → items (plugin.json) bundles.ts   bundle files, `*` name patterns
 render.ts     build one item in memory (Nunjucks)     apply.ts     diff → atomic write → clean
@@ -26,7 +26,7 @@ engine.ts     sync / check / status pipeline          hooks.ts     SessionStart 
 report.ts     text / json / hook output               targets.ts   harness detection, LAYOUTS, lock keys
 convert.ts    agent Markdown → Codex TOML             agentsmd.ts  Codex rules file, AGENTS.md pointer, hook trust
 frontmatter.ts  YAML subset reader                    toml.ts      TOML writer (no dependency)
-fsutil.ts     hash, atomicWrite                       gitenv.ts    gitEnv(): the env of every git run
+fsutil.ts     hash, atomicWrite, innerSegments        gitenv.ts    gitEnv(): the env of every git run
 ```
 
 - `sources/*` knows nothing about templating; `render` nothing about the
@@ -46,6 +46,12 @@ fsutil.ts     hash, atomicWrite                       gitenv.ts    gitEnv(): the
   directory or item, never the scan; skilletor's own installed copies are not offered).
   `render` (`installPath`) maps its files to `skills/<name>/…`, `agents/<file>` or
   `rules/<file>`, so targets never see the source layout.
+- A source entry's `path` replaces that scan: `scan(dir, paths)` offers only the skills
+  beneath those paths (`dir` set) — no layout dirs, `plugin.json`, `.claude/` or bundles;
+  the root `skilletor.json` is still read. Every `scan` call passes `backend.path`. The
+  walk down passes over symlinks and non-skill dot-directories; a name found in two
+  directories is that item's `error`, never a failed scan. `path` is no identity: it keys
+  no cache and binds no trust, and `check` sees a changed one through `sources-read.json`.
 - `briefing.ts` reads installed agent files (never renders) — a warning source, not a
   pipeline stage; it must not block a sync.
 - `apply` knows nothing about harnesses: it gets a lock key → root function.
@@ -88,8 +94,8 @@ fsutil.ts     hash, atomicWrite                       gitenv.ts    gitEnv(): the
   variable is an error, and a template error leaves that item at its old state.
 - **Trust:** a source declared only in a project config is not fetched until
   `skilletor trust <name>`; a changed URL lapses trust.
-- **Security:** item names, tar entries and includes cannot escape source or
-  target root; symlinks in sources are rejected; `url` sources are HTTPS-only.
+- **Security:** item names, tar entries, includes and a source's `path` cannot escape
+  source or target root; symlinks in sources are rejected; `url` sources are HTTPS-only.
 - **A hook never disturbs the session:** every path in `hooks.ts` catches, exits
   0, and surfaces problems as one warning line. Offline → cache + warning.
 - **Config default vs. fallback:** `checkInterval` defaults to 1800 s in

@@ -9,7 +9,7 @@
 // that can go wrong throws a ConfigError naming the file and the offending key.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { atomicWrite } from "./fsutil.ts";
+import { atomicWrite, innerSegments } from "./fsutil.ts";
 
 export type ItemType = "skill" | "agent" | "rule";
 export const ITEM_TYPES: readonly ItemType[] = ["skill", "agent", "rule"];
@@ -50,6 +50,9 @@ export interface ResolvedSource {
   ref?: string;
   url?: string;
   local?: string;
+  /** Where the source's skills lie, as written (spec §3, §4.1; k126). Like `ref`, no part of
+   *  the identity and no backend field: it has no origin. */
+  path?: string | string[];
   /** The origin of each backend field present. Trust follows the origin of the field the
    *  chosen backend comes from, never the source as a whole (spec §3, §4.3). */
   origins: Partial<Record<BackendKind, Origin>>;
@@ -124,7 +127,7 @@ export interface LoadOptions {
 }
 
 const ALLOWED_KEYS = new Set(["sources", "install", "vars", "gitignore", "checkInterval", "targets"]);
-const SOURCE_KEYS = new Set(["git", "ref", "url", "local"]);
+const SOURCE_KEYS = new Set(["git", "ref", "url", "local", "path"]);
 
 type Json = Record<string, unknown>;
 
@@ -210,10 +213,40 @@ export function sourceFields(def: unknown, at: string): SourceDef {
     }
     src.url = d.url;
   }
+  if (d.path !== undefined) src.path = pathField(d.path, at);
   if (src.git === undefined && src.url === undefined && src.local === undefined) {
     throw new ConfigError(`${at} needs one of "git", "url" or "local"`);
   }
   return src;
+}
+
+/** A source's `path` as a list: a string is a list of one (spec §3). */
+export function pathList(path: string | string[]): string[] {
+  return typeof path === "string" ? [path] : path;
+}
+
+/** A source's `path` as written (spec §3, k126): a non-empty string or a non-empty array of
+ *  them, each relative to the source root and beneath it. What needs no file system is refused
+ *  here, as a `ref` git could not take is – a value that is absolute, contains ".." or names
+ *  the source root itself – so `add` never writes one (k110); that it exists, is a directory
+ *  and no symlink is the scan's to say (spec §4.1). */
+function pathField(value: unknown, at: string): string | string[] {
+  const where = `${at}.path`;
+  const omit = ` (omit "path" for the default layout)`;
+  if (typeof value !== "string" && !Array.isArray(value)) {
+    throw new ConfigError(`${where} ${JSON.stringify(value)} must be a string or an array of strings`);
+  }
+  if (value.length === 0) throw new ConfigError(`${where} ${JSON.stringify(value)} must not be empty${omit}`);
+  pathList(value as string | string[]).forEach((entry: unknown, i) => {
+    const w = `${where}${Array.isArray(value) ? `[${i}]` : ""} ${JSON.stringify(entry)}`;
+    if (typeof entry !== "string") throw new ConfigError(`${w} must be a string`);
+    if (entry === "") throw new ConfigError(`${w} must not be empty`);
+    const segments = innerSegments(entry);
+    if (segments === "absolute") throw new ConfigError(`${w} must not be absolute (it is relative to the source root)`);
+    if (segments === "dotdot") throw new ConfigError(`${w} must not contain ".."`);
+    if (segments === "root") throw new ConfigError(`${w} must not be the source root (name the directories its skills lie in)`);
+  });
+  return value as string | string[];
 }
 
 /** A source field as written: present means a non-empty string (k88). Anything else would
@@ -245,10 +278,11 @@ function gitField(value: string, key: "git" | "ref", at: string): string {
 }
 
 /** Merge `incoming` source fields over `base`, field by field: each backend field keeps
- *  the origin of the file it came from (spec §3). */
+ *  the origin of the file it came from (spec §3); `ref` and `path` are replaced whole. */
 function mergeSource(base: ResolvedSource | undefined, incoming: ResolvedSource): ResolvedSource {
   const merged: ResolvedSource = { ...(base ?? incoming), origins: { ...base?.origins } };
   if (incoming.ref !== undefined) merged.ref = incoming.ref;
+  if (incoming.path !== undefined) merged.path = incoming.path; // the whole value, never concatenated
   for (const kind of BACKEND_KINDS) {
     if (incoming[kind] === undefined) continue;
     merged[kind] = incoming[kind];
@@ -543,6 +577,7 @@ export interface SourceDef {
   ref?: string;
   url?: string;
   local?: string;
+  path?: string | string[];
 }
 
 type RawConfig = Record<string, unknown>;

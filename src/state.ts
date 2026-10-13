@@ -24,9 +24,11 @@ export interface TrustCheck extends TrustedBackend {
 }
 
 /** The version of a source a sync read, and the backend it read it through (spec §14.3,
- *  k80): kind, address and – git only – the ref, which picks the cache (k69). */
+ *  k80): kind, address and – git only – the ref, which picks the cache (k69); and the `path`
+ *  it scanned that tree with, when the source has one (k126). */
 export interface SourceRead extends TrustedBackend {
   ref?: string;
+  path?: string[];
   version: string;
 }
 
@@ -166,9 +168,11 @@ export class State {
       if (value === null || typeof value !== "object") continue;
       const v = value as Record<string, unknown>;
       if ((v.kind !== "git" && v.kind !== "url" && v.kind !== "local") || typeof v.address !== "string" ||
-        typeof v.version !== "string" || (v.ref !== undefined && typeof v.ref !== "string")) continue;
+        typeof v.version !== "string" || (v.ref !== undefined && typeof v.ref !== "string") ||
+        (v.path !== undefined && !(Array.isArray(v.path) && v.path.every((x) => typeof x === "string")))) continue;
       out[name] = { kind: v.kind, address: v.address, version: v.version };
       if (typeof v.ref === "string") out[name].ref = v.ref;
+      if (v.path !== undefined) out[name].path = v.path as string[];
     }
     return out;
   }
@@ -181,6 +185,7 @@ export class State {
       const r = record[name]!;
       next[name] = { kind: r.kind, address: r.address, version: r.version };
       if (r.ref !== undefined) next[name].ref = r.ref;
+      if (r.path !== undefined) next[name].path = r.path;
     }
     if (JSON.stringify(all[scopeKey] ?? {}) === JSON.stringify(next)) return;
     if (Object.keys(next).length > 0) all[scopeKey] = next;

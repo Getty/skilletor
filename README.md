@@ -63,6 +63,7 @@ shown here:
 | `hf.co/user` | `git: https://hf.co/user/skills` | `user` |
 | `gitlab.com/u/r` | `git: https://gitlab.com/u/r` | `r` |
 | `https://github.com/u/r/tree/<ref>` (a browser link) | `git: https://github.com/u/r` with `ref: <ref>` | `r` |
+| `https://github.com/u/r/tree/<ref>/<dir>` (a link into a directory) | the same with `path: <dir>` (see [Skills elsewhere](#skills-elsewhere-path)) | `r` |
 | `host.tld/` | `https://host.tld/skills` (probed: git, then `.tar.gz`) | `host-tld` |
 | `https://…/x.tar.gz` | `url` (HTTPS tarball) | the host |
 | `~/dev/skills`, `./path`, `/abs` | `local` | the directory name |
@@ -76,7 +77,11 @@ or changed) until you fix it; a name the config already gives another address fa
 1, nothing changed) — pass a name (`skilletor add <name> <spec>`) or `skilletor source
 remove <name>` first. A GitHub tree link (`…/tree/<ref>`) pins that ref; the same address
 already configured without it or with another ref fails the same way — set `ref` by hand.
-A file (`…/blob/…`) or subdirectory link is refused: a source is a whole repository.
+A link into a directory (`…/tree/<ref>/<dir>`) stores that directory as the source's `path`
+as well, and an entry with no `path` or another one fails likewise — set `path` by hand or
+pass a name. A file link (`…/blob/…`) is refused: a source is a repository or directories of
+it, not a file. The segment after `tree` is always taken as the ref, so for a ref that
+contains `/` add the repository and set `ref` (and `path`) by hand.
 
 A source's layout (convention, no manifest):
 
@@ -106,6 +111,43 @@ skilletor add obra/superpowers    # source "superpowers"
 skilletor add mattpocock          # → mattpocock/skills, skills listed in its plugin.json
 skilletor add Getty/karr          # source "karr", a project: its .claude/ skills, agents and rules
 ```
+
+### Skills elsewhere: `path`
+
+A repository that keeps its skills somewhere else — by category, say, with no `plugin.json`
+— offers nothing under the layout above. Give its source entry a `path`: a directory, or a
+list of them, relative to the repository root.
+
+```json
+"hermes": { "git": "https://github.com/NousResearch/hermes-agent", "path": ["skills", "optional-skills"] }
+```
+
+skilletor walks each path down, to any depth: a directory holding a `SKILL.md[.njk]` is one
+skill, named after that directory and installed as `skills/<name>/`; it is not searched
+further, and everything else on the way (a category's `DESCRIPTION.md`, an index cache,
+symlinks, `.git`) is passed over. So a path can be the whole tree, one category
+(`skills/research`) or a single skill (`skills/research/arxiv`).
+
+- `path` **replaces** the layout above for that source: it offers those skills and nothing
+  else — no `skills/<name>/`, agents, rules, `plugin.json` or `.claude/` items, no bundles.
+  The source's `skilletor.json` (description, var defaults) is still read. For both, add the
+  repository under two names; they share one clone.
+- Two directories with the same name make that one skill an error (`available` shows it,
+  `install` refuses it, `sync` warns and keeps an installed copy); every other skill is
+  offered.
+- A path that is absolute, contains `..` or is the repository root (`.`) is a config error;
+  one that does not exist, is not a directory or is a symlink makes the source unresolvable
+  for that sync — a warning, and what it installed stays.
+- `path` is not part of what a source *is*: cache and trust follow the address alone. It
+  merges across the config files like `ref` — the user's value replaces the project's, the
+  local file's both, as a whole. Changing it syncs once, with the next session.
+- The whole repository is still cloned (shallow); `path` narrows what is offered, not what is
+  fetched.
+
+A GitHub link into a directory sets it for you — `skilletor add
+https://github.com/NousResearch/hermes-agent/tree/main/optional-skills` stores `ref: main`
+and `path: optional-skills`; a list of paths, or a `path` without a `ref`, is written into
+the entry by hand.
 
 ## Declaring what you want
 
@@ -141,8 +183,10 @@ Only `skill`, `agent` and `rule` are installable — skilletor never syncs hooks
 for (`claude`, `codex`) — see [Codex](#codex).
 
 A source's `git`, `ref` or `local`, when present, must be a non-empty string (omit `ref`
-for the remote's HEAD, never `""`), and `url` an `https://` URL. Anything else is a config
-error naming the file, the source and the key — never a field quietly read as absent.
+for the remote's HEAD, never `""`), and `url` an `https://` URL; a `path` (see [Skills
+elsewhere](#skills-elsewhere-path)) a non-empty string or a non-empty list of them. Anything
+else is a config error naming the file, the source and the key — never a field quietly read
+as absent.
 A source's name — its key under `sources` — is ASCII letters, digits, `.`, `_` and `-`,
 starting with a letter or digit; any other name is a config error naming the file and the
 name, and `skilletor add` refuses it before writing anything. It likewise refuses a spec
@@ -634,6 +678,9 @@ rendered. This is the same trust level as installing a plugin.
 - Trust does not cover a git `ref`, so a `git` address or `ref` that starts with `-`, and a
   `ref` with whitespace, control characters or `~ ^ : ? * [ \`, `..` or `@{`, is a config
   error: nothing syncs, and the session start names the file and the source.
+- Nor does it cover a source's `path`: a project may change which directories of a trusted
+  source are scanned. A `path` cannot leave the source (absolute, `..` and symlinks are
+  refused).
 - A project cannot change what your user-scope items are built from: those resolve
   against your user config's sources alone. A project field merged into one of your
   sources (a `local` path, say) counts as the project's and needs its own trust; your

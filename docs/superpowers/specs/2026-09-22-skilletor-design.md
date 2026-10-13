@@ -57,7 +57,8 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
   "sources": {
     "shared": { "git": "https://github.com/Getty/skills", "ref": "main" },
     "team":   { "url": "https://skills.example.com/skills.tar.gz" },
-    "mine":   { "local": "~/dev/my-skills" }
+    "mine":   { "local": "~/dev/my-skills" },
+    "hermes": { "git": "https://github.com/NousResearch/hermes-agent", "path": ["skills", "optional-skills"] }
   },
   "install": {
     "skills": ["perl-moo@shared", "container-kubernetes@shared"],
@@ -73,6 +74,21 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
 - `ref` is optional (default: the remote's HEAD); a tag or commit pins it. A `git`, `ref` or
   `local` present must be a non-empty string (`url` an `https://` URL) – else a config error
   naming file, source and key, never a field read as absent (k88).
+- `path` is optional (k126): where the source's skills lie, for a repository that keeps them
+  outside `skills/<name>/` – a string or an array of strings, each a directory relative to the
+  source root, with any backend. It replaces the scan of the source layout (§4.1): the source
+  offers the skills beneath those directories and nothing else. Present, it must be a
+  non-empty string or a non-empty array of non-empty strings – else a config error naming
+  file, source and key in the k88 style (`<file>: sources.hermes.path [] must not be empty
+  (omit "path" for the default layout)`, an element as `sources.hermes.path[1] 7 must be a
+  string`). What a path may not be whatever the source holds is refused here too, as a `ref`
+  git could not take is: a value that is absolute, contains `..` or names the source root
+  itself (`.`, `./`; `\` separates like `/`) is a config error naming the value
+  (`sources.hermes.path "../x" must not contain ".."`), so `add` never writes one (§4.2,
+  k110). That a path exists, is a directory and no symlink only the resolved source can say:
+  the scan's errors (§4.1). `path` is no part of the source's identity: cache (§4.4), trust
+  (§4.3) and the comparison of two addresses (§4.2, §15.6) are the backend's and address's
+  alone, so two names for one address with different paths share one cache and one fetch.
 - A source name – the key under `sources` – is ASCII letters, digits, `.`, `_` and `-`,
   starting with a letter or digit (`^[A-Za-z0-9][A-Za-z0-9._-]*$`): it ends up in lock
   entries, state keys (`trust.json`, `sources-read.json`) and `name@source` specs. Any other
@@ -120,12 +136,15 @@ change what a user-scope item is built from, and every backend field keeps its o
 - **Per scope.** The user scope resolves its items – explicit, wildcard and bundle
   entries, and the sources a user bundle names – against the user config's sources
   alone; neither a project's `skilletor.json` nor `skilletor.local.json` can change the
-  backend or `ref` of a user-scope item. The project scope uses the merged map
+  backend, `ref` or `path` of a user-scope item. The project scope uses the merged map
   (project < user < local).
 - **Per field.** In the merged map each backend field (`git`, `url`, `local`) remembers
   the file it came from: `user` for the user config and `skilletor.local.json` (both
   written by the user), `project` for the project's `skilletor.json`. `ref` merges as
-  before and is not part of the identity.
+  before and is not part of the identity. `path` merges like `ref` (k126): the value of the
+  last file that gives one replaces the one below as a whole – a string or a list, never
+  concatenated – and a file that gives none keeps it. It has no origin: whichever backend is
+  chosen, the source's `path` is applied to what that backend resolves to.
 - **One resolved backend.** Choosing the backend and checking trust work on one value:
   kind (`git`, `url`, `local`), effective address (a `local` path normalized to an
   absolute real path), and the origin of that field. The choice is author mode's (below):
@@ -215,9 +234,56 @@ project wrote from other sources, not the project's own items; git ignores them 
 a file of the item like any other (replaced by skilletor's while `gitignore` is on, §6.4).
 Bundles under `.claude/`, `.agents/skills` (the Codex layout) and `share/` are not read.
 
+**Skills elsewhere: a source's `path`** (k126). A repository that keeps its skills neither
+in `skills/<name>/` nor listed in a `plugin.json` offers nothing above, without an error:
+NousResearch/hermes-agent has `skills/<category>/<name>/SKILL.md` and
+`optional-skills/<category>/[<sub>/]<name>/SKILL.md`, and `skills/` is read one level deep.
+The source entry's `path` (§3) says where its skills lie – it is not a new source root, and
+nothing of the layout above is expected beneath it:
+
+- **Descent.** Each path is walked down to any depth. A directory holding `SKILL.md[.njk]` is
+  one skill and is not searched further – a `SKILL.md` beneath it is a file of that skill,
+  never a second item; any other directory is walked. So a path may be the whole of `skills/`,
+  one category (`skills/research`) or a single skill (`skills/research/arxiv`); what lies
+  between the skills (`skills/<category>/DESCRIPTION.md`, `skills/index-cache/*.json`) is no
+  item.
+- **The skill.** Its name is its directory's basename, and it is built like every other
+  skill: its files, its description, the `f` beside `f.njk` error (k113) and its install
+  path `skills/<name>/`, whatever its source path.
+- **Refusals.** Each path gets those of a `plugin.json` skills path, and they make the source
+  unresolvable (§6.1) the same way: absolute, contains `..`, a symlink at the path or above it
+  (dangling included), does not exist, is not a directory, or is the source root itself
+  (`source hermes: "path" does not exist: moved-skills`). The first, second and last need no
+  file system and are config errors already (§3); the scan checks them again.
+- **On the way down** nothing is followed and nothing fails: a symlinked entry (a directory, a
+  file, a dangling link) and a dot-directory that is not itself a skill (`.git`, `.github`)
+  are passed over silently. A path naming a dot-directory is walked. Inside a skill directory
+  the rules of every skill hold unchanged: a symlink there fails the scan (§9).
+- **One name, two directories** is an error of that item, like an agent's `x.md` beside its
+  `x.md.njk` (k100): the catalog holds the name once, with an error naming the directories in
+  sorted order (`found in 2 directories: optional-skills/research/arxiv and
+  skills/research/arxiv`), `available`, `install` and `sync` treat it as above, and every
+  other skill is offered. This differs from `plugin.json`, where it makes the source
+  unresolvable, on purpose: that file is the repository's own list, a `path` reads a foreign
+  repository as it is, and an addition upstream must not take the whole source down. The same
+  directory reached through two overlapping paths (`skills` and `skills/research`) counts
+  once.
+- **Instead of, not in addition.** `path` replaces the item scan of that source: no
+  `skills/<name>/`, `agents/`, `rules/`, `plugin.json` or `.claude/` items, and `bundles/` is
+  not read (§15.1) – a source with a `path` offers skills only. `skilletor.json` at the source
+  root is still read (description, var defaults). To get both from one repository, add it
+  under two names: one address, one cache (§4.4).
+- `plugin.json` skills paths stay one level deep: going deeper there would change what
+  existing sources offer to a wildcard.
+
+The whole repository is still fetched (a shallow clone, §4.4); `path` narrows the scan, not
+the checkout.
+
 Known public sources as examples: `skilletor add anthropics` (→ `anthropics/skills`, flat
 `skills/`), `skilletor add obra/superpowers` (flat `skills/`), `skilletor add mattpocock`
-(→ `mattpocock/skills`, skills nested by category, listed in its `plugin.json`).
+(→ `mattpocock/skills`, skills nested by category, listed in its `plugin.json`),
+`skilletor add NousResearch/hermes-agent` with `"path": ["skills", "optional-skills"]` set
+on the entry (skills nested by category, one or two levels deep, no `plugin.json`).
 
 The catalog (`skilletor available`) is built by scanning this layout; name and
 description come from the items' frontmatter. The same scan expands a wildcard
@@ -239,6 +305,7 @@ Hooks never guess or probe.
 | `github.com/u`, `gitlab.com/u`, `codeberg.org/u`, `hf.co/u`, `huggingface.co/u` | `git: https://<host>/u/skills` |
 | the same hosts with `u/repo` | `git: https://<host>/u/repo` |
 | `[https://]github.com/u/repo/tree/<ref>` (a GitHub browser link) | `git: https://github.com/u/repo` with `ref: <ref>` |
+| `[https://]github.com/u/repo/tree/<ref>/<dir…>` (a link into a directory) | the same with `path: <dir…>` (§3) |
 | `host.tld` or `host.tld/` | `https://host.tld/skills` – probe below |
 | `host.tld/path` | `https://host.tld/path` – probe below |
 
@@ -303,11 +370,21 @@ repository at that ref, never probed: `https://github.com/Getty/karr/tree/main` 
 https://github.com/Getty/karr`, `ref: main`, named after the repo (`karr`; a default repo its
 owner, as above). Owner and repo take GitHub's characters (k117); the ref is taken as written
 and goes through config load's check of a `ref` (§3) before anything is written (k110: `…/tree/-x`
-and `…/tree/main~1` fail with load's words). A source is a whole repository, so a file link
-(`…/blob/<ref>/<path>`), a link into a subdirectory (`…/tree/<ref>/<dir>`) and a tree link
-without a ref are errors naming what to add instead. A link cannot tell a ref with `/`
-(`feature/x`) from a subdirectory: the segment after `tree` is the ref and anything after it a
-subdirectory, so for such a ref add the repository and set `ref` by hand. Only github.com links
+and `…/tree/main~1` fail with load's words). A link into a directory –
+`…/tree/<ref>/<dir…>`, refused until k126 – is the repository at that ref with its skills
+beneath that directory: what follows the ref becomes the source's `path` (§3, §4.1), one
+`/`-joined string (`https://github.com/NousResearch/hermes-agent/tree/main/optional-skills` →
+`git: https://github.com/NousResearch/hermes-agent`, `ref: main`, `path: optional-skills`),
+blank segments skipped and a trailing `/` dropped as elsewhere. It is taken as written – a
+`%`-escape of the link is not decoded – and goes through config load's check of a `path`
+before anything is written (k110: `…/tree/main/a/../..` fails with load's words). The name is
+still the repository's, so a second directory of one repository is added under a name of its
+own (`skilletor add <name> <link>`), or by editing `path` into a list. A file link
+(`…/blob/<ref>/<path>`) and a tree link without a ref stay errors naming what to add instead:
+a source is a repository or directories of it, never a file. A link cannot tell a ref with
+`/` (`feature/x`) from a directory: the segment after `tree` is the ref and anything after it
+the path, so `…/tree/feature/x` is stored as `ref: feature`, `path: x` – for such a ref add
+the repository and set `ref` (and `path`) by hand. Only github.com links
 are read this way; `http://github.com/…`, `www.github.com`, another forge's link
 (`gitlab.com/u/r/-/tree/main`, whose shape differs) and the `github:` and `owner/repo`
 shorthands keep their result above.
@@ -348,7 +425,16 @@ entry without a `ref` or with another is an error before anything is written or 
 naming both refs and the ways out (`source "karr" in <file> is git https://github.com/Getty/karr
 with no ref, not ref "main"; nothing was changed. Set its "ref" by hand, add it under another
 name (…) or remove the source first (…).`). A spec without a ref keeps an entry's `ref`, as
-before.
+before. A spec that names a path (a link into a directory, k126) is treated the same way,
+after its ref: it keeps such an entry only with that `path` – written as a string or a list of
+one, compared by segments (`./skills/` is `skills`) – since keeping an entry without one would
+offer the whole source layout, and one with another path what lies elsewhere. An entry
+without a `path`, with another or with a longer list is an error before anything is written
+or trusted, naming both and the ways out (`source "karr" in <file> is git
+https://github.com/Getty/karr with path "skills", not path "skills/research"; nothing was
+changed. Set its "path" by hand, add it under another name (…) or remove the source first
+(…).`). A spec without a path keeps an entry's `path`. `add` has no option for either field:
+a `ref` or `path` no link carries is written into the entry by hand.
 
 **`add` writes only what config load takes** (k110). The source definition a spec resolves
 to goes through config load's own check of a source (§3) before the config is read or
@@ -357,7 +443,8 @@ written and before any trust. An explicit address is kept verbatim, so a `.tar.g
 load refuses: `add` fails with exit 1, config byte-identical, naming key, value and rule
 (`cannot add http://host/x.tar.gz: sources.host.url "http://host/x.tar.gz" must be an https://
 URL; nothing was changed`), also when that config already has the same address by hand
-under that name (never kept and trusted). A bundle entry naming such an address is an error
+under that name (never kept and trusted). A link's `ref` (k119) and `path` (k126) go through
+the same check. A bundle entry naming such an address is an error
 of that bundle (§15.4, k115), so the bundle prompt never offers it (§15.6).
 
 ### 4.3 Trust
@@ -378,6 +465,10 @@ of that bundle (§15.4, k115), so the bundle prompt never offers it (§15.6).
   `git check-ref-format` forbids per character (whitespace, control characters,
   `~ ^ : ? * [ \`, `..`, `@{`), is a config error naming file, source and key; `add`
   refuses a spec starting with `-` (k85).
+- Trust binds no `path` either (k126): a project may narrow or widen which directories of a
+  trusted source are scanned, as it may move its `ref`. A `path` cannot leave the source –
+  absolute, `..` and a symlink are refused (§3, §4.1) – so it reaches nothing trust did not
+  already cover.
 - Trust means code execution: Nunjucks is not a sandbox. This is the same trust level as
   installing a plugin, and the README says so.
 
@@ -416,7 +507,8 @@ explicit ref (the first resolve fetches again; offline, that source counts as un
 and keeps its items, §6.1). Offline, a SHA pin is served from cache only if the cached
 commit is the pin; a ref shorter than a full SHA that names no other commit there (a tag or
 branch named like a date) is taken as a name (k69). Names with one URL and ref share the
-cache and a sync's one fetch of it (§6.1, k83). Git gets the address and the ref after `--`,
+cache and a sync's one fetch of it (§6.1, k83), whatever their `path` (§3): each name scans
+that one tree with its own. Git gets the address and the ref after `--`,
 never as an option (k85). A git killed midway (a hook timeout, a crash) can leave its lock
 files in the cache; the next run that takes the sync lock removes them once stale (§6.5, k84).
 A cache it was creating – a `.git` that `git init` never finished, a repo without `origin` or
@@ -671,8 +763,8 @@ the block is deleted. Content outside the block is never touched.
 
 `~/.claude/skilletor/`: `cache/` (deletable), `trust.json`, `last-check.json`,
 `pending-report.json`, `unreached.json` (per lock, the drift the last sync could not reach,
-§14.3), `sources-read.json` (per lock, the version of each source the last sync read and the
-backend it read it through, §14.3), `render-inputs.json` (per lock, a hash of the vars and
+§14.3), `sources-read.json` (per lock, the version of each source the last sync read, the
+backend it read it through and the `path` it scanned it with, §14.3), `render-inputs.json` (per lock, a hash of the vars and
 project the last sync rendered the scope's items with, §14.3), `sync.lock/` (mkdir mutex
 against parallel sessions, refreshed while held; below).
 `CLAUDE_PLUGIN_DATA` is not used, so the CLI runs identically without Claude Code.
@@ -885,8 +977,9 @@ message naming the option, nothing touched.
 
 - A fixed type table with fixed target directories; hooks, `settings.json`, and MCP
   configs are never synchronized.
-- Path hardening: item names, tar entries, and includes may not leave the source or
-  target root; symlinks in sources are rejected; `url` is HTTPS-only.
+- Path hardening: item names, tar entries, includes and a source's `path` (§4.1) may not
+  leave the source or target root; symlinks in sources are rejected (beneath a `path`: passed
+  over on the way down, rejected inside a skill); `url` is HTTPS-only.
 - Trust model per 4.3; no `env.*` in the context; pinning via `ref`.
 
 ## 10. Repo, build, distribution
@@ -1077,14 +1170,17 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
   not counted – the trust request stands for it.
 - **A source moved** means: since the last sync read it (k80). Each sync records per lock in
   `sources-read.json` (§6.5) the version of every source it resolved and scanned, with the
-  backend it read it through (kind, address, and a git source's ref), and `check` compares
+  backend it read it through (kind, address, and a git source's ref) and the `path` it scanned
+  it with (k126), and `check` compares
   the source with that – not with the lock, which holds nothing of a source whose items a
   sync could not install (every one blocked by a conflict, missing from the source, an empty
   wildcard over it), and can hold an item kept at an older version than the rest of its
   source (removed upstream, a conflict or template error on an update). Compared with the
   lock, such a source can read as changed in every session, re-syncing and repeating the
   warnings the last sync gave. A version read through another backend proves nothing for this one: after
-  a changed URL or ref the source counts as changed and syncs once. A source a sync tried
+  a changed URL or ref the source counts as changed and syncs once. Nor does one read with
+  another `path`: the same tree offered other items, so a changed `path` – compared as a list,
+  `"skills"` being `["skills"]` – is one sync too, though the source did not move. A source a sync tried
   but could not resolve or scan keeps what an earlier sync read of it; a source no sync
   needs any more leaves the record with the next sync. With no record – before the first
   sync, or after one that stopped with an error, which clears it with `unreached.json` –
@@ -1369,6 +1465,10 @@ vars:
 Every key but `description` is optional. An entry of another source names that source by
 its address, never by a config name, so a bundle means the same on every machine (§15.6).
 
+A source configured with a `path` (§3, §4.1; k126) has no bundles: `bundles/` is not read,
+`available` lists none, and a declared `name@source` is the bundle that does not exist
+(§15.4).
+
 ### 15.2 Expansion
 
 At sync time, per scope and after the source resolves (§6.1 step 3), each declared bundle
@@ -1414,7 +1514,9 @@ installed before stay installed (kept like an unresolvable source's items, §6.1
   without `https://`, local path);
 - an entry's `@<spec>` pins a ref (a GitHub tree link, §4.2; k119): an entry names its source
   by address alone (§15.6), so the ref could only be dropped (`rules: "x@github.com/o/r/tree/v1"
-  pins ref "v1", but an entry names its source by address alone: write x@https://github.com/o/r`);
+  pins ref "v1", but an entry names its source by address alone: write x@https://github.com/o/r`).
+  A link into a directory names a path as well (k126) and is the same error, naming both
+  (`pins ref "v1" and path "skills"`);
 - an entry's `@<spec>` resolves to a source config load would refuse (§3; k115): a
   `.tar.gz`/`.tgz` address that is not `https://` (`http://…`, `file://…`, `git@host:….tar.gz`)
   is a `url` (§4.2), and a `url` must be `https://`. Checked by load's own check, on the
@@ -1452,8 +1554,10 @@ another source by address. `<spec>` uses the shorthand of §4.2 (`Getty`, `Getty
 `gitlab.com/peter`, `https://…`, `…tar.gz`); the resolved URL is the source's identity.
 Only specs that resolve without a probe are allowed – a generic host (`host.tld/…`) must be
 written as a full `https://…` URL – and local paths are not allowed; both are bundle
-errors (§15.4). So is a spec that pins a ref (a GitHub tree link, §4.2, k119): the serving
-source's own `ref` applies, whatever an entry could say.
+errors (§15.4). So is a spec that pins a ref (a GitHub tree link, §4.2, k119) or names a
+path (a link into a directory, k126): the serving source's own `ref` and `path` apply,
+whatever an entry could say – an entry is matched against the catalog that source offers, so
+a serving source with a `path` serves the skills beneath it and no agent or rule.
 
 - **Matching:** the entry is served by the configured source (any scope visible to the
   bundle's scope) whose resolved `git`/`url` identity equals the entry's. The config name

@@ -15,6 +15,8 @@ interface Row {
   name: string;
   /** The ref a GitHub tree link pins (k119); every other row has none. */
   ref?: string;
+  /** The directory a GitHub tree link leads into (k126); every other row has none. */
+  path?: string;
 }
 
 // Deterministic rows: known forms that never hit the probe.
@@ -229,9 +231,32 @@ const k119Pinned: Row[] = [
   },
 ];
 
+// k126: a GitHub link into a subdirectory (`…/tree/<ref>/<dir…>`) was refused since k119 – a
+// source was a whole repository. A source entry's `path` now says where its skills lie, so the
+// link is the repo at that ref with that path. Asserts: the segment after `tree` is the ref,
+// the rest – blank segments skipped, a trailing "/" dropped, `?query` and `#fragment` the
+// page's – one "/"-joined path taken as written (no unescaping: `%20` stays); the name is the
+// repo's as for any link; a ref with "/" still reads as ref + path (the documented caveat).
+const k126Rows: Row[] = [
+  {
+    spec: "https://github.com/NousResearch/hermes-agent/tree/main/optional-skills", kind: "git",
+    value: "https://github.com/NousResearch/hermes-agent", name: "hermes-agent", ref: "main", path: "optional-skills",
+  },
+  { spec: "https://github.com/Getty/karr/tree/main/skills/foo", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main", path: "skills/foo" },
+  { spec: "github.com/Getty/karr/tree/main/skills/", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main", path: "skills" },
+  { spec: " GitHub.com/Getty/karr/tree/v1.2.0//skills//research/ ", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "v1.2.0", path: "skills/research" },
+  { spec: "HTTPS://GitHub.com/Getty/skills/tree/0f3a9c1/Skills/Research", kind: "git", value: "https://github.com/Getty/skills", name: "getty", ref: "0f3a9c1", path: "Skills/Research" },
+  { spec: "https://github.com/Getty/karr/tree/main/skills/research?tab=readme-ov-file#usage", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main", path: "skills/research" },
+  { spec: "https://github.com/Getty/karr/tree/main/my%20skills", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main", path: "my%20skills" },
+  { spec: "https://github.com/Getty/karr/tree/feature/x", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "feature", path: "x" },
+  // What config load refuses in a path (k110) is `add`'s to say, with load's words; the spec resolves.
+  { spec: "https://github.com/Getty/karr/tree/main/skills/../..", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main", path: "skills/../.." },
+  { spec: "github.com/Getty/karr/tree/main/.", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main", path: "." },
+];
+
 const allRows = [
   ...rows, ...k101Rows, ...k104Rows, ...k109Rows, ...k109Pinned, ...k117Pinned, ...k117Rows, ...k118Rows, ...k119Rows,
-  ...k119Pinned,
+  ...k119Pinned, ...k126Rows,
 ];
 
 for (const row of allRows) {
@@ -241,6 +266,7 @@ for (const row of allRows) {
     assert.equal(r.value, row.value, "value");
     assert.equal(r.derivedName, row.name, "derivedName");
     assert.equal(r.ref, row.ref, "ref");
+    assert.equal(r.path, row.path, "path");
   });
 }
 
@@ -443,26 +469,19 @@ test("k118: a single colon, an empty address or no transport word stays an unkno
   for (const [spec, prefix] of cases) refused(spec, `cannot resolve "${spec}": unknown prefix "${prefix}"; ${forms}`);
 });
 
-// k119: a GitHub link to a file, into a subdirectory or without a ref was kept verbatim as a git
-// source (https://…) or tracked the repo's HEAD (github.com/…). Asserts: each is a SpecError
-// naming the spec and what to add instead, never probed – a `blob` link is a file, a source a
-// whole repository; a `tree` link past its ref names a subdirectory (a ref with "/" cannot be
-// told from one, so the message says to add the repo and set "ref" by hand); a `tree` link
-// without a ref names none. Owner and repo keep GitHub's rules (k117).
-test("k119: a GitHub file link, a subdirectory link or a tree link without a ref is a SpecError, never probed", () => {
+// k119: a GitHub link to a file or without a ref was kept verbatim as a git source (https://…)
+// or tracked the repo's HEAD (github.com/…). Asserts: each is a SpecError naming the spec and
+// what to add instead, never probed – a `blob` link is a file, a source a repository; a `tree`
+// link without a ref names none. Owner and repo keep GitHub's rules (k117). (A `tree` link past
+// its ref, refused here until k126, is the repo with a `path`: k126Rows.)
+test("k119: a GitHub file link or a tree link without a ref is a SpecError, never probed", () => {
   const repo = "https://github.com/Getty/karr";
-  const file = (ref?: string) => `a GitHub file link; a source is a whole repository: add ${repo}` +
+  const file = (ref?: string) => `a GitHub file link; a source is a repository, not a file: add ${repo}` +
     (ref === undefined ? "" : `, or ${repo}/tree/${ref} to pin ref "${ref}"`);
-  const subdir = (sub: string, ref: string) => `skilletor installs a whole repository, not its subdirectory "${sub}"; ` +
-    `add ${repo}/tree/${ref} to pin ref "${ref}". A link cannot tell a ref with "/" from a subdirectory: ` +
-    `for such a ref, add ${repo} and set its "ref" by hand`;
   const cases: [string, string][] = [
     ["https://github.com/Getty/karr/blob/main/README.md", file("main")],
     ["github.com/Getty/karr/blob/v1/skills/x/SKILL.md", file("v1")],
     ["GITHUB.COM/Getty/karr/blob", file()],
-    ["https://github.com/Getty/karr/tree/main/skills/foo", subdir("skills/foo", "main")],
-    ["github.com/Getty/karr/tree/main/skills/", subdir("skills", "main")],
-    ["https://github.com/Getty/karr/tree/feature/x", subdir("x", "feature")],
     ["https://github.com/Getty/karr/blob/main/README.md#L10", file("main")],
     ["https://github.com/Getty/karr/tree", `a GitHub tree link without a ref; add ${repo}`],
     ["github.com/Getty/karr/tree/", `a GitHub tree link without a ref; add ${repo}`],
@@ -473,6 +492,9 @@ test("k119: a GitHub file link, a subdirectory link or a tree link without a ref
       `digits and "-"; ${forms}`);
   refused("github.com/Getty/re:po/tree/main",
     `cannot resolve "github.com/Getty/re:po/tree/main": GitHub repo "re:po" may only contain ASCII letters, digits, ` +
+      `".", "_" and "-"; ${forms}`);
+  refused("github.com/Getty/re:po/tree/main/skills",
+    `cannot resolve "github.com/Getty/re:po/tree/main/skills": GitHub repo "re:po" may only contain ASCII letters, digits, ` +
       `".", "_" and "-"; ${forms}`);
 });
 
