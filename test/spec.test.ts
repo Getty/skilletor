@@ -120,7 +120,7 @@ const k109Pinned: Row[] = [
 
 // k117, pinned: forms next to the new owner, repo and port rules keep their result – a
 // GitHub owner or repo of the characters GitHub allows, a known forge's owner or repo with
-// characters GitHub would not take (`.`, `_`), segments past the repo ignored, an explicit URL
+// characters GitHub would not take (`.`, `_`), an explicit URL
 // verbatim whatever its path holds, and a git source of any scheme: git and its remote helpers
 // (`codecommit://`, `persistent-https://`) decide what they fetch, so `foo://bar` fails there.
 const k117Pinned: Row[] = [
@@ -131,8 +131,6 @@ const k117Pinned: Row[] = [
   { spec: "gitlab.com/group.name/sub_repo", kind: "git", value: "https://gitlab.com/group.name/sub_repo", name: "sub-repo" },
   { spec: "codeberg.org/user_name/re.po", kind: "git", value: "https://codeberg.org/user_name/re.po", name: "re-po" },
   { spec: "hf.co/Org-X/model_1", kind: "git", value: "https://hf.co/Org-X/model_1", name: "model-1" },
-  { spec: "github:Getty/karr/tree/main", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
-  { spec: "Getty/karr/extra", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
   { spec: "https://github.com//skills", kind: "git", value: "https://github.com//skills", name: "skills" },
   { spec: "https://github.com/a b/re:po", kind: "git", value: "https://github.com/a b/re:po", name: "re-po" },
   { spec: "ssh+git://git@host/o/r", kind: "git", value: "ssh+git://git@host/o/r", name: "r" },
@@ -209,22 +207,15 @@ const k119Rows: Row[] = [
   { spec: "https://github.com/Getty/karr/tree/v1/?x=a/b#c/d", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "v1" },
 ];
 
-// k119, pinned: forms next to a GitHub browser link keep their result – no ref, as before. Only
-// github.com links map to a ref: `http://`, `www.` and another forge's link (`/-/tree/` on
-// GitLab) stay what they were, as do the `github:` and owner/repo shorthands, a repo named
-// "tree" or "blob", and a GitHub archive tarball.
-// (`github:Getty/karr/tree/main` is pinned in k117Pinned.)
+// k119, pinned: forms next to a GitHub browser link keep their result – no ref, as before:
+// `http://` and `www.` links, a repo named "tree" or "blob", and a GitHub archive tarball. (The
+// `github:` and owner/repo shorthands and other forges' links read as links since k125.)
 const k119Pinned: Row[] = [
-  { spec: "Getty/karr/tree/main", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
-  { spec: "github.com/Getty/karr/issues", kind: "git", value: "https://github.com/Getty/karr", name: "karr" },
   { spec: "github.com/Getty/tree", kind: "git", value: "https://github.com/Getty/tree", name: "tree" },
   { spec: "github.com/tree/blob", kind: "git", value: "https://github.com/tree/blob", name: "blob" },
   { spec: "https://github.com/Getty/tree", kind: "git", value: "https://github.com/Getty/tree", name: "tree" },
   { spec: "http://github.com/Getty/karr/tree/main", kind: "git", value: "http://github.com/Getty/karr/tree/main", name: "main" },
   { spec: "https://www.github.com/Getty/karr/tree/main", kind: "git", value: "https://www.github.com/Getty/karr/tree/main", name: "main" },
-  { spec: "https://gitlab.com/u/r/-/tree/main", kind: "git", value: "https://gitlab.com/u/r/-/tree/main", name: "main" },
-  { spec: "gitlab.com/u/r/-/tree/main", kind: "git", value: "https://gitlab.com/u/r", name: "r" },
-  { spec: "codeberg.org/u/r/src/branch/main", kind: "git", value: "https://codeberg.org/u/r", name: "r" },
   {
     spec: "https://github.com/Getty/karr/archive/refs/tags/v1.tar.gz", kind: "url",
     value: "https://github.com/Getty/karr/archive/refs/tags/v1.tar.gz", name: "github-com",
@@ -235,7 +226,7 @@ const k119Pinned: Row[] = [
 // source was a whole repository. A source entry's `path` now says where its skills lie, so the
 // link is the repo at that ref with that path. Asserts: the segment after `tree` is the ref,
 // the rest – blank segments skipped, a trailing "/" dropped, `?query` and `#fragment` the
-// page's – one "/"-joined path taken as written (no unescaping: `%20` stays); the name is the
+// page's – one "/"-joined path (unescaped since k125: k125Rows); the name is the
 // repo's as for any link; a ref with "/" still reads as ref + path (the documented caveat).
 const k126Rows: Row[] = [
   {
@@ -247,16 +238,72 @@ const k126Rows: Row[] = [
   { spec: " GitHub.com/Getty/karr/tree/v1.2.0//skills//research/ ", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "v1.2.0", path: "skills/research" },
   { spec: "HTTPS://GitHub.com/Getty/skills/tree/0f3a9c1/Skills/Research", kind: "git", value: "https://github.com/Getty/skills", name: "getty", ref: "0f3a9c1", path: "Skills/Research" },
   { spec: "https://github.com/Getty/karr/tree/main/skills/research?tab=readme-ov-file#usage", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main", path: "skills/research" },
-  { spec: "https://github.com/Getty/karr/tree/main/my%20skills", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main", path: "my%20skills" },
   { spec: "https://github.com/Getty/karr/tree/feature/x", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "feature", path: "x" },
   // What config load refuses in a path (k110) is `add`'s to say, with load's words; the spec resolves.
   { spec: "https://github.com/Getty/karr/tree/main/skills/../..", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main", path: "skills/../.." },
   { spec: "github.com/Getty/karr/tree/main/.", kind: "git", value: "https://github.com/Getty/karr", name: "karr", ref: "main", path: "." },
 ];
 
+// k125: a repo link with a `#anchor` or `?query` was stored as written and failed at fetch;
+// /releases/tag/<t> and /commit/<sha> links tracked HEAD (shorthand) or failed at fetch
+// (https://); `github:o/r/tree/x` and `o/r/tree/x` dropped the ref; a %-escaped ref or path was
+// stored escaped; GitLab, Codeberg and Hugging Face links dropped or kept their tail. Asserts
+// (maintainer, 2026-10-15): the query and fragment are cut from every known-forge link – an
+// explicit repo URL otherwise kept as written; a release-tag or commit link pins that ref; every
+// GitHub form reads a link like github.com/; ref and path are %-decoded segment by segment (so
+// `%2F` keeps a "/" inside the ref); each known forge's own link shapes pin a ref (and a path):
+// GitLab `/-/tree|commit|tags|releases`, its project path all segments before `/-/` (nested
+// groups); Codeberg `/src/branch|tag|commit/<ref>`, `/releases/tag`, `/commit`; Hugging Face
+// `/tree/<ref>` and `/commit`, `datasets/` and `spaces/` part of the repository.
+const gh = "https://github.com/Getty/karr";
+const k125Rows: Row[] = [
+  { spec: "https://github.com/Getty/karr#readme", kind: "git", value: gh, name: "karr" },
+  { spec: "https://github.com/Getty/karr?tab=readme-ov-file", kind: "git", value: gh, name: "karr" },
+  { spec: "https://github.com/Getty/karr/#readme", kind: "git", value: `${gh}/`, name: "karr" },
+  { spec: "HTTPS://GitHub.com/Getty/karr.git?x=1", kind: "git", value: "https://GitHub.com/Getty/karr.git", name: "karr" },
+  { spec: "github.com/Getty/karr?tab=readme-ov-file#x", kind: "git", value: gh, name: "karr" },
+  { spec: "Getty/karr#readme", kind: "git", value: gh, name: "karr" },
+  { spec: "github:Getty/karr?tab=x", kind: "git", value: gh, name: "karr" },
+  { spec: "https://gitlab.com/group/sub/Tools#readme", kind: "git", value: "https://gitlab.com/group/sub/Tools", name: "tools" },
+  { spec: "https://github.com/Getty/karr/releases/tag/v1.2.0", kind: "git", value: gh, name: "karr", ref: "v1.2.0" },
+  { spec: "github.com/Getty/karr/releases/tag/v1/", kind: "git", value: gh, name: "karr", ref: "v1" },
+  { spec: "github.com/Getty/karr/commit/0f3a9c1d", kind: "git", value: gh, name: "karr", ref: "0f3a9c1d" },
+  { spec: "Getty/karr/releases/tag/v1", kind: "git", value: gh, name: "karr", ref: "v1" },
+  { spec: "github:Getty/karr/commit/abc123#diff-1", kind: "git", value: gh, name: "karr", ref: "abc123" },
+  { spec: "github:Getty/karr/tree/main", kind: "git", value: gh, name: "karr", ref: "main" },
+  { spec: "Getty/karr/tree/main", kind: "git", value: gh, name: "karr", ref: "main" },
+  { spec: "Getty/karr/tree/main/skills", kind: "git", value: gh, name: "karr", ref: "main", path: "skills" },
+  { spec: "github:Getty//karr/tree/v1/skills/research/", kind: "git", value: gh, name: "karr", ref: "v1", path: "skills/research" },
+  { spec: "Getty/skills/tree/main", kind: "git", value: "https://github.com/Getty/skills", name: "getty", ref: "main" },
+  { spec: "https://github.com/Getty/karr/tree/main/my%20skills", kind: "git", value: gh, name: "karr", ref: "main", path: "my skills" },
+  { spec: "https://github.com/Getty/karr/tree/feature%2Fx", kind: "git", value: gh, name: "karr", ref: "feature/x" },
+  { spec: "github.com/Getty/karr/tree/feature%2fx/skills", kind: "git", value: gh, name: "karr", ref: "feature/x", path: "skills" },
+  { spec: "github.com/Getty/karr/tree/v%C3%BC/a%2Fb", kind: "git", value: gh, name: "karr", ref: "vü", path: "a/b" },
+  { spec: "github.com/Getty/karr/releases/tag/v1%2B2", kind: "git", value: gh, name: "karr", ref: "v1+2" },
+  { spec: "https://gitlab.com/u/r/-/tree/main", kind: "git", value: "https://gitlab.com/u/r", name: "r", ref: "main" },
+  { spec: "gitlab.com/u/r/-/tree/main", kind: "git", value: "https://gitlab.com/u/r", name: "r", ref: "main" },
+  { spec: "GitLab.com/group/sub/repo/-/tree/v1/skills#x", kind: "git", value: "https://gitlab.com/group/sub/repo", name: "repo", ref: "v1", path: "skills" },
+  { spec: "gitlab.com/group/sub/repo", kind: "git", value: "https://gitlab.com/group/sub/repo", name: "repo" },
+  { spec: "gitlab.com/u/r/-/commit/abc123", kind: "git", value: "https://gitlab.com/u/r", name: "r", ref: "abc123" },
+  { spec: "gitlab.com/u/r/-/tags/v1", kind: "git", value: "https://gitlab.com/u/r", name: "r", ref: "v1" },
+  { spec: "gitlab.com/u/r/-/releases/v1", kind: "git", value: "https://gitlab.com/u/r", name: "r", ref: "v1" },
+  { spec: "https://codeberg.org/u/r/src/branch/main/skills", kind: "git", value: "https://codeberg.org/u/r", name: "r", ref: "main", path: "skills" },
+  { spec: "codeberg.org/u/r/src/branch/main", kind: "git", value: "https://codeberg.org/u/r", name: "r", ref: "main" },
+  { spec: "codeberg.org/u/r/src/tag/v1", kind: "git", value: "https://codeberg.org/u/r", name: "r", ref: "v1" },
+  { spec: "codeberg.org/u/r/src/commit/abc123", kind: "git", value: "https://codeberg.org/u/r", name: "r", ref: "abc123" },
+  { spec: "codeberg.org/u/r/releases/tag/v1", kind: "git", value: "https://codeberg.org/u/r", name: "r", ref: "v1" },
+  { spec: "codeberg.org/u/r/commit/abc123", kind: "git", value: "https://codeberg.org/u/r", name: "r", ref: "abc123" },
+  { spec: "https://huggingface.co/u/r/tree/main/skills", kind: "git", value: "https://huggingface.co/u/r", name: "r", ref: "main", path: "skills" },
+  { spec: "hf.co/u/r/commit/abc123", kind: "git", value: "https://hf.co/u/r", name: "r", ref: "abc123" },
+  { spec: "hf.co/datasets/u/r/tree/main", kind: "git", value: "https://hf.co/datasets/u/r", name: "r", ref: "main" },
+  { spec: "hf.co/spaces/u/r", kind: "git", value: "https://hf.co/spaces/u/r", name: "r" },
+  { spec: "hf.co/datasets/u", kind: "git", value: "https://hf.co/datasets/u/skills", name: "u" },
+  { spec: "https://hf.co/datasets/u/r", kind: "git", value: "https://hf.co/datasets/u/r", name: "r" },
+];
+
 const allRows = [
   ...rows, ...k101Rows, ...k104Rows, ...k109Rows, ...k109Pinned, ...k117Pinned, ...k117Rows, ...k118Rows, ...k119Rows,
-  ...k119Pinned, ...k126Rows,
+  ...k119Pinned, ...k126Rows, ...k125Rows,
 ];
 
 for (const row of allRows) {
@@ -535,4 +582,44 @@ test('k85: a spec starting with "-" is refused, never probed', () => {
       return true;
     });
   }
+});
+
+// k125: other page links of a known forge silently tracked HEAD (shorthand) or were kept as a git
+// address no fetch serves (https://); a malformed %-escape was stored as written. Asserts: each
+// is a SpecError naming the spec, never probed – a page that is not the repository, a branch,
+// tag or commit of it names the repository to add; a release or commit link without its tag or
+// commit says so; a file link of another forge names its tree link to pin; a %-escape that does
+// not decode names the segment.
+test("k125: a known forge's page, release or commit link without its ref, or a bad %-escape is a SpecError", () => {
+  const page = (view: string, forge = "GitHub", repo = gh) => `a ${forge} "${view}" page is not a source; add ${repo}`;
+  const cases: [string, string][] = [
+    ["https://github.com/Getty/karr/issues", page("issues")],
+    ["github.com/Getty/karr/issues/12#issuecomment-1", page("issues/12")],
+    ["Getty/karr/pull/12", page("pull/12")],
+    ["github:Getty/karr/pulls", page("pulls")],
+    ["Getty/karr/extra", page("extra")],
+    ["https://github.com/Getty/karr/releases", page("releases")],
+    ["https://github.com/Getty/karr/releases/latest", page("releases/latest")],
+    ["github.com/Getty/karr/commits/main", page("commits/main")],
+    ["github.com/Getty/karr/commit/abc/x", page("commit/abc/x")],
+    ["https://github.com/Getty/karr/releases/tag", `a GitHub release link without a tag; add ${gh}`],
+    ["Getty/karr/commit/", `a GitHub commit link without a commit; add ${gh}`],
+    ["gitlab.com/u/r/-/issues", page("issues", "GitLab", "https://gitlab.com/u/r")],
+    ["https://gitlab.com/u/r/-/merge_requests/3", page("merge_requests/3", "GitLab", "https://gitlab.com/u/r")],
+    ["gitlab.com/u/r/-/tree", `a GitLab tree link without a ref; add https://gitlab.com/u/r`],
+    ["codeberg.org/u/r/issues", page("issues", "Codeberg", "https://codeberg.org/u/r")],
+    ["codeberg.org/u/r/src/main", page("src/main", "Codeberg", "https://codeberg.org/u/r")],
+    ["codeberg.org/u/r/src/branch/", `a Codeberg tree link without a ref; add https://codeberg.org/u/r`],
+    ["https://hf.co/u/r/discussions", page("discussions", "Hugging Face", "https://hf.co/u/r")],
+    ["gitlab.com/u/r/-/blob/main/README.md",
+      `a GitLab file link; a source is a repository, not a file: add https://gitlab.com/u/r, or https://gitlab.com/u/r/-/tree/main to pin ref "main"`],
+    ["codeberg.org/u/r/raw/tag/v1/x.md",
+      `a Codeberg file link; a source is a repository, not a file: add https://codeberg.org/u/r, or https://codeberg.org/u/r/src/tag/v1 to pin ref "v1"`],
+    ["hf.co/u/r/resolve/main/x.bin",
+      `a Hugging Face file link; a source is a repository, not a file: add https://hf.co/u/r, or https://hf.co/u/r/tree/main to pin ref "main"`],
+    ["https://github.com/Getty/karr/tree/100%", `"100%" in the link is not a valid %-escape`],
+    ["github.com/Getty/karr/tree/main/a%zzb", `"a%zzb" in the link is not a valid %-escape`],
+  ];
+  for (const [spec, why] of cases) refused(spec, `cannot resolve "${spec}": ${why}`);
+  refused("hf.co/datasets", `cannot resolve "hf.co/datasets": expected hf.co/datasets/owner[/repo]`);
 });

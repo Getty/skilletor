@@ -66,10 +66,12 @@ nothing; non-zero = a sync is due. An option the command does not take → exit 
 
 `add` without a name takes the repo's for a git repo other than `skills` (`Getty/karr`,
 `https://github.com/Getty/karr.git` → `karr`), else the owner's (`Getty` → `getty`), the
-host's or the directory's. A GitHub tree link (`github.com/o/r/tree/<ref>`) adds the repo
-pinned to `<ref>`, one into a directory (`…/tree/<ref>/<dir>`) with `path: <dir>` as well; the
-segment after `tree` is always the ref (a ref with `/`: set `ref` by hand); a file link is
-refused. `add` never replaces a source: the same address again keeps the entry as written
+host's or the directory's. A GitHub tree link (`github.com/o/r/tree/<ref>`, also as
+`o/r/tree/<ref>`, `…/releases/tag/<tag>`, `…/commit/<sha>`) adds the repo pinned to `<ref>`,
+one into a directory (`…/tree/<ref>/<dir>`) with `path: <dir>` as well; GitLab (`/-/tree/`),
+Codeberg (`/src/branch/`) and Hugging Face (`/tree/`) links alike. `?query`/`#anchor` are
+dropped, `%`-escapes decoded; the segment after `tree` is always the ref (a ref with `/`:
+`%2F`, or set `ref` by hand); a file link or any other page (`/issues`) is refused. `add` never replaces a source: the same address again keeps the entry as written
 (`ref`, `path`, `local` stay) and syncs. Exit 1, nothing changed or trusted, when config load
 refuses that entry (a hand-written `"ref": ""`: fix it by hand), a tree link pins a ref or
 path the entry lacks (set it by hand or use another name) or the name has another address

@@ -2012,3 +2012,33 @@ test("k74: install plans under the sync lock, then asks and syncs without holdin
     e.cleanup();
   }
 });
+
+// k125: `add` of a release-tag, commit or %-escaped link stored the link as a git address no
+// fetch serves, tracked HEAD, or kept the escapes; a page link (issues) tracked HEAD. Asserts:
+// a release-tag link and a shorthand tree link with %2F in the ref and %20 in the path store
+// the repo with the decoded ref and path, which config load reads back; an issues link is the
+// SpecError before anything is written or trusted.
+test("k125: add stores a release or %-escaped link's decoded ref and path, and refuses a page link", async () => {
+  const e = env();
+  try {
+    const git = "https://github.com/Getty/karr";
+    const rel = await cmdAdd(e.ctx, { spec: `${git}/releases/tag/v1.2.0#notes` });
+    assert.deepEqual([rel.name, rel.def], ["karr", { git, ref: "v1.2.0" }]);
+    const tree = await cmdAdd(e.ctx, { name: "fx", spec: "github:Getty/karr/tree/feature%2Fx/my%20skills", project: true });
+    assert.deepEqual(tree.def, { git, ref: "feature/x", path: "my skills" });
+    const cfg = loadConfig({ home: e.home, projectDir: e.projectDir });
+    assert.deepEqual([cfg.sources.get("karr")?.ref, cfg.sources.get("fx")?.ref, cfg.sources.get("fx")?.path], ["v1.2.0", "feature/x", "my skills"]);
+  } finally {
+    e.cleanup();
+  }
+  const f = env();
+  try {
+    await assert.rejects(() => cmdAdd(f.ctx, { spec: "Getty/karr/issues" }), {
+      name: "SpecError", message: `cannot resolve "Getty/karr/issues": a GitHub "issues" page is not a source; add https://github.com/Getty/karr`,
+    });
+    assert.equal(existsSync(f.userCfgPath), false, "no user config written");
+    assert.equal(existsSync(join(f.ctx.stateRoot, "trust.json")), false, "nothing trusted");
+  } finally {
+    f.cleanup();
+  }
+});

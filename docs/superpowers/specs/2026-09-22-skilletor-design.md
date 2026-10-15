@@ -326,8 +326,9 @@ Hooks never guess or probe.
 | `github:Getty/repo` | as above (manage-skills compatibility) |
 | `github.com/u`, `gitlab.com/u`, `codeberg.org/u`, `hf.co/u`, `huggingface.co/u` | `git: https://<host>/u/skills` |
 | the same hosts with `u/repo` | `git: https://<host>/u/repo` |
-| `[https://]github.com/u/repo/tree/<ref>` (a GitHub browser link) | `git: https://github.com/u/repo` with `ref: <ref>` |
+| `[https://]github.com/u/repo/tree/<ref>` (a GitHub browser link; `…/releases/tag/<ref>`, `…/commit/<ref>`; `u/repo/…` and `github:u/repo/…` alike) | `git: https://github.com/u/repo` with `ref: <ref>` |
 | `[https://]github.com/u/repo/tree/<ref>/<dir…>` (a link into a directory) | the same with `path: <dir…>` (§3) |
+| GitLab, Codeberg, Hugging Face links (below) | the same for their own link shapes |
 | `host.tld` or `host.tld/` | `https://host.tld/skills` – probe below |
 | `host.tld/path` | `https://host.tld/path` – probe below |
 
@@ -386,30 +387,57 @@ probe-free, the form is allowed in a bundle entry (`x@codecommit::us-east-1://my
 §15.6).
 
 A GitHub browser link (k119) – `github.com/<owner>/<repo>/tree/<ref>`, with or without
-`https://`, scheme and host in any case, a trailing `/` allowed, a `?query` or `#fragment`
-ignored (a view or heading anchor of the page; GitHub escapes both in a ref) – is the
-repository at that ref, never probed: `https://github.com/Getty/karr/tree/main` → `git:
+`https://`, scheme and host in any case, a trailing `/` allowed – is the repository at that
+ref, never probed: `https://github.com/Getty/karr/tree/main` → `git:
 https://github.com/Getty/karr`, `ref: main`, named after the repo (`karr`; a default repo its
-owner, as above). Owner and repo take GitHub's characters (k117); the ref is taken as written
-and goes through config load's check of a `ref` (§3) before anything is written (k110: `…/tree/-x`
-and `…/tree/main~1` fail with load's words). A link into a directory –
-`…/tree/<ref>/<dir…>`, refused until k126 – is the repository at that ref with its skills
-beneath that directory: what follows the ref becomes the source's `path` (§3, §4.1), one
-`/`-joined string (`https://github.com/NousResearch/hermes-agent/tree/main/optional-skills` →
-`git: https://github.com/NousResearch/hermes-agent`, `ref: main`, `path: optional-skills`),
-blank segments skipped and a trailing `/` dropped as elsewhere. It is taken as written – a
-`%`-escape of the link is not decoded – and goes through config load's check of a `path`
-before anything is written (k110: `…/tree/main/a/../..` fails with load's words). The name is
-still the repository's, so a second directory of one repository is added under a name of its
-own (`skilletor add <name> <link>`), or by editing `path` into a list. A file link
-(`…/blob/<ref>/<path>`) and a tree link without a ref stay errors naming what to add instead:
-a source is a repository or directories of it, never a file. A link cannot tell a ref with
-`/` (`feature/x`) from a directory: the segment after `tree` is the ref and anything after it
-the path, so `…/tree/feature/x` is stored as `ref: feature`, `path: x` – for such a ref add
-the repository and set `ref` (and `path`) by hand. Only github.com links
-are read this way; `http://github.com/…`, `www.github.com`, another forge's link
-(`gitlab.com/u/r/-/tree/main`, whose shape differs) and the `github:` and `owner/repo`
-shorthands keep their result above.
+owner, as above). Owner and repo take GitHub's characters (k117); the ref goes through config
+load's check of a `ref` (§3) before anything is written (k110: `…/tree/-x` and `…/tree/main~1`
+fail with load's words). A link into a directory – `…/tree/<ref>/<dir…>`, refused until k126 –
+is the repository at that ref with its skills beneath that directory: what follows the ref
+becomes the source's `path` (§3, §4.1), one `/`-joined string
+(`https://github.com/NousResearch/hermes-agent/tree/main/optional-skills` → `git:
+https://github.com/NousResearch/hermes-agent`, `ref: main`, `path: optional-skills`), blank
+segments skipped and a trailing `/` dropped as elsewhere, and it goes through config load's
+check of a `path` before anything is written (k110: `…/tree/main/a/../..` fails with load's
+words). The name is still the repository's, so a second directory of one repository is added
+under a name of its own (`skilletor add <name> <link>`), or by editing `path` into a list.
+
+Every link to a known forge is read so (k125), whether written as `https://…`, as `<host>/…`
+or – GitHub – as `github:<owner>/<repo>/…` or `<owner>/<repo>/…`:
+
+- **Query and fragment** are the page's – a view or heading anchor; a forge escapes both in a
+  ref and a path – and are cut from every such link, a repository link too
+  (`https://github.com/Getty/karr#readme`, `Getty/karr?tab=readme-ov-file` →
+  `https://github.com/Getty/karr`). An explicit `https://` repository link is otherwise kept
+  as written – its case, a trailing `/` and `.git` included.
+- **Escapes.** The ref and each segment of the path are `%`-decoded, segment by segment, after
+  the link is split at `/`: `…/tree/main/my%20skills` → `path: my skills`, and `%2F` keeps a
+  `/` inside one segment (`…/tree/feature%2Fx/skills` → `ref: feature/x`, `path: skills`). A
+  `%` that does not start a valid escape is an error naming the segment.
+- **Which page.** What follows the repository decides:
+
+  | Forge | Repository | Ref (+ `path`) | Ref only | File link (error) |
+  |---|---|---|---|---|
+  | GitHub | `<owner>/<repo>` | `tree/<ref>[/<dir…>]` | `releases/tag/<tag>`, `commit/<sha>` | `blob/…` |
+  | GitLab | every segment before `/-/` (nested groups) | `-/tree/<ref>[/<dir…>]` | `-/commit/<sha>`, `-/tags/<tag>`, `-/releases/<tag>` | `-/blob/…`, `-/raw/…` |
+  | Codeberg | `<owner>/<repo>` | `src/branch\|tag\|commit/<ref>[/<dir…>]` | `releases/tag/<tag>`, `commit/<sha>` | `raw\|media/branch\|tag\|commit/…` |
+  | Hugging Face | `[datasets/\|spaces/]<owner>/<repo>` | `tree/<ref>[/<dir…>]` | `commit/<sha>` | `blob/…`, `resolve/…`, `raw/…` |
+
+  A file link is an error naming the repository and the tree link that pins its ref (`a
+  GitHub file link; a source is a repository, not a file: add <repo>, or <repo>/tree/<ref> to
+  pin ref "<ref>"`); a tree link without a ref, a release link without a tag and a commit
+  link without a commit name the repository to add. Any other page – `issues`, `pulls`,
+  `releases`, `wiki`, a segment no shape above has (`Getty/karr/extra`, which dropped
+  `extra` until k125) – is an error naming it and the repository (`a GitHub "issues" page is
+  not a source; add https://github.com/Getty/karr`), never a source tracking HEAD and never
+  an address kept for git to refuse at fetch.
+
+A link cannot tell a ref with `/` (`feature/x`) from a directory: the segment after `tree` is
+the ref and anything after it the path, so `…/tree/feature/x` is stored as `ref: feature`,
+`path: x` – for such a ref write its `/` as `%2F` (`…/tree/feature%2Fx`), or add the
+repository and set `ref` (and `path`) by hand. Only these hosts' `https://` links are read
+this way; `http://github.com/…`, `www.github.com` and any other host keep their result above,
+and a forge's tarball (`…/archive/….tar.gz`) stays a `url`.
 
 **Probe for generic hosts:** first `git ls-remote <url>`; if that does not respond,
 `HEAD <url>.tar.gz`. The first hit decides `git` vs. `url`; no hit → error listing both

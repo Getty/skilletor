@@ -6698,7 +6698,13 @@ function inline(value2, line) {
 var SpecError = class extends Error {
   name = "SpecError";
 };
-var KNOWN_FORGES = ["github.com", "gitlab.com", "codeberg.org", "hf.co", "huggingface.co"];
+var FORGES = {
+  "github.com": "GitHub",
+  "gitlab.com": "GitLab",
+  "codeberg.org": "Codeberg",
+  "hf.co": "Hugging Face",
+  "huggingface.co": "Hugging Face"
+};
 var DEFAULT_REPO = "skills";
 var FALLBACK_NAME = "source";
 function normalizeName(raw) {
@@ -6742,19 +6748,90 @@ function checkGithub(spec, owner, repo) {
     );
   }
 }
-function githubLink(spec, path) {
-  const [owner, repo, view, ref, ...sub] = path.split(/[?#]/, 1)[0].split("/").filter(filled);
-  if (owner === void 0 || repo === void 0 || view !== "tree" && view !== "blob") return void 0;
-  checkGithub(spec, owner, repo);
-  const value2 = `https://github.com/${owner}/${repo}`;
-  const pin = ref === void 0 ? "" : `${value2}/tree/${ref} to pin ref "${ref}"`;
-  if (view === "blob") {
-    throw new SpecError(`cannot resolve "${spec}": a GitHub file link; a source is a repository, not a file: add ${value2}${pin && `, or ${pin}`}`);
+function forgeLink(spec, written, rest, explicit) {
+  const host = written.toLowerCase();
+  const forge = FORGES[host];
+  const segs = rest.split(/[?#]/, 1)[0].split("/").filter(Boolean);
+  const hf = forge === "Hugging Face" && (segs[0] === "datasets" || segs[0] === "spaces");
+  const prefix = hf ? [segs.shift()] : [];
+  const owner = segs[0];
+  if (!owner?.trim()) {
+    if (explicit !== void 0) return { kind: "git", value: explicit, derivedName: nameFromUrl(explicit, "git") };
+    throw new SpecError(`cannot resolve "${spec}": expected ${written}/${prefix.map((p) => `${p}/`).join("")}owner[/repo]`);
   }
-  if (ref === void 0) throw new SpecError(`cannot resolve "${spec}": a GitHub tree link without a ref; add ${value2}`);
-  const link = { kind: "git", value: value2, derivedName: repoName(owner, repo), ref };
-  if (sub.length > 0) link.path = sub.join("/");
-  return link;
+  const tail = segs.slice(1).filter(filled);
+  let repoPath;
+  let view;
+  if (host === "gitlab.com") {
+    const dash = tail.indexOf("-");
+    repoPath = dash === -1 ? tail : tail.slice(0, dash);
+    view = dash === -1 ? [] : tail.slice(dash + 1);
+  } else {
+    repoPath = tail.slice(0, 1);
+    view = tail.slice(1);
+  }
+  const repo = repoPath[repoPath.length - 1];
+  if (explicit !== void 0 && view.length === 0) {
+    return { kind: "git", value: explicit, derivedName: nameFromUrl(explicit, "git") };
+  }
+  if (host === "github.com") checkGithub(spec, owner, repo);
+  else for (const seg of repoPath.length ? repoPath : [DEFAULT_REPO]) checkForge(spec, written, owner, seg);
+  const value2 = `https://${host}/${[...prefix, owner, ...repoPath.length ? repoPath : [DEFAULT_REPO]].join("/")}`;
+  const resolved = { kind: "git", value: value2, derivedName: repoName(owner, repo) };
+  if (view.length === 0) return resolved;
+  const fail2 = (why) => {
+    throw new SpecError(`cannot resolve "${spec}": ${why}`);
+  };
+  const page = () => fail2(`a ${forge} ${JSON.stringify(view.join("/"))} page is not a source; add ${value2}`);
+  const decode = (seg) => {
+    try {
+      return decodeURIComponent(seg);
+    } catch {
+      return fail2(`${JSON.stringify(seg)} in the link is not a valid %-escape`);
+    }
+  };
+  const tree = (at) => {
+    if (view[at] === void 0) fail2(`a ${forge} tree link without a ref; add ${value2}`);
+    const link = { ...resolved, ref: decode(view[at]) };
+    const sub = view.slice(at + 1).map(decode);
+    if (sub.length > 0) link.path = sub.join("/");
+    return link;
+  };
+  const pin = (at, what) => {
+    if (view[at] === void 0) fail2(`a ${forge} ${what} link without a ${what === "release" ? "tag" : "commit"}; add ${value2}`);
+    if (view.length > at + 1) page();
+    return { ...resolved, ref: decode(view[at]) };
+  };
+  const file = (at, treeOf) => {
+    const ref = view[at];
+    const pinned = ref === void 0 ? "" : `, or ${treeOf(ref)} to pin ref "${ref}"`;
+    return fail2(`a ${forge} file link; a source is a repository, not a file: add ${value2}${pinned}`);
+  };
+  const [v0, v1] = view;
+  switch (forge) {
+    case "GitHub":
+    case "Hugging Face":
+      if (v0 === "tree") return tree(1);
+      if (v0 === "blob" || forge === "Hugging Face" && (v0 === "resolve" || v0 === "raw")) return file(1, (r) => `${value2}/tree/${r}`);
+      if (v0 === "commit") return pin(1, "commit");
+      if (forge === "GitHub" && v0 === "releases" && v1 === "tag") return pin(2, "release");
+      return page();
+    case "GitLab":
+      if (v0 === "tree") return tree(1);
+      if (v0 === "blob" || v0 === "raw") return file(1, (r) => `${value2}/-/tree/${r}`);
+      if (v0 === "commit") return pin(1, "commit");
+      if (v0 === "tags" || v0 === "releases") return pin(1, "release");
+      return page();
+    default: {
+      const kinds = ["branch", "tag", "commit"];
+      if (v0 === "src" && v1 !== void 0 && kinds.includes(v1)) return tree(2);
+      if (v0 === "src" && v1 === void 0) return fail2(`a ${forge} tree link without a ref; add ${value2}`);
+      if ((v0 === "raw" || v0 === "media") && v1 !== void 0 && kinds.includes(v1)) return file(2, (r) => `${value2}/src/${v1}/${r}`);
+      if (v0 === "commit") return pin(1, "commit");
+      if (v0 === "releases" && v1 === "tag") return pin(2, "release");
+      return page();
+    }
+  }
 }
 function checkForge(spec, forge, owner, repo) {
   for (const [what, seg] of [["owner", owner], ["repo", repo]]) {
@@ -6813,43 +6890,22 @@ function resolveAddress(spec, probe) {
   if (address !== void 0) return { kind: "git", value: s, derivedName: nameFromHelper(address) };
   if (hasScheme(s) || isScpLike(s)) {
     const value2 = lowerScheme(s);
-    const github = /^https:\/\/github\.com\//i.exec(value2);
-    const link = github && githubLink(spec, value2.slice(github[0].length));
-    if (link) return link;
     const kind = isTarball(value2) ? "url" : "git";
+    const forge = /^https:\/\/([^/?#]+)\//.exec(value2);
+    if (kind === "git" && forge && FORGES[forge[1].toLowerCase()] !== void 0) {
+      return forgeLink(spec, forge[1], value2.slice(forge[0].length), value2.split(/[?#]/, 1)[0]);
+    }
     return { kind, value: value2, derivedName: nameFromUrl(value2, kind) };
   }
   if (/^github:/i.test(s)) {
     const path2 = s.slice("github:".length);
-    const [owner, ...more] = path2.split("/");
-    if (!owner?.trim()) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
-    const repo = more.find(filled);
-    checkGithub(spec, owner, repo);
-    return {
-      kind: "git",
-      value: `https://github.com/${owner}/${repo ?? DEFAULT_REPO}`,
-      derivedName: repoName(owner, repo)
-    };
+    if (!path2.split(/[/?#]/, 1)[0].trim()) throw new SpecError(`cannot resolve "${spec}": expected github:owner[/repo]`);
+    return forgeLink(spec, "github.com", path2);
   }
   const slash = s.indexOf("/");
   const firstSeg = slash === -1 ? s : s.slice(0, slash);
   const rest = slash === -1 ? "" : s.slice(slash + 1);
-  if (KNOWN_FORGES.includes(firstSeg.toLowerCase()) && slash !== -1) {
-    const segs = rest.split("/").filter(Boolean);
-    const owner = segs[0];
-    if (!owner?.trim()) throw new SpecError(`cannot resolve "${spec}": expected ${firstSeg}/owner[/repo]`);
-    const github = firstSeg.toLowerCase() === "github.com";
-    const link = github ? githubLink(spec, rest) : void 0;
-    if (link) return link;
-    const repo = segs.slice(1).find(filled) ?? DEFAULT_REPO;
-    if (github) checkGithub(spec, owner, repo);
-    else checkForge(spec, firstSeg, owner, repo);
-    return {
-      kind: "git",
-      value: `https://${firstSeg.toLowerCase()}/${owner}/${repo}`,
-      derivedName: repoName(owner, repo)
-    };
-  }
+  if (FORGES[firstSeg.toLowerCase()] !== void 0 && slash !== -1) return forgeLink(spec, firstSeg, rest);
   const colon = firstSeg.indexOf(":");
   if (colon !== -1 && !firstSeg.includes(".")) {
     throw new SpecError(`cannot resolve "${spec}": unknown prefix "${firstSeg.slice(0, colon + 1)}"; ${FORMS}`);
@@ -6872,15 +6928,7 @@ function resolveAddress(spec, probe) {
     }
     return probeGeneric(`https://${firstSeg}/${DEFAULT_REPO}`, firstSeg, spec, probe);
   }
-  if (!firstSeg.includes(".")) {
-    const repo = rest.split("/").find(filled) ?? DEFAULT_REPO;
-    checkGithub(spec, firstSeg, repo);
-    return {
-      kind: "git",
-      value: `https://github.com/${firstSeg}/${repo}`,
-      derivedName: repoName(firstSeg, repo)
-    };
-  }
+  if (!firstSeg.includes(".")) return forgeLink(spec, "github.com", s);
   const path = rest.replace(/\/+$/, "");
   const base = path ? `https://${firstSeg}/${path}` : `https://${firstSeg}/${DEFAULT_REPO}`;
   return probeGeneric(base, firstSeg, spec, probe);

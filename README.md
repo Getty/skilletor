@@ -64,7 +64,7 @@ shown here:
 | `Getty/repo` | `git: https://github.com/Getty/repo` | `repo` |
 | `hf.co/user` | `git: https://hf.co/user/skills` | `user` |
 | `gitlab.com/u/r` | `git: https://gitlab.com/u/r` | `r` |
-| `https://github.com/u/r/tree/<ref>` (a browser link) | `git: https://github.com/u/r` with `ref: <ref>` | `r` |
+| `https://github.com/u/r/tree/<ref>` (a browser link; also `…/releases/tag/<tag>`, `…/commit/<sha>`) | `git: https://github.com/u/r` with `ref: <ref>` | `r` |
 | `https://github.com/u/r/tree/<ref>/<dir>` (a link into a directory) | the same with `path: <dir>` (see [Skills elsewhere](#skills-elsewhere-path)) | `r` |
 | `host.tld/` | `https://host.tld/skills` (probed: git, then `.tar.gz`) | `host-tld` |
 | `https://…/x.tar.gz` | `url` (HTTPS tarball) | the host |
@@ -82,8 +82,16 @@ already configured without it or with another ref fails the same way — set `re
 A link into a directory (`…/tree/<ref>/<dir>`) stores that directory as the source's `path`
 as well, and an entry with no `path` or another one fails likewise — set `path` by hand or
 pass a name. A file link (`…/blob/…`) is refused: a source is a repository or directories of
-it, not a file. The segment after `tree` is always taken as the ref, so for a ref that
-contains `/` add the repository and set `ref` (and `path`) by hand.
+it, not a file. So is any other page (`…/issues`, `…/pulls`, `…/releases`), naming the
+repository to add instead. A link's `?query` and `#anchor` are dropped, and `%`-escapes in
+its ref and path decoded (`…/tree/main/my%20skills` → `path: my skills`). Every GitHub form
+reads a link the same way (`Getty/karr/tree/v1`, `github:Getty/karr/tree/v1`), and so do the
+other known forges' links: GitLab `gitlab.com/g/r/-/tree/<ref>[/<dir>]` (`/-/commit/<sha>`,
+`/-/tags/<tag>`; every segment before `/-/` is the project, nested groups included),
+Codeberg `codeberg.org/u/r/src/branch|tag|commit/<ref>[/<dir>]`, Hugging Face
+`hf.co/u/r/tree/<ref>[/<dir>]` (`datasets/` and `spaces/` repositories too). The segment
+after `tree` is always taken as the ref, so write a `/` in a ref as `%2F`
+(`…/tree/feature%2Fx/skills`), or add the repository and set `ref` (and `path`) by hand.
 
 A source's layout (convention, no manifest):
 

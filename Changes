@@ -40,6 +40,18 @@ Revision history for skilletor
     A source no file gives a backend is a config error naming the source and
     each file declaring it. A user config entry without one changes projects
     only; a user install naming it is a config error.
+  - `skilletor add` of a forge link: a `?query` or `#anchor` is dropped, also
+    from a repository link; `/releases/tag/<tag>` and `/commit/<sha>` pin that
+    ref; `%`-escapes in a link's ref and path are decoded (`%2F` puts a `/`
+    into a ref); `Getty/karr/tree/v1` and `github:Getty/karr/tree/v1` pin the
+    ref like `github.com/...` instead of dropping it. GitLab (`/-/tree/`,
+    `/-/commit/`, `/-/tags/`), Codeberg (`/src/branch|tag|commit/`,
+    `/releases/tag/`, `/commit/`) and Hugging Face (`/tree/`, `/commit/`,
+    `datasets/` and `spaces/` repositories) links are read the same way, and
+    a GitLab project path keeps every segment before `/-/` (nested groups).
+    Any other page (`/issues`, `/pulls`, `/releases`, a segment past the
+    repository such as `Getty/karr/extra`) is an error naming the repository
+    to add, instead of a source that tracked HEAD or failed at fetch.
 
 0.4.2     2026-10-06 05:28:16Z
   - Windows: hooks and the CLI start without Git Bash. `bin/skilletor.exe`, a

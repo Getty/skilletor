@@ -80,7 +80,7 @@ shorthand, restricted to forms that resolve without a network probe:
 
 | Allowed | Refused (bundle error) |
 |---|---|
-| `Getty`, `Getty/repo`, `gitlab.com/peter`, `hf.co/user`, `https://…`, `https://….tar.gz` | generic host `example.org/foo` (write `https://example.org/foo`), local paths `~/…`, `./…`, `/…`, an address config load refuses as a source (a tarball not `https://`: `x@http://host/x.tar.gz`), a link carrying a ref, file or subdirectory (`…/tree/<ref>`, `…/blob/…`) — an entry names the repo address only |
+| `Getty`, `Getty/repo`, `gitlab.com/peter`, `hf.co/user`, `https://…`, `https://….tar.gz` | generic host `example.org/foo` (write `https://example.org/foo`), local paths `~/…`, `./…`, `/…`, an address config load refuses as a source (a tarball not `https://`: `x@http://host/x.tar.gz`), a link carrying a ref, file or subdirectory (`…/tree/<ref>`, `…/releases/tag/<tag>`, `…/blob/…`) or naming another page (`…/issues`) — an entry names the repo address only |
 
 - **Matching is by URL, not config name.** The entry is served by whichever configured
   source (visible to the bundle's scope; a user bundle sees your user config's definitions
