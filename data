@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-10-15T05:07:00Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-15T05:06:54Z
+created: 2026-10-15T04:41:50Z
+id: 137
+priority: low
+started: 2026-10-15T04:45:47Z
+status: done
+tags:
+- config
+- sources
+title: 'k128 gaps: source remove of the backend-supplying entry; unsetting a lower
+  ref'
+updated: 2026-10-15T05:07:00Z
+---
+
+Found during k128 (worker). (1) 'skilletor source remove X' in the file that supplies X's backend, while another file keeps a backend-less override entry for X, leaves a config that no longer loads. Remove should refuse with a message naming the other file(s), or remove the dangling overrides too — pick the safer (refuse). (2) A higher file cannot unset (unpin) a lower file's 'ref'. Decide: document it (simplest), or accept "ref": null as unset. Prefer: "ref": null unsets, documented in README §sources and spec §3.
+
+2026-10-15 05:02 (1) cmdSourceRemove refuses, after the not-declared check and --force or not, when the target entry gives the only git/url/local and the other config files (other scope's skilletor.json, skilletor.local.json) keep backend-less entries for the name; the message names each file and the way out (source remove [--project], local by hand). Only the current project is visible: a user-config removal cannot see overrides in other projects (stated in spec §7). (2) "ref": null accepted by sourceFields (no ref) and unsets the lower files' ref in the merge (mergeSource unsetRef); only ref, other fields keep refusing null (k88 test now skips ref:null only). path:null would be the same two lines if wanted — not done. Also: add's 'with no ref' message treats a null ref as none.
+
+2026-10-15 05:03 Done (patch k137.patch, applies after k136.patch; own dist build, check-dist green; full suite 998/998). src/commands.ts strandedOverrides() + cmdSourceRemove refusal; src/config.ts ref:null unsets (sourceFields, mergeSource, loadConfig). Tests red first: test/commands.test.ts 'k137: source remove of the entry another file's override needs is refused…' (before: no rejection, the config was saved broken), test/config.test.ts 'k137: "ref": null … unsets a lower file's ref' (before: 'ref null must be a string'); k88 test adjusted to skip ref:null. Docs: README sources + CLI notes, spec §3 (merge, entries without a backend) + §7 (source remove), Changes.
+
+2026-10-15 05:07 Committed 8bf0790
