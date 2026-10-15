@@ -1,0 +1,34 @@
+---
+claimed_at: 2026-10-15T03:22:21Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-15T03:22:14Z
+created: 2026-09-27T23:03:13Z
+id: 124
+priority: high
+started: 2026-10-15T02:51:22Z
+status: done
+tags:
+- skills
+- dogfood
+title: 'dogfood: agent worktrees lack the gitignored skilletor-installed skills'
+updated: 2026-10-15T03:22:21Z
+---
+
+Found during k122 (worker). Since k122 the six shared skills in .claude/skills are installed by skilletor and gitignored. A fresh git worktree (Agent isolation: worktree, .claude/worktrees/…) has only the tracked repo-owned skills until a sync runs there; kanban-issues-karr-ticket, kanban-issues-karr-coordination and getty-git-commit-style are not in ~/.claude/skills either, so briefing.skills of the skilletor-* agents would not resolve. Not observed yet (no worktree used since). Options: (a) verify whether a worktree session runs the SessionStart hook before briefing resolves; (b) install those skills at user scope too (maintainer user config); (c) a WorktreeCreate hook or documented `skilletor sync --scope project` step; (d) gitignore: false. Decide with the maintainer.
+
+2026-10-15 01:22 BESTAETIGT 2026-10-15 (Hub): Jetzt beobachtet. Am 2026-10-14 meldete knarr-worker im Worktree .claude/worktrees/k73-k74 'nicht startbar (briefing-Hook: unbekannte Skills)'. Ursache: briefing 0.5.3 loest Skills nur <cwd>/.claude/skills -> ~/.claude/skills -> installiert auf; der Worktree-cwd hat nur die getrackten agents/rules/settings, .claude/skills ist gitignored und fehlt. Reproduziert mit git worktree add: .claude/ enthaelt agents rules settings.json skilletor.json, kein skills/. Betrifft jedes Repo mit skilletor-Skills, wenn Sitzungen/Subagenten in Worktrees arbeiten (Harness-Guard lenkt Worker systematisch dorthin). Prioritaet damit hoch statt medium; Kurzfix im Auftrag: 'skilletor sync' als ersten Schritt im Worktree.
+
+2026-10-15 02:01 Maintainer decision 2026-10-15: option (c) — a WorktreeCreate hook in the plugin that runs skilletor's project sync in the new worktree, so every repo with skilletor-installed skills gets them in agent worktrees.
+
+2026-10-15 02:03 Maintainer decision REVISED 2026-10-15: NOT a WorktreeCreate hook — per https://code.claude.com/docs/en/hooks#worktreecreate such a hook REPLACES Claude Code's git worktree creation (hook must create it and print the path; multi-plugin behavior undocumented). Instead: skilletor maintains a marked block in <repo>/.worktreeinclude (project root, gitignore syntax; Claude Code copies matching gitignored files into --worktree, subagent isolation:worktree and desktop worktrees — https://code.claude.com/docs/en/worktrees) listing the gitignored items it installed at project scope. Mind the '**/' / wholly-ignored-directory nuance on that page. Keep user lines outside the block untouched; remove the block when nothing is left. Hook-created worktrees do not process .worktreeinclude (out of scope).
+
+2026-10-15 02:54 Worker started. Read CC 2.1.300's .worktreeinclude code: lines trimmed, '#' lines skipped (skilletor's '# >>> skilletor >>>' markers are comments); 'git ls-files --others --ignored --exclude-standard --directory'; a wholly ignored dir (an installed skill dir is one: its own '.gitignore' '*') is descended when a pattern starts with that dir, or its pre-glob prefix is a prefix of the dir, or the dir itself matches; files then copied when ignore().ignores(file). Plan: fixed anchored entries per installed kind (like k62), not per item.
+
+2026-10-15 03:10 Design taken: .worktreeinclude block with FIXED anchored entries (every harness's project roots: /.claude/skills/, /.claude/{agents,rules}/**/.local.*, /.agents/skills/, /.codex/agents/**/.local.*, /.codex/skilletor-rules.md, /.hermes/skills/, plus /.claude/skilletor.lock.json and /.claude/skilletor.local.json), present while the project scope is in use and gitignore is on — same presence rule as the .claude/.gitignore block. Per-item or per-target entries were tried and dropped: they make a committed file follow machine state (k62's lesson; teammates with other harnesses/local config would flip it). The lock must be copied: hand test shows a worktree sync without it reports every item as a conflict; with it 'up to date'. check: layout drift when the block differs from the fixed one (missing only counts when the lock has entries). Commit hint reuses gitignoreUpdated.
+
+2026-10-15 03:16 Also found (not changed): (1) .claude/skills/skilletor-core (skill-author lane) lists the managed-file invariants and does not mention .worktreeinclude yet — one line under 'Codex rules' / Git invariants would keep it honest. (2) The bundled skill's description still names only skilletor-rules.md and the AGENTS.md pointer as managed files; I left it alone (every session loads it), the body and references/sync.md name .worktreeinclude. (3) A symlinked .worktreeinclude is replaced by a file, as a symlinked .gitignore already is (atomicWrite renames over it).
+
+2026-10-15 03:16 Done: sync keeps a fixed '# >>> skilletor >>>' block in <project>/.worktreeinclude (9 anchored entries from LAYOUTS: every harness's project skills/agents/rules paths + /.claude/skilletor.lock.json + /.claude/skilletor.local.json) while the project is in use and gitignore is on; removed otherwise (file deleted if only the block was left); commit hint via gitignoreUpdated; an unwritable file is one warning, never a failed sync. check: layout drift when the block differs (missing only counts beside lock entries), so existing installs get it next session without a RENDER_FORMAT bump. Files: src/gitignore.ts, src/engine.ts, src/report.ts, dist, spec §6.4/§14.3, README, skills/skilletor (+references/sync.md), Changes. Verified: new test/worktreeinclude.test.ts (7 tests, incl. git's own matcher over every ignored file for claude/codex/hermes, and a runHook black-box test); 7 existing tests updated for the new hint; typecheck ok, npm test 944/944, check-dist up to date. Hand test with bin/skilletor in temp HOME/CODEX_HOME/project + a replica of Claude Code 2.1.300's .worktreeinclude selection: copies exactly the installed files + lock; 'git worktree add' + copy + sync in the worktree = 'up to date' (without the lock: every item a conflict). Not run against this repo.
+
+2026-10-15 03:22 Committed 3d79e20
