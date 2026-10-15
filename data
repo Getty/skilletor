@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-10-15T04:45:25Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-15T04:45:19Z
+created: 2026-10-15T03:52:20Z
+id: 135
+priority: low
+started: 2026-10-15T04:01:30Z
+status: done
+tags:
+- bug
+- sources
+- windows
+title: names equal ignoring case collide outside path too (default layout, plugin.json,
+  across sources)
+updated: 2026-10-15T04:45:25Z
+---
+
+Follow-up from k127 (worker). k127 treats path skill names equal ignoring case as the duplicate-name error. The same collision can happen elsewhere: the default layout on Linux can hold skills/Foo and skills/foo (or agents/Foo.md and agents/foo.md); plugin.json and .claude/ scans only drop exact-name duplicates; two sources installing Foo and foo land in one directory on macOS/Windows. Apply k127's principle (equal ignoring case = one name, on every platform, so a lock stays portable): within a source's catalog the duplicate-name error; across sources at install time a conflict like any other same-name item. Reuse k127's comparison.
+
+2026-10-15 04:36 k127 comparison extracted as nameKey() in src/config.ts (toLowerCase, unchanged), used by catalog, config and engine. Catalog (src/catalog.ts): new oneName() groups one type by nameKey — skills/, agents/, rules/, path skills and .claude/ — each spelling an item with error "found in N directories, names equal ignoring case: …" (skills) or "both A and B exist, names equal ignoring case" / "A, B and C exist, …" (agents/rules; k100 message unchanged for x.md+x.md.njk); files = all, no dir. plugin.json: a name found ignoring case in another dir fails the scan like any duplicate there (`skill "Foo" found twice, names equal ignoring case: skills/foo and extra/Foo`). .claude/: an item whose name its type already has ignoring case is skipped silently (precedence rule), two spellings inside .claude/ are the item error, x.md+x.md.njk there still takes the first. Config: duplicate target key ignores case (Foo@a + foo@b, also across project/local). Engine: offers and explicit claims keyed by type dir + nameKey; two sources → `rule "Foo" and "foo" offered by *@a and *@b; skipped` (both installed copies kept); explicit wins over another sources other spelling with the usual warning. Tests red first: 2 catalog, 1 config, 1 engine.
+
+2026-10-15 04:36 Also found (not fixed): apply on a case-insensitive FS when a lock key changes only in case (config Foo@a → foo@a): the new skills/foo is written, then the old skills/Foo files are deleted through the same directory — may delete the fresh copy on macOS/Windows. Worth a card. Also: .claude/skills/skilletor-core/SKILL.md (skill-author lane) does not mention the case rule outside path.
+
+2026-10-15 04:36 Done: one-name-ignoring-case rule (k127) applied to the default layout, plugin.json, .claude/, install lists and cross-source offers; spec §3/§4.1, README, SKILL.md, Changes. Verified: npm run typecheck, npm test 991/991, build, check-dist; patch k135.patch on top of k128+k125, each patch state checked with check-dist (and tests at k128, k125 states).
+
+2026-10-15 04:45 Committed as 9a44778
