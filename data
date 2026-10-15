@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-10-15T02:50:57Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-15T02:50:57Z
+created: 2026-10-15T02:05:57Z
+id: 132
+priority: low
+started: 2026-10-15T02:15:36Z
+status: done
+tags:
+- hermes
+- windows
+title: 'hermes: default Hermes home on native Windows is %LOCALAPPDATA%\hermes, not
+  ~/.hermes'
+updated: 2026-10-15T02:50:57Z
+---
+
+Found during the hermes-target rebase (worker). Hermes' own default (hermes_constants._get_platform_default_hermes_home) on native Windows is %LOCALAPPDATA%\hermes. skilletor's default join(home, '.hermes') in src/engine.ts and src/targets.ts is wrong there: without HERMES_HOME, a CLI or Claude Code run installs where Hermes does not look (self-corrects once the plugin runs and records the home). Use the same platform default as Hermes; test with a faked platform.
+
+2026-10-15 02:19 Started. One defaultHermesHome(home, platform, env) in targets.ts mirroring hermes_constants._get_platform_default_hermes_home (win32: LOCALAPPDATA stripped, else <home>\AppData\Local, + hermes).
+
+2026-10-15 02:30 Not followed: Hermes appends HERMES_DATA_DIR_SUFFIX (desktop bundle / channel builds, e.g. ~/.hermes-channel-build-canary) to its default home on every platform. Left out as Linux-wide scope; a run without HERMES_HOME under such a build would install to the unsuffixed home until the plugin records the real one. Test isolation: test/setup.ts (win32) and homeEnv() now point LOCALAPPDATA into the throwaway home, so a Windows test run cannot sync into the real %LOCALAPPDATA%\hermes.
+
+2026-10-15 02:30 Done: defaultHermesHome(home, platform = process.platform, env = process.env) in src/targets.ts mirrors hermes_constants._get_platform_default_hermes_home: win32 -> win32.join(LOCALAPPDATA.trim() || <home>\AppData\Local, "hermes"), else <home>/.hermes. Used by the user-scope root fallback (targets.ts) and the engine default (engine.ts hermesDefaultOf). Red-first test with injected platform/env (linux, darwin, win32 set/unset/blank/padded). README "The Hermes home" rule 3 and spec §16.2 rule 3 updated; README keeps "on Linux" with "tested on Linux only". typecheck ok; npm test 937/937; build + check-dist up to date.
+
+2026-10-15 02:50 Committed 9b23f9c
