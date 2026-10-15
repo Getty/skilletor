@@ -18,6 +18,8 @@ Revision history for skilletor
     `SKILL.md` is one skill, and the source then offers those skills only. A
     name found in two directories is an error of that skill alone. A config
     with `path` is a config error for skilletor 0.4.2 and earlier.
+    Skills a sync installed there (carrying skilletor's `.gitignore`) are
+    not offered, so a `path` into a `.claude/skills` offers the repo's own.
   - `skilletor add` of a GitHub link into a directory (`.../tree/<ref>/<dir>`)
     sets `ref` and `path` instead of being refused.
   - Agent worktrees get the project's installed skills, agents and rules. A

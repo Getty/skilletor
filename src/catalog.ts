@@ -28,7 +28,8 @@
 // A source entry's `path` (config, spec §3; k126) says where the source's skills lie
 // instead: `scan(dir, paths)` walks each path down to the directories holding
 // SKILL.md[.njk] and offers those skills and nothing else – none of the layout above
-// but skilletor.json, and no bundles.
+// but skilletor.json, and no bundles. skilletor's own installed copies are skipped there
+// too (k129).
 //
 // Names come from the path; descriptions from item frontmatter (read raw for
 // .njk, never rendered). Symlinks anywhere in the tree are rejected (spec §9); in
@@ -273,15 +274,25 @@ function claudeItem(dir: string, typeDir: string, entry: string, type: ItemType)
     if (!st.isDirectory()) return undefined;
     const file = skillFile(p);
     if (!file) return undefined;
-    const files = walkFiles(p, dir);
-    const gitignore = join(p, ".gitignore");
-    if (files.includes(toPosix(relative(dir, gitignore))) && readFileSync(gitignore, "utf8") === SKILL_GITIGNORE) return undefined;
-    return skillItem(dir, p, file, files);
+    if (isInstalledCopy(p)) return undefined;
+    return skillItem(dir, p, file);
   }
   if (!st.isFile()) return undefined;
   const name = itemName(entry);
   if (name === undefined || name.startsWith(LOCAL_PREFIX)) return undefined;
   return { type, name, description: descriptionOf(p), files: [toPosix(relative(dir, p))], dir: toPosix(relative(dir, typeDir)) };
+}
+
+/** Is the skill directory `skillDir` one of skilletor's own installed copies – its `.gitignore`
+ *  a plain file holding skilletor's (spec §6.4)? Then a sync wrote it from other sources and
+ *  git ignores it, so a scan passes it over (k96, k129) without reading the rest of it. */
+function isInstalledCopy(skillDir: string): boolean {
+  const gitignore = join(skillDir, ".gitignore");
+  try {
+    return lstatSync(gitignore).isFile() && readFileSync(gitignore, "utf8") === SKILL_GITIGNORE;
+  } catch {
+    return false;
+  }
 }
 
 /** Skills listed in `.claude-plugin/plugin.json` `skills` that `found` does not
@@ -345,7 +356,8 @@ function pluginSkills(dir: string, found: CatalogItem[]): CatalogItem[] {
  * and is not searched further; any other directory is walked. On the way down nothing is
  * followed and nothing fails – a symlinked entry and a dot-directory that is no skill (`.git`)
  * are passed over – while a skill directory keeps every skill's rules (a symlink in it fails
- * the scan). A directory reached through two overlapping paths counts once; a name two
+ * the scan). skilletor's own installed copies are passed over as in `.claude/` (k129). A
+ * directory reached through two overlapping paths counts once; a name two
  * directories yield is one item carrying an error naming them in sorted order, never a
  * failed scan: an addition in a foreign repository must not take the whole source down.
  */
@@ -354,6 +366,7 @@ function pathSkills(dir: string, paths: string[]): CatalogItem[] {
   const visit = (cur: string, named: boolean): void => {
     const file = skillFile(cur);
     if (file) {
+      if (isInstalledCopy(cur)) return;
       const item = skillItem(dir, cur, file);
       const dirs = found.get(item.name) ?? new Map<string, CatalogItem>();
       if (!dirs.has(item.dir!)) dirs.set(item.dir!, item);

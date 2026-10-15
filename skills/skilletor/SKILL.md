@@ -92,8 +92,9 @@ A repo with its skills elsewhere (by category, no `plugin.json`) offers nothing 
 
 and every directory beneath it holding a `SKILL.md[.njk]`, at any depth, is one skill named
 after that directory (a category `skills/research` or one skill `skills/research/arxiv` works
-too). `path` replaces the layout above: that source then offers those skills only — no
-agents, rules, bundles, `plugin.json` or `.claude/` items. The same name in two directories
+too; skilletor's installed copies are skipped). `path` replaces the layout above: that
+source then offers those skills only — no agents, rules, bundles, `plugin.json` or `.claude/`
+items. The same name in two directories
 is an error of that skill alone (as `f` beside `f.njk`, below). `add` has no option for it:
 a link into a directory sets it, anything else is edited into the entry. (That example source
 is for Claude Code and Codex: under target `hermes` its skills collide with Hermes' own

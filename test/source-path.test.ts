@@ -17,6 +17,7 @@ import { check, sync } from "../src/engine.ts";
 import { cmdAvailable, cmdInstall, cmdSourceList, CommandError, type CommandContext } from "../src/commands.ts";
 import { runHook, type HookContext } from "../src/hooks.ts";
 import { readLock } from "../src/lock.ts";
+import { SKILL_GITIGNORE } from "../src/gitignore.ts";
 
 const SKILL = (n: string, body = "BODY") => `---\nname: ${n}\ndescription: ${n} skill\n---\n${body}\n`;
 
@@ -308,6 +309,36 @@ test("k126: a path skill with f beside f.njk carries the k113 error", () => {
       ["ok", "ok skill", undefined],
       ["pair", undefined, "both pack/cat/pair/SKILL.md and pack/cat/pair/SKILL.md.njk exist"],
     ]);
+  } finally {
+    s.cleanup();
+  }
+});
+
+// Asserts (k129): a path walk skips skilletor's own installed copies as the `.claude/` scan does
+// (k96) – a skill directory whose .gitignore is skilletor's: a sync in that project wrote it
+// from other sources and git ignores it, so a `local` checkout offers what its clone does. It
+// is passed over before its files are read (a symlink in it fails nothing) and is not walked
+// into; a skill's own .gitignore keeps it a skill. A path naming the copy itself offers nothing.
+test("k129: a path walk does not offer skilletor's own installed copies", () => {
+  const s = makeSource({
+    ".claude/skills/installed/SKILL.md": SKILL("installed"),
+    ".claude/skills/installed/.gitignore": SKILL_GITIGNORE,
+    ".claude/skills/installed/examples/inner/SKILL.md": SKILL("inner"),
+    ".claude/skills/own/SKILL.md": SKILL("own"),
+    ".claude/skills/own/.gitignore": "node_modules/\n",
+    ".claude/skills/group/deep/SKILL.md": SKILL("deep"),
+    ".claude/skills/group/deep/.gitignore": SKILL_GITIGNORE,
+  });
+  try {
+    assert.deepEqual(scan(s.dir, [".claude/skills"]).items.map((i) => [i.name, i.files]), [
+      ["own", [".claude/skills/own/.gitignore", ".claude/skills/own/SKILL.md"]],
+    ]);
+    assert.deepEqual(scan(s.dir, [".claude/skills/installed"]).items, []);
+    assert.deepEqual(scan(s.dir, [".claude/skills/group"]).items, []);
+    if (!NO_SYMLINKS) {
+      symlinkSync(join(s.dir, ".claude/skills/own/SKILL.md"), join(s.dir, ".claude/skills/installed/linked.md"));
+      assert.deepEqual(brief(s.dir, [".claude"]), [["skill", "own", ".claude/skills/own"]]);
+    }
   } finally {
     s.cleanup();
   }

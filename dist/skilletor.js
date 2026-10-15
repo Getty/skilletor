@@ -8369,15 +8369,21 @@ function claudeItem(dir, typeDir, entry, type) {
     if (!st.isDirectory()) return void 0;
     const file = skillFile(p);
     if (!file) return void 0;
-    const files = walkFiles(p, dir);
-    const gitignore = join9(p, ".gitignore");
-    if (files.includes(toPosix(relative(dir, gitignore))) && readFileSync5(gitignore, "utf8") === SKILL_GITIGNORE) return void 0;
-    return skillItem(dir, p, file, files);
+    if (isInstalledCopy(p)) return void 0;
+    return skillItem(dir, p, file);
   }
   if (!st.isFile()) return void 0;
   const name = itemName(entry);
   if (name === void 0 || name.startsWith(LOCAL_PREFIX2)) return void 0;
   return { type, name, description: descriptionOf(p), files: [toPosix(relative(dir, p))], dir: toPosix(relative(dir, typeDir)) };
+}
+function isInstalledCopy(skillDir) {
+  const gitignore = join9(skillDir, ".gitignore");
+  try {
+    return lstatSync5(gitignore).isFile() && readFileSync5(gitignore, "utf8") === SKILL_GITIGNORE;
+  } catch {
+    return false;
+  }
 }
 function pluginSkills(dir, found) {
   const pdir = join9(dir, ".claude-plugin");
@@ -8433,6 +8439,7 @@ function pathSkills(dir, paths) {
   const visit = (cur, named) => {
     const file = skillFile(cur);
     if (file) {
+      if (isInstalledCopy(cur)) return;
       const item = skillItem(dir, cur, file);
       const dirs = found.get(item.name) ?? /* @__PURE__ */ new Map();
       if (!dirs.has(item.dir)) dirs.set(item.dir, item);

@@ -259,6 +259,9 @@ nothing of the layout above is expected beneath it:
   file, a dangling link) and a dot-directory that is not itself a skill (`.git`, `.github`)
   are passed over silently. A path naming a dot-directory is walked. Inside a skill directory
   the rules of every skill hold unchanged: a symlink there fails the scan (§9).
+- **Installed copies** (k129) are passed over as in `.claude/`: a skill directory whose
+  `.gitignore` is skilletor's (§6.4) is no item and is not read further, wherever the walk
+  meets it – a `path` into a project's `.claude/skills` offers what a clone of it does.
 - **One name, two directories** is an error of that item, like an agent's `x.md` beside its
   `x.md.njk` (k100): the catalog holds the name once, with an error naming the directories in
   sorted order (`found in 2 directories: optional-skills/research/arxiv and

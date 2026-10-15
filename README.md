@@ -127,7 +127,9 @@ skilletor walks each path down, to any depth: a directory holding a `SKILL.md[.n
 skill, named after that directory and installed as `skills/<name>/`; it is not searched
 further, and everything else on the way (a category's `DESCRIPTION.md`, an index cache,
 symlinks, `.git`) is passed over. So a path can be the whole tree, one category
-(`skills/research`) or a single skill (`skills/research/arxiv`).
+(`skills/research`) or a single skill (`skills/research/arxiv`). A skill carrying
+skilletor's own `.gitignore` is a copy a sync installed there and is passed over too, so a
+`path` into a project's `.claude/skills` offers its own skills only.
 
 - `path` **replaces** the layout above for that source: it offers those skills and nothing
   else — no `skills/<name>/`, agents, rules, `plugin.json` or `.claude/` items, no bundles.
