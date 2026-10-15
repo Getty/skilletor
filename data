@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-10-15T02:50:17Z
+claimed_by: main
+class: standard
+completed: 2026-10-15T02:50:17Z
+created: 2026-10-15T02:06:08Z
+id: 134
+priority: low
+started: 2026-10-15T02:31:52Z
+status: done
+tags:
+- release
+- docs
+title: 'release docs: hermes/skilletor/plugin.yaml is a third version file'
+updated: 2026-10-15T02:50:17Z
+---
+
+Found during the hermes-target rebase (worker). docs/release.md and .claude/agents/skilletor-release-manager.md name only package.json and the plugin.json files; hermes/skilletor/plugin.yaml must match too (a test catches a mismatch). Add it to both (agent file: skill-author lane).
+
+2026-10-15 02:35 skill-author: .claude/agents/skilletor-release-manager.md — release-audit step 1 now requires package.json version to equal .claude-plugin/plugin.json, .codex-plugin/plugin.json and hermes/skilletor/plugin.yaml (codex manifest was missing too); description's audit clause names both plugin.json and hermes/skilletor/plugin.yaml. Static check 0 errors. docs/release.md not touched (prose doc, outside this lane).
+
+docs/release.md lists hermes/skilletor/plugin.yaml in the version step (main agent); agent file by skill-author.
+
+2026-10-15 02:50 Committed 0fb9ac4
