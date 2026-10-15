@@ -1,5 +1,5 @@
 // Temp-directory fixture helper for tests.
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,4 +19,14 @@ export function makeTmpDir(prefix = "skilletor-test-"): TmpDir {
       rmSync(dir, { recursive: true, force: true });
     },
   };
+}
+
+/** True when `dir`'s file system treats names equal ignoring case as one (macOS, Windows). */
+export function caseInsensitive(dir: string): boolean {
+  writeFileSync(join(dir, "CaseProbe"), "");
+  try {
+    return existsSync(join(dir, "caseprobe"));
+  } finally {
+    rmSync(join(dir, "CaseProbe"));
+  }
 }

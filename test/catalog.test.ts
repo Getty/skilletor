@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
-import { makeTmpDir } from "./helpers/tmp.ts";
+import { caseInsensitive, makeTmpDir } from "./helpers/tmp.ts";
 import { scan, CatalogError } from "../src/catalog.ts";
 import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
@@ -231,6 +231,9 @@ test("k113: a skill with f beside f.njk carries an error naming both, the scan g
 // ignoring case" added), its files the group's; plugin.json, whose own list it is, fails the
 // scan; a .claude/ item whose name ignoring case is already found is skipped silently, and two
 // .claude/ spellings are the item error; other types and other names are offered as before.
+// On a case-insensitive file system (macOS, Windows) two sibling spellings are one entry, the
+// first one written, so a source there cannot hold both: that spelling is then the plain item,
+// and only groups of names that differ beyond case (`q.md` beside `q.md.njk`) are the error.
 function caseSource(files: Record<string, string>): { dir: string; cleanup: () => void } {
   const tmp = makeTmpDir();
   for (const [rel, content] of Object.entries(files)) {
@@ -257,6 +260,22 @@ test("k135: names equal ignoring case in skills/, agents/ and rules/ are an erro
     const q = "agents/Q.md, agents/q.md and agents/q.md.njk exist, names equal ignoring case";
     const rules = "both rules/R.md and rules/r.md exist, names equal ignoring case";
     const skillFiles = ["skills/Foo/SKILL.md", "skills/foo/SKILL.md"];
+    if (caseInsensitive(s.dir)) {
+      // skills/foo, agents/q.md and rules/r.md were written into skills/Foo, agents/Q.md, rules/R.md.
+      const q2 = "both agents/Q.md and agents/q.md.njk exist, names equal ignoring case";
+      assert.deepEqual(caseRows(s.dir), [
+        ["agent:Bar", bar, null, ["agents/Bar.md", "agents/bar.md.njk"]],
+        ["agent:Q", q2, null, ["agents/Q.md", "agents/q.md.njk"]],
+        ["agent:bar", bar, null, ["agents/Bar.md", "agents/bar.md.njk"]],
+        ["agent:q", q2, null, ["agents/Q.md", "agents/q.md.njk"]],
+        ["agent:r", null, null, ["agents/r.md"]],
+        ["agent:x", null, null, ["agents/x.md"]],
+        ["rule:R", null, null, ["rules/R.md"]],
+        ["skill:Foo", null, "skills/Foo", ["skills/Foo/SKILL.md"]],
+        ["skill:ok", null, "skills/ok", ["skills/ok/SKILL.md"]],
+      ]);
+      return;
+    }
     assert.deepEqual(caseRows(s.dir), [
       ["agent:Bar", bar, null, ["agents/Bar.md", "agents/bar.md.njk"]],
       ["agent:Q", q, null, ["agents/Q.md", "agents/q.md", "agents/q.md.njk"]],
@@ -300,6 +319,17 @@ test("k135: plugin.json fails the scan on a name found ignoring case; .claude/ s
   try {
     const baz = "found in 2 directories, names equal ignoring case: .claude/skills/Baz and .claude/skills/baz";
     const a = "both .claude/agents/A.md and .claude/agents/a.md exist, names equal ignoring case";
+    if (caseInsensitive(claude.dir)) {
+      // .claude/skills/baz and .claude/agents/a.md were written into .claude/skills/Baz and A.md.
+      assert.deepEqual(caseRows(claude.dir), [
+        ["agent:A", null, ".claude/agents", [".claude/agents/A.md"]],
+        ["agent:k", null, null, ["agents/k.md"]],
+        ["rule:m", null, ".claude/rules", [".claude/rules/m.md"]],
+        ["skill:Baz", null, ".claude/skills/Baz", [".claude/skills/Baz/SKILL.md"]],
+        ["skill:foo", null, "skills/foo", ["skills/foo/SKILL.md"]],
+      ]);
+      return;
+    }
     assert.deepEqual(caseRows(claude.dir), [
       ["agent:A", a, null, [".claude/agents/A.md", ".claude/agents/a.md"]],
       ["agent:a", a, null, [".claude/agents/A.md", ".claude/agents/a.md"]],

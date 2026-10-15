@@ -5,7 +5,7 @@ import {
   chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { makeTmpDir } from "./helpers/tmp.ts";
+import { caseInsensitive, makeTmpDir } from "./helpers/tmp.ts";
 import { apply, type PlanItem } from "../src/apply.ts";
 import { hashBuffer, toPosix } from "../src/fsutil.ts";
 import { readLock } from "../src/lock.ts";
@@ -790,16 +790,6 @@ test("k71: an apply that fails before its first write leaves the lock untouched"
 });
 
 // ---- case-only renames (k136) ------------------------------------------------
-
-/** True when `dir`'s file system treats names equal ignoring case as one (macOS, Windows). */
-function caseInsensitive(dir: string): boolean {
-  writeFileSync(join(dir, "CaseProbe"), "");
-  try {
-    return existsSync(join(dir, "caseprobe"));
-  } finally {
-    rmSync(join(dir, "CaseProbe"));
-  }
-}
 
 /** Make `to` the very file `from` is, as a case-insensitive file system makes it when the two
  *  paths differ only in case: a hard link on a case-sensitive one, nothing to do on the other. */

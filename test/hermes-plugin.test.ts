@@ -316,7 +316,9 @@ test("on Windows the checkout's CLI is bin/skilletor.exe, which runs without a s
     writeFileSync(join(checkout, "bin", "skilletor.exe"), "");
     chmodSync(join(checkout, "bin", "skilletor.exe"), 0o755);
     const environ = { PATH: join(f.tmp.dir, "empty"), HOME: f.tmp.dir };
-    assert.equal(drive({ mode: "adapter", plugin, environ, windows: true, steps: [] }).cli, join(checkout, "bin", "skilletor.exe"));
+    // The plugin resolves its checkout through realpath (macOS: /var is /private/var).
+    const cli = drive({ mode: "adapter", plugin, environ, windows: true, steps: [] }).cli;
+    assert.equal(typeof cli === "string" ? realpathSync(cli) : cli, realpathSync(join(checkout, "bin", "skilletor.exe")));
     assert.equal(drive({ mode: "adapter", plugin, environ, windows: false, steps: [] }).cli, null);
   } finally {
     f.cleanup();
