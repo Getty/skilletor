@@ -5884,13 +5884,13 @@ function parseSources(obj, path, origin, unchecked) {
     if (!isSourceName(name)) {
       throw new ConfigError(`${path}: source name ${JSON.stringify(name)} is not valid (${SOURCE_NAME_RULE})`);
     }
-    const src = Object.assign({ name, origins: {} }, sourceFields(def, `${path}: sources.${name}`));
+    const src = Object.assign({ name, origins: {} }, sourceFields(def, `${path}: sources.${name}`, false));
     for (const kind of BACKEND_KINDS) if (src[kind] !== void 0) src.origins[kind] = origin;
     sources.set(name, src);
   }
   return sources;
 }
-function sourceFields(def, at) {
+function sourceFields(def, at, needsBackend = true) {
   if (def === null || typeof def !== "object" || Array.isArray(def)) throw new ConfigError(`${at} must be an object`);
   const d = def;
   for (const key of Object.keys(d)) {
@@ -5909,10 +5909,11 @@ function sourceFields(def, at) {
     src.url = d.url;
   }
   if (d.path !== void 0) src.path = pathField(d.path, at);
-  if (src.git === void 0 && src.url === void 0 && src.local === void 0) {
-    throw new ConfigError(`${at} needs one of "git", "url" or "local"`);
-  }
+  if (needsBackend && !hasBackend(src)) throw new ConfigError(`${at} needs one of "git", "url" or "local"`);
   return src;
+}
+function hasBackend(src) {
+  return src.git !== void 0 || src.url !== void 0 || src.local !== void 0;
 }
 function pathList(path) {
   return typeof path === "string" ? [path] : path;
@@ -5962,7 +5963,7 @@ function mergeSource(base, incoming) {
   return merged;
 }
 var BUNDLES_KEY = "bundles";
-function parseInstall(obj, path, scope, known) {
+function parseInstall(obj, path, scope, known, overrides = /* @__PURE__ */ new Set()) {
   const install = asObject(obj.install, path, "install");
   for (const key of Object.keys(install)) {
     if (!(key in INSTALL_KEYS) && key !== BUNDLES_KEY) {
@@ -5981,6 +5982,7 @@ function parseInstall(obj, path, scope, known) {
         throw new ConfigError(`${path}: install.${key}[${i}] must be a string`);
       }
       const item = parseEntry(entry, type, path, `install.${key}[${i}]`);
+      if (overrides.has(item.source)) throw new ConfigError(overrideUse(path, entry, item.source));
       if (!known.has(item.source)) {
         throw new ConfigError(
           `${path}: ${scope} install "${entry}" references unknown source "${item.source}"`
@@ -6001,9 +6003,12 @@ function parseInstall(obj, path, scope, known) {
       }
     });
   }
-  return { install: items, wildcards, bundles: parseBundles(install[BUNDLES_KEY], path, scope, known) };
+  return { install: items, wildcards, bundles: parseBundles(install[BUNDLES_KEY], path, scope, known, overrides) };
 }
-function parseBundles(list, path, scope, known) {
+function overrideUse(path, entry, source) {
+  return `${path}: user install "${entry}" references source "${source}", which has no "git", "url" or "local" in this file (user-scope items are built from the user config's sources alone)`;
+}
+function parseBundles(list, path, scope, known, overrides) {
   if (list === void 0) return [];
   if (!Array.isArray(list)) throw new ConfigError(`${path}: install.${BUNDLES_KEY} must be an array`);
   const out = [];
@@ -6011,6 +6016,7 @@ function parseBundles(list, path, scope, known) {
     const where = `install.${BUNDLES_KEY}[${i}]`;
     if (typeof entry !== "string") throw new ConfigError(`${path}: ${where} must be a string`);
     const b = parseBundleEntry(entry, path, where);
+    if (overrides.has(b.source)) throw new ConfigError(overrideUse(path, entry, b.source));
     if (!known.has(b.source)) {
       throw new ConfigError(`${path}: ${scope} install "${entry}" references unknown source "${b.source}"`);
     }
@@ -6098,8 +6104,20 @@ function loadConfig(opts) {
   for (const [name, s] of projectSources) sources.set(name, mergeSource(void 0, s));
   for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s));
   for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s));
+  for (const [name, s] of sources) {
+    if (hasBackend(s)) continue;
+    const files = [[projectSources, projectPath], [userSources, userPath], [localSources, localPath]].filter(([m]) => m.has(name)).map(([, p]) => p);
+    if (opts.unchecked?.name === name && files.includes(opts.unchecked.path)) continue;
+    throw new ConfigError(`${files.join(" and ")}: sources.${name} needs one of "git", "url" or "local"; ${files.length === 1 ? "no other config file gives one" : "none of these files gives one"} (an entry without one only changes "ref" or "path" of a source another file defines)`);
+  }
+  const overrides = /* @__PURE__ */ new Set();
+  for (const [name, s] of userSources) {
+    if (hasBackend(s) || skip(userPath) === name) continue;
+    overrides.add(name);
+    userSources.delete(name);
+  }
   const checkInterval = numberOr(user.checkInterval, 1800, userPath, "checkInterval");
-  const userInstall = parseInstall(user, userPath, "user", userSources);
+  const userInstall = parseInstall(user, userPath, "user", userSources, overrides);
   const userScope = {
     scope: "user",
     install: userInstall.install,

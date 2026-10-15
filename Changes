@@ -34,6 +34,12 @@ Revision history for skilletor
     gets the block in its next session.
   - Windows: the background sync a prompt starts runs with its window
     hidden, so no console window can flash up.
+  - A source entry needs no `git`, `url` or `local` of its own when another
+    config file gives that source one: `{ "ref": "v2" }` or `{ "path": [...] }`
+    in `skilletor.local.json` changes only that field of the project's source.
+    A source no file gives a backend is a config error naming the source and
+    each file declaring it. A user config entry without one changes projects
+    only; a user install naming it is a config error.
 
 0.4.2     2026-10-06 05:28:16Z
   - Windows: hooks and the CLI start without Git Bash. `bin/skilletor.exe`, a

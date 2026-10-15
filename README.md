@@ -192,6 +192,17 @@ for the remote's HEAD, never `""`), and `url` an `https://` URL; a `path` (see [
 elsewhere](#skills-elsewhere-path)) a non-empty string or a non-empty list of them. Anything
 else is a config error naming the file, the source and the key — never a field quietly read
 as absent.
+
+A source declared in one file can be changed from another: the user config and
+`skilletor.local.json` merge over the project's `skilletor.json`, field by field. An entry
+there needs no `git`, `url` or `local` of its own when another file gives one, so
+`{ "sources": { "shared": { "ref": "v2" } } }` in `skilletor.local.json` pins the project's
+`shared` on this machine, and `{ "path": [...] }` re-paths it. A `ref` is used only while the
+source is read from `git`, and stays when a higher file gives another `git` without one. A
+source no file gives a backend is a config error naming the source and the files declaring
+it. Your user config's sources alone build your user-scope items, so an entry there without a
+backend changes projects only — and fails where no project declares that source.
+
 A source's name — its key under `sources` — is ASCII letters, digits, `.`, `_` and `-`,
 starting with a letter or digit; any other name is a config error naming the file and the
 name, and `skilletor add` refuses it before writing anything. It likewise refuses a spec

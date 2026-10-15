@@ -127,7 +127,10 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
   such a name or address (an `http://…`/`file://…` tarball too) before writing: exit 1. A
   `path` that is missing, no directory or a symlink leaves the source unresolved for that
   sync: a warning, installed items stay. `ref` and `path` are not part of a source's
-  identity (cache, trust) and merge project < user < local, replaced whole.
+  identity (cache, trust) and merge project < user < local, replaced whole. An entry may
+  omit `git`/`url`/`local` when another file gives the source one (`{ "ref": "v2" }` in
+  `skilletor.local.json` pins the project's source); none in any file is a config error. A
+  user entry without one is no user-scope source.
 - `gitignore` (default true: commit `skilletor.json` and each `.gitignore` the report names)
   and `checkInterval` (user file only): [references/sync.md](references/sync.md).
 - `targets` (any of `claude`, `codex`, `hermes`; unset = auto-detected, `hermes` never is):

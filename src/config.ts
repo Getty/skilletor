@@ -184,7 +184,8 @@ function parseSources(obj: Json, path: string, origin: Origin, unchecked?: strin
     if (!isSourceName(name)) {
       throw new ConfigError(`${path}: source name ${JSON.stringify(name)} is not valid (${SOURCE_NAME_RULE})`);
     }
-    const src: ResolvedSource = Object.assign({ name, origins: {} }, sourceFields(def, `${path}: sources.${name}`));
+    // A backend may come from another file of the merge (k128): `loadConfig` checks that.
+    const src: ResolvedSource = Object.assign({ name, origins: {} }, sourceFields(def, `${path}: sources.${name}`, false));
     for (const kind of BACKEND_KINDS) if (src[kind] !== undefined) src.origins[kind] = origin;
     sources.set(name, src);
   }
@@ -194,8 +195,9 @@ function parseSources(obj: Json, path: string, origin: Origin, unchecked?: strin
 /** One source definition checked field by field, as config load reads it; every error starts
  *  with `at` (`<file>: sources.<name>`). `add` checks what it would write with it before
  *  writing anything (k110), a bundle entry's address is checked with it at parse (k115), so
- *  neither `add` nor the bundle prompt writes a source load refuses. */
-export function sourceFields(def: unknown, at: string): SourceDef {
+ *  neither `add` nor the bundle prompt writes a source load refuses. Config load alone passes
+ *  `needsBackend` false: there another file may give the backend (k128). */
+export function sourceFields(def: unknown, at: string, needsBackend = true): SourceDef {
   if (def === null || typeof def !== "object" || Array.isArray(def)) throw new ConfigError(`${at} must be an object`);
   const d = def as Json;
   for (const key of Object.keys(d)) {
@@ -214,10 +216,12 @@ export function sourceFields(def: unknown, at: string): SourceDef {
     src.url = d.url;
   }
   if (d.path !== undefined) src.path = pathField(d.path, at);
-  if (src.git === undefined && src.url === undefined && src.local === undefined) {
-    throw new ConfigError(`${at} needs one of "git", "url" or "local"`);
-  }
+  if (needsBackend && !hasBackend(src)) throw new ConfigError(`${at} needs one of "git", "url" or "local"`);
   return src;
+}
+
+function hasBackend(src: SourceDef): boolean {
+  return src.git !== undefined || src.url !== undefined || src.local !== undefined;
 }
 
 /** A source's `path` as a list: a string is a list of one (spec §3). */
@@ -306,6 +310,7 @@ function parseInstall(
   path: string,
   scope: "user" | "project",
   known: Map<string, ResolvedSource>,
+  overrides: Set<string> = new Set(),
 ): ParsedInstall {
   const install = asObject(obj.install, path, "install");
   for (const key of Object.keys(install)) {
@@ -325,6 +330,7 @@ function parseInstall(
         throw new ConfigError(`${path}: install.${key}[${i}] must be a string`);
       }
       const item = parseEntry(entry, type, path, `install.${key}[${i}]`);
+      if (overrides.has(item.source)) throw new ConfigError(overrideUse(path, entry, item.source));
       if (!known.has(item.source)) {
         throw new ConfigError(
           `${path}: ${scope} install "${entry}" references unknown source "${item.source}"`,
@@ -345,12 +351,18 @@ function parseInstall(
       }
     });
   }
-  return { install: items, wildcards, bundles: parseBundles(install[BUNDLES_KEY], path, scope, known) };
+  return { install: items, wildcards, bundles: parseBundles(install[BUNDLES_KEY], path, scope, known, overrides) };
+}
+
+/** A user install naming a user entry without a backend (k128). */
+function overrideUse(path: string, entry: string, source: string): string {
+  return `${path}: user install "${entry}" references source "${source}", which has no "git", "url" or "local" ` +
+    `in this file (user-scope items are built from the user config's sources alone)`;
 }
 
 /** Parse `install.bundles`: `[bundle:]name@source`, no patterns (spec §3, §15). */
 function parseBundles(
-  list: unknown, path: string, scope: "user" | "project", known: Map<string, ResolvedSource>,
+  list: unknown, path: string, scope: "user" | "project", known: Map<string, ResolvedSource>, overrides: Set<string>,
 ): BundleItem[] {
   if (list === undefined) return [];
   if (!Array.isArray(list)) throw new ConfigError(`${path}: install.${BUNDLES_KEY} must be an array`);
@@ -359,6 +371,7 @@ function parseBundles(
     const where = `install.${BUNDLES_KEY}[${i}]`;
     if (typeof entry !== "string") throw new ConfigError(`${path}: ${where} must be a string`);
     const b = parseBundleEntry(entry, path, where);
+    if (overrides.has(b.source)) throw new ConfigError(overrideUse(path, entry, b.source));
     if (!known.has(b.source)) {
       throw new ConfigError(`${path}: ${scope} install "${entry}" references unknown source "${b.source}"`);
     }
@@ -460,11 +473,30 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
   for (const [name, s] of projectSources) sources.set(name, mergeSource(undefined, s));
   for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s));
   for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s));
+  // An entry without a backend only changes `ref` or `path` of a source another file of the
+  // merge defines (k128); a source no file gives one is refused, naming each file declaring it.
+  for (const [name, s] of sources) {
+    if (hasBackend(s)) continue;
+    const files = ([[projectSources, projectPath], [userSources, userPath], [localSources, localPath]] as const)
+      .filter(([m]) => m.has(name)).map(([, p]) => p);
+    if (opts.unchecked?.name === name && files.includes(opts.unchecked.path)) continue; // never synced
+    throw new ConfigError(`${files.join(" and ")}: sources.${name} needs one of "git", "url" or "local"; ` +
+      `${files.length === 1 ? "no other config file gives one" : "none of these files gives one"} ` +
+      `(an entry without one only changes "ref" or "path" of a source another file defines)`);
+  }
+  // The user scope reads the user config alone, so an entry there without a backend is no
+  // source of its own; a user install naming it says so (parseInstall).
+  const overrides = new Set<string>();
+  for (const [name, s] of userSources) {
+    if (hasBackend(s) || skip(userPath) === name) continue;
+    overrides.add(name);
+    userSources.delete(name);
+  }
 
   // Default 30 min. 0 (or negative) disables the in-session check; SessionStart still syncs.
   const checkInterval = numberOr(user.checkInterval, 1800, userPath, "checkInterval");
 
-  const userInstall = parseInstall(user, userPath, "user", userSources);
+  const userInstall = parseInstall(user, userPath, "user", userSources, overrides);
   const userScope: ScopeConfig = {
     scope: "user",
     install: userInstall.install,

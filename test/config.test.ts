@@ -865,3 +865,99 @@ test("k126: path merges project < user < local, replaced whole; the user scope k
     cleanup();
   }
 });
+
+// k128: every entry needed a backend of its own, so a skilletor.local.json could not pin or
+// re-path a source the project declares without repeating its `git`. Rule (maintainer,
+// 2026-10-15): an entry without `git`, `url` or `local` is allowed when another config file
+// of the merge (project < user < local) gives the source one; it then changes only `ref` and
+// `path`, and every backend field keeps the file it came from. Asserts: a local `{ref}` and a
+// local `{path}` alone override the project's; a user `{ref}` alone does too; the author-mode
+// merge is unchanged – a user `local` beside the project's `git`, its `ref` overridden by
+// the local file, keeps all three with their origins.
+test("k128: an entry without a backend overrides ref or path of a source another file defines", () => {
+  const git = "https://github.com/Getty/skills";
+  const { home, projectDir, cleanup } = setup({
+    project: { sources: {
+      pinned: { git, ref: "main" }, pathed: { git, path: "skills" }, both: { git, ref: "v1", path: "a" },
+      authored: { git, ref: "main" }, byUser: { git },
+    } },
+    user: { sources: { authored: { local: "~/dev/skills" }, byUser: { ref: "v3" } } },
+    local: { sources: {
+      pinned: { ref: "v2" }, pathed: { path: ["x", "y"] }, both: { ref: "v4", path: "b" }, authored: { ref: "dev" },
+    } },
+  });
+  try {
+    const cfg = loadConfig({ home, projectDir });
+    const s = (name: string) => cfg.sources.get(name);
+    assert.deepEqual(s("pinned"), { name: "pinned", git, ref: "v2", origins: { git: "project" } });
+    assert.deepEqual(s("pathed"), { name: "pathed", git, path: ["x", "y"], origins: { git: "project" } });
+    assert.deepEqual(s("both"), { name: "both", git, ref: "v4", path: "b", origins: { git: "project" } });
+    assert.deepEqual(s("authored"), {
+      name: "authored", git, ref: "dev", local: "~/dev/skills", origins: { git: "project", local: "user" },
+    });
+    assert.deepEqual(s("byUser"), { name: "byUser", git, ref: "v3", origins: { git: "project" } });
+  } finally {
+    cleanup();
+  }
+});
+
+// k128: the user scope reads the user config's sources alone (spec §3), so a user entry
+// without a backend has nothing to build a user-scope item from. Asserts: it is no user-scope
+// source, and a user install naming it is a ConfigError that says why, not "unknown source";
+// the project scope still installs from the merged source.
+test("k128: a user entry without a backend is no user-scope source; a user install of it says why", () => {
+  const git = "https://github.com/Getty/skills";
+  const project = { sources: { shared: { git } }, install: { skills: ["foo@shared"] } };
+  const ok = setup({ project, user: { sources: { shared: { ref: "v2" } } } });
+  try {
+    const cfg = loadConfig({ home: ok.home, projectDir: ok.projectDir });
+    assert.equal(cfg.userSources.has("shared"), false);
+    assert.equal(cfg.sources.get("shared")?.ref, "v2");
+    assert.deepEqual(cfg.project?.install.map((i) => i.raw), ["foo@shared"]);
+  } finally {
+    ok.cleanup();
+  }
+  const bad = setup({ project, user: { sources: { shared: { ref: "v2" } }, install: { skills: ["bar@shared"] } } });
+  try {
+    assert.throws(() => loadConfig({ home: bad.home, projectDir: bad.projectDir }), (e: unknown) => {
+      assert.ok(e instanceof ConfigError, String(e));
+      assert.equal((e as Error).message, `${configPath("user", bad.home, bad.projectDir)}: user install "bar@shared" ` +
+        `references source "shared", which has no "git", "url" or "local" in this file ` +
+        `(user-scope items are built from the user config's sources alone)`);
+      return true;
+    });
+  } finally {
+    bad.cleanup();
+  }
+});
+
+// k128: an entry without a backend in any file of the merge stays an error. Asserts: the
+// ConfigError names the source and every file that declares it, in merge order – one file,
+// several files, and the user config alone when there is no project.
+test("k128: a source without a backend in any config file is refused, naming the source and its files", () => {
+  const cases: { files: Partial<Record<"user" | "project" | "local", FileValue>>; named: ("user" | "project" | "local")[] }[] = [
+    { files: { local: { sources: { team: { ref: "v2" } } } }, named: ["local"] },
+    { files: { project: { sources: { team: { path: "skills" } } }, user: { sources: { team: { ref: "v2" } } } }, named: ["project", "user"] },
+    { files: { project: { sources: { team: { ref: "v1" } } }, local: { sources: { team: { path: ["a"] } } } }, named: ["project", "local"] },
+  ];
+  const tail = (n: number) => `: sources.team needs one of "git", "url" or "local"; ${n === 1 ? "no other config file gives one" : "none of these files gives one"} ` +
+    `(an entry without one only changes "ref" or "path" of a source another file defines)`;
+  for (const c of cases) {
+    const { home, projectDir, cleanup } = setup(c.files);
+    try {
+      assert.throws(() => loadConfig({ home, projectDir }), (e: unknown) => {
+        assert.ok(e instanceof ConfigError, String(e));
+        assert.equal((e as Error).message, c.named.map((f) => configPath(f, home, projectDir)).join(" and ") + tail(c.named.length));
+        return true;
+      }, JSON.stringify(c.files));
+    } finally {
+      cleanup();
+    }
+  }
+  const { home, projectDir, cleanup } = setup({ user: { sources: { team: { ref: "v2" } } }, project: { sources: { team: { git: "https://example.com/s" } } } });
+  try {
+    assert.throws(() => loadConfig({ home }), { name: "ConfigError", message: configPath("user", home, projectDir) + tail(1) }, "no project");
+  } finally {
+    cleanup();
+  }
+});

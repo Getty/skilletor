@@ -145,6 +145,21 @@ change what a user-scope item is built from, and every backend field keeps its o
   last file that gives one replaces the one below as a whole – a string or a list, never
   concatenated – and a file that gives none keeps it. It has no origin: whichever backend is
   chosen, the source's `path` is applied to what that backend resolves to.
+- **Entries without a backend** (k128). An entry needs no `git`, `url` or `local` of its own
+  when another file of the merge gives the source one: `{ "ref": "v2" }` or
+  `{ "path": ["skills"] }` in `skilletor.local.json` changes only that field of the
+  project's source. The rule for each field stays the one above: a backend field from a
+  higher file replaces the same field below and sits beside the others (a user's `local`
+  beside the project's `git` is author mode, below, with the `git` as its fallback); `ref`
+  and `path` are each the last file's that gives one. `ref` is the `git` backend's: it is
+  used only when `git` is the chosen backend, and it stays when a higher file gives another
+  `git` without a `ref` – a pin is never dropped silently (k88); a higher `ref` replaces it.
+  A source no file gives a backend is a config error naming the source and every file that
+  declares it (`<project>/.claude/skilletor.local.json: sources.team needs one of "git",
+  "url" or "local"; no other config file gives one (…)`). Per scope as above: a user entry
+  without a backend changes the project scope's source only – it is no user-scope source,
+  and a user install or bundle naming it is a config error that says so – and with no
+  project scope (§3, above) the user config alone must give the backend.
 - **One resolved backend.** Choosing the backend and checking trust work on one value:
   kind (`git`, `url`, `local`), effective address (a `local` path normalized to an
   absolute real path), and the origin of that field. The choice is author mode's (below):
