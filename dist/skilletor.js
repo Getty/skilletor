@@ -6262,7 +6262,8 @@ function entryMatches(e, name, source) {
   const at = e.lastIndexOf("@");
   const eName = (at > 0 ? e.slice(0, at) : e).replace(/^[a-z]+:/, "");
   const eSource = at > 0 ? e.slice(at + 1) : void 0;
-  return eName === name && (source === void 0 || eSource === source);
+  const same = name.includes(WILDCARD) || eName.includes(WILDCARD) ? eName === name : nameKey(eName) === nameKey(name);
+  return same && (source === void 0 || eSource === source);
 }
 function findInstallEntries(path, name, source, type) {
   const install = loadRaw(path).install;
@@ -7823,8 +7824,8 @@ var GitSource = class {
       const head = (await this.run(dir, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
       const pin = await this.run(dir, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).then((out) => out.trim(), () => "");
       const byName = ref.length < 40 && (pin === "" || pin === head);
-      const held = head.startsWith(ref.toLowerCase()) ? pin === head : byName;
-      if (!held) throw new CacheRejected(`cached commit ${head} does not match requested pin ${ref}`);
+      const held2 = head.startsWith(ref.toLowerCase()) ? pin === head : byName;
+      if (!held2) throw new CacheRejected(`cached commit ${head} does not match requested pin ${ref}`);
     }
     const sha = (await this.run(dir, ["rev-parse", "--short", "HEAD"])).trim();
     return `git:${sha}`;
@@ -8780,6 +8781,11 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
     return set;
   };
   const planned = new Set(plan.map((i) => i.key));
+  const keep = new Set(opts.keep ?? []);
+  const leaving = Object.keys(oldLock).filter((key) => {
+    const e = oldLock[key];
+    return !planned.has(key) && !keep.has(key) && !e.block && !e.skipped && Object.keys(e.files).length > 0;
+  });
   for (const it of plan) {
     if (!NAME_RE.test(it.name)) throw new ApplyError(`invalid item name: ${it.name}`);
     if (it.inBlock) {
@@ -8796,7 +8802,9 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
       continue;
     }
     const existing = oldLock[it.key]?.skipped ? void 0 : oldLock[it.key];
-    const owned = (rel) => existing?.files[rel] !== void 0;
+    const holders = [existing?.files ?? {}, ...leaving.filter((key) => rootFor(key) === root).map((key) => oldLock[key].files)];
+    const lockedHash = (rel) => existing?.files[rel] ?? held(root, rel, holders);
+    const owned = (rel) => lockedHash(rel) !== void 0;
     const own = ownPath(it.key);
     const removals = Object.keys(existing?.files ?? {}).filter((rel) => !it.output.has(rel));
     const found = [];
@@ -8835,6 +8843,7 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
     const entryFiles = {};
     let wrote = false;
     let removedFile = false;
+    let tookOver = false;
     const land = (rel, hash) => {
       res.written.push({ key: it.key, path: rel });
       let l = landed.get(it.key);
@@ -8845,8 +8854,9 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
       const abs = safeJoin(root, rel);
       const desired = hashBuffer(buf);
       const executable = it.executable?.has(rel) ?? false;
-      const locked = existing?.files[rel];
       const st = lstatOrUndefined(abs);
+      const locked = st ? lockedHash(rel) : existing?.files[rel];
+      if (locked !== void 0 && existing?.files[rel] === void 0) tookOver = true;
       if (st?.isFile()) {
         const diskHash = hashBuffer(readFileSync8(abs));
         if (diskHash === desired && isExecutable(st.mode) === executable) {
@@ -8866,20 +8876,23 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
       entryFiles[rel] = desired;
       land(rel, desired);
     }
-    if (removeItemFiles(it.key, root, removals, touched(root), res)) removedFile = true;
+    const outputs = [Object.fromEntries([...it.output.keys()].map((rel) => [rel, ""]))];
+    const gone = removals.filter((rel) => held(root, rel, outputs) === void 0);
+    if (removeItemFiles(it.key, root, gone, touched(root), res)) removedFile = true;
+    if (gone.length < removals.length) tookOver = true;
     if (Object.keys(entryFiles).length > 0) {
       newLock[it.key] = withVia({ source: it.source, version: it.version, files: entryFiles }, it);
     }
     if (existing === void 0) {
-      if (wrote) res.added.push(it.key);
+      if (wrote || tookOver) res.added.push(it.key);
       else res.unchanged.push(it.key);
-    } else if (wrote || removedFile || existing.partial) {
+    } else if (wrote || removedFile || tookOver || existing.partial) {
       res.updated.push(it.key);
     } else {
       res.unchanged.push(it.key);
     }
   }
-  const keep = new Set(opts.keep ?? []);
+  const kept = (root) => Object.entries(newLock).filter(([key, e]) => !e.block && rootFor(key) === root).map(([, e]) => e.files);
   for (const key of Object.keys(oldLock)) {
     if (planned.has(key)) continue;
     if (keep.has(key)) {
@@ -8888,7 +8901,9 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
     }
     if (!oldLock[key].block) {
       const root = rootFor(key);
-      removeItemFiles(key, root, Object.keys(oldLock[key].files), touched(root), res);
+      const holders = kept(root);
+      const files = Object.keys(oldLock[key].files).filter((rel) => held(root, rel, holders) === void 0);
+      removeItemFiles(key, root, files, touched(root), res);
     }
     if (!oldLock[key].skipped) res.removed.push(key);
   }
@@ -8928,6 +8943,15 @@ function recordBlockItem(it, prev, newLock, res) {
 function withVia(entry, it) {
   if (it.via?.length) entry.via = [...it.via];
   return entry;
+}
+function held(root, rel, holders) {
+  const k = nameKey(rel);
+  for (const files of holders) {
+    for (const [other, hash] of Object.entries(files)) {
+      if (other !== rel && nameKey(other) === k && sameFile(safeJoin(root, other), safeJoin(root, rel))) return hash;
+    }
+  }
+  return void 0;
 }
 function safeJoin(root, rel) {
   const abs = resolvePath4(join11(root, rel));
@@ -11045,7 +11069,7 @@ function covering(path, lock, bundlesHere, name, source, type, explicitTypes) {
   const found = findWildcardEntries(path, source, type).filter((w) => matchesPattern(w.pattern, name)).map((w) => ({ type: w.type, pattern: w.pattern }));
   const locked = (t) => Object.entries(lock).filter(([key, e]) => {
     const k = parseLockKey(key);
-    return k.name === name && (!t || k.type === t) && e.source === source;
+    return nameKey(k.name) === nameKey(name) && (!t || k.type === t) && e.source === source;
   });
   const inLock = (t) => locked(t).length > 0;
   const labels = new Set(bundlesHere.map(bundleLabel));

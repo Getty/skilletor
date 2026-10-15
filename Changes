@@ -59,6 +59,13 @@ Revision history for skilletor
     `foo@b` in one install list are a duplicate target; two sources' wildcards
     offering `Foo` and `foo` skip both with a warning, and an explicit entry
     wins over another source's other spelling.
+  - macOS, Windows: an item whose name changes only in case (`Foo@a` to
+    `foo@a`, a source renaming `skills/Foo`), or a file inside an item
+    renamed so, is no longer a conflict with its own old copy nor deleted
+    with the old spelling after the sync wrote it: the file both spellings
+    name is taken over (reported as added and removed, as on Linux).
+    `uninstall foo@a` removes an entry `Foo@a`, and names the wildcard or
+    bundle that installed `Foo`.
 
 0.4.2     2026-10-06 05:28:16Z
   - Windows: hooks and the CLI start without Git Bash. `bin/skilletor.exe`, a

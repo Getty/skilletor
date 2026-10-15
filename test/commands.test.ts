@@ -2042,3 +2042,27 @@ test("k125: add stores a release or %-escaped link's decoded ref and path, and r
     f.cleanup();
   }
 });
+
+// k136: names equal ignoring case are one name (k135), so `uninstall` finds an item however its
+// name is spelled. Asserts: `uninstall foo@mine` removes the entry `Foo@mine` and its files, and
+// `uninstall r1@mine` for a rule `R1` only a bundle installs names that bundle (the lock's
+// spelling is matched ignoring case) instead of calling it declared nowhere.
+test("k136: uninstall matches an entry and the lock ignoring case", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      skill(d, "Foo");
+      rule(d, "R1");
+      bundleFile(d, "perl", "description: Perl\nrules: [R1]\n");
+    });
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["Foo@mine"], bundles: ["perl@mine"] } });
+    await cmdInstall(e.ctx, { items: [] });
+    assert.equal(existsSync(join(e.home, ".claude/skills/Foo/SKILL.md")), true);
+    await cmdUninstall(e.ctx, { items: ["foo@mine"] });
+    assert.deepEqual(e.readUserCfg().install, { bundles: ["perl@mine"] });
+    assert.equal(existsSync(join(e.home, ".claude/skills/Foo")), false);
+    await assert.rejects(() => cmdUninstall(e.ctx, { items: ["r1@mine"] }), /r1@mine is not declared explicitly; it is installed by the bundle bundle:perl@mine/);
+  } finally {
+    e.cleanup();
+  }
+});

@@ -739,6 +739,18 @@ has recorded the new format, no further sync runs for it.
 - If a managed file diverges from the lock hash (edited locally), the source wins; the
   report names the overwritten file.
 - Only what is in the lock – or a plain-path file `--force` adopts – is ever deleted.
+- **One path ignoring case** (k136). A lock key that changes only in case (`Foo@a` →
+  `foo@a`, a source renaming `skills/Foo` to `skills/foo`), or a file of an item renamed so,
+  finds its new path held by the old spelling on a case-insensitive file system (macOS,
+  Windows): `skills/foo/SKILL.md` *is* `skills/Foo/SKILL.md`. A file at the new path that the
+  old entry – or any entry leaving the lock in this run – holds under another spelling (equal
+  ignoring case, not equal), and that is the same file on disk (same real path or inode),
+  belongs to the item: no conflict, adopted when equal, rewritten when not. Removing the old
+  entry (or the old spelling inside the item) never deletes a file the new lock holds that
+  way. The report says added + removed (updated within one item), the same on every
+  platform; on a case-sensitive file system the two spellings are two files, the old one
+  goes, and a foreign file at the new spelling stays a conflict. The directory keeps the
+  spelling it had on a case-insensitive file system.
 
 ### 6.4 Git hygiene
 
@@ -1011,7 +1023,9 @@ so the CLI run from a subdirectory sees the same project as the session. A root 
 `~` itself has no project scope (§3).
 
 `uninstall` removes explicit entries from that one config only: `type:name@source` from
-that type's list, `name@source` from every list. All items are checked before anything
+that type's list, `name@source` from every list. The name matches ignoring case (k136: one
+name, §4.1), the lock's entries too when the error names a covering wildcard or bundle; a
+wildcard pattern matches as written. All items are checked before anything
 is edited; an item with no explicit entry there fails the command (exit 1, config
 untouched). If a wildcard in the same config installs it, the error names the wildcard
 and the ways out: uninstall `type:*@source`, or gate the item through `vars` when its

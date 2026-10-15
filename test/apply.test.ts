@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
+  chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
@@ -784,6 +784,114 @@ test("k71: an apply that fails before its first write leaves the lock untouched"
     assert.throws(() => apply([item("rule", "x", { "rules/.local.x.md": "X" }), item("skill", "cow", { "skills/cow/SKILL.md": "C2" })],
       { targetDir: tmp.dir }));
     assert.equal(readFileSync(lockFile, "utf8"), before);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// ---- case-only renames (k136) ------------------------------------------------
+
+/** True when `dir`'s file system treats names equal ignoring case as one (macOS, Windows). */
+function caseInsensitive(dir: string): boolean {
+  writeFileSync(join(dir, "CaseProbe"), "");
+  try {
+    return existsSync(join(dir, "caseprobe"));
+  } finally {
+    rmSync(join(dir, "CaseProbe"));
+  }
+}
+
+/** Make `to` the very file `from` is, as a case-insensitive file system makes it when the two
+ *  paths differ only in case: a hard link on a case-sensitive one, nothing to do on the other. */
+function oneFile(dir: string, from: string, to: string): void {
+  if (existsSync(join(dir, to))) return;
+  mkdirSync(join(dir, to, ".."), { recursive: true });
+  linkSync(join(dir, from), join(dir, to));
+}
+
+// k136: on a case-insensitive file system `agents/Foo.md` and `agents/foo.md` name one file, so
+// a lock key changing only in case (`Foo@a` -> `foo@a`, a source renaming `skills/Bar`) finds
+// its new path held by the old entry. A hard link stands in for that file system, so every
+// platform runs this. Asserts: the renamed item takes the files over without a conflict
+// (adopted when equal, rewritten when not, no drift reported), the old entry's removal deletes
+// none of them, the report says added + removed, and the next run has nothing to do.
+test("k136: a key changing only in case takes over the files its old entry held; that removal deletes none of them", () => {
+  const tmp = makeTmpDir();
+  try {
+    apply([item("agent", "Foo", { "agents/Foo.md": "A" }), item("skill", "Bar", { "skills/Bar/SKILL.md": "S", "skills/Bar/ref.md": "R" })],
+      { targetDir: tmp.dir });
+    oneFile(tmp.dir, "agents/Foo.md", "agents/foo.md");
+    oneFile(tmp.dir, "skills/Bar/SKILL.md", "skills/bar/SKILL.md");
+    oneFile(tmp.dir, "skills/Bar/ref.md", "skills/bar/ref.md");
+    const plan = () => [item("agent", "foo", { "agents/foo.md": "A" }), item("skill", "bar", { "skills/bar/SKILL.md": "S", "skills/bar/ref.md": "R2" })];
+    const res = apply(plan(), { targetDir: tmp.dir });
+    assert.deepEqual([res.conflicts, res.overwritten], [[], []]);
+    assert.deepEqual([res.added.sort(), res.removed.sort()], [["agents/foo", "skills/bar"], ["agents/Foo", "skills/Bar"]]);
+    assert.deepEqual([read(tmp.dir, "agents/foo.md"), read(tmp.dir, "skills/bar/SKILL.md"), read(tmp.dir, "skills/bar/ref.md")], ["A", "S", "R2"]);
+    const lock = readLock(join(tmp.dir, "skilletor.lock.json"));
+    assert.deepEqual(Object.keys(lock).sort(), ["agents/foo", "skills/bar"]);
+    assert.deepEqual(Object.keys(lock["skills/bar"]!.files).sort(), ["skills/bar/SKILL.md", "skills/bar/ref.md"]);
+    const again = apply(plan(), { targetDir: tmp.dir });
+    assert.deepEqual([again.conflicts, again.added, again.removed, again.unchanged.sort()], [[], [], [], ["agents/foo", "skills/bar"]]);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// k136: the same rename on this machine's own file system, no stand-in – on macOS CI the
+// case-insensitive one. Asserts the outcome every platform shares: the item is there under its
+// new key, nothing conflicts, and on a case-sensitive file system the old spelling is gone.
+test("k136: a key changing only in case, on this platform's file system", () => {
+  const tmp = makeTmpDir();
+  try {
+    apply([item("agent", "Foo", { "agents/Foo.md": "A" }), item("skill", "Bar", { "skills/Bar/SKILL.md": "S", "skills/Bar/ref.md": "R" })],
+      { targetDir: tmp.dir });
+    const res = apply([item("agent", "foo", { "agents/foo.md": "A" }), item("skill", "bar", { "skills/bar/SKILL.md": "S2" })],
+      { targetDir: tmp.dir });
+    assert.deepEqual(res.conflicts, []);
+    assert.deepEqual([res.added.sort(), res.removed.sort()], [["agents/foo", "skills/bar"], ["agents/Foo", "skills/Bar"]]);
+    assert.deepEqual([read(tmp.dir, "agents/foo.md"), read(tmp.dir, "skills/bar/SKILL.md")], ["A", "S2"]);
+    assert.equal(existsSync(join(tmp.dir, "skills/bar/ref.md")), false, "a file the new item lacks goes");
+    assert.deepEqual(Object.keys(readLock(join(tmp.dir, "skilletor.lock.json"))).sort(), ["agents/foo", "skills/bar"]);
+    if (!caseInsensitive(tmp.dir)) {
+      assert.deepEqual([existsSync(join(tmp.dir, "agents/Foo.md")), existsSync(join(tmp.dir, "skills/Bar"))], [false, false]);
+    }
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// k136: within one item too – a source renaming `Ref.md` to `ref.md` inside a skill. Asserts:
+// no conflict, the file is held under its new spelling, the removal of the old one spares it,
+// and the item counts as updated.
+test("k136: a file of an item renamed only in case is taken over, not deleted", () => {
+  const tmp = makeTmpDir();
+  try {
+    apply([item("skill", "moo", { "skills/moo/SKILL.md": "S", "skills/moo/Ref.md": "R" })], { targetDir: tmp.dir });
+    oneFile(tmp.dir, "skills/moo/Ref.md", "skills/moo/ref.md");
+    const res = apply([item("skill", "moo", { "skills/moo/SKILL.md": "S", "skills/moo/ref.md": "R" })], { targetDir: tmp.dir });
+    assert.deepEqual([res.conflicts, res.updated], [[], ["skills/moo"]]);
+    assert.equal(read(tmp.dir, "skills/moo/ref.md"), "R");
+    assert.deepEqual(Object.keys(readLock(join(tmp.dir, "skilletor.lock.json"))["skills/moo"]!.files).sort(),
+      ["skills/moo/SKILL.md", "skills/moo/ref.md"]);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// k136: only the same file is taken over. On a case-sensitive file system another file at the
+// other spelling is foreign. Asserts: a conflict that leaves it untouched, and the old entry
+// still goes as before.
+test("k136: a different file at a spelling equal ignoring case stays a conflict", () => {
+  const tmp = makeTmpDir();
+  try {
+    if (caseInsensitive(tmp.dir)) return; // two such files cannot exist here
+    apply([item("agent", "Foo", { "agents/Foo.md": "A" })], { targetDir: tmp.dir });
+    writeFileSync(join(tmp.dir, "agents/foo.md"), "MINE");
+    const res = apply([item("agent", "foo", { "agents/foo.md": "A" })], { targetDir: tmp.dir });
+    assert.deepEqual(res.conflicts, [{ key: "agents/foo", path: "agents/foo.md" }]);
+    assert.equal(read(tmp.dir, "agents/foo.md"), "MINE");
+    assert.deepEqual([res.removed, existsSync(join(tmp.dir, "agents/Foo.md"))], [["agents/Foo"], false]);
   } finally {
     tmp.cleanup();
   }

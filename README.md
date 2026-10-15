@@ -262,7 +262,10 @@ Names that differ only in case (`Foo`, `foo`) are the same name throughout — i
 across sources and in your install lists — on every system, since macOS and Windows would
 install both into one directory: two of them in one source are an error of each (`available`
 shows it, `install` refuses it, `sync` warns and keeps an installed copy), and two install
-entries or two sources' offers of them collide like the same name.
+entries or two sources' offers of them collide like the same name. `uninstall foo@shared`
+removes an entry `Foo@shared`, and an item whose name changes only in case (`Foo@shared` →
+`foo@shared`, or upstream renaming its directory) is taken over in place: on macOS and
+Windows the sync keeps the file both spellings name instead of deleting it with the old one.
 
 An item installed through a wildcard cannot be uninstalled by name — the wildcard would
 bring it back. Uninstall the wildcard (`skilletor uninstall 'rule:*@shared'`), or keep it

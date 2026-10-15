@@ -10,12 +10,15 @@
 // above the item's path (a linked `skills` dir) are followed. Managed files that
 // drifted from their lock hash are overwritten and reported. An error thrown after the
 // first write still leaves a lock that owns what landed (entries marked partial), so a
-// retry resumes instead of calling skilletor's own output a conflict. `apply` knows
-// nothing about sources.
+// retry resumes instead of calling skilletor's own output a conflict. Paths equal ignoring
+// case that are one file on disk (a case-insensitive file system, k136) are one path: an item
+// owns what its old entry, or another entry leaving the lock, holds under the other spelling,
+// and a removal never deletes a file the new lock holds that way. `apply` knows nothing
+// about sources.
 import { existsSync, lstatSync, readFileSync, readdirSync, rmdirSync, rmSync, type Stats } from "node:fs";
 import { dirname, join, relative, resolve as resolvePath, sep } from "node:path";
-import type { ItemType } from "./config.ts";
-import { atomicWrite, hashBuffer, isExecutable } from "./fsutil.ts";
+import { nameKey, type ItemType } from "./config.ts";
+import { atomicWrite, hashBuffer, isExecutable, sameFile } from "./fsutil.ts";
 import { readLock, serializeLock, writeLock, type Lock, type LockEntry, type SkipReason } from "./lock.ts";
 
 export interface PlanItem {
@@ -134,6 +137,13 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
   };
 
   const planned = new Set(plan.map((i) => i.key));
+  const keep = new Set(opts.keep ?? []);
+  // Entries leaving the lock that hold files: a planned item may find one of their files at
+  // its own path under a spelling equal ignoring case (k136: `Foo@a` -> `foo@a`).
+  const leaving = Object.keys(oldLock).filter((key) => {
+    const e = oldLock[key]!;
+    return !planned.has(key) && !keep.has(key) && !e.block && !e.skipped && Object.keys(e.files).length > 0;
+  });
 
   for (const it of plan) {
     if (!NAME_RE.test(it.name)) throw new ApplyError(`invalid item name: ${it.name}`);
@@ -153,7 +163,11 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
     }
     // A previous skip entry owns nothing: treat the item as not yet installed.
     const existing = oldLock[it.key]?.skipped ? undefined : oldLock[it.key];
-    const owned = (rel: string): boolean => existing?.files[rel] !== undefined;
+    const holders = [existing?.files ?? {}, ...leaving.filter((key) => rootFor(key) === root).map((key) => oldLock[key]!.files)];
+    /** The lock hash of the file at `rel`: the item's own, or one held as the same file under a
+     *  spelling equal ignoring case (k136) – by its old entry or an entry leaving the lock. */
+    const lockedHash = (rel: string): string | undefined => existing?.files[rel] ?? held(root, rel, holders);
+    const owned = (rel: string): boolean => lockedHash(rel) !== undefined;
     const own = ownPath(it.key);
     const removals = Object.keys(existing?.files ?? {}).filter((rel) => !it.output.has(rel));
 
@@ -201,6 +215,7 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
     const entryFiles: Record<string, string> = {};
     let wrote = false;
     let removedFile = false;
+    let tookOver = false; // a file held under another spelling is the item's now (k136)
     /** A path written or adopted: reported, and owned even if a later step throws. */
     const land = (rel: string, hash: string): void => {
       res.written.push({ key: it.key, path: rel });
@@ -213,8 +228,9 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
       const abs = safeJoin(root, rel);
       const desired = hashBuffer(buf);
       const executable = it.executable?.has(rel) ?? false;
-      const locked = existing?.files[rel];
       const st = lstatOrUndefined(abs);
+      const locked = st ? lockedHash(rel) : existing?.files[rel];
+      if (locked !== undefined && existing?.files[rel] === undefined) tookOver = true;
 
       if (st?.isFile()) {
         const diskHash = hashBuffer(readFileSync(abs));
@@ -239,25 +255,30 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
       land(rel, desired);
     }
 
-    // Files this item no longer contains but the lock still tracks.
-    if (removeItemFiles(it.key, root, removals, touched(root), res)) removedFile = true;
+    // Files this item no longer contains but the lock still tracks – save one that is a file
+    // of its output under another spelling (k136).
+    const outputs = [Object.fromEntries([...it.output.keys()].map((rel) => [rel, ""]))];
+    const gone = removals.filter((rel) => held(root, rel, outputs) === undefined);
+    if (removeItemFiles(it.key, root, gone, touched(root), res)) removedFile = true;
+    if (gone.length < removals.length) tookOver = true;
 
     if (Object.keys(entryFiles).length > 0) {
       newLock[it.key] = withVia({ source: it.source, version: it.version, files: entryFiles }, it);
     }
 
     if (existing === undefined) {
-      if (wrote) res.added.push(it.key);
+      if (wrote || tookOver) res.added.push(it.key);
       else res.unchanged.push(it.key); // fully conflicted, nothing installed
-    } else if (wrote || removedFile || existing.partial) {
+    } else if (wrote || removedFile || tookOver || existing.partial) {
       res.updated.push(it.key); // a partial entry: the run that left it never reported it
     } else {
       res.unchanged.push(it.key);
     }
   }
 
-  const keep = new Set(opts.keep ?? []);
-  // Items no longer declared: delete their locked files (unless kept).
+  // Items no longer declared: delete their locked files (unless kept) – but none the new lock
+  // holds under another spelling (k136).
+  const kept = (root: string) => Object.entries(newLock).filter(([key, e]) => !e.block && rootFor(key) === root).map(([, e]) => e.files);
   for (const key of Object.keys(oldLock)) {
     if (planned.has(key)) continue;
     if (keep.has(key)) {
@@ -266,7 +287,9 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
     }
     if (!oldLock[key]!.block) {
       const root = rootFor(key);
-      removeItemFiles(key, root, Object.keys(oldLock[key]!.files), touched(root), res);
+      const holders = kept(root);
+      const files = Object.keys(oldLock[key]!.files).filter((rel) => held(root, rel, holders) === undefined);
+      removeItemFiles(key, root, files, touched(root), res);
     }
     if (!oldLock[key]!.skipped) res.removed.push(key); // a skip entry had nothing installed
   }
@@ -323,6 +346,21 @@ function recordBlockItem(it: PlanItem, prev: LockEntry | undefined, newLock: Loc
 function withVia(entry: LockEntry, it: PlanItem): LockEntry {
   if (it.via?.length) entry.via = [...it.via];
   return entry;
+}
+
+/**
+ * The hash `holders` give the file at `rel` under another spelling of it (k136): a path equal
+ * ignoring case that is the same file on disk, as on a case-insensitive file system (macOS,
+ * Windows). Two distinct files – a case-sensitive one – are not; neither is a missing one.
+ */
+function held(root: string, rel: string, holders: Record<string, string>[]): string | undefined {
+  const k = nameKey(rel);
+  for (const files of holders) {
+    for (const [other, hash] of Object.entries(files)) {
+      if (other !== rel && nameKey(other) === k && sameFile(safeJoin(root, other), safeJoin(root, rel))) return hash;
+    }
+  }
+  return undefined;
 }
 
 function safeJoin(root: string, rel: string): string {

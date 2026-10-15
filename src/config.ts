@@ -676,12 +676,15 @@ export function addInstallEntry(path: string, type: ItemType, entry: string): vo
   saveRaw(path, cfg);
 }
 
-/** Does raw install entry `e` (`[type:]name@source`) declare `name` (from `source`, if given)? */
+/** Does raw install entry `e` (`[type:]name@source`) declare `name` (from `source`, if given)?
+ *  A name matches ignoring case, as it is one name (k135, k136); a wildcard pattern is the
+ *  entry as written, as its duplicate key is (`seenKey`). */
 function entryMatches(e: string, name: string, source?: string): boolean {
   const at = e.lastIndexOf("@");
   const eName = (at > 0 ? e.slice(0, at) : e).replace(/^[a-z]+:/, "");
   const eSource = at > 0 ? e.slice(at + 1) : undefined;
-  return eName === name && (source === undefined || eSource === source);
+  const same = name.includes(WILDCARD) || eName.includes(WILDCARD) ? eName === name : nameKey(eName) === nameKey(name);
+  return same && (source === undefined || eSource === source);
 }
 
 /**

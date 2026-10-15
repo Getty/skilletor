@@ -4,7 +4,7 @@
 import { dirname, join } from "node:path";
 import {
   addBundleEntry, addInstallEntry, addSource, bundleEntries, ConfigError, findInstallEntries, findWildcardEntries,
-  isSourceName, loadConfig, pathList, removeBundleEntries, removeInstallEntries, removeSource, SOURCE_NAME_RULE, sourceEntry,
+  isSourceName, loadConfig, nameKey, pathList, removeBundleEntries, removeInstallEntries, removeSource, SOURCE_NAME_RULE, sourceEntry,
   sourceFields, WILDCARD, type BackendKind, type ItemType, type LoadedConfig, type Origin, type SourceDef,
 } from "./config.ts";
 import { BundleError, expandBundle, matchesPattern, sameIdentity, type ForeignEntry } from "./bundles.ts";
@@ -610,10 +610,11 @@ function covering(
   const found = findWildcardEntries(path, source, type)
     .filter((w) => matchesPattern(w.pattern, name))
     .map((w) => ({ type: w.type, pattern: w.pattern }));
-  // Any target's entry counts (claude `skills/x`, codex `codex:skills/x`, spec §14.3).
+  // Any target's entry counts (claude `skills/x`, codex `codex:skills/x`, spec §14.3), its
+  // name ignoring case (k136: one name, k135).
   const locked = (t?: ItemType) => Object.entries(lock).filter(([key, e]) => {
     const k = parseLockKey(key);
-    return k.name === name && (!t || k.type === t) && e.source === source;
+    return nameKey(k.name) === nameKey(name) && (!t || k.type === t) && e.source === source;
   });
   const inLock = (t: ItemType) => locked(t).length > 0;
   const labels = new Set(bundlesHere.map(bundleLabel));
