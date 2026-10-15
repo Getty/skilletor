@@ -8121,7 +8121,22 @@ var PROJECT_CLAUDE_ENTRIES = ["skilletor.lock.json", "skilletor.local.json", "ag
 var LOCAL_ENTRIES = ["agents/**/.local.*", "rules/**/.local.*"];
 var CODEX_ENTRIES = ["agents/**/.local.*", "skilletor-rules.md"];
 function updateGitignore(opts) {
-  const path = join8(opts.dir, ".gitignore");
+  return updateBlockFile(join8(opts.dir, ".gitignore"), opts);
+}
+var WORKTREE_INCLUDE = ".worktreeinclude";
+function updateWorktreeInclude(opts) {
+  return updateBlockFile(join8(opts.dir, WORKTREE_INCLUDE), opts);
+}
+function blockEntries(path) {
+  try {
+    const lines = readFileSync4(path, "utf8").split("\n");
+    const { begin, end, hasBlock: hasBlock2 } = blockOf(lines);
+    return hasBlock2 ? lines.slice(begin + 1, end) : [];
+  } catch {
+    return [];
+  }
+}
+function updateBlockFile(path, opts) {
   const existed = existsSync6(path);
   const existing = existed ? readFileSync4(path, "utf8") : "";
   const lines = existing.length ? existing.split("\n") : [];
@@ -10037,6 +10052,16 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
         (rep.gitignoreUpdated ??= []).push(scopeLabel(scope, base, join14(rootDir, ".gitignore")));
       }
     }
+    if (scope === "project") {
+      try {
+        const change = updateWorktreeInclude({ dir: base, entries: worktreeIncludeEntries(rc), enabled: gitignoreOn && inUse });
+        if (change === "created" || change === "changed") {
+          (rep.gitignoreUpdated ??= []).push(scopeLabel(scope, base, join14(base, WORKTREE_INCLUDE)));
+        }
+      } catch (err) {
+        rep.warnings.push(`${WORKTREE_INCLUDE} not updated: ${err.message}`);
+      }
+    }
   }
   if (gitignoreOn) {
     const written = result.written.map((w) => ({
@@ -10086,6 +10111,21 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
 }
 function projectInUse(targetDir, lock) {
   return Object.keys(lock).length > 0 || existsSync11(join14(targetDir, "skilletor.json")) || existsSync11(join14(targetDir, "skilletor.local.json"));
+}
+function worktreeIncludeEntries(rc) {
+  const at = (abs, suffix = "") => `/${toPosix(relative4(rc.base, abs))}${suffix}`;
+  const claude = join14(rc.base, ".claude");
+  const out = /* @__PURE__ */ new Set([at(join14(claude, "skilletor.lock.json")), at(join14(claude, "skilletor.local.json"))]);
+  for (const h of HARNESSES) {
+    for (const type of ITEM_TYPES) {
+      const root = rootOf(rc, h, type);
+      if (root === void 0) continue;
+      if (isBlockType(h, type)) out.add(at(join14(root, RULES_FILE)));
+      else if (type === "skill") out.add(at(join14(root, "skills"), "/"));
+      else if (LAYOUTS[h].localTypes?.includes(type)) out.add(at(join14(root, `${type}s`), "/**/.local.*"));
+    }
+  }
+  return [...out].sort();
 }
 function scopeLabel(scope, base, abs) {
   const rel = relative4(base, abs);
@@ -10352,8 +10392,17 @@ function layoutDrift(ctx, scope, scopeCfg, lock) {
       drift(gitignoreOn ? "gitignore" : "no-gitignore");
     }
   }
-  if (scope === "project" && !projectInUse(targetDirOf(ctx, scope), lock) && allRoots(rootContextOf(ctx, scope)).some((dir) => hasBlock(dir))) {
+  const inUse = scope === "project" && projectInUse(targetDirOf(ctx, scope), lock);
+  if (scope === "project" && !inUse && allRoots(rootContextOf(ctx, scope)).some((dir) => hasBlock(dir))) {
     out.push({ kind: "layout", id: "layout:unused-project", sources: [] });
+  }
+  if (scope === "project") {
+    const rc = rootContextOf(ctx, scope);
+    const want = gitignoreOn && inUse ? worktreeIncludeEntries(rc) : [];
+    const have = blockEntries(join14(rc.base, WORKTREE_INCLUDE));
+    if (have.join("\n") !== want.join("\n") && (have.length > 0 || Object.keys(lock).length > 0)) {
+      out.push({ kind: "layout", id: "layout:worktreeinclude", sources: [] });
+    }
   }
   return out;
 }

@@ -36,7 +36,8 @@ Hermes Agent gets **skills only** (no agents, no rules): user `<Hermes home>/ski
 A file is managed when its path is in `<scope>/.claude/skilletor.lock.json` (Codex keys
 `codex:skills/<name>` etc., Hermes `hermes:skills/<name>`) — check the lock before editing;
 files not in it are yours. In `AGENTS.md` only the block between `<!-- skilletor:begin -->`
-and `<!-- skilletor:end -->` is managed. A conflict blocks the whole item, and `sync --force`
+and `<!-- skilletor:end -->` is managed; in a `.gitignore` and the project's `.worktreeinclude`
+only the one between `# >>> skilletor >>>` and `# <<< skilletor <<<`. A conflict blocks the whole item, and `sync --force`
 can **delete** the user's own files: read [references/sync.md](references/sync.md) before
 forcing, and when a report shows a conflict, a partial item, an overlap or `git rm --cached`
 warning, or a due `check`.

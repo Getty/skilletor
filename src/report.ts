@@ -84,8 +84,9 @@ export interface ScopeReport {
   /** Installed agents whose briefing skills do not resolve (spec §6.7); each also has
    *  its line in `warnings`. Absent when empty. */
   briefingMissing?: BriefingMissing[];
-  /** `.gitignore` files whose skilletor block this sync created or changed, to be
-   *  committed (spec §6.4): `.claude/.gitignore`, `~/.claude/.gitignore`. Absent when empty. */
+  /** `.gitignore` files – and the project's `.worktreeinclude` – whose skilletor block this
+   *  sync created or changed, to be committed (spec §6.4): `.claude/.gitignore`,
+   *  `~/.claude/.gitignore`, `.worktreeinclude`. Absent when empty. */
   gitignoreUpdated?: string[];
 }
 

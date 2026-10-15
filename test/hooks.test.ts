@@ -462,7 +462,7 @@ test("k62: session-start asks once to commit a new .gitignore block, in the mess
     e.writeUserCfg({ sources: { mine: { local: src } } });
     writeFileSync(join(e.projectDir, ".claude/skilletor.json"), JSON.stringify({ install: { skills: ["foo@mine"] } }));
     const out = await runHook("session-start", { source: "startup", cwd: e.projectDir }, e.ctx);
-    assert.equal(out.systemMessage, "skilletor: 1 item(s) updated, .claude/.gitignore updated — commit it");
+    assert.equal(out.systemMessage, "skilletor: 1 item(s) updated, .claude/.gitignore, .worktreeinclude updated — commit them");
     assert.match(out.hookSpecificOutput?.additionalContext ?? "", /^- \.claude\/\.gitignore updated — commit it$/m);
     // Nothing changed since: no second hint, the hook stays silent.
     assert.deepEqual(await runHook("session-start", { source: "startup", cwd: e.projectDir }, e.ctx), {});

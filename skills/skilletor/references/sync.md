@@ -44,6 +44,11 @@ Every installed skill dir gets its own `.gitignore` (`*`); a marked block in
 `skilletor.json` and the `.gitignore` files — the report says `.claude/.gitignore updated —
 commit it` when a block is created or changed.
 
+A project's `.worktreeinclude` gets a fixed block naming every harness's installed paths, the
+lock and `skilletor.local.json`: Claude Code copies the gitignored files it matches into each
+worktree it creates, so agent worktrees have the installed items. Commit it as well; lines
+outside the block are the user's.
+
 - Ignoring never untracks: when sync writes or adopts a file git already tracks (committed
   by hand or while `false`), a warning per item gives the `git rm --cached` that untracks it.
 - User scope: blocks in `~/.claude` (lock, state dir, never `skilletor.json`) and

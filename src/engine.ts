@@ -8,7 +8,7 @@ import { hostname, platform, userInfo } from "node:os";
 import { existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import {
-  loadConfig, pathList, WILDCARD, type BackendKind, type BundleItem, type Harness, type ItemType, type LoadedConfig, type Origin,
+  HARNESSES, ITEM_TYPES, loadConfig, pathList, WILDCARD, type BackendKind, type BundleItem, type Harness, type ItemType, type LoadedConfig, type Origin,
   type ResolvedSource, type ScopeConfig, type WildcardItem,
 } from "./config.ts";
 import {
@@ -16,7 +16,7 @@ import {
 } from "./bundles.ts";
 import {
   defaultHermesHome, defaultMarkers, detectHarnesses, lockKey, parseLockKey, placeOutput, receivers, rootOf, rootOfKey, selectTargets, servedVia, supports,
-  targetGaps, allRoots, isBlockType, lacksLocalPrefix, type HarnessMarkers, type RootContext, type TargetSelection,
+  targetGaps, allRoots, isBlockType, lacksLocalPrefix, LAYOUTS, type HarnessMarkers, type RootContext, type TargetSelection,
 } from "./targets.ts";
 import {
   codexHookTrusted, inspectAgentsMd, parseRulesFile, pointerLines, projectDocLimit, rulesFileText, RULES_FILE, withBlock,
@@ -35,8 +35,8 @@ import { apply, isValidItemName, type PlanItem } from "./apply.ts";
 import { readLock, writeLock, type Lock, type LockEntry, type SkipReason } from "./lock.ts";
 import { State, type SourceRead } from "./state.ts";
 import {
-  CODEX_ENTRIES, gitTracked, hasBlock, isGitWorkTree, LOCAL_ENTRIES, PROJECT_CLAUDE_ENTRIES, SKILL_GITIGNORE, skillGitignorePath,
-  updateGitignore, withSkillGitignore,
+  blockEntries, CODEX_ENTRIES, gitTracked, hasBlock, isGitWorkTree, LOCAL_ENTRIES, PROJECT_CLAUDE_ENTRIES, SKILL_GITIGNORE,
+  skillGitignorePath, updateGitignore, updateWorktreeInclude, withSkillGitignore, WORKTREE_INCLUDE,
 } from "./gitignore.ts";
 import { briefingWarning, missingSkills, skillRoots, type BriefingMissing } from "./briefing.ts";
 import {
@@ -973,6 +973,19 @@ async function syncScopeRun(
         (rep.gitignoreUpdated ??= []).push(scopeLabel(scope, base, join(rootDir, ".gitignore")));
       }
     }
+    // The project's `.worktreeinclude` (spec §6.4, k124): what Claude Code copies into a
+    // worktree it creates; written while the project is in use, like its `.gitignore` block.
+    // A file skilletor cannot write never stops the sync.
+    if (scope === "project") {
+      try {
+        const change = updateWorktreeInclude({ dir: base, entries: worktreeIncludeEntries(rc), enabled: gitignoreOn && inUse });
+        if (change === "created" || change === "changed") {
+          (rep.gitignoreUpdated ??= []).push(scopeLabel(scope, base, join(base, WORKTREE_INCLUDE)));
+        }
+      } catch (err) {
+        rep.warnings.push(`${WORKTREE_INCLUDE} not updated: ${(err as Error).message}`);
+      }
+    }
   }
 
   // Managed paths git still tracks (spec §6.4): only what this run wrote or adopted, and
@@ -1047,6 +1060,30 @@ async function syncScopeRun(
 function projectInUse(targetDir: string, lock: Lock): boolean {
   return Object.keys(lock).length > 0 ||
     existsSync(join(targetDir, "skilletor.json")) || existsSync(join(targetDir, "skilletor.local.json"));
+}
+
+/**
+ * The `.worktreeinclude` block of a project (spec §6.4, k124): fixed entries, anchored at the
+ * project root – every project root a harness's items go to, whether or not this machine
+ * targets it: a skills root as a whole (each installed skill directory ignores itself), the
+ * `.local.` agents and rules, the Codex rules file – and the lock and the local config, so a
+ * sync in the worktree finds the copied files its own. Like the `.gitignore` blocks they do
+ * not follow items, local config or targets, so the committed file does not either.
+ */
+function worktreeIncludeEntries(rc: RootContext): string[] {
+  const at = (abs: string, suffix = ""): string => `/${toPosix(relative(rc.base, abs))}${suffix}`;
+  const claude = join(rc.base, ".claude");
+  const out = new Set([at(join(claude, "skilletor.lock.json")), at(join(claude, "skilletor.local.json"))]);
+  for (const h of HARNESSES) {
+    for (const type of ITEM_TYPES) {
+      const root = rootOf(rc, h, type);
+      if (root === undefined) continue;
+      if (isBlockType(h, type)) out.add(at(join(root, RULES_FILE)));
+      else if (type === "skill") out.add(at(join(root, "skills"), "/"));
+      else if (LAYOUTS[h].localTypes?.includes(type)) out.add(at(join(root, `${type}s`), "/**/.local.*"));
+    }
+  }
+  return [...out].sort();
 }
 
 /** A path for the commit hint and the tracked warning (spec §6.4): relative to the
@@ -1390,9 +1427,10 @@ interface Drift {
   sources: string[];
 }
 
-/** Every drift of a scope: targets, layout, declarations. Reads the lock, the config and at
- *  most one small file per root of a project not in use – no git, no network. `servedBy`
- *  (sync only): the other sources a bundle's entries are served by (spec §15.6). */
+/** Every drift of a scope: targets, layout, declarations. Reads the lock, the config, a
+ *  project's `.worktreeinclude` and at most one small file per root of a project not in use –
+ *  no git, no network. `servedBy` (sync only): the other sources a bundle's entries are
+ *  served by (spec §15.6). */
 function scopeDrift(
   ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig, harnesses: Harness[], lock: Lock,
   servedBy?: Map<string, string[]>,
@@ -1452,8 +1490,9 @@ function moveHermesHome(
  * file without the `.local.` prefix; a skill entry whose `.gitignore` is not skilletor's
  * while the switch is on, or is while it is off (by hash – with the switch off, a
  * `.gitignore` the source ships installs as shipped). A project not in use: a skilletor
- * block in one of its roots, one read per root. Skip entries, rule sections and unknown
- * harnesses own nothing to move.
+ * block in one of its roots, one read per root. Any project: a `.worktreeinclude` block that
+ * differs from the one a sync would write (k124), one read. Skip entries, rule sections and
+ * unknown harnesses own nothing to move.
  */
 function layoutDrift(ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig, lock: Lock): Drift[] {
   const gitignoreOn = scopeCfg.gitignore !== false;
@@ -1468,9 +1507,20 @@ function layoutDrift(ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig
       drift(gitignoreOn ? "gitignore" : "no-gitignore");
     }
   }
-  if (scope === "project" && !projectInUse(targetDirOf(ctx, scope), lock) &&
-    allRoots(rootContextOf(ctx, scope)).some((dir) => hasBlock(dir))) {
+  const inUse = scope === "project" && projectInUse(targetDirOf(ctx, scope), lock);
+  if (scope === "project" && !inUse && allRoots(rootContextOf(ctx, scope)).some((dir) => hasBlock(dir))) {
     out.push({ kind: "layout", id: "layout:unused-project", sources: [] });
+  }
+  // The project's `.worktreeinclude` block is not the one a sync writes (k124): edited, left
+  // in a project no longer in use, or missing beside installed items (a sync before k124). One
+  // read. Missing with nothing installed waits for the next sync: nothing to copy yet.
+  if (scope === "project") {
+    const rc = rootContextOf(ctx, scope);
+    const want = gitignoreOn && inUse ? worktreeIncludeEntries(rc) : [];
+    const have = blockEntries(join(rc.base, WORKTREE_INCLUDE));
+    if (have.join("\n") !== want.join("\n") && (have.length > 0 || Object.keys(lock).length > 0)) {
+      out.push({ kind: "layout", id: "layout:worktreeinclude", sources: [] });
+    }
   }
   return out;
 }

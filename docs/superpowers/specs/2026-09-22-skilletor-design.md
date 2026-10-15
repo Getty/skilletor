@@ -710,10 +710,10 @@ sync. (The first design listed every managed path; the block then followed machi
 | `<project>/.codex`, `$CODEX_HOME` | `agents/**/.local.*`, `skilletor-rules.md` | while the root holds managed Codex agents or the rules file (user: inside a work tree) |
 | `<project>/.agents`, `~/.agents` | – (skills carry their own) | never; a block left there is removed |
 
-Committed are `skilletor.json` and the `.gitignore` files; your own skills, agents and rules
-alongside stay version-controlled as usual. A block written by an earlier version (exact
-paths) is replaced on the first sync. Project blocks are written whether or not the
-project is a git repository (harmless, and a later `git init` finds them in place) – but
+Committed are `skilletor.json`, the `.gitignore` files and `.worktreeinclude` (below); your
+own skills, agents and rules alongside stay version-controlled as usual. A block written by
+an earlier version (exact paths) is replaced on the first sync. Project blocks are written
+whether or not the project is a git repository (harmless, and a later `git init` finds them in place) – but
 only while the project scope is **in use**: a project `skilletor.json` or
 `skilletor.local.json` exists, or the project lock still holds entries after the sync
 (items left to clean up). A lock without entries is deleted, never written as `{}` (both
@@ -724,8 +724,57 @@ to 0.2.0 wrote one there). Outside use nothing is written, and a skilletor block
 in a project root is removed – the file deleted when only the block remained – without
 a commit hint.
 
+**Worktrees** (k124). A git worktree is a fresh checkout, so the gitignored items of the
+project scope are missing there – and a plugin that resolves skills from
+`<cwd>/.claude/skills` (briefing) fails in an agent worktree. Claude Code copies into every
+worktree it creates with git (`--worktree`, subagents with `isolation: worktree`, desktop
+parallel sessions) the files that are gitignored and match `<repo>/.worktreeinclude`
+(gitignore syntax; a worktree a `WorktreeCreate` hook creates gets none). skilletor keeps a
+marked block there, of the same form as the `.gitignore` blocks, in the project root:
+
+```
+# >>> skilletor >>>
+/.agents/skills/
+/.claude/agents/**/.local.*
+/.claude/rules/**/.local.*
+/.claude/skilletor.local.json
+/.claude/skilletor.lock.json
+/.claude/skills/
+/.codex/agents/**/.local.*
+/.codex/skilletor-rules.md
+/.hermes/skills/
+# <<< skilletor <<<
+```
+
+- **Fixed entries**, like the `.gitignore` blocks: every project root of every harness
+  (derived from `LAYOUTS`), whether or not this machine targets it, so the committed file
+  does not follow items, local config or targets – teammates with other harnesses write the
+  same block. Entries are anchored at the project root. Matching an entry is not enough:
+  Claude Code copies only what is also gitignored, so a committed skill is never duplicated,
+  and `"gitignore": false` (nothing ignored) writes no block.
+- **Skills by their root.** An installed skill directory ignores itself (its own
+  `.gitignore`), so `git ls-files --ignored --directory` reports it as a wholly ignored
+  directory; Claude Code (2.1.300) looks into such a directory only when an entry names it
+  or a path below it (or a `**/` entry's first name lies in its path). `/.claude/skills/`
+  names a parent of every skill directory and covers the skills root itself when all of it
+  is ignored. It also copies gitignored files of the user's own under that root – what a
+  session in the worktree would want as well.
+- **The lock and the local config go along.** Without the lock a sync in the worktree finds
+  every copied file unowned and reports each as a conflict; with it the worktree is up to
+  date. `skilletor.local.json` keeps the worktree's declared set the checkout's.
+- **Written** while the project scope is in use (as the `.claude/.gitignore` block) and
+  `gitignore` is on; otherwise a block found there is removed and the file deleted when
+  only the block remained. Text outside the markers is never touched. Never in the user
+  scope. A `.worktreeinclude` skilletor cannot read or write (a directory, a permission)
+  is one warning (`.worktreeinclude not updated: …`); the sync goes on.
+- **`check`** counts a block that differs from the fixed one as layout drift: edited, left
+  in a project no longer in use (or with `gitignore` off), or missing while the lock holds
+  entries – a project synced before k124 gets its block in the next session. One read of
+  the file; a missing block beside an empty lock waits for the next sync.
+
 **Commit hint.** When sync creates a block or changes its content, the report says so and
-asks for the file to be committed (`.claude/.gitignore updated — commit it`). With fixed
+asks for the file to be committed (`.claude/.gitignore updated — commit it`,
+`.worktreeinclude updated — commit it`; `gitignoreUpdated` in the JSON report). With fixed
 entries this happens once per root: on the first sync, or on the switch from the per-path
 block.
 
@@ -1156,14 +1205,16 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
   session: an agent or rule entry (Claude, or a Codex agent) whose files lack the
   `.local.` prefix; with `gitignore` enabled a skill entry without skilletor's
   `skills/<name>/.gitignore`, with it disabled one that still has it (told apart by its lock
-  hash – with the switch off a `.gitignore` the source ships installs as shipped); or a
-  project that is not in use (§6.4) but holds a skilletor block in one of its roots. And
+  hash – with the switch off a `.gitignore` the source ships installs as shipped); a
+  project that is not in use (§6.4) but holds a skilletor block in one of its roots; or a
+  project's `.worktreeinclude` block that is not the fixed one (§6.4, k124). And
   when the lock does not match what the config declares (k70): an explicit item an active
   target lacks, or holds from another source; an entry no explicit item, wildcard or
   bundle declares any more; a wildcard or bundle with nothing installed; an entry a failed
   sync left partial (§6.2, k71). And when a scope's render inputs changed (k76, below). The
   test stays offline and read-only: the lock, the state dir, two existence tests, at most
-  one small read per root of a project not in use, and for a project in use its git remote
+  one small read per root of a project not in use, one of the project's `.worktreeinclude`,
+  and for a project in use its git remote
   (`git remote get-url origin`, a local config read).
 - **What a sync cannot reach costs one sync, not one per session** (k70). Drift a sync
   leaves in place although every source it needed was resolved and scanned – an item the

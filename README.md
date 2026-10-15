@@ -440,8 +440,14 @@ rules keeps them out of commits:
   file. Only projects that use skilletor (a `skilletor.json` or `skilletor.local.json`, or
   items still installed) get a block; a repository you merely open stays untouched.
 
-Commit `skilletor.json` and the `.gitignore` files; the report asks you to once, when sync
-creates or changes a block. Your own hand-written skills, agents and rules stay
+- **`<project>/.worktreeinclude`** gets a fixed block too, naming the installed skill,
+  agent and rule paths of every harness, the lock and `skilletor.local.json`. Claude Code
+  copies the gitignored files it matches into each worktree it creates (`--worktree`,
+  subagents with `isolation: worktree`, desktop parallel sessions), so agent worktrees have
+  the project's installed items without a sync. Your own lines in that file stay untouched.
+
+Commit `skilletor.json`, the `.gitignore` files and `.worktreeinclude`; the report asks you
+to once, when sync creates or changes a block. Your own hand-written skills, agents and rules stay
 version-controlled and are never touched — only don't name your own files `.local.*` in
 `agents/` or `rules/`, that prefix is skilletor's. A hand-written `agents/foo.md` next to an
 installed agent `foo` is reported as a conflict (two agents would share the name);

@@ -664,7 +664,7 @@ test("k62: the first sync after the upgrade migrates both harnesses; the .agents
     assert.equal(readFileSync(join(p, ".codex/.gitignore"), "utf8"), BLOCK("agents/**/.local.*", "skilletor-rules.md"));
     assert.equal(readFileSync(join(p, ".claude/.gitignore"), "utf8"),
       BLOCK("agents/**/.local.*", "rules/**/.local.*", "skilletor.local.json", "skilletor.lock.json"));
-    assert.deepEqual(r.scopes[0]!.gitignoreUpdated, [".claude/.gitignore", ".codex/.gitignore"]);
+    assert.deepEqual(r.scopes[0]!.gitignoreUpdated, [".claude/.gitignore", ".codex/.gitignore", ".worktreeinclude"]);
     assert.match(reportText(r), /^ {2}\.codex\/\.gitignore updated — commit it$/m);
   } finally {
     e.cleanup();

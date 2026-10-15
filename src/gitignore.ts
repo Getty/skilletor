@@ -8,6 +8,8 @@
 // which root gets which entries. Content outside the block is untouched; the block is
 // rewritten idempotently (no change → no write). A block with no entries, or with
 // gitignore disabled, is removed, and the file is deleted if only the block remained.
+// The project root's `.worktreeinclude` gets a block of the same form (k124), listing what
+// Claude Code copies into a new worktree; the engine decides its entries.
 // `gitTracked` answers which managed paths git still tracks, for the report's warning. Both
 // questions are about the repository git finds from the directory, never one an exported GIT_DIR
 // names (k91).
@@ -34,7 +36,8 @@ export const LOCAL_ENTRIES = ["agents/**/.local.*", "rules/**/.local.*"];
 export const CODEX_ENTRIES = ["agents/**/.local.*", "skilletor-rules.md"];
 
 export interface GitignoreOptions {
-  /** The directory whose `.gitignore` holds the block (a target root of either scope). */
+  /** The directory whose `.gitignore` holds the block (a target root of either scope), or
+   *  the project root for `.worktreeinclude`. */
   dir: string;
   /** The block's entries, relative to `dir`; none removes the block. */
   entries: string[];
@@ -46,7 +49,31 @@ export interface GitignoreOptions {
 export type BlockChange = "created" | "changed" | "removed" | "unchanged";
 
 export function updateGitignore(opts: GitignoreOptions): BlockChange {
-  const path = join(opts.dir, ".gitignore");
+  return updateBlockFile(join(opts.dir, ".gitignore"), opts);
+}
+
+/** The file at a project root whose gitignored matches Claude Code copies into every worktree
+ *  it creates with git (spec §6.4, k124); its block is written like a `.gitignore`'s. */
+export const WORKTREE_INCLUDE = ".worktreeinclude";
+
+/** The block of `<dir>/.worktreeinclude` (`dir`: the project root), by `updateGitignore`'s rules. */
+export function updateWorktreeInclude(opts: GitignoreOptions): BlockChange {
+  return updateBlockFile(join(opts.dir, WORKTREE_INCLUDE), opts);
+}
+
+/** The entries of the skilletor block in the file at `path`; none for a missing or unreadable
+ *  file, or one without a block (the `check` test, spec §6.4). */
+export function blockEntries(path: string): string[] {
+  try {
+    const lines = readFileSync(path, "utf8").split("\n");
+    const { begin, end, hasBlock } = blockOf(lines);
+    return hasBlock ? lines.slice(begin + 1, end) : [];
+  } catch {
+    return [];
+  }
+}
+
+function updateBlockFile(path: string, opts: GitignoreOptions): BlockChange {
   const existed = existsSync(path);
   const existing = existed ? readFileSync(path, "utf8") : "";
   const lines = existing.length ? existing.split("\n") : [];

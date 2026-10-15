@@ -380,8 +380,11 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
   const rules = readFileSync(join(codexHome, "skilletor-rules.md"), "utf8");
   assert.match(rules, /^<!-- skilletor:rules scope=user -->\n[\s\S]*<!-- skilletor:rule style source=s -->\nUse tabs\.\n$/);
   assert.ok(out.hookSpecificOutput.additionalContext.startsWith(rules + "\nskilletor synced items:\n"));
-  // k62: the new project block asks for a commit, to the user and to the model.
-  assert.match(out.systemMessage, /\.claude\/\.gitignore updated — commit it/);
+  // k62: the new project block asks for a commit, to the user and to the model; k124: so
+  // does the project's new .worktreeinclude, which names the Codex skills root.
+  assert.match(out.systemMessage, /\.claude\/\.gitignore, \.worktreeinclude updated — commit them/);
+  assert.match(out.hookSpecificOutput.additionalContext, /^- \.worktreeinclude updated — commit it$/m);
+  assert.match(readFileSync(join(repo, ".worktreeinclude"), "utf8"), /^\/\.agents\/skills\/$/m);
   assert.match(out.hookSpecificOutput.additionalContext, /^- \.claude\/\.gitignore updated — commit it$/m);
   assert.equal(existsSync(join(realpathSync(repo), ".agents/skills/bar/SKILL.md")), true);
   assert.equal(existsSync(join(repo, ".claude/skills")), false); // Claude not in use here
@@ -541,14 +544,14 @@ test("a committed project drops skilletor: sync leaves only deletions of tracked
   assert.equal(first.status, 0, first.stderr);
   git("add", "-A");
   git("commit", "-qm", "use skilletor");
-  assert.deepEqual(git("ls-files").split("\n").filter(Boolean), [".claude/.gitignore", ".claude/skilletor.json"]);
+  assert.deepEqual(git("ls-files").split("\n").filter(Boolean), [".claude/.gitignore", ".claude/skilletor.json", ".worktreeinclude"]);
 
   rmSync(join(repo, ".claude", "skilletor.json"));
   const drop = runCli(["sync", "--project-dir", repo], env);
   assert.equal(drop.status, 0, drop.stderr);
   assert.match(drop.stdout, /^ {2}- skills\/foo \(removed\)$/m);
   assert.doesNotMatch(drop.stdout, /commit it/);
-  assert.equal(git("status", "--porcelain"), " D .claude/.gitignore\n D .claude/skilletor.json\n"); // no ?? lock
+  assert.equal(git("status", "--porcelain"), " D .claude/.gitignore\n D .claude/skilletor.json\n D .worktreeinclude\n"); // no ?? lock
   assert.deepEqual(readdirSync(join(repo, ".claude")), []);
 
   const st = runCli(["status", "--json", "--project-dir", repo], env);

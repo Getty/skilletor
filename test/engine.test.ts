@@ -246,7 +246,7 @@ test("k62: the first sync after the upgrade moves old-layout files and replaces 
     assert.deepEqual(Object.keys(lock["agents/a"]!.files), ["agents/.local.a.md"]);
     assert.deepEqual(Object.keys(lock["rules/r"]!.files), ["rules/.local.r.md"]);
     assert.equal(readFileSync(join(claude, ".gitignore"), "utf8"), "own\n\n" + PROJECT_BLOCK);
-    assert.deepEqual(r.scopes[0]!.gitignoreUpdated, [".claude/.gitignore"]);
+    assert.deepEqual(r.scopes[0]!.gitignoreUpdated, [".claude/.gitignore", ".worktreeinclude"]);
 
     const again = await sync(e.ctx, { scope: "project" });
     assert.equal(reportText(again), "");
@@ -400,7 +400,7 @@ test("k62: gitignore false writes no block and no skill .gitignore; the .local. 
     const on = await sync(e.ctx, { scope: "project" });
     assert.deepEqual(gitignores().sort(), [".gitignore", join("skills", "foo", ".gitignore")]);
     assert.deepEqual(on.scopes[0]!.updated.map((i) => i.key), ["skills/foo"]);
-    assert.deepEqual(on.scopes[0]!.gitignoreUpdated, [".claude/.gitignore"]);
+    assert.deepEqual(on.scopes[0]!.gitignoreUpdated, [".claude/.gitignore", ".worktreeinclude"]);
 
     // Off again: both go (no commit hint for a removal), nothing is renamed.
     e.writeCfg("project", { install: K62_INSTALL, gitignore: false });
@@ -446,10 +446,10 @@ test("k62: the commit hint appears when a block is created or changed, never whe
     const gi = join(e.projectDir, ".claude/.gitignore");
 
     const first = await sync(e.ctx, { scope: "project" });
-    assert.deepEqual(first.scopes[0]!.gitignoreUpdated, [".claude/.gitignore"]);
+    assert.deepEqual(first.scopes[0]!.gitignoreUpdated, [".claude/.gitignore", ".worktreeinclude"]);
     assert.match(reportText(first), /^ {2}\.claude\/\.gitignore updated — commit it$/m);
     const hook = reportHook(first);
-    assert.match(hook.systemMessage ?? "", /^skilletor: 1 item\(s\) updated, \.claude\/\.gitignore updated — commit it$/);
+    assert.match(hook.systemMessage ?? "", /^skilletor: 1 item\(s\) updated, \.claude\/\.gitignore, \.worktreeinclude updated — commit them$/);
     assert.match(hook.additionalContext ?? "", /^- \.claude\/\.gitignore updated — commit it$/m);
 
     // Items, files and vars change: the committed .gitignore does not.
@@ -712,7 +712,7 @@ test("k65: a project skilletor.json, even empty, or skilletor.local.json alone p
     e.writeCfg("project", {});
     const first = await sync(e.ctx);
     assert.equal(readFileSync(gi, "utf8"), PROJECT_BLOCK);
-    assert.deepEqual(projectOf(first).gitignoreUpdated, [".claude/.gitignore"]);
+    assert.deepEqual(projectOf(first).gitignoreUpdated, [".claude/.gitignore", ".worktreeinclude"]); // k124: in use
     rmSync(join(e.projectDir, ".claude/skilletor.json"));
     e.writeCfg("local", {});
     const local = await sync(e.ctx);
@@ -721,6 +721,7 @@ test("k65: a project skilletor.json, even empty, or skilletor.local.json alone p
     rmSync(join(e.projectDir, ".claude/skilletor.local.json"));
     const none = await sync(e.ctx);
     assert.equal(existsSync(gi), false);
+    assert.equal(existsSync(join(e.projectDir, ".worktreeinclude")), false);
     assert.equal(projectOf(none).gitignoreUpdated, undefined);
   } finally {
     e.cleanup();

@@ -20,6 +20,14 @@ Revision history for skilletor
     with `path` is a config error for skilletor 0.4.2 and earlier.
   - `skilletor add` of a GitHub link into a directory (`.../tree/<ref>/<dir>`)
     sets `ref` and `path` instead of being refused.
+  - Agent worktrees get the project's installed skills, agents and rules. A
+    project that uses skilletor gets a fixed block in `.worktreeinclude`
+    naming the paths skilletor installs to, its lock and
+    `skilletor.local.json`; Claude Code copies the gitignored files it matches
+    into every worktree it creates (`--worktree`, subagents with `isolation:
+    worktree`, desktop parallel sessions). Commit the file once, when the
+    report asks; your own lines in it stay untouched. A project synced before
+    gets the block in its next session.
 
 0.4.2     2026-10-06 05:28:16Z
   - Windows: hooks and the CLI start without Git Bash. `bin/skilletor.exe`, a
