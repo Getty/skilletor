@@ -11228,11 +11228,13 @@ async function syncBackground(input, ctx) {
     state.putPendingReport(key, output);
   }
 }
-function defaultBackground(ctx) {
+function defaultBackground(ctx, spawnChild = spawn) {
   if (!ctx.binPath) return;
-  const child = spawn(process.execPath, [ctx.binPath, "hook", "__sync-background"], {
+  const child = spawnChild(process.execPath, [ctx.binPath, "hook", "__sync-background"], {
     detached: true,
     stdio: "ignore",
+    windowsHide: true,
+    // detached on Windows means a console of its own: keep it hidden (k133)
     env: {
       ...process.env,
       SKILLETOR_PROJECT_DIR: ctx.projectDir ?? ""

@@ -32,6 +32,8 @@ Revision history for skilletor
     worktree`, desktop parallel sessions). Commit the file once, when the
     report asks; your own lines in it stay untouched. A project synced before
     gets the block in its next session.
+  - Windows: the background sync a prompt starts runs with its window
+    hidden, so no console window can flash up.
 
 0.4.2     2026-10-06 05:28:16Z
   - Windows: hooks and the CLI start without Git Bash. `bin/skilletor.exe`, a

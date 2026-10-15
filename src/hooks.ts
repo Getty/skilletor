@@ -13,7 +13,7 @@
 // the Codex rules files, ahead of its report (spec §14.8). The Hermes plugin runs the
 // same two events with `--harness hermes` and hands the output on (spec §16.4); while
 // `hermes` is no target, its SessionStart answer says how to opt in (spec §16.2).
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { loadConfig, type Harness } from "./config.ts";
@@ -247,11 +247,16 @@ async function syncBackground(input: HookInput, ctx: HookContext): Promise<void>
   }
 }
 
-function defaultBackground(ctx: HookContext): void {
+/** The spawn `defaultBackground` uses; a parameter so a test can pin the call. */
+export type BackgroundSpawn = (command: string, args: string[], options: SpawnOptions) => { unref(): void };
+
+/** Start `hook __sync-background` as a detached node process (the default `background`). */
+export function defaultBackground(ctx: HookContext, spawnChild: BackgroundSpawn = spawn): void {
   if (!ctx.binPath) return;
-  const child = spawn(process.execPath, [ctx.binPath, "hook", "__sync-background"], {
+  const child = spawnChild(process.execPath, [ctx.binPath, "hook", "__sync-background"], {
     detached: true,
     stdio: "ignore",
+    windowsHide: true, // detached on Windows means a console of its own: keep it hidden (k133)
     env: {
       ...process.env,
       SKILLETOR_PROJECT_DIR: ctx.projectDir ?? "",

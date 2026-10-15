@@ -999,7 +999,7 @@ message naming the option, nothing touched.
 | Event | Behavior |
 |---|---|
 | `SessionStart` (`startup`, `resume`) | synchronous: `check` all sources in parallel (5 s network timeout per source) and the config against the lock (§14.3), `sync` on change; untrusted sources are named without a sync (§4.3) |
-| `UserPromptSubmit` | not due → return immediately. Due → start a detached background `sync`, return at once. If a `pending-report.json` exists → emit it as `additionalContext` and delete it |
+| `UserPromptSubmit` | not due → return immediately. Due → start a detached background `sync` (`windowsHide`: no console window on Windows, k133), return at once. If a `pending-report.json` exists → emit it as `additionalContext` and delete it |
 
 - With no change and no source awaiting trust, the plugin is silent.
 - With a change: one `systemMessage` line for the user, a terse `additionalContext` for

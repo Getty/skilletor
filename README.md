@@ -45,8 +45,9 @@ Two hooks drive it:
 - **SessionStart** — check every source (5s timeout each) and compare the config with what
   is installed; on a change, sync and report. An untrusted project source is named every
   session until you trust it.
-- **UserPromptSubmit** — when the throttle is due, kick off a detached background sync and
-  deliver its result on a later prompt; otherwise return instantly and silent.
+- **UserPromptSubmit** — when the throttle is due, kick off a detached background sync (no
+  console window on Windows) and deliver its result on a later prompt; otherwise return
+  instantly and silent.
 
 Skills become usable immediately; agents and rules activate after `/reload-plugins` or a
 restart — the report says so per item.

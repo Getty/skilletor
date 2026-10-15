@@ -7,7 +7,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
-import { runHook, type HookContext, type HookOutput } from "../src/hooks.ts";
+import { defaultBackground, runHook, type HookContext, type HookOutput } from "../src/hooks.ts";
 import { State } from "../src/state.ts";
 import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
@@ -154,6 +154,33 @@ test("user-prompt-submit spawns a background sync only when due", async () => {
   } finally {
     e.cleanup();
   }
+});
+
+// Asserts (k133): the default background trigger starts `<bin> hook __sync-background` with the
+// running node, detached and unreferenced, with no stdio, the project in SKILLETOR_PROJECT_DIR –
+// and windowsHide, so a background sync on Windows opens no console window. Without a binPath
+// it starts nothing.
+test("k133: the default background spawn is detached, silent and hides its window", () => {
+  const calls: { command: string; args: string[]; options: Record<string, unknown> }[] = [];
+  let unrefs = 0;
+  const fake = (command: string, args: string[], options: object) => {
+    calls.push({ command, args, options: options as Record<string, unknown> });
+    return { unref: () => void unrefs++ };
+  };
+  const ctx = { home: "/h", projectDir: "/p/proj", binPath: "/bin/skilletor.js" } as HookContext;
+  defaultBackground(ctx, fake);
+  assert.equal(calls.length, 1);
+  const { command, args, options } = calls[0]!;
+  assert.equal(command, process.execPath);
+  assert.deepEqual(args, ["/bin/skilletor.js", "hook", "__sync-background"]);
+  assert.equal(options.detached, true);
+  assert.equal(options.stdio, "ignore");
+  assert.equal(options.windowsHide, true);
+  assert.equal((options.env as Record<string, string>).SKILLETOR_PROJECT_DIR, "/p/proj");
+  assert.equal(unrefs, 1);
+
+  defaultBackground({ ...ctx, binPath: undefined }, fake);
+  assert.equal(calls.length, 1);
 });
 
 test("checkInterval: 0 disables the in-session check entirely", async () => {
