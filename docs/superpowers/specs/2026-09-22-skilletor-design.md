@@ -103,8 +103,10 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
 - `targets` (optional, user, project or local): which agent harnesses to install for,
   `["claude"]`, `["codex"]` or both. Default: auto-detected. Merge rule in §14.
 - Duplicate target names within one type and scope (`foo@shared` + `foo@team`) are a
-  config error. So is the same wildcard (`*@shared` under one type) declared twice in
-  one scope.
+  config error. Names equal ignoring case are one name here, as everywhere an item name meets
+  a directory (§4.1, k135): `Foo@shared` + `foo@team` install into one directory on macOS and
+  Windows, so they are this error on every platform. So is the same wildcard (`*@shared`
+  under one type) declared twice in one scope.
 - **Wildcards:** `"*@source"` (or `"rule:*@source"`) in `install.skills|agents|rules`
   declares every item of that type in the source. It is stored as written and expanded
   at sync time against the resolved source's catalog (see 6.1), so items added upstream
@@ -127,6 +129,9 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
     `*-style` both matching `perl-style`): installed once, silently;
   - two wildcards (different sources) yielding the same name: that name is skipped with
     a warning (an already installed copy stays as it is); all other items proceed.
+  - "The same name" is the same ignoring case (k135): another source's `foo` beside an
+    explicit `Foo` is ignored with the warning, and wildcards of two sources yielding `Foo`
+    and `foo` skip both (`rule "Foo" and "foo" offered by *@a and *@b; skipped`).
 
 **Merging sources:** user sources are usable in project configs. Same name: fields from
 the user or local config merge *over* the project definition – but a project can never
@@ -208,6 +213,19 @@ builds nothing for it, so an installed copy stays (§6.6). The name counts as fo
 `.claude/` item of that name is skipped as below. Under `.claude/` the pair is no error: the
 first of the two, `<name>.md`, is taken silently.
 
+**One name ignoring case** (k135). Names equal ignoring case are one name within a type, on
+every platform: `skills/Foo` and `skills/foo`, `agents/Bar.md` and `agents/bar.md.njk`
+install into one directory or file on a case-insensitive file system (macOS, Windows), and a
+lock must be the same everywhere. Such a group is an error of each of its spellings – a
+config names one of them exactly – scoped like the pair above: the error names every
+directory (a skill) or file (an agent or rule) in sorted order and why (`found in 2
+directories, names equal ignoring case: skills/Foo and skills/foo`; `both agents/Bar.md and
+agents/bar.md.njk exist, names equal ignoring case`), the item's files are all of theirs,
+and every other item is offered. The comparison is k127's (`path`, below). A `plugin.json`
+skill, whose duplicate fails the scan, does so for a name found ignoring case as well; a
+`.claude/` item whose name its type already has ignoring case is skipped silently, and two
+spellings within `.claude/` are this error.
+
 Inside a skill the same holds for any file (k113): `f` beside `f.njk` – `SKILL.md` and
 `SKILL.md.njk`, `scripts/x.sh` and `scripts/x.sh.njk` – both install as `f`, so the skill
 carries an error naming every such pair in sorted order (`both skills/x/SKILL.md and
@@ -226,7 +244,8 @@ added to the ones found under `skills/<name>/`; the same directory reached both 
 once. Everything else in the plugin (`agents`, `commands`, `hooks`, MCP servers) is ignored.
 Errors make the source unresolvable (§6.1): a path that is absolute, contains `..`, is a
 symlink (dangling included), does not exist, is not a directory, or is the source root
-itself (`""`, `.` – its name would be the cache directory's); two different directories yielding the same skill name;
+itself (`""`, `.` – its name would be the cache directory's); two different directories yielding the same skill name,
+ignoring case (k135: `skill "Foo" found twice, names equal ignoring case: skills/foo and extra/Foo`);
 `plugin.json` that is not valid JSON or whose `skills` is neither a string nor an array of
 strings. A `plugin.json` without `skills`, or whose top level is not an object, is ignored.
 

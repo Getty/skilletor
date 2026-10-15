@@ -220,3 +220,96 @@ test("k113: a skill with f beside f.njk carries an error naming both, the scan g
     tmp.cleanup();
   }
 });
+
+// k135: k127 made names equal ignoring case one name for a source's `path` alone. The default
+// layout on Linux could still offer skills/Foo beside skills/foo, agents/Bar.md beside
+// agents/bar.md.njk, and plugin.json and .claude/ dropped exact-name duplicates only, so two
+// items installed into one directory on macOS and Windows and a lock differed per platform.
+// Asserts (maintainer, 2026-10-15): within one catalog such a group is the duplicate-name error
+// of its context – in skills/, agents/ and rules/ each spelling is an item carrying an error
+// naming every directory or file in sorted order (k100's and k127's wording, "names equal
+// ignoring case" added), its files the group's; plugin.json, whose own list it is, fails the
+// scan; a .claude/ item whose name ignoring case is already found is skipped silently, and two
+// .claude/ spellings are the item error; other types and other names are offered as before.
+function caseSource(files: Record<string, string>): { dir: string; cleanup: () => void } {
+  const tmp = makeTmpDir();
+  for (const [rel, content] of Object.entries(files)) {
+    mkdirSync(join(tmp.dir, rel, ".."), { recursive: true });
+    writeFileSync(join(tmp.dir, rel), content);
+  }
+  return { dir: tmp.dir, cleanup: () => tmp.cleanup() };
+}
+const ITEM = (n: string) => `---\ndescription: ${n}\n---\nbody\n`;
+const caseRows = (dir: string) => scan(dir).items
+  .map((i) => [`${i.type}:${i.name}`, i.error ?? null, i.dir ?? null, i.files] as const)
+  .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+
+test("k135: names equal ignoring case in skills/, agents/ and rules/ are an error of each spelling", () => {
+  const s = caseSource({
+    "skills/Foo/SKILL.md": ITEM("Foo"), "skills/foo/SKILL.md": ITEM("foo"), "skills/ok/SKILL.md": ITEM("ok"),
+    "agents/Bar.md": ITEM("Bar"), "agents/bar.md.njk": ITEM("bar"), "agents/x.md": ITEM("x"), "agents/r.md": ITEM("r"),
+    "agents/Q.md": ITEM("Q"), "agents/q.md": ITEM("q"), "agents/q.md.njk": ITEM("q"),
+    "rules/R.md": ITEM("R"), "rules/r.md": ITEM("r"),
+  });
+  try {
+    const skills = "found in 2 directories, names equal ignoring case: skills/Foo and skills/foo";
+    const bar = "both agents/Bar.md and agents/bar.md.njk exist, names equal ignoring case";
+    const q = "agents/Q.md, agents/q.md and agents/q.md.njk exist, names equal ignoring case";
+    const rules = "both rules/R.md and rules/r.md exist, names equal ignoring case";
+    const skillFiles = ["skills/Foo/SKILL.md", "skills/foo/SKILL.md"];
+    assert.deepEqual(caseRows(s.dir), [
+      ["agent:Bar", bar, null, ["agents/Bar.md", "agents/bar.md.njk"]],
+      ["agent:Q", q, null, ["agents/Q.md", "agents/q.md", "agents/q.md.njk"]],
+      ["agent:bar", bar, null, ["agents/Bar.md", "agents/bar.md.njk"]],
+      ["agent:q", q, null, ["agents/Q.md", "agents/q.md", "agents/q.md.njk"]],
+      ["agent:r", null, null, ["agents/r.md"]],
+      ["agent:x", null, null, ["agents/x.md"]],
+      ["rule:R", rules, null, ["rules/R.md", "rules/r.md"]],
+      ["rule:r", rules, null, ["rules/R.md", "rules/r.md"]],
+      ["skill:Foo", skills, null, skillFiles],
+      ["skill:foo", skills, null, skillFiles],
+      ["skill:ok", null, "skills/ok", ["skills/ok/SKILL.md"]],
+    ]);
+  } finally {
+    s.cleanup();
+  }
+});
+
+test("k135: plugin.json fails the scan on a name found ignoring case; .claude/ skips it or makes it an item error", () => {
+  const plugin = caseSource({
+    "skills/foo/SKILL.md": ITEM("foo"), "extra/Foo/SKILL.md": ITEM("Foo"),
+    ".claude-plugin/plugin.json": JSON.stringify({ skills: ["extra/Foo"] }),
+  });
+  try {
+    assert.throws(() => scan(plugin.dir), (e: unknown) => {
+      assert.ok(e instanceof CatalogError, String(e));
+      assert.equal((e as Error).message, `${join(plugin.dir, ".claude-plugin", "plugin.json")}: skill "Foo" found twice, ` +
+        `names equal ignoring case: skills/foo and extra/Foo`);
+      return true;
+    });
+  } finally {
+    plugin.cleanup();
+  }
+  const claude = caseSource({
+    "skills/foo/SKILL.md": ITEM("foo"), "agents/k.md": ITEM("k"),
+    ".claude/skills/Foo/SKILL.md": ITEM("Foo"), ".claude/agents/K.md": ITEM("K"),
+    ".claude/skills/Baz/SKILL.md": ITEM("Baz"), ".claude/skills/baz/SKILL.md": ITEM("baz"),
+    ".claude/agents/A.md": ITEM("A"), ".claude/agents/a.md": ITEM("a"),
+    ".claude/rules/m.md": ITEM("m"), ".claude/rules/m.md.njk": ITEM("m"),
+  });
+  try {
+    const baz = "found in 2 directories, names equal ignoring case: .claude/skills/Baz and .claude/skills/baz";
+    const a = "both .claude/agents/A.md and .claude/agents/a.md exist, names equal ignoring case";
+    assert.deepEqual(caseRows(claude.dir), [
+      ["agent:A", a, null, [".claude/agents/A.md", ".claude/agents/a.md"]],
+      ["agent:a", a, null, [".claude/agents/A.md", ".claude/agents/a.md"]],
+      ["agent:k", null, null, ["agents/k.md"]],
+      ["rule:m", null, ".claude/rules", [".claude/rules/m.md"]],
+      ["skill:Baz", baz, null, [".claude/skills/Baz/SKILL.md", ".claude/skills/baz/SKILL.md"]],
+      ["skill:baz", baz, null, [".claude/skills/Baz/SKILL.md", ".claude/skills/baz/SKILL.md"]],
+      ["skill:foo", null, "skills/foo", ["skills/foo/SKILL.md"]],
+    ]);
+  } finally {
+    claude.cleanup();
+  }
+});

@@ -83,7 +83,9 @@ work too, the skills their `.claude-plugin/plugin.json` lists installed as `skil
 own `.claude/skills/<name>/`, `.claude/agents/<name>.md[.njk]` and `.claude/rules/<name>.md[.njk]`
 install like published ones (`skilletor add Getty/karr`), read last, best effort: a name
 found above wins; a symlink and skilletor's installed copies (`.local.` files, a skill
-carrying skilletor's `.gitignore`) are skipped.
+carrying skilletor's `.gitignore`) are skipped. Names differing only in case (`Foo`, `foo`)
+are one name everywhere — in a source an error of each, in two install entries or two
+sources' offers the same-name conflict — as macOS and Windows install both into one place.
 
 A repo with its skills elsewhere (by category, no `plugin.json`) offers nothing that way: set
 `path` on its source entry — a directory or a list, relative to the repo root —

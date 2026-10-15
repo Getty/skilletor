@@ -41,7 +41,7 @@
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join, posix, relative } from "node:path";
 import { innerSegments, toPosix } from "./fsutil.ts";
-import type { ItemType } from "./config.ts";
+import { nameKey, type ItemType } from "./config.ts";
 import { BundleError, parseBundle, type BundleDef } from "./bundles.ts";
 import { SKILL_GITIGNORE } from "./gitignore.ts";
 
@@ -60,9 +60,9 @@ export interface CatalogItem {
    *  `rules`). Its files install under `skills/<name>/`, `agents/`, `rules/` (render.ts). */
   dir?: string;
   /** Why the item cannot be built: both `<name>.md` and `<name>.md.njk` exist (k100), a
-   *  skill holds `f` beside `f.njk` (k113), or a source's `path` yields the name from several
-   *  directories, ignoring case (k126, k127; no `dir` then). That error belongs to the item, never to the scan
-   *  (spec §4.1); `files` holds both, or every directory's. */
+   *  skill holds `f` beside `f.njk` (k113), or the name, ignoring case, comes from several
+   *  directories or files of one type (k126, k127, k135; no `dir` then). That error belongs to
+   *  the item, never to the scan (spec §4.1); `files` holds every file of them. */
   error?: string;
 }
 
@@ -171,6 +171,48 @@ function itemName(fileName: string): string | undefined {
   return m ? m[1] : undefined;
 }
 
+/** `a`, `a and b`, `a, b and c`. */
+function listed(xs: string[]): string {
+  return xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`;
+}
+
+/** The error of skills one name comes from several directories of (k126, k127). */
+function inDirs(where: string[], why: string): string {
+  return `found in ${where.length} directories${why}: ${listed(where)}`;
+}
+
+/** The error of an agent or rule one name comes from several files of (k100, k135). */
+function bothExist(where: string[], why: string): string {
+  return `${where.length === 2 ? "both " : ""}${listed(where)} exist${why}`;
+}
+
+/**
+ * `items` of one type with one item per name ignoring case (k127, k135), in first-seen order.
+ * Names equal ignoring case are one name – they install into one directory or file on a
+ * case-insensitive file system (macOS, Windows) – on every platform, so a lock is the same
+ * everywhere. A name alone keeps its item; a name found more than once is an error of each of
+ * its spellings, as a config names one of them exactly: `error` gets where they lie (a
+ * skill's directory, an agent's or rule's file) in sorted order and why, `files` are all of
+ * theirs, and no `dir` is set.
+ */
+function oneName(items: CatalogItem[], error: (where: string[], why: string) => string): CatalogItem[] {
+  const groups = new Map<string, CatalogItem[]>();
+  for (const item of items) groups.set(nameKey(item.name), [...(groups.get(nameKey(item.name)) ?? []), item]);
+  const out: CatalogItem[] = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      out.push(group[0]!);
+      continue;
+    }
+    const names = [...new Set(group.map((i) => i.name))];
+    const where = group.map((i) => (i.type === "skill" ? i.dir! : i.files[0]!)).sort();
+    const why = names.length > 1 ? ", names equal ignoring case" : "";
+    const files = group.flatMap((i) => i.files).sort();
+    for (const name of names) out.push({ type: group[0]!.type, name, files: [...files], error: error(where, why) });
+  }
+  return out;
+}
+
 /** The catalog of the source tree at `dir`. With `paths` – a source entry's `path` (spec §3,
  *  §4.1; k126) – the items are the skills lying beneath those paths and nothing else: the
  *  layout's own directories, plugin.json, `.claude/` and bundles are not read. */
@@ -183,7 +225,7 @@ export function scan(dir: string, paths?: string[]): Catalog {
     if (!existsSync(typeDir)) continue;
     noSymlink(typeDir);
 
-    const byName = new Map<string, string[]>(); // an agent's or rule's file(s), per name
+    const found: CatalogItem[] = []; // a skill per directory, an agent or rule per file
     for (const entry of readdirSync(typeDir)) {
       const p = join(typeDir, entry);
       const st = noSymlink(p);
@@ -192,22 +234,18 @@ export function scan(dir: string, paths?: string[]): Catalog {
         if (!st.isDirectory()) continue;
         const file = skillFile(p);
         if (!file) continue;
-        items.push(skillItem(dir, p, file));
+        found.push(skillItem(dir, p, file));
       } else {
         if (!st.isFile()) continue;
         const name = itemName(entry);
         if (name === undefined) continue;
-        byName.set(name, [...(byName.get(name) ?? []), toPosix(relative(dir, p))]);
+        found.push({ type, name, files: [toPosix(relative(dir, p))] });
       }
     }
     // Both `<name>.md` and `<name>.md.njk` is an error of that item, like a bundle's `.yaml`
-    // beside its `.yml` (spec §4.1, §15.4).
-    for (const [name, files] of byName) {
-      files.sort();
-      items.push(files.length > 1
-        ? { type, name, files, error: `both ${files.join(" and ")} exist` }
-        : { type, name, description: descriptionOf(join(dir, files[0]!)), files });
-    }
+    // beside its `.yml` (spec §4.1, §15.4); so are two spellings of one name (k135).
+    items.push(...oneName(found, type === "skill" ? inDirs : bothExist).map((i) =>
+      i.error === undefined && type !== "skill" ? { ...i, description: descriptionOf(join(dir, i.files[0]!)) } : i));
   }
 
   items.push(...pluginSkills(dir, items));
@@ -240,7 +278,7 @@ function claudeItems(dir: string, found: CatalogItem[]): CatalogItem[] {
   const out: CatalogItem[] = [];
   const base = join(dir, ".claude");
   if (!isPlainDir(base)) return out;
-  const known = new Set(found.map((i) => `${i.type}:${i.name}`));
+  const known = new Set(found.map((i) => `${i.type}:${nameKey(i.name)}`)); // ignoring case (k135)
   for (const { dir: sub, type } of TYPE_DIRS) {
     const typeDir = join(base, sub);
     if (!isPlainDir(typeDir)) continue;
@@ -250,6 +288,7 @@ function claudeItems(dir: string, found: CatalogItem[]): CatalogItem[] {
     } catch {
       continue;
     }
+    const here: CatalogItem[] = [];
     for (const entry of entries) {
       let item: CatalogItem | undefined;
       try {
@@ -257,10 +296,12 @@ function claudeItems(dir: string, found: CatalogItem[]): CatalogItem[] {
       } catch {
         continue; // a symlink or an unreadable file: this item only
       }
-      if (!item || known.has(`${type}:${item.name}`)) continue;
-      known.add(`${type}:${item.name}`);
-      out.push(item);
+      // A name found before is skipped; `<name>.md` beside `<name>.md.njk` here takes the first.
+      if (!item || known.has(`${type}:${nameKey(item.name)}`) || here.some((i) => i.name === item.name)) continue;
+      here.push(item);
     }
+    // Two spellings of one name here are an error of each, as in the published layout (k135).
+    out.push(...oneName(here, type === "skill" ? inDirs : bothExist));
   }
   return out;
 }
@@ -317,18 +358,21 @@ function pluginSkills(dir: string, found: CatalogItem[]): CatalogItem[] {
     throw new CatalogError(`${p}: "skills" must be a string or an array of strings`);
   }
 
-  const dirOf = new Map<string, string>(); // skill name -> its dir, relative to the source
-  for (const it of found) if (it.type === "skill") dirOf.set(it.name, it.dir ?? posix.join("skills", it.name));
+  // skill name ignoring case (k135) -> its dir(s), relative to the source
+  const dirsOf = new Map<string, string[]>();
+  const known = (name: string, rel: string) => dirsOf.set(nameKey(name), [...(dirsOf.get(nameKey(name)) ?? []), rel]);
+  for (const it of found) if (it.type === "skill") known(it.name, it.dir ?? posix.join("skills", it.name));
   const out: CatalogItem[] = [];
   const add = (skillDir: string, file: string) => {
     const rel = toPosix(relative(dir, skillDir));
     const name = basename(skillDir);
-    const known = dirOf.get(name);
-    if (known === rel) return;
-    if (known !== undefined) {
-      throw new CatalogError(`${p}: skill "${name}" found twice: ${known} and ${rel}`);
+    const dirs = dirsOf.get(nameKey(name)) ?? [];
+    if (dirs.includes(rel)) return;
+    if (dirs.length > 0) {
+      const why = dirs.every((d) => posix.basename(d) === name) ? "" : ", names equal ignoring case";
+      throw new CatalogError(`${p}: skill "${name}" found twice${why}: ${dirs[0]} and ${rel}`);
     }
-    dirOf.set(name, rel);
+    known(name, rel);
     out.push(skillItem(dir, skillDir, file));
   };
 
@@ -365,17 +409,13 @@ function pluginSkills(dir: string, found: CatalogItem[]): CatalogItem[] {
  * spelling is an item carrying that error, since a config names one of them exactly.
  */
 function pathSkills(dir: string, paths: string[]): CatalogItem[] {
-  // skill name ignoring case -> its dir(s), relative to the source (k127)
-  const found = new Map<string, Map<string, CatalogItem>>();
+  const found = new Map<string, CatalogItem>(); // a skill per directory, relative to the source
   const visit = (cur: string, named: boolean): void => {
     const file = skillFile(cur);
     if (file) {
       if (isInstalledCopy(cur)) return;
       const item = skillItem(dir, cur, file);
-      const key = item.name.toLowerCase();
-      const dirs = found.get(key) ?? new Map<string, CatalogItem>();
-      if (!dirs.has(item.dir!)) dirs.set(item.dir!, item);
-      found.set(key, dirs);
+      if (!found.has(item.dir!)) found.set(item.dir!, item);
       return;
     }
     if (!named && basename(cur).startsWith(".")) return;
@@ -386,20 +426,7 @@ function pathSkills(dir: string, paths: string[]): CatalogItem[] {
   };
   for (const entry of paths) visit(innerDir(dir, '"path"', entry), true);
 
-  const out: CatalogItem[] = [];
-  for (const dirs of found.values()) {
-    if (dirs.size === 1) {
-      out.push([...dirs.values()][0]!);
-      continue;
-    }
-    const where = [...dirs.keys()].sort();
-    const names = [...new Set([...dirs.values()].map((i) => i.name))];
-    const files = [...dirs.values()].flatMap((i) => i.files).sort();
-    const why = names.length > 1 ? ", names equal ignoring case" : "";
-    const error = `found in ${where.length} directories${why}: ${where.slice(0, -1).join(", ")} and ${where.at(-1)}`;
-    for (const name of names) out.push({ type: "skill", name, files: [...files], error });
-  }
-  return out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return oneName([...found.values()], inDirs).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 /** Resolve one path of a source – a plugin.json `skills` path, a source entry's `path` – to a

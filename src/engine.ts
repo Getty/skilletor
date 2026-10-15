@@ -8,7 +8,7 @@ import { hostname, platform, userInfo } from "node:os";
 import { existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import {
-  HARNESSES, ITEM_TYPES, loadConfig, pathList, WILDCARD, type BackendKind, type BundleItem, type Harness, type ItemType, type LoadedConfig, type Origin,
+  HARNESSES, ITEM_TYPES, loadConfig, nameKey, pathList, WILDCARD, type BackendKind, type BundleItem, type Harness, type ItemType, type LoadedConfig, type Origin,
   type ResolvedSource, type ScopeConfig, type WildcardItem,
 } from "./config.ts";
 import {
@@ -781,10 +781,13 @@ async function syncScopeRun(
     }
   };
 
-  // Expand wildcards and bundles (spec §3, §6.1, §15.2) into offers per target. An
+  // Expand wildcards and bundles (spec §3, §6.1, §15.2) into offers per target, its name
+  // ignoring case (k135: one directory on macOS and Windows, so one name everywhere). An
   // unresolvable source (or a bundle that cannot be expanded) offers what it installed
   // before, so those items are kept and still count for collisions.
   interface Offer {
+    /** The item's name as offered: one target may hold several spellings (k135). */
+    name: string;
     /** The declaring entry as shown in warnings: `*@shared`, `bundle:perl@shared`. */
     from: string;
     source: string;
@@ -794,12 +797,13 @@ async function syncScopeRun(
     /** Live bundle offers: the chains the item was reached through. */
     chains?: Chain[];
   }
-  const offers = new Map<string, { type: ItemType; name: string; offers: Offer[] }>();
-  const offer = (type: ItemType, name: string, o: Offer) => {
-    const target = `${TYPE_DIR[type]}/${name}`;
-    const entry = offers.get(target) ?? { type, name, offers: [] };
-    if (!entry.offers.some((x) => x.from === o.from)) entry.offers.push(o);
-    offers.set(target, entry);
+  const offers = new Map<string, { type: ItemType; offers: Offer[] }>();
+  const targetKey = (type: ItemType, name: string) => `${TYPE_DIR[type]}/${nameKey(name)}`;
+  const offer = (type: ItemType, name: string, o: Omit<Offer, "name">) => {
+    const key = targetKey(type, name);
+    const entry = offers.get(key) ?? { type, offers: [] };
+    if (!entry.offers.some((x) => x.from === o.from && x.name === name)) entry.offers.push({ ...o, name });
+    offers.set(key, entry);
   };
   /** Lock entries of this scope, per item (any target), as type + name. */
   const lockedItems = Object.entries(oldLock).map(([key, entry]) => ({ ...keyToTypeName(key), entry }));
@@ -879,45 +883,53 @@ async function syncScopeRun(
   // lock records the same-source bundles that also yield them, for `uninstall` hints.
   const explicit = new Map<string, { source: string; raw: string }>();
   for (const item of scopeCfg.install) {
-    explicit.set(item.target, { source: item.source, raw: item.raw });
-    const via = (offers.get(item.target)?.offers ?? []).flatMap((x) => (x.via && x.source === item.source ? [x.via] : []));
+    explicit.set(targetKey(item.type, item.name), { source: item.source, raw: item.raw });
+    const via = (offers.get(targetKey(item.type, item.name))?.offers ?? [])
+      .flatMap((x) => (x.via && x.source === item.source && x.name === item.name ? [x.via] : []));
     buildItem(item, { via });
   }
   // Bundle var conflicts (spec §15.3), reported once per key and pair of bundles.
   const varConflicts = new Map<string, string[]>();
-  for (const [target, o] of offers) {
-    const claim = explicit.get(target);
+  for (const [key, o] of offers) {
+    const claim = explicit.get(key);
     if (claim) {
       for (const x of o.offers) {
         if (x.source !== claim.source) {
-          rep.warnings.push(`${o.type} "${o.name}" from ${x.from} ignored: explicitly declared as ${claim.raw}`);
+          rep.warnings.push(`${o.type} "${x.name}" from ${x.from} ignored: explicitly declared as ${claim.raw}`);
         }
       }
       continue;
     }
+    const names = [...new Set(o.offers.map((x) => x.name))];
     if (new Set(o.offers.map((x) => x.source)).size > 1) {
-      rep.warnings.push(`${o.type} "${o.name}" offered by ${o.offers.map((x) => x.from).join(" and ")}; skipped`);
-      keepIfLocked(target, o.type);
+      const from = [...new Set(o.offers.map((x) => x.from))];
+      rep.warnings.push(`${o.type} ${names.map((n) => `"${n}"`).join(" and ")} offered by ${from.join(" and ")}; skipped`);
+      for (const name of names) keepIfLocked(`${TYPE_DIR[o.type]}/${name}`, o.type);
       continue;
     }
-    // One source: installed once, however many of its wildcards and bundles yield it.
+    // One source: installed once, however many of its wildcards and bundles yield it. (Two
+    // spellings from one source are its catalog's error, k135: each warns on its own.)
     const source = o.offers[0]!.source;
-    const live = o.offers.filter((x) => x.live);
-    if (live.length === 0) {
-      keepIfLocked(target, o.type);
-      continue;
+    for (const name of names) {
+      const mine = o.offers.filter((x) => x.name === name);
+      const target = `${TYPE_DIR[o.type]}/${name}`;
+      const live = mine.filter((x) => x.live);
+      if (live.length === 0) {
+        keepIfLocked(target, o.type);
+        continue;
+      }
+      if (!isValidItemName(name)) {
+        rep.warnings.push(`${o.type} "${name}" from ${live[0]!.from} skipped: invalid item name`);
+        continue;
+      }
+      const via = mine.flatMap((x) => (x.via ? [x.via] : []));
+      const chains = live.flatMap((x) => x.chains ?? []);
+      const bundleVars = mergeChainVars(chains, source, (key, setters) => {
+        const k = `"${key}": ${setters.join(" and ")}`;
+        varConflicts.set(k, [...(varConflicts.get(k) ?? []), `${o.type} ${name}`]);
+      });
+      buildItem({ type: o.type, name, source, target }, { bundleVars, via });
     }
-    if (!isValidItemName(o.name)) {
-      rep.warnings.push(`${o.type} "${o.name}" from ${live[0]!.from} skipped: invalid item name`);
-      continue;
-    }
-    const via = o.offers.flatMap((x) => (x.via ? [x.via] : []));
-    const chains = live.flatMap((x) => x.chains ?? []);
-    const bundleVars = mergeChainVars(chains, source, (key, setters) => {
-      const k = `"${key}": ${setters.join(" and ")}`;
-      varConflicts.set(k, [...(varConflicts.get(k) ?? []), `${o.type} ${o.name}`]);
-    });
-    buildItem({ type: o.type, name: o.name, source, target }, { bundleVars, via });
   }
   for (const [k, items] of varConflicts) {
     rep.warnings.push(`bundle vars conflict on ${k} set different values; neither applies to ${items.join(", ")}`);

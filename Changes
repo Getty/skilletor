@@ -52,6 +52,13 @@ Revision history for skilletor
     Any other page (`/issues`, `/pulls`, `/releases`, a segment past the
     repository such as `Getty/karr/extra`) is an error naming the repository
     to add, instead of a source that tracked HEAD or failed at fetch.
+  - Names that differ only in case count as one name everywhere, not only
+    under a source's `path`: `skills/Foo` beside `skills/foo` (or
+    `agents/Bar.md` beside `agents/bar.md.njk`) in a source, in `.claude/`
+    and in `plugin.json` skills are the duplicate-name error; `Foo@a` and
+    `foo@b` in one install list are a duplicate target; two sources' wildcards
+    offering `Foo` and `foo` skip both with a warning, and an explicit entry
+    wins over another source's other spelling.
 
 0.4.2     2026-10-06 05:28:16Z
   - Windows: hooks and the CLI start without Git Bash. `bin/skilletor.exe`, a

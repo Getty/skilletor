@@ -258,6 +258,12 @@ nothing fails:
 - wildcards or bundles of **different** sources offer the same name → that one name is
   skipped with a warning (an installed copy stays as it is); every other item proceeds.
 
+Names that differ only in case (`Foo`, `foo`) are the same name throughout — in a source,
+across sources and in your install lists — on every system, since macOS and Windows would
+install both into one directory: two of them in one source are an error of each (`available`
+shows it, `install` refuses it, `sync` warns and keeps an installed copy), and two install
+entries or two sources' offers of them collide like the same name.
+
 An item installed through a wildcard cannot be uninstalled by name — the wildcard would
 bring it back. Uninstall the wildcard (`skilletor uninstall 'rule:*@shared'`), or keep it
 and switch the item off via vars ([empty render = skipped](#switching-items-on-and-off-with-vars)).

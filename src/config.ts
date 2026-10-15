@@ -22,6 +22,13 @@ export const HARNESSES: readonly Harness[] = ["claude", "codex", "hermes"];
  *  name it matches any run of characters, so `perl-*@source` is a pattern (spec §3). */
 export const WILDCARD = "*";
 
+/** An item name as a key: names equal ignoring case are one name (k127, k135) – they install
+ *  into one directory on a case-insensitive file system (macOS, Windows) – on every platform,
+ *  so a config, a catalog and a lock mean the same everywhere. */
+export function nameKey(name: string): string {
+  return name.toLowerCase();
+}
+
 export class ConfigError extends Error {
   override name = "ConfigError";
 }
@@ -415,9 +422,9 @@ function dedupeBundles(a: BundleItem[], b: BundleItem[], path: string): BundleIt
   return [...a, ...b];
 }
 
-/** Duplicate key: a name per type, or a wildcard pattern per type and source. */
+/** Duplicate key: a name per type, ignoring case (k135), or a wildcard pattern per type and source. */
 function seenKey(item: { type: ItemType; name: string; source: string }): string {
-  return item.name.includes(WILDCARD) ? `${item.type}/${item.name}@${item.source}` : `${item.type}/${item.name}`;
+  return item.name.includes(WILDCARD) ? `${item.type}/${item.name}@${item.source}` : `${item.type}/${nameKey(item.name)}`;
 }
 
 /** Parse `[type:]name@source`. The array's type wins; an explicit prefix must match it. */
@@ -538,7 +545,7 @@ function dedupeAcross(a: InstallItem[], b: InstallItem[], path: string): Install
   const seen = new Map<string, string>();
   const out: InstallItem[] = [];
   for (const item of [...a, ...b]) {
-    const key = `${item.type}/${item.name}`;
+    const key = seenKey(item);
     const prev = seen.get(key);
     if (prev !== undefined) {
       throw new ConfigError(

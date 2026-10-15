@@ -961,3 +961,34 @@ test("k128: a source without a backend in any config file is refused, naming the
     cleanup();
   }
 });
+
+// k135: names equal ignoring case install into one directory on macOS and Windows (k127), yet
+// `Foo@a` and `foo@b` under one type and scope loaded. Asserts: in one file and across the
+// project and local files they are the duplicate-target ConfigError any same name is; under
+// two types, or in the two scopes, they are not.
+test("k135: two install entries whose names are equal ignoring case are a duplicate target", () => {
+  const sources = { a: { git: "https://example.com/a" }, b: { git: "https://example.com/b" } };
+  const one = setup({ user: { sources, install: { skills: ["Foo@a", "foo@b"] } } });
+  try {
+    assert.throws(() => loadConfig({ home: one.home, projectDir: one.projectDir }), {
+      name: "ConfigError", message: `${configPath("user", one.home, one.projectDir)}: duplicate skill target "foo" declared as Foo@a and foo@b`,
+    });
+  } finally {
+    one.cleanup();
+  }
+  const two = setup({ project: { sources, install: { rules: ["Foo@a"] } }, local: { install: { rules: ["fOO@a"] } } });
+  try {
+    assert.throws(() => loadConfig({ home: two.home, projectDir: two.projectDir }), {
+      name: "ConfigError", message: `${configPath("project", two.home, two.projectDir)}: duplicate rule target "fOO" declared as Foo@a and fOO@a`,
+    });
+  } finally {
+    two.cleanup();
+  }
+  const fine = setup({ user: { sources, install: { skills: ["Foo@a"], agents: ["foo@b"] } }, project: { install: { skills: ["foo@b"] } } });
+  try {
+    const cfg = loadConfig({ home: fine.home, projectDir: fine.projectDir });
+    assert.deepEqual([cfg.user.install.map((i) => i.raw), cfg.project?.install.map((i) => i.raw)], [["Foo@a", "foo@b"], ["foo@b"]]);
+  } finally {
+    fine.cleanup();
+  }
+});

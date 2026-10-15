@@ -2055,3 +2055,34 @@ test("a user-scope bundle does not see a source only the project declares", asyn
     e.cleanup();
   }
 });
+
+// k135: two sources offering `Foo` and `foo` installed both – one directory on macOS and
+// Windows, two on Linux, so the lock differed per platform. Asserts: names equal ignoring
+// case are one name across sources too (k127's rule): two wildcards of different sources
+// offering them skip both spellings with the one "offered by" warning and install neither;
+// an explicit entry wins over another source's wildcard offering the other spelling, with the
+// usual warning; the rest installs.
+test("k135: names equal ignoring case from two sources are the same-name conflict", async () => {
+  const e = env();
+  try {
+    const a = join(e.tmp.dir, "case-a");
+    const b = join(e.tmp.dir, "case-b");
+    putItem(a, "rule", "Foo");
+    putItem(a, "rule", "ok");
+    putItem(b, "rule", "foo");
+    putItem(b, "skill", "Bar");
+    putItem(a, "skill", "bar");
+    e.writeCfg("user", {
+      sources: { a: { local: a }, b: { local: b } },
+      install: { rules: ["*@a", "*@b"], skills: ["Bar@b", "skill:*@a"] },
+    });
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.deepEqual(r.scopes[0]!.added.map((i) => `${i.key}@${i.source}`).sort(), ["rules/ok@a", "skills/Bar@b"]);
+    assert.deepEqual(r.scopes[0]!.warnings, [
+      `skill "bar" from skill:*@a ignored: explicitly declared as Bar@b`,
+      `rule "Foo" and "foo" offered by *@a and *@b; skipped`,
+    ]);
+  } finally {
+    e.cleanup();
+  }
+});

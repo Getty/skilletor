@@ -5826,6 +5826,9 @@ var ITEM_TYPES = ["skill", "agent", "rule"];
 var INSTALL_KEYS = { skills: "skill", agents: "agent", rules: "rule" };
 var HARNESSES = ["claude", "codex", "hermes"];
 var WILDCARD = "*";
+function nameKey(name) {
+  return name.toLowerCase();
+}
 var ConfigError = class extends Error {
   name = "ConfigError";
 };
@@ -6056,7 +6059,7 @@ function dedupeBundles(a, b, path) {
   return [...a, ...b];
 }
 function seenKey(item) {
-  return item.name.includes(WILDCARD) ? `${item.type}/${item.name}@${item.source}` : `${item.type}/${item.name}`;
+  return item.name.includes(WILDCARD) ? `${item.type}/${item.name}@${item.source}` : `${item.type}/${nameKey(item.name)}`;
 }
 function parseEntry(entry, type, path, where) {
   const at = entry.lastIndexOf("@");
@@ -6154,7 +6157,7 @@ function dedupeAcross(a, b, path) {
   const seen = /* @__PURE__ */ new Map();
   const out = [];
   for (const item of [...a, ...b]) {
-    const key = `${item.type}/${item.name}`;
+    const key = seenKey(item);
     const prev = seen.get(key);
     if (prev !== void 0) {
       throw new ConfigError(
@@ -8264,12 +8267,12 @@ function gitTracked(dir, paths) {
   const out = [];
   for (let i = 0; i < paths.length; i += LS_FILES_BATCH) {
     try {
-      const listed = execFileSync(
+      const listed2 = execFileSync(
         "git",
         ["-C", dir, "--literal-pathspecs", "ls-files", "-z", "--", ...paths.slice(i, i + LS_FILES_BATCH)],
         { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5e3, env: gitEnv() }
       );
-      out.push(...listed.split("\0").filter(Boolean));
+      out.push(...listed2.split("\0").filter(Boolean));
     } catch {
       return [];
     }
@@ -8360,6 +8363,32 @@ function itemName(fileName) {
   const m = /^(.+?)\.md(\.njk)?$/.exec(fileName);
   return m ? m[1] : void 0;
 }
+function listed(xs) {
+  return xs.length < 2 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`;
+}
+function inDirs(where, why) {
+  return `found in ${where.length} directories${why}: ${listed(where)}`;
+}
+function bothExist(where, why) {
+  return `${where.length === 2 ? "both " : ""}${listed(where)} exist${why}`;
+}
+function oneName(items, error) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const item of items) groups.set(nameKey(item.name), [...groups.get(nameKey(item.name)) ?? [], item]);
+  const out = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      out.push(group[0]);
+      continue;
+    }
+    const names = [...new Set(group.map((i) => i.name))];
+    const where = group.map((i) => i.type === "skill" ? i.dir : i.files[0]).sort();
+    const why = names.length > 1 ? ", names equal ignoring case" : "";
+    const files = group.flatMap((i) => i.files).sort();
+    for (const name of names) out.push({ type: group[0].type, name, files: [...files], error: error(where, why) });
+  }
+  return out;
+}
 function scan(dir, paths) {
   if (paths !== void 0) return { items: pathSkills(dir, paths), bundles: [], meta: readSourceMeta(dir) };
   const items = [];
@@ -8367,7 +8396,7 @@ function scan(dir, paths) {
     const typeDir = join9(dir, sub);
     if (!existsSync7(typeDir)) continue;
     noSymlink(typeDir);
-    const byName = /* @__PURE__ */ new Map();
+    const found = [];
     for (const entry of readdirSync3(typeDir)) {
       const p = join9(typeDir, entry);
       const st = noSymlink(p);
@@ -8375,18 +8404,15 @@ function scan(dir, paths) {
         if (!st.isDirectory()) continue;
         const file = skillFile(p);
         if (!file) continue;
-        items.push(skillItem(dir, p, file));
+        found.push(skillItem(dir, p, file));
       } else {
         if (!st.isFile()) continue;
         const name = itemName(entry);
         if (name === void 0) continue;
-        byName.set(name, [...byName.get(name) ?? [], toPosix(relative(dir, p))]);
+        found.push({ type, name, files: [toPosix(relative(dir, p))] });
       }
     }
-    for (const [name, files] of byName) {
-      files.sort();
-      items.push(files.length > 1 ? { type, name, files, error: `both ${files.join(" and ")} exist` } : { type, name, description: descriptionOf(join9(dir, files[0])), files });
-    }
+    items.push(...oneName(found, type === "skill" ? inDirs : bothExist).map((i) => i.error === void 0 && type !== "skill" ? { ...i, description: descriptionOf(join9(dir, i.files[0])) } : i));
   }
   items.push(...pluginSkills(dir, items));
   items.push(...claudeItems(dir, items));
@@ -8404,7 +8430,7 @@ function claudeItems(dir, found) {
   const out = [];
   const base = join9(dir, ".claude");
   if (!isPlainDir(base)) return out;
-  const known = new Set(found.map((i) => `${i.type}:${i.name}`));
+  const known = new Set(found.map((i) => `${i.type}:${nameKey(i.name)}`));
   for (const { dir: sub, type } of TYPE_DIRS) {
     const typeDir = join9(base, sub);
     if (!isPlainDir(typeDir)) continue;
@@ -8414,6 +8440,7 @@ function claudeItems(dir, found) {
     } catch {
       continue;
     }
+    const here = [];
     for (const entry of entries) {
       let item;
       try {
@@ -8421,10 +8448,10 @@ function claudeItems(dir, found) {
       } catch {
         continue;
       }
-      if (!item || known.has(`${type}:${item.name}`)) continue;
-      known.add(`${type}:${item.name}`);
-      out.push(item);
+      if (!item || known.has(`${type}:${nameKey(item.name)}`) || here.some((i) => i.name === item.name)) continue;
+      here.push(item);
     }
+    out.push(...oneName(here, type === "skill" ? inDirs : bothExist));
   }
   return out;
 }
@@ -8470,18 +8497,20 @@ function pluginSkills(dir, found) {
   if (!Array.isArray(paths) || !paths.every((x) => typeof x === "string")) {
     throw new CatalogError(`${p}: "skills" must be a string or an array of strings`);
   }
-  const dirOf = /* @__PURE__ */ new Map();
-  for (const it of found) if (it.type === "skill") dirOf.set(it.name, it.dir ?? posix2.join("skills", it.name));
+  const dirsOf = /* @__PURE__ */ new Map();
+  const known = (name, rel) => dirsOf.set(nameKey(name), [...dirsOf.get(nameKey(name)) ?? [], rel]);
+  for (const it of found) if (it.type === "skill") known(it.name, it.dir ?? posix2.join("skills", it.name));
   const out = [];
   const add = (skillDir, file) => {
     const rel = toPosix(relative(dir, skillDir));
     const name = basename3(skillDir);
-    const known = dirOf.get(name);
-    if (known === rel) return;
-    if (known !== void 0) {
-      throw new CatalogError(`${p}: skill "${name}" found twice: ${known} and ${rel}`);
+    const dirs = dirsOf.get(nameKey(name)) ?? [];
+    if (dirs.includes(rel)) return;
+    if (dirs.length > 0) {
+      const why = dirs.every((d) => posix2.basename(d) === name) ? "" : ", names equal ignoring case";
+      throw new CatalogError(`${p}: skill "${name}" found twice${why}: ${dirs[0]} and ${rel}`);
     }
-    dirOf.set(name, rel);
+    known(name, rel);
     out.push(skillItem(dir, skillDir, file));
   };
   for (const entry of paths) {
@@ -8507,10 +8536,7 @@ function pathSkills(dir, paths) {
     if (file) {
       if (isInstalledCopy(cur)) return;
       const item = skillItem(dir, cur, file);
-      const key = item.name.toLowerCase();
-      const dirs = found.get(key) ?? /* @__PURE__ */ new Map();
-      if (!dirs.has(item.dir)) dirs.set(item.dir, item);
-      found.set(key, dirs);
+      if (!found.has(item.dir)) found.set(item.dir, item);
       return;
     }
     if (!named && basename3(cur).startsWith(".")) return;
@@ -8520,20 +8546,7 @@ function pathSkills(dir, paths) {
     }
   };
   for (const entry of paths) visit(innerDir(dir, '"path"', entry), true);
-  const out = [];
-  for (const dirs of found.values()) {
-    if (dirs.size === 1) {
-      out.push([...dirs.values()][0]);
-      continue;
-    }
-    const where = [...dirs.keys()].sort();
-    const names = [...new Set([...dirs.values()].map((i) => i.name))];
-    const files = [...dirs.values()].flatMap((i) => i.files).sort();
-    const why = names.length > 1 ? ", names equal ignoring case" : "";
-    const error = `found in ${where.length} directories${why}: ${where.slice(0, -1).join(", ")} and ${where.at(-1)}`;
-    for (const name of names) out.push({ type: "skill", name, files: [...files], error });
-  }
-  return out.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  return oneName([...found.values()], inDirs).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 }
 function innerDir(dir, what, entry) {
   const segments = innerSegments(entry);
@@ -9972,11 +9985,12 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
     }
   };
   const offers = /* @__PURE__ */ new Map();
+  const targetKey = (type, name) => `${TYPE_DIR[type]}/${nameKey(name)}`;
   const offer = (type, name, o) => {
-    const target = `${TYPE_DIR[type]}/${name}`;
-    const entry = offers.get(target) ?? { type, name, offers: [] };
-    if (!entry.offers.some((x) => x.from === o.from)) entry.offers.push(o);
-    offers.set(target, entry);
+    const key = targetKey(type, name);
+    const entry = offers.get(key) ?? { type, offers: [] };
+    if (!entry.offers.some((x) => x.from === o.from && x.name === name)) entry.offers.push({ ...o, name });
+    offers.set(key, entry);
   };
   const lockedItems = Object.entries(oldLock).map(([key, entry]) => ({ ...keyToTypeName(key), entry }));
   for (const w of scopeCfg.wildcards) {
@@ -10046,43 +10060,49 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   }
   const explicit = /* @__PURE__ */ new Map();
   for (const item of scopeCfg.install) {
-    explicit.set(item.target, { source: item.source, raw: item.raw });
-    const via = (offers.get(item.target)?.offers ?? []).flatMap((x) => x.via && x.source === item.source ? [x.via] : []);
+    explicit.set(targetKey(item.type, item.name), { source: item.source, raw: item.raw });
+    const via = (offers.get(targetKey(item.type, item.name))?.offers ?? []).flatMap((x) => x.via && x.source === item.source && x.name === item.name ? [x.via] : []);
     buildItem(item, { via });
   }
   const varConflicts = /* @__PURE__ */ new Map();
-  for (const [target, o] of offers) {
-    const claim = explicit.get(target);
+  for (const [key, o] of offers) {
+    const claim = explicit.get(key);
     if (claim) {
       for (const x of o.offers) {
         if (x.source !== claim.source) {
-          rep.warnings.push(`${o.type} "${o.name}" from ${x.from} ignored: explicitly declared as ${claim.raw}`);
+          rep.warnings.push(`${o.type} "${x.name}" from ${x.from} ignored: explicitly declared as ${claim.raw}`);
         }
       }
       continue;
     }
+    const names = [...new Set(o.offers.map((x) => x.name))];
     if (new Set(o.offers.map((x) => x.source)).size > 1) {
-      rep.warnings.push(`${o.type} "${o.name}" offered by ${o.offers.map((x) => x.from).join(" and ")}; skipped`);
-      keepIfLocked(target, o.type);
+      const from = [...new Set(o.offers.map((x) => x.from))];
+      rep.warnings.push(`${o.type} ${names.map((n) => `"${n}"`).join(" and ")} offered by ${from.join(" and ")}; skipped`);
+      for (const name of names) keepIfLocked(`${TYPE_DIR[o.type]}/${name}`, o.type);
       continue;
     }
     const source = o.offers[0].source;
-    const live = o.offers.filter((x) => x.live);
-    if (live.length === 0) {
-      keepIfLocked(target, o.type);
-      continue;
+    for (const name of names) {
+      const mine = o.offers.filter((x) => x.name === name);
+      const target = `${TYPE_DIR[o.type]}/${name}`;
+      const live = mine.filter((x) => x.live);
+      if (live.length === 0) {
+        keepIfLocked(target, o.type);
+        continue;
+      }
+      if (!isValidItemName(name)) {
+        rep.warnings.push(`${o.type} "${name}" from ${live[0].from} skipped: invalid item name`);
+        continue;
+      }
+      const via = mine.flatMap((x) => x.via ? [x.via] : []);
+      const chains = live.flatMap((x) => x.chains ?? []);
+      const bundleVars = mergeChainVars(chains, source, (key2, setters) => {
+        const k = `"${key2}": ${setters.join(" and ")}`;
+        varConflicts.set(k, [...varConflicts.get(k) ?? [], `${o.type} ${name}`]);
+      });
+      buildItem({ type: o.type, name, source, target }, { bundleVars, via });
     }
-    if (!isValidItemName(o.name)) {
-      rep.warnings.push(`${o.type} "${o.name}" from ${live[0].from} skipped: invalid item name`);
-      continue;
-    }
-    const via = o.offers.flatMap((x) => x.via ? [x.via] : []);
-    const chains = live.flatMap((x) => x.chains ?? []);
-    const bundleVars = mergeChainVars(chains, source, (key, setters) => {
-      const k = `"${key}": ${setters.join(" and ")}`;
-      varConflicts.set(k, [...varConflicts.get(k) ?? [], `${o.type} ${o.name}`]);
-    });
-    buildItem({ type: o.type, name: o.name, source, target }, { bundleVars, via });
   }
   for (const [k, items] of varConflicts) {
     rep.warnings.push(`bundle vars conflict on ${k} set different values; neither applies to ${items.join(", ")}`);
