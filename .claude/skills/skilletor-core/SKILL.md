@@ -5,8 +5,8 @@ description: "Use when changing skilletor's own code, tests, build or plugin wir
 
 # skilletor — architecture and invariants
 
-skilletor is a Claude Code and Codex plugin plus a standalone CLI that installs
-**skills, agents and rules** from remote sources for one or both harnesses, in
+skilletor is a Claude Code, Codex and Hermes plugin plus a standalone CLI that installs
+**skills, agents and rules** from remote sources for each targeted harness, in
 user scope (`~`) and project scope (the project root), re-rendering every sync. Design spec:
 `docs/superpowers/specs/2026-09-22-skilletor-design.md`. User-facing CLI and
 config reference: `skills/skilletor/SKILL.md` (the skill the plugin ships) —
@@ -20,7 +20,7 @@ config.ts     load/merge/validate + edit operations   spec.ts      shorthand →
 probe.ts      real probe for `add` (ls-remote, HEAD)  sources/*    resolve(), check() per backend
 catalog.ts    scan a source dir → items (plugin.json) bundles.ts   bundle files, `*` name patterns
 render.ts     build one item in memory (Nunjucks)     apply.ts     diff → atomic write → clean
-gitignore.ts  managed .gitignore blocks (§6.4)        briefing.ts  installed agent's briefing skills present? (§6.7)
+gitignore.ts  .gitignore/.worktreeinclude blocks §6.4 briefing.ts  installed agent's briefing skills present? (§6.7)
 lock.ts       lock read/write                         state.ts     trust, last-check, pending-report, mutex
 engine.ts     sync / check / status pipeline          hooks.ts     SessionStart + UserPromptSubmit, black box
 report.ts     text / json / hook output               targets.ts   harness detection, LAYOUTS, lock keys
@@ -52,6 +52,9 @@ fsutil.ts     hash, atomicWrite, innerSegments        gitenv.ts    gitEnv(): the
   walk down passes over symlinks and non-skill dot-directories; a name found in two
   directories is that item's `error`, never a failed scan. `path` is no identity: it keys
   no cache and binds no trust, and `check` sees a changed one through `sources-read.json`.
+- A source entry without `git`/`url`/`local` only overrides `ref` or `path` of a source
+  another file defines: one file's entries may lack a backend, `loadConfig`'s merged
+  sources never do; `sourceFields` demands one everywhere but config load (`needsBackend`).
 - `briefing.ts` reads installed agent files (never renders) — a warning source, not a
   pipeline stage; it must not block a sync.
 - `apply` knows nothing about harnesses: it gets a lock key → root function.
@@ -68,9 +71,9 @@ fsutil.ts     hash, atomicWrite, innerSegments        gitenv.ts    gitEnv(): the
   A change to what a url cache tree holds bumps `URL_CACHE_FORMAT` (`sources/url.ts`).
 - **The lock is the ownership boundary.** One lock per scope, always
   `<scope>/.claude/skilletor.lock.json`, for every harness. Claude keys stay
-  unprefixed (`skills/foo`); Codex keys are `codex:skills/foo`, paths relative to
-  that key's root. Only paths in the lock are ever overwritten or deleted; entries
-  with an unknown prefix are kept untouched. A path on disk that is not in the lock
+  unprefixed (`skills/foo`); the others carry their harness (`codex:skills/foo`,
+  `hermes:…`), paths relative to that key's root. Only paths in the lock are ever
+  overwritten or deleted; entries with an unknown prefix are kept untouched. A path on disk that is not in the lock
   is a conflict (reported, untouched; `--force` adopts it). A managed file that
   diverged from its lock hash is overwritten and named in the report.
 - **Codex rules: the rules file is owned, `AGENTS.md` is shared.** Rules are
@@ -83,9 +86,20 @@ fsutil.ts     hash, atomicWrite, innerSegments        gitenv.ts    gitEnv(): the
 - **Installable types are exactly** `skill`, `agent`, `rule` (`ITEM_TYPES` in
   `config.ts`); where each lands is `LAYOUTS[harness].roots[type]` per scope.
   Hooks, `settings.json` and MCP configs are never synced.
+- **Item names ignore case** on every platform (one directory on macOS/Windows): a new
+  comparison or map key of item names goes through `nameKey()` (`config.ts`).
 - **Targets:** machine set = user `targets` ?? detected markers (empty → config
-  error, nothing touched); a project can only narrow it. Every item renders once
-  per active target with `harness` in the context; empty render skips per target.
+  error, nothing touched); a project can only narrow it. Only Claude and Codex are
+  detected; Hermes (skills only, spec `2026-10-04-hermes-target-design.md`) is a target
+  only when user `targets` names it — give it no markers. Its home is `$HERMES_HOME`
+  else `defaultHermesHome()` (`targets.ts`; `%LOCALAPPDATA%\hermes` on Windows). Every
+  item renders once per active target with `harness` in the context; empty render
+  skips per target.
+- **Managed blocks follow the layout, never items or targets.** The `.gitignore` blocks
+  and the project's `.worktreeinclude` block (`worktreeIncludeEntries`, `engine.ts`) list
+  every harness's roots, so committed files agree across machines; a `.worktreeinclude`
+  block other than the one a sync writes is `layout` drift in `check`. A root or
+  `LAYOUTS` change moves both, and this repo's committed `.worktreeinclude` with it.
 - **Templating:** only `*.njk` is rendered (installed with `.njk` stripped);
   everything else is copied byte for byte. A skill's file keeps its source's owner
   executable bit (a `.njk` passes its bit to what it renders); agents, rules and
@@ -106,19 +120,17 @@ fsutil.ts     hash, atomicWrite, innerSegments        gitenv.ts    gitEnv(): the
 
 Claude Code: skills written mid-session are usable at once; agents and rules are
 read at session start or `/reload-plugins` and take effect from the **next**
-prompt. Codex: unmeasured, so every Codex item reports "active from the next Codex
-session". `report.ts` `ACTIVATION` / `CODEX_ACTIVATION` state this — keep the
-wording honest when adding item types or changing the report.
+prompt. Codex (unmeasured) and Hermes (skill index built before the sync) report
+every item "active from the next … session". `report.ts` `ACTIVATION` /
+`HARNESS_ACTIVATION` state this — keep the wording honest when adding item types,
+harnesses or changing the report.
 
 ## Code conventions
 
-- **Erasable TypeScript only.** Tests run `.ts` through Node's type-stripping,
-  so constructor parameter properties, `enum`, runtime `namespace` and other
-  emit-generating syntax fail at runtime with
-  `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` — and `tsc --noEmit` does **not** catch
-  it. Declare fields and assign in the constructor body. `npm test` is the
-  check that counts.
-- Imports between modules use the `.ts` extension (`from "./report.ts"`).
+- **Erasable TypeScript only.** Tests run `.ts` through Node's type-stripping:
+  constructor parameter properties, `enum`, runtime `namespace` fail with
+  `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`, and `tsc --noEmit` does **not** catch it.
+  Assign fields in the constructor body; `npm test` is the check that counts.
 - Runtime dependency is Nunjucks alone. Adding another is a design decision.
 - Public artifacts (code, comments, docs, README, this skill) are English.
 
@@ -126,7 +138,7 @@ wording honest when adding item types or changing the report.
 
 ```bash
 npm run typecheck && npm test        # node:test, temp dirs
-node --test --import ./test/setup.ts test/<file>.test.ts   # one file; setup.ts drops GIT_DIR & co.
+node --test --import ./test/setup.ts test/<file>.test.ts   # one file; setup.ts drops GIT_DIR, HERMES_HOME & co.
 npm run build && npm run check-dist  # dist/skilletor.js is committed; CI diffs it
 ```
 
@@ -134,28 +146,18 @@ npm run build && npm run check-dist  # dist/skilletor.js is committed; CI diffs 
   `check-dist`. Commit `dist/skilletor.js` with the source change.
 - Test git fixtures use `git init -b main` (the default branch name is not
   portable). Path comparisons go through `realpathSync` (macOS `/var` →
-  `/private/var`). Several tests create symlinks — Windows is not in CI.
-- The CLI takes `home` from `os.homedir()`, the Codex home from `$CODEX_HOME` and
-  the project from `--project-dir`, else the cwd's git top level (a hook: stdin
-  `cwd`, unless `$CLAUDE_PROJECT_DIR` is set). So a sync, status or hook run from
-  the checkout touches the real `~/.claude/`, `~/.agents/`, Codex home **and this
-  repo** (its `.claude/skilletor.json` is real). Hand tests: a temp cwd (or
-  `--project-dir`), **both** `HOME` and `CODEX_HOME` temp (an exported `CODEX_HOME`
-  survives a changed `HOME`), and a marker (`$HOME/.claude.json`,
-  `$CODEX_HOME/installation_id`) or `targets` — else no harness is detected.
-- Hook tests are black-box: stdin JSON → stdout JSON via `runHook`. Drive the
-  real binary the same way, with a temp project as `cwd`:
-  `T=$(mktemp -d); mkdir -p "$T/home" "$T/proj"; touch "$T/home/.claude.json"`, then
-  `printf '{"cwd":"%s","hook_event_name":"SessionStart"}' "$T/proj" | HOME="$T/home" CODEX_HOME="$T/codex" bin/skilletor hook session-start`.
-- Live check against Claude Code: `claude --plugin-dir <checkout>` from a temp
-  project dir in a throwaway `HOME`, with a sentinel skill in a local source;
-  confirm the SessionStart report and that the sentinel resolves in the same session.
+  `/private/var`). Several tests create symlinks — Windows is not in CI. A spawned
+  CLI's env comes from `homeEnv()` (`test/helpers/harness.ts`): on Windows the home is
+  `USERPROFILE`, and `LOCALAPPDATA` holds Hermes' default home — `HOME` alone leaks.
+- **A CLI run from the checkout acts on the real `~/.claude/`, `~/.agents/`, Codex
+  home and this repo's real `.claude/skilletor.json`.** Before a hand test, a hook
+  drive or a live Claude Code check, read [references/hand-tests.md](references/hand-tests.md).
 
 ## Release surface (audit, never perform)
 
-`package.json`, `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`
-carry the same version (a test enforces it); a tag
-`vX.Y.Z` matches both; `README.md` and `skills/skilletor/SKILL.md` restate the
+`package.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` and
+`hermes/skilletor/plugin.yaml` carry the same version (tests enforce it); a tag
+`vX.Y.Z` matches them; `README.md` and `skills/skilletor/SKILL.md` restate the
 CLI reference and must match `src/cli.ts` usage text. Steps and the marketplace
 entry: `docs/release.md`. Tagging, pushing and marketplace edits are the
 maintainer's, on explicit go-ahead only.
