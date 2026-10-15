@@ -37,8 +37,8 @@ Claude (`.claude-plugin/marketplace.json`, `plugins`):
 ```json
 {
   "name": "skilletor",
-  "source": { "source": "github", "repo": "Getty/skilletor" },
-  "description": "Remote skills, agents and rules for Claude Code and Codex — declared once in skilletor.json, synced on every session, templated per project. Adds sources like marketplaces and puts the skilletor CLI on PATH.",
+  "source": { "source": "url", "url": "https://github.com/Getty/skilletor.git" },
+  "description": "Remote skills, agents and rules for Claude Code, Codex and Hermes Agent — declared once in skilletor.json, synced on every session, templated per project. Adds sources like marketplaces and puts the skilletor CLI on PATH.",
   "license": "MIT",
   "homepage": "https://github.com/Getty/skilletor",
   "category": "productivity",
@@ -51,7 +51,7 @@ Codex (`.agents/plugins/marketplace.json`, `plugins`):
 ```json
 {
   "name": "skilletor",
-  "description": "Remote skills, agents and rules for Codex and Claude Code — declared once in skilletor.json, synced on every session, templated per project. For Codex: skills in .agents/skills, agents as agent-role TOML, rules injected at session start by the hook.",
+  "description": "Remote skills, agents and rules for Codex, Claude Code and Hermes Agent — declared once in skilletor.json, synced on every session, templated per project. For Codex: skills in .agents/skills, agents as agent-role TOML, rules injected at session start by the hook.",
   "source": { "source": "url", "url": "https://github.com/Getty/skilletor.git", "ref": "main" },
   "policy": { "installation": "AVAILABLE", "authentication": "ON_USE" },
   "category": "Productivity"

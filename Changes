@@ -1,6 +1,8 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - The plugin, package and README descriptions name Hermes Agent as the third
+    target.
 
 0.6.0     2026-10-15 17:39:19Z
   - Hermes Agent is a third target, `hermes` in `targets`. It is opt-in:

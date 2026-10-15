@@ -4,8 +4,8 @@
 
 > **MYAAH! Your skills are mine… to sync.**
 
-Remote skills, agents and rules for Claude Code and Codex — declared once, synced on
-every session, templated per project.
+Remote skills, agents and rules for Claude Code, Codex and Hermes Agent — declared once,
+synced on every session, templated per project.
 
 skilletor is a Claude Code and Codex plugin plus a standalone CLI. It installs **skills,
 agents and rules** from configured sources and keeps them up to date: it reconciles at session
