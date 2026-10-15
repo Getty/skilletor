@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-10-15T05:06:49Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-15T05:06:43Z
+created: 2026-10-15T04:41:43Z
+id: 136
+priority: medium
+started: 2026-10-15T04:45:41Z
+status: done
+tags:
+- bug
+- windows
+- sources
+title: case-only lock key change (Foo@a → foo@a) may delete the fresh copy on macOS/Windows
+updated: 2026-10-15T05:06:49Z
+---
+
+Found during k135 (worker). On a case-insensitive file system, when a lock key changes only in case, the sync installs the new spelling's copy and then removes the old entry's path — which is the same directory — so the item is gone after the sync. Reproduce with a case-insensitive fs simulation or an injected fs comparison; fix by treating old and new entries whose paths are equal ignoring case (nameKey) as one item (rename in place / skip removal). Test on every platform.
+
+2026-10-15 04:49 Cause (apply.ts): ownership is exact-path. On a case-insensitive fs the new spelling's path (skills/foo/SKILL.md) finds the old entry's file, which the new key does not own -> conflict, item blocked; then the unplanned old key (skills/Foo) deletes its files = the same files. With --force: adopted, then deleted. Same class inside one item (Ref.md -> ref.md). Plan: a planned item owns a file another leaving entry (or its own old entry) holds under a spelling equal ignoring case when it is the same file on disk (fsutil sameFile: realpath or dev+ino); a removal never deletes a file the new lock (or the item's output) holds that way. Test: hard link stands in for the shared directory entry on every platform; a real-fs test runs the scenario on macOS CI.
+
+2026-10-15 04:54 Fixed in src/apply.ts (held(): same file under another spelling, via fsutil sameFile). Red first: test/apply.test.ts 'k136: a key changing only in case takes over…' (hard-link stand-in, conflicts on 3 paths before the fix) and 'a file of an item renamed only in case…' (conflict on skills/moo/ref.md). 'on this platform's file system' is the real-fs repro for macOS CI (passes on Linux before and after: there the two spellings are two files). Extra (coordinator): config.ts entryMatches now matches names ignoring case (wildcard patterns stay exact, as seenKey keeps them), commands.ts covering matches the lock's names ignoring case; red test commands.test.ts 'k136: uninstall matches an entry and the lock ignoring case' failed on both halves separately. Left open: on a case-insensitive fs the skill directory keeps its old spelling (no rename in place) — cosmetic, lock and files are right; exact-same path held by a different leaving key (not a case variant) keeps the old behavior (conflict, then removal).
+
+2026-10-15 05:02 Done (patch k136.patch, applies on HEAD 9a44778; own dist build, check-dist green; suite at that stage 996/996). src/apply.ts: a planned item owns a file that its old entry or an entry leaving the lock holds under another spelling (equal ignoring case, not equal) when it is the same file on disk (fsutil sameFile: real path or dev+ino); the old spelling's removal (an undeclared entry, or a file renamed inside the item) never deletes a file the new lock / the item's output holds that way. Reported added+removed (updated within one item) on every platform. Extra (coordinator): config.ts entryMatches compares names via nameKey (wildcard patterns stay exact, like seenKey), commands.ts covering compares the lock's names via nameKey. Tests: 4 in test/apply.test.ts (hard-link stand-in for a case-insensitive fs, red before the fix; a real-fs run that reproduces on macOS CI; a foreign different file stays a conflict) + 1 in test/commands.test.ts (red on both halves separately). Docs: spec §6.3 + §7, README case paragraph, Changes. Open: the skill dir keeps its old spelling on a case-insensitive fs (no rename in place); the macOS real-fs path is unverified locally (Linux only here) and runs in CI's macos-latest job.
+
+2026-10-15 05:06 Committed 51e3cde
