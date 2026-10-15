@@ -270,7 +270,11 @@ nothing of the layout above is expected beneath it:
   unresolvable, on purpose: that file is the repository's own list, a `path` reads a foreign
   repository as it is, and an addition upstream must not take the whole source down. The same
   directory reached through two overlapping paths (`skills` and `skills/research`) counts
-  once.
+  once. Names equal ignoring case are one name (k127): `a/Foo` and `b/foo` install into one
+  directory on a case-insensitive file system (macOS, Windows), so they are this error on
+  every platform and a lock stays the same everywhere. Each spelling is an item of its own
+  carrying it (`found in 2 directories, names equal ignoring case: a/Foo and b/foo`), since a
+  config names one of them exactly.
 - **Instead of, not in addition.** `path` replaces the item scan of that source: no
   `skills/<name>/`, `agents/`, `rules/`, `plugin.json` or `.claude/` items, and `bundles/` is
   not read (§15.1) – a source with a `path` offers skills only. `skilletor.json` at the source

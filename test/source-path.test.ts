@@ -188,6 +188,42 @@ test("k126: two directories with one name are an error of that item, the rest is
   }
 });
 
+// Asserts (k127): names equal ignoring case are one name – the directories install into one
+// on a case-insensitive file system (macOS, Windows) – so they are the duplicate-name error on
+// every platform, and a lock stays the same everywhere. Each spelling is its own catalog item
+// (a config names one exactly), each carrying one error that names every directory of the
+// group in sorted order and says why; files are the group's; the rest is offered as before.
+test("k127: names equal ignoring case are an error of each such item, on every platform", () => {
+  const s = makeSource({
+    "pack/a/Foo/SKILL.md": SKILL("Foo"),
+    "pack/b/foo/SKILL.md": SKILL("foo"),
+    "pack/c/foo/SKILL.md": SKILL("foo", "THIRD"),
+    "pack/d/FOO/notes.md": "not a skill\n",
+    "pack/ok/SKILL.md": SKILL("ok"),
+  });
+  try {
+    const why = (n: number, dirs: string) => `found in ${n} directories, names equal ignoring case: ${dirs}`;
+    const cat = scan(s.dir, ["pack"]);
+    assert.deepEqual(cat.items.map((i) => [i.name, i.error, i.dir, i.description]), [
+      ["Foo", why(3, "pack/a/Foo, pack/b/foo and pack/c/foo"), undefined, undefined],
+      ["foo", why(3, "pack/a/Foo, pack/b/foo and pack/c/foo"), undefined, undefined],
+      ["ok", undefined, "pack/ok", "ok skill"],
+    ]);
+    assert.deepEqual(cat.items[0]!.files, ["pack/a/Foo/SKILL.md", "pack/b/foo/SKILL.md", "pack/c/foo/SKILL.md"]);
+    assert.deepEqual(cat.items[1]!.files, cat.items[0]!.files);
+    // Two spellings alone; one spelling in two directories keeps the k126 message unchanged.
+    assert.deepEqual(scan(s.dir, ["pack/a", "pack/b"]).items.map((i) => [i.name, i.error]), [
+      ["Foo", why(2, "pack/a/Foo and pack/b/foo")], ["foo", why(2, "pack/a/Foo and pack/b/foo")],
+    ]);
+    assert.deepEqual(scan(s.dir, ["pack/b", "pack/c"]).items.map((i) => [i.name, i.error]), [
+      ["foo", "found in 2 directories: pack/b/foo and pack/c/foo"],
+    ]);
+    assert.deepEqual(brief(s.dir, ["pack/a", "pack/ok"]), [["skill", "Foo", "pack/a/Foo"], ["skill", "ok", "pack/ok"]]);
+  } finally {
+    s.cleanup();
+  }
+});
+
 // Asserts: a path gets the refusals of a plugin.json `skills` path (spec §4.1) – absolute,
 // "..", the source root, missing, not a directory – each a CatalogError naming "path" and the
 // value, so the source is unresolvable; a good path beside a bad one does not save the scan.
@@ -439,6 +475,29 @@ test("k126: sync warns for a name found twice, keeps its installed copy and inst
     e.writeCfg("user", { sources: { hermes: { local: s.dir, path: ["skills", "optional-skills"] } }, install: { skills: ["arxiv@hermes"] } });
     assert.deepEqual((await sync(e.ctx, { scope: "user" })).scopes[0]!.warnings, [dup]);
     assert.deepEqual(e.lockKeys(), ["skills/arxiv"]);
+  } finally {
+    s.cleanup();
+    e.cleanup();
+  }
+});
+
+// Asserts (k127): through sync, a spelling that differs only in case is the duplicate error of
+// both names – a wildcard warns for each, an installed copy stays, nothing new is written – and
+// the rest syncs.
+test("k127: sync warns for names equal ignoring case and keeps the installed copy", async () => {
+  const e = env();
+  const s = makeSource({ "pack/b/foo/SKILL.md": SKILL("foo"), "pack/ok/SKILL.md": SKILL("ok") });
+  try {
+    e.writeCfg("user", { sources: { src: { local: s.dir, path: "pack" } }, install: { skills: ["*@src"] } });
+    assert.deepEqual((await sync(e.ctx, { scope: "user" })).scopes[0]!.warnings, []);
+    assert.deepEqual(e.lockKeys(), ["skills/foo", "skills/ok"]);
+
+    writeFiles(s.dir, { "pack/a/Foo/SKILL.md": SKILL("Foo", "OTHER") });
+    const why = "found in 2 directories, names equal ignoring case: pack/a/Foo and pack/b/foo; an installed copy stays";
+    assert.deepEqual((await sync(e.ctx, { scope: "user" })).scopes[0]!.warnings, [`skill Foo@src: ${why}`, `skill foo@src: ${why}`]);
+    assert.deepEqual(e.lockKeys(), ["skills/foo", "skills/ok"]);
+    assert.equal(readFileSync(e.userFile("skills/foo/SKILL.md"), "utf8"), SKILL("foo"));
+    assert.deepEqual(readdirSync(e.userFile("skills")).sort(), ["foo", "ok"]);
   } finally {
     s.cleanup();
     e.cleanup();

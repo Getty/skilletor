@@ -8441,9 +8441,10 @@ function pathSkills(dir, paths) {
     if (file) {
       if (isInstalledCopy(cur)) return;
       const item = skillItem(dir, cur, file);
-      const dirs = found.get(item.name) ?? /* @__PURE__ */ new Map();
+      const key = item.name.toLowerCase();
+      const dirs = found.get(key) ?? /* @__PURE__ */ new Map();
       if (!dirs.has(item.dir)) dirs.set(item.dir, item);
-      found.set(item.name, dirs);
+      found.set(key, dirs);
       return;
     }
     if (!named && basename3(cur).startsWith(".")) return;
@@ -8454,18 +8455,17 @@ function pathSkills(dir, paths) {
   };
   for (const entry of paths) visit(innerDir(dir, '"path"', entry), true);
   const out = [];
-  for (const [name, dirs] of found) {
+  for (const dirs of found.values()) {
     if (dirs.size === 1) {
       out.push([...dirs.values()][0]);
       continue;
     }
     const where = [...dirs.keys()].sort();
-    out.push({
-      type: "skill",
-      name,
-      files: [...dirs.values()].flatMap((i) => i.files).sort(),
-      error: `found in ${where.length} directories: ${where.slice(0, -1).join(", ")} and ${where.at(-1)}`
-    });
+    const names = [...new Set([...dirs.values()].map((i) => i.name))];
+    const files = [...dirs.values()].flatMap((i) => i.files).sort();
+    const why = names.length > 1 ? ", names equal ignoring case" : "";
+    const error = `found in ${where.length} directories${why}: ${where.slice(0, -1).join(", ")} and ${where.at(-1)}`;
+    for (const name of names) out.push({ type: "skill", name, files: [...files], error });
   }
   return out.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 }

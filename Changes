@@ -20,6 +20,8 @@ Revision history for skilletor
     with `path` is a config error for skilletor 0.4.2 and earlier.
     Skills a sync installed there (carrying skilletor's `.gitignore`) are
     not offered, so a `path` into a `.claude/skills` offers the repo's own.
+    Names that differ only in case count as one name on every system, as
+    they share a directory on macOS and Windows.
   - `skilletor add` of a GitHub link into a directory (`.../tree/<ref>/<dir>`)
     sets `ref` and `path` instead of being refused.
   - Agent worktrees get the project's installed skills, agents and rules. A

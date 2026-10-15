@@ -137,7 +137,8 @@ skilletor's own `.gitignore` is a copy a sync installed there and is passed over
   repository under two names; they share one clone.
 - Two directories with the same name make that one skill an error (`available` shows it,
   `install` refuses it, `sync` warns and keeps an installed copy); every other skill is
-  offered.
+  offered. Names that differ only in case (`Foo`, `foo`) count as the same name on every
+  system, since macOS and Windows would install both into one directory.
 - A path that is absolute, contains `..` or is the repository root (`.`) is a config error;
   one that does not exist, is not a directory or is a symlink makes the source unresolvable
   for that sync — a warning, and what it installed stays.

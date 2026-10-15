@@ -61,7 +61,7 @@ export interface CatalogItem {
   dir?: string;
   /** Why the item cannot be built: both `<name>.md` and `<name>.md.njk` exist (k100), a
    *  skill holds `f` beside `f.njk` (k113), or a source's `path` yields the name from several
-   *  directories (k126; no `dir` then). That error belongs to the item, never to the scan
+   *  directories, ignoring case (k126, k127; no `dir` then). That error belongs to the item, never to the scan
    *  (spec §4.1); `files` holds both, or every directory's. */
   error?: string;
 }
@@ -360,17 +360,22 @@ function pluginSkills(dir: string, found: CatalogItem[]): CatalogItem[] {
  * directory reached through two overlapping paths counts once; a name two
  * directories yield is one item carrying an error naming them in sorted order, never a
  * failed scan: an addition in a foreign repository must not take the whole source down.
+ * Names equal ignoring case are one name (k127) – they install into one directory on a
+ * case-insensitive file system – on every platform, so a lock is the same everywhere: each
+ * spelling is an item carrying that error, since a config names one of them exactly.
  */
 function pathSkills(dir: string, paths: string[]): CatalogItem[] {
-  const found = new Map<string, Map<string, CatalogItem>>(); // skill name -> its dir(s), relative to the source
+  // skill name ignoring case -> its dir(s), relative to the source (k127)
+  const found = new Map<string, Map<string, CatalogItem>>();
   const visit = (cur: string, named: boolean): void => {
     const file = skillFile(cur);
     if (file) {
       if (isInstalledCopy(cur)) return;
       const item = skillItem(dir, cur, file);
-      const dirs = found.get(item.name) ?? new Map<string, CatalogItem>();
+      const key = item.name.toLowerCase();
+      const dirs = found.get(key) ?? new Map<string, CatalogItem>();
       if (!dirs.has(item.dir!)) dirs.set(item.dir!, item);
-      found.set(item.name, dirs);
+      found.set(key, dirs);
       return;
     }
     if (!named && basename(cur).startsWith(".")) return;
@@ -382,18 +387,17 @@ function pathSkills(dir: string, paths: string[]): CatalogItem[] {
   for (const entry of paths) visit(innerDir(dir, '"path"', entry), true);
 
   const out: CatalogItem[] = [];
-  for (const [name, dirs] of found) {
+  for (const dirs of found.values()) {
     if (dirs.size === 1) {
       out.push([...dirs.values()][0]!);
       continue;
     }
     const where = [...dirs.keys()].sort();
-    out.push({
-      type: "skill",
-      name,
-      files: [...dirs.values()].flatMap((i) => i.files).sort(),
-      error: `found in ${where.length} directories: ${where.slice(0, -1).join(", ")} and ${where.at(-1)}`,
-    });
+    const names = [...new Set([...dirs.values()].map((i) => i.name))];
+    const files = [...dirs.values()].flatMap((i) => i.files).sort();
+    const why = names.length > 1 ? ", names equal ignoring case" : "";
+    const error = `found in ${where.length} directories${why}: ${where.slice(0, -1).join(", ")} and ${where.at(-1)}`;
+    for (const name of names) out.push({ type: "skill", name, files: [...files], error });
   }
   return out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
