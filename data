@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-10-15T02:50:43Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-15T02:50:43Z
+created: 2026-10-15T02:01:22Z
+id: 131
+priority: medium
+started: 2026-10-15T02:15:29Z
+status: done
+tags:
+- hermes
+- targets
+title: 'hermes-target: Hermes opt-in only — no auto-detection, "targets" must name
+  hermes'
+updated: 2026-10-15T02:50:43Z
+---
+
+Maintainer decision 2026-10-15 on spec §16.7 item 1: Hermes is NOT auto-detected. A Hermes home gets user-scope items only when a skilletor.json's "targets" names hermes (project scope likewise). Items 2–9 of §16.7 are confirmed as written. Change the target detection in src/, tests, README Hermes section and spec §16 (move §16.7 from 'to be confirmed' to decided).
+
+2026-10-15 02:18 Started. Plan: drop the hermes markers (detectHarnesses covers claude/codex only); env helper in test/hermes.test.ts opts in via user targets; upgrade (auto-detect-era lock) tested with and without HERMES_HOME; session-start --harness hermes answers one opt-in line while hermes is no machine target.
+
+2026-10-15 02:30 Decisions: (1) hermes markers deleted, not kept for a hint: HarnessMarkers/defaultMarkers know claude+codex only (DETECTED in targets.ts); the empty-machine error lists only their markers and still names "hermes" as a targets value. (2) Opt-in line only in the session-start answer under --harness hermes (engine hermesOptInHint, hooks withHermesOptIn): joined to systemMessage, and appended to additionalContext when there is one (the plugin hands the model the context when present). It names the machine targets plus hermes, e.g. "targets": ["claude", "hermes"]. Not on user-prompt-submit, not on a config error, not in `skilletor sync`/`hermes skilletor sync` (kept minimal). (3) Upgrade fix found by the new test: with hermes no target and the plugin run under another HERMES_HOME, moveHermesHome used to delete the old entries with a misleading "installs anew under the new one" warning and no "removed" lines. Now nothing moves while hermes is no target; the user-scope root for its orphans is the recorded home, so they are reported as removed and the record is dropped. scopeDrift hermes-home drift only while hermes is a target (orphans cover the rest), holdsHermes deleted.
+
+2026-10-15 02:30 Also found (drift, for this board): skills/skilletor/SKILL.md (the bundled skill) never mentions the hermes target. Its description and `targets` line say Claude Code and Codex only, so an agent using it would not know "hermes" is a valid `targets` value or that it is opt-in. That is skill-author lane, not changed here.
+
+2026-10-15 02:30 Done: Hermes is opt-in only. src/targets.ts (no hermes markers), src/engine.ts (hermesOptInHint; no move while hermes is no target, orphans removed from the recorded home), src/hooks.ts (opt-in line in the session-start answer under --harness hermes). Tests in test/hermes.test.ts: never detected, error without hermes markers, a project cannot add it, upgrade from the auto-detect lock (Claude run and plugin run under another HERMES_HOME), the hook line through runHook and the built CLI (exit 0). Env helper opts in via targets; hermes-real declare passes targets. Docs: README (detection/targets, Hermes Agent), spec §16 intro/§16.2/§16.4/§16.5/§16.6, §16.7 rewritten to "Decisions", Changes entry. typecheck ok; npm test 937/937 pass, 0 skipped (real Hermes ran); build + check-dist up to date.
+
+2026-10-15 02:50 Committed 9b23f9c
