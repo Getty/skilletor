@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-10-15T04:00:37Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-15T04:00:37Z
+created: 2026-10-13T05:12:18Z
+id: 129
+priority: low
+started: 2026-10-15T03:22:37Z
+status: done
+tags:
+- bug
+- sources
+title: '"path": ".claude/skills" offers skilletor''s own installed copies'
+updated: 2026-10-15T04:00:37Z
+---
+
+Found during k126 (worker). The .claude/ scan (k96) skips a skill directory carrying skilletor's .gitignore and .local. files: copies a sync in that project wrote from other sources. A source "path" pointing into .claude/skills walks the same directories without that filter, so a local checkout offers them (a git clone does not, git ignores them). Apply the same filter under a path, with a test.
+
+2026-10-15 03:24 Started (worker): red test in test/source-path.test.ts, then the k96 skill filter in pathSkills.
+
+2026-10-15 03:28 Done (worker): src/catalog.ts gets isInstalledCopy(skillDir) – .gitignore a plain file holding SKILL_GITIGNORE – used by the .claude/ scan (claudeItem, behaviour unchanged: checked before walking, a symlink in such a copy still skips it) and by the path walk (pathSkills.visit), which passes such a skill directory over before reading its files and does not descend into it. Red test first: test/source-path.test.ts 'k129: a path walk does not offer skilletor's own installed copies' (failed with 'installed' and 'deep' offered). Docs: README path section, skills/skilletor/SKILL.md, spec §4.1 'Installed copies' bullet, Changes (appended to the unreleased path entry). Verified: typecheck, npm test 945/945, build, check-dist green. Uncommitted; patch for this card alone kept for the release-manager.
+
+2026-10-15 04:00 Committed as 77da0a4
