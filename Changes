@@ -1,6 +1,8 @@
 Revision history for skilletor
 
 {{$NEXT}}
+
+0.6.0     2026-10-15 17:39:19Z
   - Hermes Agent is a third target, `hermes` in `targets`. It is opt-in:
     never detected, so `"targets"` in `~/.claude/skilletor.json` must name it,
     together with every other harness in use (`["claude", "hermes"]`). Skills

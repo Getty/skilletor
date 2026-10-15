@@ -11379,7 +11379,7 @@ function defaultBackground(ctx, spawnChild = spawn) {
 }
 
 // src/cli.ts
-var VERSION = true ? "0.5.0" : "0.0.0-dev";
+var VERSION = true ? "0.6.0" : "0.0.0-dev";
 var USAGE = `skilletor ${VERSION}
 Remote skills, agents and rules for Claude Code, Codex and Hermes Agent.
 

@@ -1,5 +1,5 @@
 name: skilletor
-version: "0.5.0"
+version: "0.6.0"
 description: "Syncs the skills skilletor manages when a session starts and tells the model what changed. Needs the skilletor CLI and Node.js >= 18."
 author: Torsten Raudssus
 license: MIT
