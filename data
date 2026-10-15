@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-10-15T04:45:13Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-15T04:45:06Z
+created: 2026-09-27T23:16:48Z
+id: 125
+priority: low
+started: 2026-10-15T04:01:24Z
+status: done
+tags:
+- spec
+- bug
+title: 'spec: other GitHub page links (anchors, /releases, /commit, github:o/r/tree/x)
+  resolve wrongly'
+updated: 2026-10-15T04:45:13Z
+---
+
+Found during k119 (worker). After k119 resolves github.com/o/r/tree/<ref>: (1) a repo page link with an anchor or query (https://github.com/Getty/karr#readme, ?tab=readme-ov-file) is stored as written and fails at fetch; (2) other page links (/releases/tag/v1, /commit/<sha>, /issues) silently track HEAD in shorthand form, their https:// forms fail at fetch; (3) github:Getty/karr/tree/main and Getty/karr/tree/main still drop /tree/main silently (pinned by k117), inconsistent with the github.com/ form; (4) low: a percent-encoded ref in a link is stored encoded. Also other forges' link shapes (GitLab /-/tree/<ref>, Codeberg /src/branch/<ref>, HF /tree/<ref>) drop or keep the tail. Decide: strip query/anchor on repo links, /releases/tag/<t> and /commit/<sha> → ref, refuse other page links; align shorthand forms with k119.
+
+2026-10-13 05:11 From k126: a GitHub link into a directory now stores the rest as "path", taken as written like the ref — `…/tree/main/my%20skills` stores path "my%20skills", which a sync reports as not existing. Decide escapes for ref and path together. Also from k126: `…/tree/feature/x` (a ref containing "/") no longer gets the explanatory error; it is stored as ref "feature", path "x" and fails at fetch.
+
+2026-10-15 02:01 Maintainer decision 2026-10-15: take the proposal — strip query/anchor on repo links; /releases/tag/<t> and /commit/<sha> → ref; refuse other page links with a clear error; align shorthand forms (github:o/r/tree/x, o/r/tree/x) with the github.com form; percent-decode ref and path; a ref containing '/' (tree/feature/x) stays ambiguous and gets the explanatory error back.
+
+2026-10-15 04:20 Done in the tree (patch k125.patch, on top of k128): src/spec.ts githubLink replaced by forgeLink(), used by https:// links to a known forge, <host>/… shorthands, github:o/r/… and o/r/…. Query/fragment cut from every known-forge link (explicit repo URL otherwise verbatim). GitHub: tree/<ref>[/dir] ref+path; releases/tag/<t> and commit/<sha> ref; blob file error; anything else ("issues", "pulls", "releases", "extra"…) SpecError `a GitHub "<view>" page is not a source; add <repo>`. Ref and each path segment %-decoded after splitting at "/" (so %2F keeps a "/" in the ref); bad escape is an error. Other forges (module knows them in KNOWN_FORGES, now FORGES): GitLab project = all segments before /-/ (nested groups; gitlab.com/g/sub/r was silently g/sub before), -/tree, -/commit, -/tags, -/releases, -/blob|raw file error; Codeberg src/branch|tag|commit/<ref>[/dir], releases/tag, commit, raw|media file error; HF tree, commit, blob|resolve|raw file error, datasets/ and spaces/ prefixes part of the repo. Other pages refused on all of them. http://github.com, www.github.com and forge tarballs unchanged. Tests: 43 spec rows/cases red first, plus a cmdAdd test (red against HEAD spec.ts). npm test 987/987.
+
+2026-10-15 04:41 Maintainer decision 2026-10-15: option A — keep the k126 rule (segment after tree/ is the ref, rest is path); a ref containing '/' is written percent-encoded (feature%2Fx). Unblocked; commit as is.
+
+Option A chosen by maintainer; ready to commit (k125.patch).
+
+2026-10-15 04:45 Committed as ad43ee4
