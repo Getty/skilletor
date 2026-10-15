@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-10-15T02:50:30Z
+claimed_by: main
+class: standard
+completed: 2026-10-15T02:50:30Z
+created: 2026-10-13T05:12:29Z
+id: 130
+priority: low
+started: 2026-10-15T02:31:14Z
+status: done
+tags:
+- docs
+- hermes
+title: 'hermes-target: README/spec line on Hermes'' own skills from a "path" source'
+updated: 2026-10-15T02:50:30Z
+---
+
+For branch hermes-target, once it is rebased onto main with k126. The skills of NousResearch/hermes-agent (the k126 example source) already sit in a Hermes home under skills/<category>/<name>/. Installed by skilletor for target hermes they land in skills/<name>/ and hit the ambiguous-name refusal measured in §16.5: Hermes refuses the bare name and skilletor's copy cannot be loaded. Say so in the README Hermes section and §16.5: that source is for Claude Code and Codex, or needs "targets" without hermes. Ties into §16.7 decision 2 (no per-target selection of items).
+
+README 'What is missing' and spec §16.5 'Name collisions': the hermes-agent path example source is for Claude Code and Codex; with hermes in targets every skill collides with Hermes' own (refs §16.7 decision 2).
+
+2026-10-15 02:50 Committed 9b23f9c
