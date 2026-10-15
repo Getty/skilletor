@@ -8,6 +8,8 @@ stdin, one JSON object:
   home, cwd what the Adapter's home and cwd lookups answer (adapter mode)
   limits    {"session_start_s": …, "prompt_s": …} (adapter mode, optional)
   steps     [[method, kwargs], …] (adapter mode)
+  windows   find_cli as on Windows (adapter mode, optional; only the reported "cli")
+  no_killpg os.killpg removed before the steps run, as on Windows (adapter mode, optional)
 stdout: one JSON object with what happened.
 """
 
@@ -65,7 +67,12 @@ def main():
         adapter = plugin.Adapter(
             job["plugin"], environ=job["environ"], home=lambda environ: job.get("home"),
             cwd=lambda: job.get("cwd"), **job.get("limits", {}))
-        out["cli"] = plugin.find_cli(job["environ"], job["plugin"])
+        if "windows" in job:
+            out["cli"] = plugin.find_cli(job["environ"], job["plugin"], windows=job["windows"])
+        else:
+            out["cli"] = plugin.find_cli(job["environ"], job["plugin"])
+        if job.get("no_killpg"):
+            del os.killpg
         out["results"] = []
         for method, kwargs in job["steps"]:
             started = time.monotonic()

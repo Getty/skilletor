@@ -14,7 +14,9 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const PLUGIN = join(root, "hermes", "skilletor");
 const DRIVER = join(root, "test", "helpers", "hermes_plugin_driver.py");
 const python = spawnSync("python3", ["--version"]).status === 0;
-const skip = python ? false : "no python3";
+// The stand-in is a sh script, which Windows does not start; the Windows launcher is chosen by
+// find_cli(…, windows=True), tested here.
+const skip = process.platform === "win32" ? "the stand-in CLI is a sh script" : python ? false : "no python3";
 
 /** The stand-in: logs argv, stdin (per event) and its environment beside itself, then does
  *  what the files beside it say – `<script>.<event>` is its answer to that event. */
@@ -59,6 +61,8 @@ interface Job {
   cwd?: string;
   limits?: { session_start_s?: number; prompt_s?: number };
   steps?: [string, Record<string, unknown>][];
+  windows?: boolean;
+  no_killpg?: boolean;
 }
 
 function drive(job: Job) {
@@ -274,6 +278,46 @@ test("fail open: a CLI that hangs is killed at the plugin's own limit, well befo
     const pid = Number(f.read("pid"));
     assert.ok(pid > 1);
     assert.throws(() => process.kill(pid, 0), /ESRCH/);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("fail open where os.killpg is missing (Windows): a CLI that hangs is still killed at the limit", { skip }, () => {
+  const f = fixture();
+  try {
+    f.says("sleep", "30");
+    f.says("session-start", answer("never shown"));
+    const out = drive({
+      mode: "adapter", environ: f.environ, cwd: f.cwd, limits: { session_start_s: 0.4, prompt_s: 0.4 },
+      no_killpg: true, steps: [START(), TURN()],
+    });
+    assert.deepEqual(out.results.map((r) => r.ret), [null, null]);
+    assert.ok(out.results[0]!.took >= 0.4 && out.results[0]!.took < 5, `took ${out.results[0]!.took}`);
+    const pid = Number(f.read("pid"));
+    assert.ok(pid > 1);
+    assert.throws(() => process.kill(pid, 0), /ESRCH/);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("on Windows the checkout's CLI is bin/skilletor.exe, which runs without a shell", { skip }, () => {
+  const f = fixture();
+  try {
+    // A checkout of its own: the plugin in it, dist/ and only the Windows launcher in bin/.
+    const checkout = join(f.tmp.dir, "checkout");
+    const plugin = join(checkout, "hermes", "skilletor");
+    mkdirSync(plugin, { recursive: true });
+    mkdirSync(join(checkout, "bin"));
+    mkdirSync(join(checkout, "dist"));
+    writeFileSync(join(plugin, "__init__.py"), readFileSync(join(PLUGIN, "__init__.py")));
+    writeFileSync(join(checkout, "dist", "skilletor.js"), "");
+    writeFileSync(join(checkout, "bin", "skilletor.exe"), "");
+    chmodSync(join(checkout, "bin", "skilletor.exe"), 0o755);
+    const environ = { PATH: join(f.tmp.dir, "empty"), HOME: f.tmp.dir };
+    assert.equal(drive({ mode: "adapter", plugin, environ, windows: true, steps: [] }).cli, join(checkout, "bin", "skilletor.exe"));
+    assert.equal(drive({ mode: "adapter", plugin, environ, windows: false, steps: [] }).cli, null);
   } finally {
     f.cleanup();
   }

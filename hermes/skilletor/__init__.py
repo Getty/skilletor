@@ -26,7 +26,9 @@ PROMPT_S, are below Hermes' own for a hook callback
 and skips it for a minute; a child that runs into ours is killed.
 
 The CLI is $SKILLETOR_BIN if set – then that or nothing; else bin/skilletor of
-the checkout this directory is a symlink into; else `skilletor` on PATH. The
+the checkout this directory is a symlink into (on Windows bin/skilletor.exe, the
+launcher Claude Code starts there: bin/skilletor is a sh script); else
+`skilletor` on PATH. The
 child runs with the session's Hermes home as HERMES_HOME, and skilletor takes
 the project from the `cwd` it is sent.
 
@@ -58,14 +60,18 @@ PROJECT_VARS = ("SKILLETOR_PROJECT_DIR", "CLAUDE_PROJECT_DIR")
 
 FRESH, SEEN = "fresh", "seen"
 
+WINDOWS = os.name == "nt"
+# Windows: the hook child gets no console window of its own (a gateway runs without one).
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-def find_cli(environ, here):
+
+def find_cli(environ, here, windows=WINDOWS):
     """The skilletor CLI this plugin adapts, or None."""
     named = environ.get("SKILLETOR_BIN")
     if named:
         return named if os.path.isfile(named) and os.access(named, os.X_OK) else None
     root = os.path.dirname(os.path.dirname(os.path.realpath(here)))
-    shim = os.path.join(root, "bin", "skilletor")
+    shim = os.path.join(root, "bin", "skilletor.exe" if windows else "skilletor")
     if os.access(shim, os.X_OK) and os.path.isfile(os.path.join(root, "dist", "skilletor.js")):
         return shim
     return shutil.which("skilletor", path=environ.get("PATH"))
@@ -149,14 +155,18 @@ class Adapter:
         proc = subprocess.Popen(
             [cli, "hook", event, "--harness", HARNESS],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            env=self.child_env(hook=True), cwd=cwd if cwd and os.path.isdir(cwd) else "/",
-            start_new_session=True)
+            env=self.child_env(hook=True),
+            cwd=cwd if cwd and os.path.isdir(cwd) else os.path.abspath(os.sep),
+            start_new_session=True, creationflags=NO_WINDOW)
         try:
             out, _ = proc.communicate(json.dumps(payload).encode("utf-8"), timeout=limit)
         except subprocess.TimeoutExpired:
             # The shim and its node, not the detached background sync (a session of
-            # its own). Not waited for beyond a moment: Hermes has a limit too.
+            # its own). Not waited for beyond a moment: Hermes has a limit too. Without
+            # process groups (Windows) the launcher alone; its node finds the pipes closed.
             try:
+                if not hasattr(os, "killpg"):
+                    raise OSError
                 os.killpg(proc.pid, signal.SIGKILL)
             except OSError:
                 proc.kill()

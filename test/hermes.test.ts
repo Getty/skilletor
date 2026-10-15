@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join, resolve as resolvePath } from "node:path";
 import { buildToString } from "../scripts/esbuild.config.mjs";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
+import { homeEnv } from "./helpers/harness.ts";
 import { check, status, sync, type EngineContext } from "../src/engine.ts";
 import { reportHook, reportText } from "../src/report.ts";
 import { runHook } from "../src/hooks.ts";
@@ -570,7 +571,7 @@ function machine() {
   mkdirSync(cwd);
   writeFileSync(join(hermesHome, "config.yaml"), "plugins:\n  enabled:\n    - skilletor\n");
   const { HERMES_HOME: _h, CODEX_HOME: _c, ...rest } = process.env;
-  const plain = { ...rest, HOME: home, CODEX_HOME: join(home, ".no-codex") };
+  const plain = { ...rest, ...homeEnv(home), CODEX_HOME: join(home, ".no-codex") };
   const run = (args: string[], env: NodeJS.ProcessEnv, input?: string) =>
     spawnSync(process.execPath, [bundle, ...args], { encoding: "utf8", env, input, cwd });
   return { tmp, home, hermesHome, cwd, plain, inHermes: { ...plain, HERMES_HOME: hermesHome }, run, cleanup: () => tmp.cleanup() };
