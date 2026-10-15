@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-10-15T04:45:00Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-15T04:44:55Z
+created: 2026-10-13T05:12:12Z
+id: 128
+priority: low
+started: 2026-10-15T04:01:18Z
+status: done
+tags:
+- spec
+- sources
+title: 'spec §3: a config file cannot override "ref" or "path" alone for a source
+  another file declares'
+updated: 2026-10-15T04:45:00Z
+---
+
+Found during k126 (worker). §3 "Merging sources" reads as if fields merged freely (project < user < local), but every source entry needs its own backend field at load, so a skilletor.local.json cannot say only { "path": [...] } or { "ref": "x" } for a source the project declares. Decide: allow a backend-less entry when another file supplies the backend, or say in §3 and the README that an overriding entry repeats the backend.
+
+2026-10-15 02:01 Maintainer decision 2026-10-15: allow a backend-less entry when another config file supplies the backend for that source (ref/path override alone); an entry with no backend anywhere stays an error.
+
+2026-10-15 04:07 Rule taken: backend fields keep merging per field (k66) — a higher git/url/local replaces only the same field and sits beside the others, so a user local over a project git stays author mode with the git as fallback (checked: the real ~/.claude/skilletor.json + this repo still load unchanged). ref/path: last file giving one wins. ref is the git backend field: used only when git is chosen; it stays when a higher file gives another git without ref (a pin is never dropped silently, k88 spirit; same-repo SSH/HTTPS re-declarations keep their pin); a higher ref replaces it. Backend-less entry: allowed in any file when another file of the merge gives one; none anywhere = ConfigError "<files joined by and>: sources.X needs one of git, url or local; no other config file gives one / none of these files gives one (...)". User scope reads the user config alone, so a backend-less user entry is dropped from userSources; a user install/bundle naming it is a ConfigError saying why. With no project scope the user config alone must give the backend.
+
+2026-10-15 04:07 Also found (not fixed, for this board): `source remove` of the one entry giving the backend (e.g. project git) while skilletor.local.json still has {ref} for that name leaves a config load refuses; the command edits, then its sync fails with the new clear ConfigError. Could pre-check and refuse/name the local file. Also: there is no way for a higher file to unset a lower ref (unpin) — only to replace it.
+
+2026-10-15 04:07 Done: src/config.ts (sourceFields needsBackend flag, post-merge backend check, backend-less user entries out of userSources with a clear install/bundle error); 3 red-first tests in test/config.test.ts; spec §3 bullet, README Declaring section, SKILL.md, Changes. Verified: config tests 46/46, full npm test 951/951, typecheck, build, check-dist. Patch: scratchpad k128.patch.
+
+2026-10-15 04:45 Committed as 9a8248a
