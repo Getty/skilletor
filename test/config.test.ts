@@ -342,6 +342,7 @@ test("k88: a git, ref or local that is not a string is refused, naming file, sou
   const values: unknown[] = [123, true, null, ["main"], { name: "main" }];
   for (const [i, key] of ["git", "ref", "local"].entries()) {
     for (const [j, value] of values.entries()) {
+      if (key === "ref" && value === null) continue; // unsets a lower file's ref (k137)
       const file = files[(i + j) % files.length];
       const { home, projectDir, cleanup } = setup({ [file]: { sources: { team: { ...others[key], [key]: value } } } });
       try {
@@ -990,5 +991,31 @@ test("k135: two install entries whose names are equal ignoring case are a duplic
     assert.deepEqual([cfg.user.install.map((i) => i.raw), cfg.project?.install.map((i) => i.raw)], [["Foo@a", "foo@b"], ["foo@b"]]);
   } finally {
     fine.cleanup();
+  }
+});
+
+// k137: a higher file of the merge (project < user < local) could pin a lower file's ref but
+// not unpin it. Rule: `"ref": null` unsets the ref the files below gave; a file above may set
+// one again. Asserts: a local or user `{ref: null}` (an override without a backend) leaves the
+// project's `git` without a ref – no `ref` key at all, the backend's origin kept; a local
+// `ref` over a user null pins again; a user entry with a backend and `ref: null` is the user
+// scope's source without a ref. Other fields keep refusing null (k88).
+test("k137: \"ref\": null in a higher config file unsets a lower file's ref", () => {
+  const git = "https://github.com/Getty/skills";
+  const { home, projectDir, cleanup } = setup({
+    project: { sources: { byLocal: { git, ref: "v1" }, byUser: { git, ref: "v1", path: "a" }, again: { git, ref: "v1" } } },
+    user: { sources: { byUser: { ref: null }, again: { ref: null }, own: { git, ref: null } } },
+    local: { sources: { byLocal: { ref: null }, again: { ref: "v4" } } },
+  });
+  try {
+    const cfg = loadConfig({ home, projectDir });
+    const s = (name: string) => cfg.sources.get(name);
+    assert.deepEqual(s("byLocal"), { name: "byLocal", git, origins: { git: "project" } });
+    assert.deepEqual(s("byUser"), { name: "byUser", git, path: "a", origins: { git: "project" } });
+    assert.deepEqual(s("again"), { name: "again", git, ref: "v4", origins: { git: "project" } });
+    assert.deepEqual(cfg.userSources.get("own"), { name: "own", git, origins: { git: "user" } });
+    assert.deepEqual([...cfg.userSources.keys()], ["own"]);
+  } finally {
+    cleanup();
   }
 });

@@ -2066,3 +2066,70 @@ test("k136: uninstall matches an entry and the lock ignoring case", async () => 
     e.cleanup();
   }
 });
+
+// k137: removing the entry that gives a source its backend, while another config file keeps an
+// entry for it without one (k128: it only changes "ref" or "path"), saved a config that no
+// longer loads. Asserts, `--force` or not: a CommandError before anything else naming every
+// file with such an entry and how to remove it (`source remove` for the user or project
+// config, by hand for skilletor.local.json) or give it a backend; every config byte-identical,
+// no sync run (no lock). When another file gives a backend too, the entry goes as before; so
+// does the source once its overrides are gone.
+test("k137: source remove of the entry another file's override needs is refused, naming that file", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => skill(d, "foo"));
+    const projCfg = join(e.projectDir, ".claude", "skilletor.json");
+    const localCfg = join(e.projectDir, ".claude", "skilletor.local.json");
+    const write = (p: string, v: object) => writeFileSync(p, JSON.stringify(v, null, 2));
+    const override = { sources: { shared: { path: "skills" } } };
+    const backend = { sources: { shared: { local: src } } };
+    const msg = (from: string, shown: string, ways: string, many = false) =>
+      `source "shared" in ${from} gives its only "git", "url" or "local", and the ${many ? "entries" : "entry"} in ${shown} ` +
+      `${many ? "have" : "has"} none: config load would refuse ${many ? "those entries" : "that entry"} once this one is gone. ` +
+      `Remove ${many ? "those entries" : "that entry"} first (${ways}), or give ${many ? "one of them" : "it"} a "git", "url" or "local" ` +
+      `of its own; nothing was changed.`;
+    const user = `the user config (${e.userCfgPath})`;
+    const proj = `the project config (${projCfg})`;
+    const cases: { user: object; proj: object; local?: object; project: boolean; message: string }[] = [
+      { user: backend, proj: override, project: false, message: msg(user, proj, "skilletor source remove shared --project") },
+      { user: override, proj: backend, project: true, message: msg(proj, user, "skilletor source remove shared") },
+      { user: backend, proj: override, local: override, project: false,
+        message: msg(user, `${proj} and ${localCfg}`, `skilletor source remove shared --project; edit ${localCfg} by hand`, true) },
+    ];
+    for (const c of cases) {
+      write(e.userCfgPath, c.user);
+      write(projCfg, c.proj);
+      if (c.local) write(localCfg, c.local);
+      else rmSync(localCfg, { force: true });
+      const files = [e.userCfgPath, projCfg, ...(c.local ? [localCfg] : [])];
+      const before = files.map((f) => readFileSync(f));
+      for (const force of [false, true]) {
+        const args = { name: "shared", project: c.project, force };
+        await assert.rejects(() => cmdSourceRemove(e.ctx, args), { name: "CommandError", message: c.message }, JSON.stringify(args));
+        assert.deepEqual(files.map((f) => readFileSync(f)), before, `${JSON.stringify(args)}: every config byte-identical`);
+      }
+    }
+    assert.equal(existsSync(join(e.home, ".claude", "skilletor.lock.json")), false, "no sync: no user lock");
+    assert.equal(existsSync(join(e.projectDir, ".claude", "skilletor.lock.json")), false, "no sync: no project lock");
+
+    // Another file gives a backend too: the entry goes, the config still loads.
+    write(e.userCfgPath, backend);
+    write(projCfg, { sources: { shared: { local: src, path: "skills" } } });
+    write(localCfg, override);
+    assert.equal((await cmdSourceRemove(e.ctx, { name: "shared" })).error, undefined);
+    assert.equal(sourceEntryOf(e.userCfgPath), undefined);
+    // Overrides gone first, the source goes as well.
+    write(e.userCfgPath, backend);
+    write(projCfg, override);
+    rmSync(localCfg);
+    assert.equal((await cmdSourceRemove(e.ctx, { name: "shared", project: true })).error, undefined);
+    assert.equal((await cmdSourceRemove(e.ctx, { name: "shared" })).error, undefined);
+    assert.deepEqual(e.readUserCfg(), {});
+  } finally {
+    e.cleanup();
+  }
+});
+
+function sourceEntryOf(path: string): unknown {
+  return (JSON.parse(readFileSync(path, "utf8")).sources ?? {}).shared;
+}

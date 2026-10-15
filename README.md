@@ -206,9 +206,11 @@ A source declared in one file can be changed from another: the user config and
 there needs no `git`, `url` or `local` of its own when another file gives one, so
 `{ "sources": { "shared": { "ref": "v2" } } }` in `skilletor.local.json` pins the project's
 `shared` on this machine, and `{ "path": [...] }` re-paths it. A `ref` is used only while the
-source is read from `git`, and stays when a higher file gives another `git` without one. A
-source no file gives a backend is a config error naming the source and the files declaring
-it. Your user config's sources alone build your user-scope items, so an entry there without a
+source is read from `git`, and stays when a higher file gives another `git` without one;
+`{ "ref": null }` unpins it — the files below lose their `ref`, the remote's HEAD is used, and
+a file above may pin again. A source no file gives a backend is a config error naming the
+source and the files declaring it, so `source remove` refuses to remove the one entry giving
+the backend while another file keeps an entry without one; the error names those files. Your user config's sources alone build your user-scope items, so an entry there without a
 backend changes projects only — and fails where no project declares that source.
 
 A source's name — its key under `sources` — is ASCII letters, digits, `.`, `_` and `-`,
@@ -900,7 +902,9 @@ with `--project`) does not declare exits 1 and changes nothing, `--force` or not
 names where else it is declared (the other config, `skilletor.local.json`), if anywhere. It
 removes a source whose entry config load refuses (an `http://` url, a hand-written
 `"ref": ""`) when that entry is all the config load refuses; any other config error stops
-it (exit 1, nothing changed).
+it (exit 1, nothing changed). Nor does it remove the entry giving a source its only `git`,
+`url` or `local` while another config file keeps an entry for that source without one (exit
+1, nothing changed, `--force` or not): the error names those files and how to remove them.
 `-h`/`--help` anywhere prints the usage and runs nothing (`sync --help` does not sync);
 `-v`/`--version` only as the first argument.
 

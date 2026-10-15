@@ -5903,7 +5903,7 @@ function sourceFields(def, at, needsBackend = true) {
   }
   const src = {};
   if (d.git !== void 0) src.git = gitField(stringField(d.git, "git", at), "git", at);
-  if (d.ref !== void 0) src.ref = gitField(stringField(d.ref, "ref", at), "ref", at);
+  if (d.ref !== void 0 && d.ref !== null) src.ref = gitField(stringField(d.ref, "ref", at), "ref", at);
   if (d.local !== void 0) src.local = stringField(d.local, "local", at);
   if (d.url !== void 0) {
     if (typeof d.url !== "string" || !d.url.startsWith("https://")) {
@@ -5954,9 +5954,10 @@ function gitField(value2, key, at) {
   }
   return value2;
 }
-function mergeSource(base, incoming) {
+function mergeSource(base, incoming, unsetRef = false) {
   const merged = { ...base ?? incoming, origins: { ...base?.origins } };
   if (incoming.ref !== void 0) merged.ref = incoming.ref;
+  else if (unsetRef) delete merged.ref;
   if (incoming.path !== void 0) merged.path = incoming.path;
   for (const kind of BACKEND_KINDS) {
     if (incoming[kind] === void 0) continue;
@@ -6103,10 +6104,11 @@ function loadConfig(opts) {
   const userSources = parseSources(user, userPath, "user", skip(userPath));
   const projectSources = hasProject ? parseSources(project, projectPath, "project", skip(projectPath)) : /* @__PURE__ */ new Map();
   const localSources = hasProject ? parseSources(local, localPath, "user", skip(localPath)) : /* @__PURE__ */ new Map();
+  const nullRef = (obj, name) => obj.sources?.[name]?.ref === null;
   const sources = /* @__PURE__ */ new Map();
   for (const [name, s] of projectSources) sources.set(name, mergeSource(void 0, s));
-  for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s));
-  for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s));
+  for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s, nullRef(user, name)));
+  for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s, nullRef(local, name)));
   for (const [name, s] of sources) {
     if (hasBackend(s)) continue;
     const files = [[projectSources, projectPath], [userSources, userPath], [localSources, localPath]].filter(([m]) => m.has(name)).map(([, p]) => p);
@@ -10719,7 +10721,7 @@ async function cmdAdd(ctx, args) {
     const has = existing.ref;
     if (resolved.ref !== void 0 && has !== resolved.ref) {
       throw new CommandError(
-        `source "${name}" in ${path} is ${addressText(existing)} ${has === void 0 ? "with no ref" : `with ref ${JSON.stringify(has)}`}, not ref ${JSON.stringify(resolved.ref)}; nothing was changed. Set its "ref" by hand, add it under another name (skilletor add <name> ${args.spec}${flag}) or remove the source first (skilletor source remove ${name}${flag}).`
+        `source "${name}" in ${path} is ${addressText(existing)} ${has === void 0 || has === null ? "with no ref" : `with ref ${JSON.stringify(has)}`}, not ref ${JSON.stringify(resolved.ref)}; nothing was changed. Set its "ref" by hand, add it under another name (skilletor add <name> ${args.spec}${flag}) or remove the source first (skilletor source remove ${name}${flag}).`
       );
     }
     const lies = existing.path;
@@ -10805,6 +10807,8 @@ async function cmdSourceRemove(ctx, args) {
       `source "${args.name}" is not declared in the ${project ? "project" : "user"} config (${path})` + sourceElsewhere(ctx, args.name, project)
     );
   }
+  const stranded = strandedOverrides(ctx, args.name, project);
+  if (stranded !== void 0) throw new CommandError(stranded);
   const config = removalConfig(ctx, path, args.name);
   const inUse = usedSources(config).has(args.name);
   if (inUse && !args.force) {
@@ -10820,6 +10824,27 @@ function removalConfig(ctx, path, name) {
     if (!(err instanceof ConfigError)) throw err;
     return loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx), unchecked: { path, name } });
   }
+}
+function givesBackend(entry) {
+  return entry !== null && typeof entry === "object" && ADDRESS_KEYS.some((k) => entry[k] !== void 0);
+}
+function strandedOverrides(ctx, name, project) {
+  const path = configPath(ctx, project);
+  if (!givesBackend(sourceEntry(path, name))) return void 0;
+  const root = projectDirOf(ctx);
+  if (!root) return void 0;
+  const local = join15(root, ".claude", "skilletor.local.json");
+  const others = [
+    {
+      path: configPath(ctx, !project),
+      shown: `the ${project ? "user" : "project"} config (${configPath(ctx, !project)})`,
+      way: `skilletor source remove ${name}${project ? "" : " --project"}`
+    },
+    { path: local, shown: local, way: `edit ${local} by hand` }
+  ].map((o) => ({ ...o, entry: sourceEntry(o.path, name) })).filter((o) => o.entry !== void 0);
+  if (others.length === 0 || others.some((o) => givesBackend(o.entry))) return void 0;
+  const many = others.length > 1;
+  return `source "${name}" in the ${project ? "project" : "user"} config (${path}) gives its only "git", "url" or "local", and the ${many ? "entries" : "entry"} in ${others.map((o) => o.shown).join(" and ")} ${many ? "have" : "has"} none: config load would refuse ${many ? "those entries" : "that entry"} once this one is gone. Remove ${many ? "those entries" : "that entry"} first (${others.map((o) => o.way).join("; ")}), or give ${many ? "one of them" : "it"} a "git", "url" or "local" of its own; nothing was changed.`;
 }
 function sourceElsewhere(ctx, name, project) {
   const root = projectDirOf(ctx);

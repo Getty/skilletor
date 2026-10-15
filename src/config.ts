@@ -214,7 +214,8 @@ export function sourceFields(def: unknown, at: string, needsBackend = true): Sou
   }
   const src: SourceDef = {};
   if (d.git !== undefined) src.git = gitField(stringField(d.git, "git", at), "git", at);
-  if (d.ref !== undefined) src.ref = gitField(stringField(d.ref, "ref", at), "ref", at);
+  // `"ref": null` is no ref: in a file of the merge it unsets a lower file's (k137, loadConfig).
+  if (d.ref !== undefined && d.ref !== null) src.ref = gitField(stringField(d.ref, "ref", at), "ref", at);
   if (d.local !== undefined) src.local = stringField(d.local, "local", at);
   if (d.url !== undefined) {
     if (typeof d.url !== "string" || !d.url.startsWith("https://")) {
@@ -289,10 +290,12 @@ function gitField(value: string, key: "git" | "ref", at: string): string {
 }
 
 /** Merge `incoming` source fields over `base`, field by field: each backend field keeps
- *  the origin of the file it came from (spec §3); `ref` and `path` are replaced whole. */
-function mergeSource(base: ResolvedSource | undefined, incoming: ResolvedSource): ResolvedSource {
+ *  the origin of the file it came from (spec §3); `ref` and `path` are replaced whole, and
+ *  `unsetRef` – the file wrote `"ref": null` (k137) – drops the ref `base` had. */
+function mergeSource(base: ResolvedSource | undefined, incoming: ResolvedSource, unsetRef = false): ResolvedSource {
   const merged: ResolvedSource = { ...(base ?? incoming), origins: { ...base?.origins } };
   if (incoming.ref !== undefined) merged.ref = incoming.ref;
+  else if (unsetRef) delete merged.ref;
   if (incoming.path !== undefined) merged.path = incoming.path; // the whole value, never concatenated
   for (const kind of BACKEND_KINDS) {
     if (incoming[kind] === undefined) continue;
@@ -476,10 +479,12 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
   const projectSources = hasProject ? parseSources(project, projectPath, "project", skip(projectPath)) : new Map<string, ResolvedSource>();
   const localSources = hasProject ? parseSources(local, localPath, "user", skip(localPath)) : new Map<string, ResolvedSource>();
 
+  // `"ref": null` in a file unsets the ref of the files below it (k137).
+  const nullRef = (obj: Json, name: string) => (obj.sources as Record<string, Json | undefined> | undefined)?.[name]?.ref === null;
   const sources = new Map<string, ResolvedSource>();
   for (const [name, s] of projectSources) sources.set(name, mergeSource(undefined, s));
-  for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s));
-  for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s));
+  for (const [name, s] of userSources) sources.set(name, mergeSource(sources.get(name), s, nullRef(user, name)));
+  for (const [name, s] of localSources) sources.set(name, mergeSource(sources.get(name), s, nullRef(local, name)));
   // An entry without a backend only changes `ref` or `path` of a source another file of the
   // merge defines (k128); a source no file gives one is refused, naming each file declaring it.
   for (const [name, s] of sources) {

@@ -66,6 +66,13 @@ Revision history for skilletor
     name is taken over (reported as added and removed, as on Linux).
     `uninstall foo@a` removes an entry `Foo@a`, and names the wildcard or
     bundle that installed `Foo`.
+  - `"ref": null` in the user config or `skilletor.local.json` unpins a
+    source: the `ref` a lower config file gave is dropped and `git` tracks
+    the remote's HEAD again.
+  - `skilletor source remove` refuses to remove the entry giving a source its
+    only `git`, `url` or `local` while another config file keeps an entry for
+    it without one, which would leave a config that no longer loads; the error
+    names those files and how to remove them.
 
 0.4.2     2026-10-06 05:28:16Z
   - Windows: hooks and the CLI start without Git Bash. `bin/skilletor.exe`, a

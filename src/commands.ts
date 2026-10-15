@@ -108,7 +108,7 @@ export async function cmdAdd(
     if (resolved.ref !== undefined && has !== resolved.ref) {
       throw new CommandError(
         `source "${name}" in ${path} is ${addressText(existing)} ` +
-          `${has === undefined ? "with no ref" : `with ref ${JSON.stringify(has)}`}, not ref ${JSON.stringify(resolved.ref)}; ` +
+          `${has === undefined || has === null ? "with no ref" : `with ref ${JSON.stringify(has)}`}, not ref ${JSON.stringify(resolved.ref)}; ` +
           `nothing was changed. Set its "ref" by hand, add it under another name (skilletor add <name> ${args.spec}${flag}) ` +
           `or remove the source first (skilletor source remove ${name}${flag}).`,
       );
@@ -223,7 +223,9 @@ function pickDef(s: SourceDef): SourceDef {
  * Remove a source from one config (user, or project with --project), then sync. A name that
  * config does not declare is an error before anything else, `--force` or not (k114, as
  * `uninstall` of an absent entry): nothing edited, no sync; it names where else it is declared.
- * An entry config load refuses is removed when nothing else in the config is (k120).
+ * An entry config load refuses is removed when nothing else in the config is (k120). The entry
+ * that gives the source its only backend stays while another file keeps an entry for it
+ * without one (k137: load would refuse that one), `--force` or not.
  */
 export async function cmdSourceRemove(
   ctx: CommandContext,
@@ -237,6 +239,8 @@ export async function cmdSourceRemove(
         sourceElsewhere(ctx, args.name, project),
     );
   }
+  const stranded = strandedOverrides(ctx, args.name, project);
+  if (stranded !== undefined) throw new CommandError(stranded);
   const config = removalConfig(ctx, path, args.name);
   const inUse = usedSources(config).has(args.name);
   if (inUse && !args.force) {
@@ -257,6 +261,34 @@ function removalConfig(ctx: CommandContext, path: string, name: string): LoadedC
     if (!(err instanceof ConfigError)) throw err;
     return loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx), unchecked: { path, name } });
   }
+}
+
+/** Does an entry as written name a backend (`git`, `url` or `local`; k128)? */
+function givesBackend(entry: unknown): boolean {
+  return entry !== null && typeof entry === "object" && ADDRESS_KEYS.some((k) => (entry as Record<string, unknown>)[k] !== undefined);
+}
+
+/** Why removing source `name` from the target config would leave other files' entries for it
+ *  without a backend (k137): that entry gives the only one, and they have none – config load
+ *  would refuse them (k128). Undefined when removing it strands nothing. */
+function strandedOverrides(ctx: CommandContext, name: string, project: boolean): string | undefined {
+  const path = configPath(ctx, project);
+  if (!givesBackend(sourceEntry(path, name))) return undefined;
+  const root = projectDirOf(ctx);
+  if (!root) return undefined; // the user config alone: no other file
+  const local = join(root, ".claude", "skilletor.local.json");
+  const others = [
+    { path: configPath(ctx, !project), shown: `the ${project ? "user" : "project"} config (${configPath(ctx, !project)})`,
+      way: `skilletor source remove ${name}${project ? "" : " --project"}` },
+    { path: local, shown: local, way: `edit ${local} by hand` },
+  ].map((o) => ({ ...o, entry: sourceEntry(o.path, name) })).filter((o) => o.entry !== undefined);
+  if (others.length === 0 || others.some((o) => givesBackend(o.entry))) return undefined;
+  const many = others.length > 1;
+  return `source "${name}" in the ${project ? "project" : "user"} config (${path}) gives its only "git", "url" or "local", ` +
+    `and the ${many ? "entries" : "entry"} in ${others.map((o) => o.shown).join(" and ")} ${many ? "have" : "has"} none: ` +
+    `config load would refuse ${many ? "those entries" : "that entry"} once this one is gone. ` +
+    `Remove ${many ? "those entries" : "that entry"} first (${others.map((o) => o.way).join("; ")}), ` +
+    `or give ${many ? "one of them" : "it"} a "git", "url" or "local" of its own; nothing was changed.`;
 }
 
 /** Where else a source is declared: the other scope's config, the project's local file. */

@@ -159,12 +159,16 @@ change what a user-scope item is built from, and every backend field keeps its o
   and `path` are each the last file's that gives one. `ref` is the `git` backend's: it is
   used only when `git` is the chosen backend, and it stays when a higher file gives another
   `git` without a `ref` – a pin is never dropped silently (k88); a higher `ref` replaces it.
+  `"ref": null` drops it on purpose (k137): the ref the files below gave is unset, so `git`
+  tracks the remote's HEAD, and a file above may set one again (project `v1`, user `null`,
+  local `v4` → `v4`). Only `ref` takes `null`; every other field keeps refusing it (k88).
   A source no file gives a backend is a config error naming the source and every file that
   declares it (`<project>/.claude/skilletor.local.json: sources.team needs one of "git",
   "url" or "local"; no other config file gives one (…)`). Per scope as above: a user entry
   without a backend changes the project scope's source only – it is no user-scope source,
   and a user install or bundle naming it is a config error that says so – and with no
-  project scope (§3, above) the user config alone must give the backend.
+  project scope (§3, above) the user config alone must give the backend. `source remove`
+  keeps the entry giving the only backend while another file has an entry without one (§7).
 - **One resolved backend.** Choosing the backend and checking trust work on one value:
   kind (`git`, `url`, `local`), effective address (a `local` path normalized to an
   absolute real path), and the origin of that field. The choice is author mode's (below):
@@ -1042,6 +1046,15 @@ config untouched, no sync) – as `uninstall` of an absent entry. The error name
 and file, then where else the name is declared: the other scope's config (→ `--project`, or
 without it) or the project's `skilletor.local.json` (no command edits that file: by hand);
 otherwise it says the name is not a configured source.
+
+The entry that gives a source its only backend (`git`, `url` or `local`) is not removed
+while another config file of the merge keeps an entry for that source without one (k137):
+that entry would be left without a backend, which load refuses (§3, k128). The command fails
+right after the check above, `--force` or not (exit 1, every config
+byte-identical, no sync), naming each such file and the way out – remove that entry first
+(`skilletor source remove <name> [--project]`, `skilletor.local.json` by hand) or give it a
+backend of its own. A user config's override in a project other than the current one is not
+seen: that project's next load names it.
 
 An entry config load refuses (§3: its name or a field – an `http://` url `add` wrote before
 k110, a hand-written `"ref": ""`) is removable when it is all load refuses (k120). The
