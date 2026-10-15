@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-10-15T04:00:49Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-15T04:00:49Z
+created: 2026-10-13T05:12:05Z
+id: 127
+priority: low
+started: 2026-10-15T03:22:43Z
+status: done
+tags:
+- bug
+- sources
+title: 'path sources: skill names differing only in case collide on macOS and Windows'
+updated: 2026-10-15T04:00:49Z
+---
+
+Found during k126 (worker). With a source "path", a/Foo and b/foo are two catalog items but install into one directory on a case-insensitive file system. The standard layout cannot produce this inside one source (one skills/ directory); "path" can. Decide: treat names equal ignoring case as the k126 duplicate-name item error, on every platform so a lock stays portable (Windows port rule: same files and lock on Linux and Windows).
+
+2026-10-15 03:28 Started (worker): decision as accepted – names equal ignoring case are the k126 duplicate-name item error on every platform. Each spelling stays its own catalog item (engine and commands match names exactly, so a config naming either one gets the error instead of 'not found'), each carrying one error naming every directory of the group.
+
+2026-10-15 03:33 Also found (not in scope, for this board): the case collision is not path-only. The default scan on a case-sensitive FS offers skills/Foo beside skills/foo (one skills/ dir can hold both on Linux), agents/Foo.md beside agents/foo.md, and the same across plugin.json and .claude/ (those dedupe by exact name). Two different sources/scopes installing Foo and foo also land in one directory on macOS/Windows. Folding is String#toLowerCase, not the FS's own table; NFC/NFD (APFS normalization) is not handled. A follow-up card could apply one case-folded name check catalog-wide or at install planning.
+
+2026-10-15 03:33 Done (worker): src/catalog.ts pathSkills groups skills by name.toLowerCase(); a group of 2+ directories is the k126 item error, and every spelling in it is its own catalog item carrying one error (engine/commands match names exactly, so a config naming 'Foo' or 'foo' gets the error, not 'not found'). Message: 'found in N directories, names equal ignoring case: a/Foo and b/foo'; one spelling keeps the k126 message unchanged. Same on every platform. Red tests first in test/source-path.test.ts: 'k127: names equal ignoring case are an error of each such item, on every platform' (scan) and 'k127: sync warns for names equal ignoring case and keeps the installed copy' (sync: both names warn, installed copy and lock unchanged). Docs: README, skills/skilletor/SKILL.md, spec §4.1, Changes (path entry). Verified: typecheck, npm test 947/947, build, check-dist green. Uncommitted; incremental patch on top of k129 kept for the release-manager.
+
+2026-10-15 04:00 Committed as 2f811a3
