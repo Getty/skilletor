@@ -481,13 +481,24 @@ harness itself creates (never `~/.claude/` alone — skilletor's own config live
 |---|---|
 | `claude` | `~/.claude.json`, `~/.claude/settings.json`, `~/.claude/projects/` |
 | `codex` | in `$CODEX_HOME` (default `~/.codex`): `config.toml`, `auth.json`, `sessions/`, `installation_id` |
-| `hermes` | in the [Hermes home](#the-hermes-home) (default `~/.hermes`): `config.yaml`, `.env`, `SOUL.md`, `sessions/` |
 
-`"targets"` – any of `"claude"`, `"codex"`, `"hermes"` – overrides detection:
+**Hermes Agent is never detected.** `hermes` is a target only when the `targets` of
+`~/.claude/skilletor.json` names it.
 
-1. **Machine targets** = the user config's `targets` if set, else the detected set. If that
-   is empty, `sync`, `check` and `status` stop with a config error naming the markers,
-   and nothing is touched — set `targets` in `~/.claude/skilletor.json`.
+`"targets"` – any of `"claude"`, `"codex"`, `"hermes"` – replaces detection completely, so
+list every harness you want, not just the one you add. To add Hermes on a machine with
+Claude Code and Codex:
+
+```json
+{ "targets": ["claude", "codex", "hermes"] }
+```
+
+The rules:
+
+1. **Machine targets** = the user config's `targets` if set, else the detected set (Claude
+   Code and Codex only). If that is empty, `sync`, `check` and `status` stop with a config
+   error naming the markers, and nothing is touched — set `targets` in
+   `~/.claude/skilletor.json`.
 2. **User scope** installs for the machine targets.
 3. **Project scope** installs for the machine targets, narrowed by the project's `targets`
    (`skilletor.local.json` if it has one, else `skilletor.json`). A project can only
@@ -671,7 +682,20 @@ plus the rules delivery.
 
 skilletor also installs for NousResearch [Hermes Agent](https://github.com/NousResearch/hermes-agent)
 (`hermes`), on Linux: **skills**, in both scopes, from the same sources and the same
-`skilletor.json`. Detection and `targets` work as [above](#which-harnesses-detection-and-targets).
+`skilletor.json`.
+
+**Hermes is opt-in.** It is never detected; name it in the `targets` of
+`~/.claude/skilletor.json`, together with every other harness you use, since `targets`
+replaces detection ([above](#which-harnesses-detection-and-targets)):
+
+```json
+{ "targets": ["claude", "hermes"] }
+```
+
+A project's `targets` can leave Hermes out, but cannot add it. Until you opt in, the
+[plugin](#the-plugin-under-hermes) adds one line to the report at each Hermes session start,
+saying what to set. Remove `hermes` from `targets` again, and the next sync removes the
+skills it installed for Hermes.
 
 | Type | Hermes |
 |---|---|
@@ -709,7 +733,8 @@ User-scope skills go to one Hermes home. Which one:
 1. `$HERMES_HOME`, when the run has it — the plugin passes the session's;
 2. else the home the last sync ran under (skilletor remembers it in
    `~/.claude/skilletor/hermes-home.json` when it is not the default);
-3. else `~/.hermes`.
+3. else the default Hermes itself uses: `~/.hermes`; on native Windows
+   `%LOCALAPPDATA%\hermes`, as in Hermes (the Hermes support is tested on Linux only).
 
 So a Hermes started with a home of its own (a service unit, a development home) is served
 by every later sync, also by the one a Claude Code or Codex session start runs: you need
@@ -758,7 +783,10 @@ runs without a message. A delegated subagent triggers nothing.
 - **No look at Hermes' other skills.** If a bundled or hub skill of that Hermes home
   already has the name (in `skills/<category>/<name>/`), Hermes calls the name ambiguous:
   the other skill stays reachable as `<category>/<name>`, the one skilletor installed does
-  not load. Rename or remove one.
+  not load. Rename or remove one. The [`path` example](#skills-elsewhere-path) source,
+  `NousResearch/hermes-agent`, is exactly that case: its skills are the ones Hermes already
+  ships, so it is a source for Claude Code and Codex — on a machine whose `targets` names
+  `hermes`, its skills land next to Hermes' own copies and none of them loads.
 - No `hermes plugins install` path and no catalog entry; the plugin does not bundle the
   `skilletor` skill — install that like any other skill.
 

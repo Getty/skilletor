@@ -11,14 +11,17 @@
 // without a project dir the git top level of the input's cwd (else cwd) is used.
 // With `--harness codex` (the Codex plugin's hooks file) SessionStart also injects
 // the Codex rules files, ahead of its report (spec §14.8). The Hermes plugin runs the
-// same two events with `--harness hermes` and hands the output on (spec §16.4).
+// same two events with `--harness hermes` and hands the output on (spec §16.4); while
+// `hermes` is no target, its SessionStart answer says how to opt in (spec §16.2).
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import { loadConfig, type Harness } from "./config.ts";
 import { State, SyncLockTimeoutError } from "./state.ts";
 import { gitEnv } from "./gitenv.ts";
-import { check, codexRulesFiles, projectDirOf, sync, type CheckReport, type EngineContext } from "./engine.ts";
+import {
+  check, codexRulesFiles, hermesOptInHint, projectDirOf, sync, type CheckReport, type EngineContext,
+} from "./engine.ts";
 import { displaySafe, emptyScopeReport, reportHook, type SyncReport } from "./report.ts";
 
 export interface HookInput {
@@ -117,7 +120,21 @@ async function sessionStart(input: HookInput, ctx: HookContext): Promise<HookOut
   if (ctx.harness === "codex" && (source === undefined || source === null || source === "startup" || source === "clear")) {
     out = withCodexRules(out, ctx);
   }
+  if (ctx.harness === "hermes") out = withHermesOptIn(out, ctx);
   return out;
+}
+
+/** Under Hermes while `hermes` is no target (spec §16.2): the opt-in line, once per answer –
+ *  after its warning line, and after its context when it has one, since the plugin hands the
+ *  model the context and the warning line only without one (spec §16.4). */
+function withHermesOptIn(out: HookOutput, ctx: HookContext): HookOutput {
+  const hint = hermesOptInHint(ctx);
+  if (!hint) return out;
+  const line = warn(hint).systemMessage!;
+  const result: HookOutput = { ...out, systemMessage: [out.systemMessage, line].filter(Boolean).join("; ") };
+  const context = out.hookSpecificOutput?.additionalContext;
+  if (context) result.hookSpecificOutput = { ...out.hookSpecificOutput!, additionalContext: `${context}\n${line}` };
+  return result;
 }
 
 /** Put the Codex rules files, read from disk, at the start of the output's

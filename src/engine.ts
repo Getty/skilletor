@@ -15,7 +15,7 @@ import {
   BundleError, entryMiss, expandBundle, matchEntry, matchesPattern, sameIdentity, type Chain,
 } from "./bundles.ts";
 import {
-  defaultMarkers, detectHarnesses, lockKey, parseLockKey, placeOutput, receivers, rootOf, rootOfKey, selectTargets, servedVia, supports,
+  defaultHermesHome, defaultMarkers, detectHarnesses, lockKey, parseLockKey, placeOutput, receivers, rootOf, rootOfKey, selectTargets, servedVia, supports,
   targetGaps, allRoots, isBlockType, lacksLocalPrefix, type HarnessMarkers, type RootContext, type TargetSelection,
 } from "./targets.ts";
 import {
@@ -54,12 +54,13 @@ export interface EngineContext {
   timeoutMs?: number;
   /** How long a run waits for another holder of `sync.lock/` (spec §6.5; default 5 s). */
   lockTimeoutMs?: number;
-  /** Harness detection markers (spec §14.1); default from `home` and `$CODEX_HOME`. */
+  /** Harness detection markers (spec §14.1); default from `home` and `$CODEX_HOME`. Hermes
+   *  has none: it is a target only when `targets` names it (spec §16.2). */
   markers?: HarnessMarkers;
   /** `$CODEX_HOME` (spec §14.2): root of user-scope Codex agents and markers; default from the env. */
   codexHome?: string;
-  /** `$HERMES_HOME` (spec §16.2): root of user-scope Hermes skills and markers; default from
-   *  the env, else the home the last user-scope sync recorded, else `~/.hermes`. */
+  /** `$HERMES_HOME` (spec §16.2): root of user-scope Hermes skills; default from the env,
+   *  else the home the last user-scope sync recorded, else Hermes' default home. */
   hermesHome?: string;
   /** Does a user-scope root lie inside a git work tree (spec §6.4)? Default: ask git. */
   isGitWorkTree?: (dir: string) => boolean;
@@ -120,24 +121,24 @@ function codexHomeOf(ctx: EngineContext): string | undefined {
   return (ctx.codexHome ?? process.env.CODEX_HOME) || undefined;
 }
 
-/** The default Hermes home, `~/.hermes`. */
-function defaultHermesHome(ctx: EngineContext): string {
-  return join(ctx.home, ".hermes");
+/** Hermes' default home for this machine (`~/.hermes`; `%LOCALAPPDATA%\hermes` on Windows). */
+function hermesDefaultOf(ctx: EngineContext): string {
+  return defaultHermesHome(ctx.home);
 }
 
 /** The Hermes home the user scope's `hermes:` entries were last synced under (spec §16.2):
  *  the recorded one, else the default. Never throws. */
 function recordedHermesHome(ctx: EngineContext): string {
   try {
-    return new State(ctx.stateRoot).hermesHome() ?? defaultHermesHome(ctx);
+    return new State(ctx.stateRoot).hermesHome() ?? hermesDefaultOf(ctx);
   } catch {
-    return defaultHermesHome(ctx); // the state dir cannot be read
+    return hermesDefaultOf(ctx); // the state dir cannot be read
   }
 }
 
 /**
  * The Hermes home this run serves (spec §16.2): `$HERMES_HOME`, injected or from the
- * environment – the plugin passes the session's –, else the recorded one, else `~/.hermes`.
+ * environment – the plugin passes the session's –, else the recorded one, else Hermes' default.
  * So a run no Hermes started (a Claude Code session) sees the same home, and with it the
  * same targets and root, as the Hermes session before it.
  */
@@ -153,8 +154,26 @@ function rootContextOf(ctx: EngineContext, scope: ScopeName): RootContext {
 
 /** Active targets per scope (spec §14.1); throws a TargetError when none apply. */
 export function targetsOf(ctx: EngineContext, config: LoadedConfig): TargetSelection {
-  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx), hermesHomeOf(ctx));
+  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx));
   return selectTargets({ user: config.user.targets, project: config.project?.targets }, detectHarnesses(markers), markers);
+}
+
+/**
+ * For a run Hermes started (spec §16.4): while `hermes` is no machine target – it is never
+ * detected, so until the user config's `targets` names it – the line that says how to opt in,
+ * naming the targets in use plus `hermes`. Undefined when Hermes is a target, or when the
+ * config or the targets cannot be read (that error is reported on its own). Never throws.
+ */
+export function hermesOptInHint(ctx: EngineContext): string | undefined {
+  let machine: Harness[];
+  try {
+    machine = targetsOf(ctx, loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx) })).user;
+  } catch {
+    return undefined;
+  }
+  if (machine.includes("hermes")) return undefined;
+  const wanted = [...machine, "hermes"].map((h) => `"${h}"`).join(", ");
+  return `Hermes gets no skills: "hermes" is not in "targets"; to opt in, set "targets": [${wanted}] in ~/.claude/skilletor.json`;
 }
 
 /** Load config and select targets; either failure is one message, nothing touched. */
@@ -596,6 +615,8 @@ async function syncScopeRun(
   const targetDir = targetDirOf(ctx, scope);
   const base = baseOf(ctx, scope);
   const rc = rootContextOf(ctx, scope);
+  // Hermes no target: its entries go as an inactive target's, from the home they were synced under.
+  if (scope === "user" && !harnesses.includes("hermes")) rc.hermesHome = recordedHermesHome(ctx);
   const lockPath = join(targetDir, "skilletor.lock.json");
   if (scope === "user") moveHermesHome(ctx, state, targetDir, rc, harnesses, rep.warnings);
   const oldLock = readLock(lockPath);
@@ -1386,18 +1407,12 @@ function scopeDrift(
   }
   // The run's Hermes home is not the one the user scope was last synced under (spec §16.2):
   // a sync moves the lock's Hermes entries there, or just records the home Hermes now uses.
-  if (scope === "user") {
+  // (Hermes no target: its entries are orphans above.)
+  if (scope === "user" && harnesses.includes("hermes")) {
     const home = hermesHomeOf(ctx);
-    if (!samePath(home, recordedHermesHome(ctx)) && (harnesses.includes("hermes") || holdsHermes(lock))) {
-      out.push({ kind: "targets", id: `hermes-home:${home}`, sources: [] });
-    }
+    if (!samePath(home, recordedHermesHome(ctx))) out.push({ kind: "targets", id: `hermes-home:${home}`, sources: [] });
   }
   return [...out, ...layoutDrift(ctx, scope, scopeCfg, lock), ...declaredDrift(scopeCfg, scope, harnesses, lock, servedBy)];
-}
-
-/** Does a lock hold entries of the Hermes target? */
-function holdsHermes(lock: Lock): boolean {
-  return Object.keys(lock).some((key) => parseLockKey(key).harness === "hermes");
 }
 
 /**
@@ -1406,17 +1421,18 @@ function holdsHermes(lock: Lock): boolean {
  * dropped – the sync then installs under the new home by the ordinary rules, and a file
  * already there is never taken for skilletor's own. The new home is recorded before anything
  * is installed under it: a sync that stops later leaves a lock and a record that agree. With
- * Hermes no target and nothing to move, the record stays as it is.
+ * Hermes no target nothing moves: the sync removes its entries from the recorded home as an
+ * inactive target's, and then drops the record.
  */
 function moveHermesHome(
   ctx: EngineContext, state: State, targetDir: string, rc: RootContext, harnesses: Harness[], warnings: string[],
 ): void {
+  if (!harnesses.includes("hermes")) return;
   const previous = recordedHermesHome(ctx);
   const current = hermesHomeOf(ctx);
   if (samePath(previous, current)) return;
   const lock = readLock(join(targetDir, "skilletor.lock.json"));
   const moved = Object.keys(lock).filter((key) => parseLockKey(key).harness === "hermes");
-  if (moved.length === 0 && !harnesses.includes("hermes")) return;
   if (moved.length > 0) {
     const old: RootContext = { ...rc, hermesHome: previous };
     apply([], {
@@ -1427,7 +1443,7 @@ function moveHermesHome(
     warnings.push(`Hermes home changed from ${previous} to ${current}: ${moved.length} item(s) removed from the old home; ` +
       "what is declared installs anew under the new one");
   }
-  state.putHermesHome(samePath(current, defaultHermesHome(ctx)) ? undefined : current);
+  state.putHermesHome(samePath(current, hermesDefaultOf(ctx)) ? undefined : current);
 }
 
 /**

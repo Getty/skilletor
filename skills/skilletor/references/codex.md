@@ -9,6 +9,7 @@ itself creates (never `~/.claude/` alone — skilletor's config lives there):
 |---|---|
 | `claude` | `~/.claude.json`, `~/.claude/settings.json`, `~/.claude/projects/` |
 | `codex` | in `$CODEX_HOME` (default `~/.codex`): `config.toml`, `auth.json`, `sessions/`, `installation_id` |
+| `hermes` | never — a target only when the user `targets` names it |
 
 - Machine set = user `targets` if set, else detected. Empty → `sync`/`check`/`status` fail
   with a config error naming the markers; nothing is touched. Fix: set `targets` in
@@ -17,7 +18,7 @@ itself creates (never `~/.claude/` alone — skilletor's config lives there):
   `skilletor.local.json` `targets`, else `skilletor.json` `targets`. A project never adds
   a harness; an empty intersection installs nothing for the project and warns.
 - Detection re-runs every sync: a harness that disappears has its items removed. Pin
-  `targets` to prevent that. Config, lock and state stay under `.claude/` for both harnesses.
+  `targets` to prevent that. Config, lock and state stay under `.claude/` for every harness.
 
 ## Agents → Codex agent-role TOML
 

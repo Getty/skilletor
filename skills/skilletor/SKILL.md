@@ -1,9 +1,9 @@
 ---
 name: skilletor
-description: "skilletor CLI — installs and updates skills, agents and rules from remote sources for Claude Code and Codex. Use when adding a source, installing/uninstalling a skill/agent/rule, all of a type or a name pattern (`*@source`, `perl-*@source`) from a source, writing or installing a bundle (`bundles/<name>.yaml`, `bundle:name@source`, `install.bundles`), switching an item on/off per project via vars, editing a skilletor.json or its `targets`, running sync/check/status, asking 'where does this skill come from' or 'why did this file change', or before editing a file skilletor manages (including skilletor-rules.md and the skilletor pointer block in AGENTS.md)."
+description: "skilletor CLI — installs and updates skills, agents and rules from remote sources for Claude Code, Codex and Hermes Agent. Use when adding a source, installing/uninstalling a skill/agent/rule, all of a type or a name pattern (`*@source`, `perl-*@source`) from a source, writing or installing a bundle (`bundles/<name>.yaml`, `bundle:name@source`, `install.bundles`), switching an item on/off per project via vars, editing a skilletor.json or its `targets`, running sync/check/status, asking 'where does this skill come from' or 'why did this file change', or before editing a file skilletor manages (including skilletor-rules.md and the skilletor pointer block in AGENTS.md)."
 ---
 
-# skilletor — remote skills, agents and rules for Claude Code and Codex
+# skilletor — remote skills, agents and rules for Claude Code, Codex and Hermes Agent
 
 ## Running the CLI
 
@@ -28,12 +28,18 @@ overrides the same-named `git` source, read directly on every sync while that ch
 | agent | `.claude/agents/.local.<name>.md` | `.codex/agents/.local.<name>.toml` (user: `$CODEX_HOME/agents/`) |
 | rule | `.claude/rules/.local.<name>.md` | a section of `.codex/skilletor-rules.md` (user: `$CODEX_HOME/skilletor-rules.md`) |
 
+Hermes Agent gets **skills only** (no agents, no rules): user `<Hermes home>/skills/<name>/`
+(`$HERMES_HOME`, else the last sync's home, else `~/.hermes`), project `.hermes/skills/<name>/`
+— none while `codex` is a target of that project: Hermes reads the Codex copy in
+`.agents/skills/`. Project skills load only after `hermes skills trust` in the project.
+
 A file is managed when its path is in `<scope>/.claude/skilletor.lock.json` (Codex keys
-`codex:skills/<name>` etc.) — check the lock before editing; files not in it are yours. In
-`AGENTS.md` only the block between `<!-- skilletor:begin -->` and `<!-- skilletor:end -->`
-is managed. A conflict blocks the whole item, and `sync --force` can **delete** the user's
-own files: read [references/sync.md](references/sync.md) before forcing, and when a report
-shows a conflict, a partial item, an overlap or `git rm --cached` warning, or a due `check`.
+`codex:skills/<name>` etc., Hermes `hermes:skills/<name>`) — check the lock before editing;
+files not in it are yours. In `AGENTS.md` only the block between `<!-- skilletor:begin -->`
+and `<!-- skilletor:end -->` is managed. A conflict blocks the whole item, and `sync --force`
+can **delete** the user's own files: read [references/sync.md](references/sync.md) before
+forcing, and when a report shows a conflict, a partial item, an overlap or `git rm --cached`
+warning, or a due `check`.
 
 ## Commands
 
@@ -88,7 +94,9 @@ after that directory (a category `skills/research` or one skill `skills/research
 too). `path` replaces the layout above: that source then offers those skills only — no
 agents, rules, bundles, `plugin.json` or `.claude/` items. The same name in two directories
 is an error of that skill alone (as `f` beside `f.njk`, below). `add` has no option for it:
-a link into a directory sets it, anything else is edited into the entry.
+a link into a directory sets it, anything else is edited into the entry. (That example source
+is for Claude Code and Codex: under target `hermes` its skills collide with Hermes' own
+copies and none loads.)
 
 ## Config
 
@@ -121,9 +129,11 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
   identity (cache, trust) and merge project < user < local, replaced whole.
 - `gitignore` (default true: commit `skilletor.json` and each `.gitignore` the report names)
   and `checkInterval` (user file only): [references/sync.md](references/sync.md).
-- `targets` (`["claude"]`, `["codex"]` or both; unset = auto-detected): the user file sets
-  the machine's set, a project or local file only narrows it (`["claude"]` keeps a project's
-  `AGENTS.md` and `.codex/` untouched). Details: [references/codex.md](references/codex.md).
+- `targets` (any of `claude`, `codex`, `hermes`; unset = auto-detected, `hermes` never is):
+  it **replaces** detection — list every harness wanted, `["claude", "codex", "hermes"]`
+  to add Hermes, never `["hermes"]` alone. The user file sets the machine's set, a project
+  or local file only narrows it (`["claude"]` keeps a project's `AGENTS.md` and `.codex/`
+  untouched). Details: [references/codex.md](references/codex.md).
 
 ### Wildcards and name patterns — `*@source`, `perl-*@source`
 

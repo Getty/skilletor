@@ -2,11 +2,12 @@
 // where each harness reads each item type, and how a lock key names its target.
 //
 // Detection looks only at markers the harness itself creates (never at
-// `~/.claude/` alone: skilletor's own config lives there). The layout table is
+// `~/.claude/` alone: skilletor's own config lives there); Hermes is never detected, it
+// is a target only when `targets` names it (spec §16.2). The layout table is
 // the seam later phases extend (Codex agents as TOML, rules in a rules file;
 // Hermes Agent, spec §16: skills only).
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { HARNESSES, type Harness, type ItemType } from "./config.ts";
 
 export type { Harness } from "./config.ts";
@@ -21,7 +22,8 @@ export interface RootContext {
   scope: "user" | "project";
   /** `$CODEX_HOME`; unset or empty means `<home>/.codex` (only the user scope uses it). */
   codexHome?: string;
-  /** The Hermes home (spec §16.2); unset or empty means `<home>/.hermes` (only the user scope uses it). */
+  /** The Hermes home (spec §16.2); unset or empty means Hermes' default for `<home>`
+   *  (`defaultHermesHome`; only the user scope uses it). */
   hermesHome?: string;
 }
 
@@ -50,7 +52,7 @@ export interface TargetLayout {
 
 const under = (dir: string) => (r: RootContext) => join(r.base, dir);
 const codexHomeDir = (r: RootContext) => r.codexHome || join(r.base, ".codex");
-const hermesHomeDir = (r: RootContext) => r.hermesHome || join(r.base, ".hermes");
+const hermesHomeDir = (r: RootContext) => r.hermesHome || defaultHermesHome(r.base);
 
 export const LAYOUTS: Record<Harness, TargetLayout> = {
   claude: {
@@ -113,23 +115,34 @@ export function lacksLocalPrefix(harness: Harness, type: ItemType, paths: string
   return paths.some((rel) => !rel.slice(Math.max(rel.lastIndexOf("/"), rel.lastIndexOf("\\")) + 1).startsWith(LOCAL_PREFIX));
 }
 
-/** Per harness: absolute paths whose existence means the harness is in use. A set without
- *  `hermes` (one written before that target, spec §16.2) means Hermes is not in use. */
-export type HarnessMarkers = { claude: string[]; codex: string[]; hermes?: string[] };
+/** The harnesses detection can find; Hermes is a target only by `targets` (spec §16.2). */
+const DETECTED = ["claude", "codex"] as const satisfies readonly Harness[];
 
-export function defaultMarkers(home: string, codexHome: string | undefined, hermesHome?: string): HarnessMarkers {
+/** Per detectable harness: absolute paths whose existence means the harness is in use. */
+export type HarnessMarkers = Record<(typeof DETECTED)[number], string[]>;
+
+/**
+ * Hermes' own default home (`_get_platform_default_hermes_home` in `hermes_constants.py`,
+ * spec §16.2): on native Windows `%LOCALAPPDATA%\hermes`, with `<home>\AppData\Local` for
+ * an unset or blank `LOCALAPPDATA`; elsewhere `~/.hermes`.
+ */
+export function defaultHermesHome(
+  home: string, platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (platform !== "win32") return join(home, ".hermes");
+  return win32.join(env.LOCALAPPDATA?.trim() || win32.join(home, "AppData", "Local"), "hermes");
+}
+
+export function defaultMarkers(home: string, codexHome: string | undefined): HarnessMarkers {
   const cx = codexHome || join(home, ".codex");
-  const hh = hermesHome || join(home, ".hermes");
   return {
     claude: [join(home, ".claude.json"), join(home, ".claude", "settings.json"), join(home, ".claude", "projects")],
     codex: ["config.toml", "auth.json", "sessions", "installation_id"].map((f) => join(cx, f)),
-    // What Hermes creates and skilletor never does (`skills/` is no marker: skilletor makes it).
-    hermes: ["config.yaml", ".env", "SOUL.md", "sessions"].map((f) => join(hh, f)),
   };
 }
 
 export function detectHarnesses(markers: HarnessMarkers): Harness[] {
-  return HARNESSES.filter((h) => (markers[h] ?? []).some((p) => existsSync(p)));
+  return DETECTED.filter((h) => (markers[h] ?? []).some((p) => existsSync(p)));
 }
 
 export interface TargetSelection {
@@ -151,7 +164,7 @@ export function selectTargets(
   const machine = configured.user ?? detected;
   if (machine.length === 0) {
     const looked = markers
-      ? ` (looked for ${HARNESSES.filter((h) => markers[h]).map((h) => `${h}: ${markers[h]!.join(", ")}`).join("; ")})`
+      ? ` (looked for ${DETECTED.filter((h) => markers[h]).map((h) => `${h}: ${markers[h].join(", ")}`).join("; ")})`
       : "";
     throw new TargetError(
       `no agent harness detected${looked}; set "targets": ["claude"], "codex" and/or "hermes" in ~/.claude/skilletor.json`,

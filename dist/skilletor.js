@@ -7043,13 +7043,13 @@ function expandBundle(cat, name) {
 
 // src/targets.ts
 import { existsSync as existsSync2 } from "node:fs";
-import { join as join3 } from "node:path";
+import { join as join3, win32 } from "node:path";
 var TargetError = class extends Error {
   name = "TargetError";
 };
 var under = (dir) => (r) => join3(r.base, dir);
 var codexHomeDir = (r) => r.codexHome || join3(r.base, ".codex");
-var hermesHomeDir = (r) => r.hermesHome || join3(r.base, ".hermes");
+var hermesHomeDir = (r) => r.hermesHome || defaultHermesHome(r.base);
 var LAYOUTS = {
   claude: {
     harness: "claude",
@@ -7096,23 +7096,25 @@ function lacksLocalPrefix(harness, type, paths) {
   if (!LAYOUTS[harness].localTypes?.includes(type)) return false;
   return paths.some((rel) => !rel.slice(Math.max(rel.lastIndexOf("/"), rel.lastIndexOf("\\")) + 1).startsWith(LOCAL_PREFIX));
 }
-function defaultMarkers(home, codexHome, hermesHome) {
+var DETECTED = ["claude", "codex"];
+function defaultHermesHome(home, platform2 = process.platform, env = process.env) {
+  if (platform2 !== "win32") return join3(home, ".hermes");
+  return win32.join(env.LOCALAPPDATA?.trim() || win32.join(home, "AppData", "Local"), "hermes");
+}
+function defaultMarkers(home, codexHome) {
   const cx = codexHome || join3(home, ".codex");
-  const hh = hermesHome || join3(home, ".hermes");
   return {
     claude: [join3(home, ".claude.json"), join3(home, ".claude", "settings.json"), join3(home, ".claude", "projects")],
-    codex: ["config.toml", "auth.json", "sessions", "installation_id"].map((f) => join3(cx, f)),
-    // What Hermes creates and skilletor never does (`skills/` is no marker: skilletor makes it).
-    hermes: ["config.yaml", ".env", "SOUL.md", "sessions"].map((f) => join3(hh, f))
+    codex: ["config.toml", "auth.json", "sessions", "installation_id"].map((f) => join3(cx, f))
   };
 }
 function detectHarnesses(markers) {
-  return HARNESSES.filter((h) => (markers[h] ?? []).some((p) => existsSync2(p)));
+  return DETECTED.filter((h) => (markers[h] ?? []).some((p) => existsSync2(p)));
 }
 function selectTargets(configured, detected, markers) {
   const machine = configured.user ?? detected;
   if (machine.length === 0) {
-    const looked = markers ? ` (looked for ${HARNESSES.filter((h) => markers[h]).map((h) => `${h}: ${markers[h].join(", ")}`).join("; ")})` : "";
+    const looked = markers ? ` (looked for ${DETECTED.filter((h) => markers[h]).map((h) => `${h}: ${markers[h].join(", ")}`).join("; ")})` : "";
     throw new TargetError(
       `no agent harness detected${looked}; set "targets": ["claude"], "codex" and/or "hermes" in ~/.claude/skilletor.json`
     );
@@ -9472,14 +9474,14 @@ function claudeMemoryFiles(ctx, scope) {
 function codexHomeOf(ctx) {
   return (ctx.codexHome ?? process.env.CODEX_HOME) || void 0;
 }
-function defaultHermesHome(ctx) {
-  return join14(ctx.home, ".hermes");
+function hermesDefaultOf(ctx) {
+  return defaultHermesHome(ctx.home);
 }
 function recordedHermesHome(ctx) {
   try {
-    return new State(ctx.stateRoot).hermesHome() ?? defaultHermesHome(ctx);
+    return new State(ctx.stateRoot).hermesHome() ?? hermesDefaultOf(ctx);
   } catch {
-    return defaultHermesHome(ctx);
+    return hermesDefaultOf(ctx);
   }
 }
 function hermesHomeOf(ctx) {
@@ -9490,8 +9492,19 @@ function rootContextOf(ctx, scope) {
   return { base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx), hermesHome: hermesHomeOf(ctx) };
 }
 function targetsOf2(ctx, config) {
-  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx), hermesHomeOf(ctx));
+  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx));
   return selectTargets({ user: config.user.targets, project: config.project?.targets }, detectHarnesses(markers), markers);
+}
+function hermesOptInHint(ctx) {
+  let machine;
+  try {
+    machine = targetsOf2(ctx, loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx) })).user;
+  } catch {
+    return void 0;
+  }
+  if (machine.includes("hermes")) return void 0;
+  const wanted = [...machine, "hermes"].map((h) => `"${h}"`).join(", ");
+  return `Hermes gets no skills: "hermes" is not in "targets"; to opt in, set "targets": [${wanted}] in ~/.claude/skilletor.json`;
 }
 function loadWithTargets(ctx) {
   try {
@@ -9732,6 +9745,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   const targetDir = targetDirOf(ctx, scope);
   const base = baseOf(ctx, scope);
   const rc = rootContextOf(ctx, scope);
+  if (scope === "user" && !harnesses.includes("hermes")) rc.hermesHome = recordedHermesHome(ctx);
   const lockPath = join14(targetDir, "skilletor.lock.json");
   if (scope === "user") moveHermesHome(ctx, state, targetDir, rc, harnesses, rep.warnings);
   const oldLock = readLock(lockPath);
@@ -10301,24 +10315,19 @@ function scopeDrift(ctx, scope, scopeCfg, harnesses, lock, servedBy) {
     const source = lock[g.key].source;
     out.push(g.missing === void 0 ? { kind: "targets", id: `orphan:${g.key}`, sources: [] } : { kind: "targets", id: `missing:${g.missing}@${source}`, sources: [source] });
   }
-  if (scope === "user") {
+  if (scope === "user" && harnesses.includes("hermes")) {
     const home = hermesHomeOf(ctx);
-    if (!samePath(home, recordedHermesHome(ctx)) && (harnesses.includes("hermes") || holdsHermes(lock))) {
-      out.push({ kind: "targets", id: `hermes-home:${home}`, sources: [] });
-    }
+    if (!samePath(home, recordedHermesHome(ctx))) out.push({ kind: "targets", id: `hermes-home:${home}`, sources: [] });
   }
   return [...out, ...layoutDrift(ctx, scope, scopeCfg, lock), ...declaredDrift(scopeCfg, scope, harnesses, lock, servedBy)];
 }
-function holdsHermes(lock) {
-  return Object.keys(lock).some((key) => parseLockKey(key).harness === "hermes");
-}
 function moveHermesHome(ctx, state, targetDir, rc, harnesses, warnings) {
+  if (!harnesses.includes("hermes")) return;
   const previous = recordedHermesHome(ctx);
   const current = hermesHomeOf(ctx);
   if (samePath(previous, current)) return;
   const lock = readLock(join14(targetDir, "skilletor.lock.json"));
   const moved = Object.keys(lock).filter((key) => parseLockKey(key).harness === "hermes");
-  if (moved.length === 0 && !harnesses.includes("hermes")) return;
   if (moved.length > 0) {
     const old = { ...rc, hermesHome: previous };
     apply([], {
@@ -10328,7 +10337,7 @@ function moveHermesHome(ctx, state, targetDir, rc, harnesses, warnings) {
     });
     warnings.push(`Hermes home changed from ${previous} to ${current}: ${moved.length} item(s) removed from the old home; what is declared installs anew under the new one`);
   }
-  state.putHermesHome(samePath(current, defaultHermesHome(ctx)) ? void 0 : current);
+  state.putHermesHome(samePath(current, hermesDefaultOf(ctx)) ? void 0 : current);
 }
 function layoutDrift(ctx, scope, scopeCfg, lock) {
   const gitignoreOn = scopeCfg.gitignore !== false;
@@ -11067,7 +11076,18 @@ async function sessionStart(input, ctx) {
   if (ctx.harness === "codex" && (source === void 0 || source === null || source === "startup" || source === "clear")) {
     out = withCodexRules(out, ctx);
   }
+  if (ctx.harness === "hermes") out = withHermesOptIn(out, ctx);
   return out;
+}
+function withHermesOptIn(out, ctx) {
+  const hint = hermesOptInHint(ctx);
+  if (!hint) return out;
+  const line = warn(hint).systemMessage;
+  const result = { ...out, systemMessage: [out.systemMessage, line].filter(Boolean).join("; ") };
+  const context = out.hookSpecificOutput?.additionalContext;
+  if (context) result.hookSpecificOutput = { ...out.hookSpecificOutput, additionalContext: `${context}
+${line}` };
+  return result;
 }
 function withCodexRules(out, ctx) {
   const texts = [];

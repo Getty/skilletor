@@ -90,9 +90,10 @@ function machine(opts: { enabled?: string[]; trustProject?: boolean } = {}) {
     mkdirSync(join(src, "skills", name), { recursive: true });
     writeFileSync(join(src, "skills", name, "SKILL.md"), SKILL(name, body));
   };
-  const declare = (user: string[], inProject: string[] = []) => {
+  /** Declare skills; Hermes is never detected, so the user config opts in by `targets`. */
+  const declare = (user: string[], inProject: string[] = [], targets = ["hermes"]) => {
     writeFileSync(join(home, ".claude", "skilletor.json"),
-      JSON.stringify({ sources: { mine: { local: src } }, install: { skills: user.map((n) => `${n}@mine`) } }));
+      JSON.stringify({ targets, sources: { mine: { local: src } }, install: { skills: user.map((n) => `${n}@mine`) } }));
     writeFileSync(join(project, ".claude", "skilletor.json"),
       JSON.stringify({ install: { skills: inProject.map((n) => `${n}@mine`) } }));
   };
@@ -168,8 +169,8 @@ test("a user skill installed for the target hermes is in Hermes' own listing and
   m.declare(["sk-demo"]);
   const sync = m.skilletor(["sync"]);
   assert.equal(sync.status, 0, sync.stderr);
-  // Hermes alone is in use on this machine: detected by the config.yaml in its home. (The
-  // throwaway home lies inside this checkout, so the report also has .gitignore lines.)
+  // Hermes alone is the target on this machine, by `targets`. (The throwaway home lies inside
+  // this checkout, so the report also has .gitignore lines.)
   assert.match(sync.stdout, /^skilletor: user scope\n {2}\+ hermes:skills\/sk-demo \(active from the next Hermes session\)\n/);
   assert.doesNotMatch(sync.stdout, /^ {2}[+~] (?!hermes:)/m);
   assert.equal(existsSync(join(m.home, ".claude", "skills")), false);
@@ -205,11 +206,12 @@ test("a project skill: under .hermes/skills in a trusted project; with Codex act
   assert.deepEqual(m.python("out.update(listing())").names, []);
   m.config(["skilletor"], true);
 
-  // Codex comes into use: its copy in .agents/skills is the one Hermes reads.
+  // Codex becomes a target: its copy in .agents/skills is the one Hermes reads.
   const codexHome = join(m.dir, "codex-home");
   mkdirSync(codexHome);
   writeFileSync(join(codexHome, "config.toml"), "");
   const both = { CODEX_HOME: codexHome };
+  m.declare([], ["sk-proj"], ["codex", "hermes"]);
   const sync = m.skilletor(["sync"], m.project, both);
   assert.equal(sync.status, 0, sync.stderr);
   assert.match(sync.stdout, /\+ codex:skills\/sk-proj/);

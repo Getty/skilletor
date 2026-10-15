@@ -20,19 +20,21 @@ for (const name of REPO_LOCAL_VARS) delete process.env[name];
 for (const name of ["CLAUDE_PROJECT_DIR", "SKILLETOR_PROJECT_DIR"]) delete process.env[name];
 
 // The same for the Hermes home (spec §16.2): a suite run from a Hermes session inherits
-// HERMES_HOME, and the engine would take it for the home to detect Hermes in and to install
-// under. A test that needs one injects it (`EngineContext.hermesHome`) or sets it in the env
-// it spawns with.
+// HERMES_HOME, and the engine would take it for the home to install Hermes skills under. A
+// test that needs one injects it (`EngineContext.hermesHome`) or sets it in the env it spawns
+// with.
 delete process.env.HERMES_HOME;
 
 // On Windows os.homedir() reads USERPROFILE and ignores HOME, so a test that sets only HOME for
 // a spawned CLI still had it sync into the developer's real profile (~/.claude/skilletor.json,
 // skills, agents, ~/.codex). Every test process gets a throwaway home of its own there instead;
-// tests that want a specific one pass it through homeEnv() (test/helpers/harness.ts).
+// tests that want a specific one pass it through homeEnv() (test/helpers/harness.ts). The default
+// Hermes home there is under LOCALAPPDATA (spec §16.2), so that moves into the throwaway home too.
 if (process.platform === "win32") {
   const home = mkdtempSync(join(tmpdir(), "skilletor-test-home-"));
   process.env.USERPROFILE = home;
   process.env.HOME = home;
+  process.env.LOCALAPPDATA = join(home, "AppData", "Local");
   delete process.env.HOMEDRIVE;
   delete process.env.HOMEPATH;
 }

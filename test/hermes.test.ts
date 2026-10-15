@@ -16,7 +16,7 @@ import { loadConfig, type Harness } from "../src/config.ts";
 import { State } from "../src/state.ts";
 import { SKILL_GITIGNORE } from "../src/gitignore.ts";
 import {
-  allRoots, defaultMarkers, detectHarnesses, lockKey, parseLockKey, receivers, rootOfKey, selectTargets, targetGaps,
+  allRoots, defaultHermesHome, defaultMarkers, detectHarnesses, lockKey, parseLockKey, receivers, rootOfKey, selectTargets, targetGaps,
   TargetError,
 } from "../src/targets.ts";
 
@@ -37,14 +37,17 @@ function env(harnesses: Harness[]) {
     stateRoot: join(tmp.dir, "state"),
     host: { name: "box", os: "linux" },
     user: { name: "getty", home },
-    markers: { claude: [markerOf("claude")], codex: [markerOf("codex")], hermes: [markerOf("hermes")] },
+    markers: { claude: [markerOf("claude")], codex: [markerOf("codex")] },
     codexHome: join(home, ".codex"), // never the real $CODEX_HOME
     hermesHome, // never the real $HERMES_HOME
     isGitWorkTree: () => false,
   };
-  const writeCfg = (which: "user" | "project", obj: unknown) => {
+  // Hermes is never detected (spec §16.2): an env that uses it names its harnesses in the
+  // user config's `targets`, unless a test sets `targets` itself.
+  const writeCfg = (which: "user" | "project", obj: Record<string, unknown>) => {
     const file = join(which === "user" ? home : projectDir, ".claude", "skilletor.json");
-    writeFileSync(file, JSON.stringify(obj, null, 2));
+    const optIn = which === "user" && harnesses.includes("hermes") && !("targets" in obj);
+    writeFileSync(file, JSON.stringify(optIn ? { targets: harnesses, ...obj } : obj, null, 2));
   };
   return { tmp, ctx, home, projectDir, hermesHome, writeCfg, cleanup: () => tmp.cleanup() };
 }
@@ -73,37 +76,40 @@ const projectLock = (e: { projectDir: string }) => readLock(join(e.projectDir, "
 
 // ---- targets.ts -------------------------------------------------------------------------
 
-test("default markers: Hermes by the files it creates in its home, never by skills/ alone", () => {
+test("Hermes is never detected: the default markers are Claude's and Codex's, whatever a Hermes home holds", () => {
   const tmp = makeTmpDir();
   try {
     const home = join(tmp.dir, "home");
-    mkdirSync(join(home, ".hermes", "skills"), { recursive: true }); // skilletor makes this one itself
-    assert.deepEqual(detectHarnesses(defaultMarkers(home, undefined, undefined)), []);
-    writeFileSync(join(home, ".hermes", "SOUL.md"), "");
-    assert.deepEqual(detectHarnesses(defaultMarkers(home, undefined, undefined)), ["hermes"]);
-
-    const other = join(tmp.dir, "hh");
-    mkdirSync(other);
-    assert.deepEqual(detectHarnesses(defaultMarkers(home, undefined, other)), []); // ~/.hermes ignored
-    for (const marker of ["config.yaml", ".env", "sessions"]) {
-      writeFileSync(join(other, marker), "");
-      assert.deepEqual(detectHarnesses(defaultMarkers(home, undefined, other)), ["hermes"], marker);
-      rmSync(join(other, marker));
-    }
+    mkdirSync(join(home, ".hermes", "sessions"), { recursive: true });
+    for (const file of ["config.yaml", ".env", "SOUL.md"]) writeFileSync(join(home, ".hermes", file), "");
+    const markers = defaultMarkers(home, undefined);
+    assert.deepEqual(Object.keys(markers), ["claude", "codex"]);
+    assert.deepEqual(detectHarnesses(markers), []);
+    writeFileSync(join(home, ".claude.json"), "{}");
+    assert.deepEqual(detectHarnesses(defaultMarkers(home, undefined)), ["claude"]);
   } finally {
     tmp.cleanup();
   }
 });
 
-test("a marker set without a hermes entry means Hermes is not in use", () => {
-  const tmp = makeTmpDir();
-  try {
-    assert.deepEqual(detectHarnesses({ claude: [tmp.dir], codex: [] }), ["claude"]);
-    assert.throws(() => selectTargets({}, [], { claude: [], codex: [] }), (err: Error) =>
-      err instanceof TargetError && /no agent harness detected/.test(err.message) && /"hermes"/.test(err.message));
-  } finally {
-    tmp.cleanup();
-  }
+test("nothing detected: the error names Claude's and Codex's markers, and hermes as a target to set", () => {
+  assert.throws(() => selectTargets({}, [], defaultMarkers(join("/h"), join("/cx"))), (err: Error) =>
+    err instanceof TargetError && /no agent harness detected/.test(err.message) &&
+    /claude: /.test(err.message) && /codex: /.test(err.message) && !/hermes: /.test(err.message) &&
+    /"hermes"/.test(err.message));
+  // Opted in: hermes alone is a machine of its own.
+  assert.deepEqual(selectTargets({ user: ["hermes"] }, []).user, ["hermes"]);
+});
+
+test("default Hermes home: Hermes' own, %LOCALAPPDATA%\\hermes on native Windows", () => {
+  assert.equal(defaultHermesHome("/home/u", "linux", { LOCALAPPDATA: "/x" }), join("/home/u", ".hermes"));
+  assert.equal(defaultHermesHome("/Users/u", "darwin", {}), join("/Users/u", ".hermes"));
+  assert.equal(defaultHermesHome("C:\\Users\\u", "win32", { LOCALAPPDATA: "D:\\Local" }), "D:\\Local\\hermes");
+  // Unset or blank: Hermes falls back to <home>\AppData\Local (hermes_constants.py:55-57).
+  assert.equal(defaultHermesHome("C:\\Users\\u", "win32", {}), "C:\\Users\\u\\AppData\\Local\\hermes");
+  assert.equal(defaultHermesHome("C:\\Users\\u", "win32", { LOCALAPPDATA: "  " }), "C:\\Users\\u\\AppData\\Local\\hermes");
+  // Hermes strips the value it uses.
+  assert.equal(defaultHermesHome("C:\\Users\\u", "win32", { LOCALAPPDATA: " D:\\Local " }), "D:\\Local\\hermes");
 });
 
 test("lock keys and roots: hermes: prefix; the Hermes home for the user scope, <repo>/.hermes for a project", () => {
@@ -362,7 +368,7 @@ test("Codex becomes active in a project: check reports it, the sync removes Herm
     await sync(e.ctx);
     assert.equal(existsSync(join(e.projectDir, ".hermes/skills/foo/SKILL.md")), true);
 
-    writeFileSync(join(e.tmp.dir, "marker-codex"), "");
+    e.writeCfg("user", { targets: ["codex", "hermes"], sources: { mine: { local: src } } });
     const chk = await check(e.ctx);
     assert.equal(chk.changed, true);
     assert.deepEqual(chk.targetsChanged, ["project"]);
@@ -374,7 +380,7 @@ test("Codex becomes active in a project: check reports it, the sync removes Herm
     assert.deepEqual(await driftOf(e.ctx), NONE);
 
     // And back: Codex gone, Hermes gets its own again.
-    rmSync(join(e.tmp.dir, "marker-codex"));
+    e.writeCfg("user", { sources: { mine: { local: src } } });
     assert.notDeepEqual(await driftOf(e.ctx), NONE);
     await sync(e.ctx);
     assert.deepEqual(Object.keys(projectLock(e)), ["hermes:skills/foo"]);
@@ -387,9 +393,10 @@ test("Codex becomes active in a project: check reports it, the sync removes Herm
 
 // ---- the Hermes home --------------------------------------------------------------------
 
-/** An env whose Hermes is detected by its own markers under the home a run is given. */
+/** An env where Claude Code is in use by its default marker and Hermes is a target by the
+ *  user config; `make` gives a Hermes home of its own. */
 function homes() {
-  const e = env([]);
+  const e = env(["claude", "hermes"]);
   const { markers: _m, hermesHome: _h, ...ctx } = e.ctx;
   const make = (name: string) => {
     const dir = join(e.tmp.dir, name);
@@ -397,29 +404,56 @@ function homes() {
     writeFileSync(join(dir, "config.yaml"), "");
     return dir;
   };
-  writeFileSync(join(e.home, ".claude.json"), "{}"); // Claude Code is in use too
+  writeFileSync(join(e.home, ".claude.json"), "{}"); // Claude Code is in use
   return { ...e, ctx: ctx as EngineContext, make, state: () => new State(e.ctx.stateRoot) };
 }
+
+test("a Hermes home in use is no target until the user's targets name hermes; a project cannot add it", async () => {
+  const e = homes();
+  try {
+    const src = source(e.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo") });
+    const a = e.make("home-a");
+    for (const file of ["SOUL.md", ".env"]) writeFileSync(join(a, file), "");
+    mkdirSync(join(a, "sessions"));
+    const declared = { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } };
+    e.writeCfg("user", { targets: undefined, ...declared }); // no targets: detection alone
+    e.writeCfg("project", { targets: ["hermes"], install: { skills: ["foo@mine"] } });
+    const inHermes: EngineContext = { ...e.ctx, hermesHome: a };
+    const r = await sync(inHermes);
+    assert.equal(r.error, undefined);
+    assert.deepEqual(Object.keys(userLock(e)), ["skills/foo"]);
+    assert.deepEqual(Object.keys(projectLock(e)), []);
+    assert.match(r.scopes[1]!.warnings.join("\n"), /project targets \(hermes\) are not in use on this machine \(claude\)/);
+    assert.equal(existsSync(join(a, "skills")), false);
+    assert.equal(e.state().hermesHome(), undefined); // a run under a Hermes home records nothing
+    assert.deepEqual(status(inHermes, { scope: "user" }).scopes[0]!.targets, ["claude"]);
+    assert.deepEqual(await driftOf(inHermes), NONE);
+
+    // Opted in: the user scope gets its Hermes copy, and the project its own.
+    e.writeCfg("user", { targets: ["claude", "hermes"], ...declared });
+    assert.notDeepEqual(await driftOf(inHermes), NONE);
+    await sync(inHermes);
+    assert.equal(existsSync(join(a, "skills/foo/SKILL.md")), true);
+    assert.deepEqual(Object.keys(projectLock(e)), ["hermes:skills/foo"]);
+    assert.equal(e.state().hermesHome(), a);
+  } finally {
+    e.cleanup();
+  }
+});
 
 test("a sync under a Hermes home of its own records it; a run without one serves the same home", async () => {
   const e = homes();
   try {
     const src = source(e.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo") });
     e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
-    // A Claude Code session before Hermes ever ran here: no ~/.hermes, so Claude alone.
-    await sync(e.ctx, { scope: "user" });
-    assert.deepEqual(Object.keys(userLock(e)), ["skills/foo"]);
-    assert.equal(e.state().hermesHome(), undefined);
-
     // The plugin's run: $HERMES_HOME names the home.
     const a = e.make("home-a");
     const inHermes: EngineContext = { ...e.ctx, hermesHome: a };
-    assert.notDeepEqual(await driftOf(inHermes, { scope: "user" }), NONE);
     await sync(inHermes, { scope: "user" });
     assert.equal(existsSync(join(a, "skills/foo/SKILL.md")), true);
     assert.equal(e.state().hermesHome(), a);
 
-    // The next Claude Code session has no $HERMES_HOME: same targets, same root, nothing to do.
+    // The next Claude Code session has no $HERMES_HOME: same root, nothing to do.
     assert.deepEqual(await driftOf(e.ctx, { scope: "user" }), NONE);
     const r = await sync(e.ctx, { scope: "user" });
     assert.deepEqual(r.scopes[0]!.unchanged.map((i) => i.key).sort(), ["hermes:skills/foo", "skills/foo"]);
@@ -440,13 +474,11 @@ test("the default home needs no record", async () => {
   try {
     const src = source(e.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo") });
     e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
-    mkdirSync(join(e.home, ".hermes"));
-    writeFileSync(join(e.home, ".hermes", "SOUL.md"), "");
     await sync(e.ctx, { scope: "user" });
-    assert.equal(existsSync(join(e.home, ".hermes/skills/foo/SKILL.md")), true);
+    assert.equal(existsSync(join(defaultHermesHome(e.home), "skills/foo/SKILL.md")), true);
     assert.equal(e.state().hermesHome(), undefined);
     // Named explicitly, it is the same home.
-    assert.deepEqual(await driftOf({ ...e.ctx, hermesHome: join(e.home, ".hermes") }, { scope: "user" }), NONE);
+    assert.deepEqual(await driftOf({ ...e.ctx, hermesHome: defaultHermesHome(e.home) }, { scope: "user" }), NONE);
   } finally {
     e.cleanup();
   }
@@ -486,23 +518,38 @@ test("another Hermes home: check reports it, the sync moves the items and takes 
   }
 });
 
-test("a recorded home that is gone: Hermes is no target any more, its entries go, the record with them", async () => {
-  const e = homes();
-  try {
-    const src = source(e.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo") });
-    e.writeCfg("user", { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
-    const a = e.make("home-a");
-    await sync({ ...e.ctx, hermesHome: a }, { scope: "user" });
-    rmSync(a, { recursive: true });
-    assert.notDeepEqual(await driftOf(e.ctx, { scope: "user" }), NONE);
-    const r = await sync(e.ctx, { scope: "user" });
-    assert.deepEqual(r.scopes[0]!.removed.map((i) => i.key), ["hermes:skills/foo"]);
-    assert.deepEqual(Object.keys(userLock(e)), ["skills/foo"]);
-    assert.equal(e.state().hermesHome(), undefined);
-    assert.equal(existsSync(join(e.home, ".hermes")), false);
-    assert.deepEqual(await driftOf(e.ctx, { scope: "user" }), NONE);
-  } finally {
-    e.cleanup();
+test("upgrade from auto-detection: without hermes in targets the next sync removes the Hermes items and the record", async () => {
+  // The first run after the upgrade: a Claude Code session, or the Hermes plugin's under its home.
+  for (const first of ["claude", "hermes"] as const) {
+    const e = homes();
+    try {
+      const src = source(e.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo") });
+      const declared = { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } };
+      e.writeCfg("user", declared);
+      const a = e.make("home-a");
+      // What a sync of the auto-detecting build left: Hermes entries in the lock, the home recorded.
+      await sync({ ...e.ctx, hermesHome: a }, { scope: "user" });
+      assert.deepEqual(Object.keys(userLock(e)).sort(), ["hermes:skills/foo", "skills/foo"]);
+      assert.equal(e.state().hermesHome(), a);
+
+      e.writeCfg("user", { targets: undefined, ...declared }); // no targets: detection alone
+      const b = e.make("home-b");
+      const ctx: EngineContext = first === "claude" ? e.ctx : { ...e.ctx, hermesHome: b };
+      assert.notDeepEqual(await driftOf(ctx, { scope: "user" }), NONE, first);
+      const r = await sync(ctx, { scope: "user" });
+      assert.equal(r.error, undefined);
+      assert.deepEqual(r.scopes[0]!.removed.map((i) => i.key), ["hermes:skills/foo"], first);
+      assert.deepEqual(r.scopes[0]!.warnings, [], first);
+      assert.deepEqual(Object.keys(userLock(e)), ["skills/foo"], first);
+      assert.equal(existsSync(join(a, "skills")), false, first);
+      assert.equal(existsSync(join(a, "config.yaml")), true, first); // Hermes' own files stay
+      assert.equal(existsSync(join(b, "skills")), false, first);
+      assert.equal(existsSync(join(e.home, ".hermes")), false, first);
+      assert.equal(e.state().hermesHome(), undefined, first);
+      assert.deepEqual(await driftOf(ctx, { scope: "user" }), NONE, first);
+    } finally {
+      e.cleanup();
+    }
   }
 });
 
@@ -547,6 +594,47 @@ test("session-start for Hermes: the sync, and the report the plugin hands to the
   }
 });
 
+const OPT_IN = (targets: string) =>
+  `skilletor: Hermes gets no skills: "hermes" is not in "targets"; to opt in, set "targets": ${targets} in ~/.claude/skilletor.json`;
+
+test("session-start under Hermes while hermes is no target: one line says how to opt in", async () => {
+  const e = env(["claude"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo") });
+    const declared = { sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } };
+    e.writeCfg("user", declared);
+    const inHermes = { ...e.ctx, harness: "hermes" as const };
+    const hint = OPT_IN('["claude", "hermes"]');
+    const out = await runHook("session-start", { source: "startup" }, inHermes);
+    assert.equal(out.systemMessage, `skilletor: 1 item(s) updated; ${hint}`);
+    // The plugin hands the model the context when there is one, so the line is in it too.
+    assert.deepEqual(out.hookSpecificOutput, {
+      hookEventName: "SessionStart",
+      additionalContext: `skilletor synced items:\n- skill foo@mine: active now\n${hint}`,
+    });
+    assert.equal(existsSync(join(e.hermesHome, "skills")), false);
+    // Nothing changed: the line alone, once.
+    assert.deepEqual(await runHook("session-start", { source: "resume" }, inHermes), { systemMessage: hint });
+    // Not under another harness, not on a turn.
+    assert.deepEqual(await runHook("session-start", { source: "startup" }, e.ctx), {});
+    assert.deepEqual(await runHook("session-start", { source: "startup" }, { ...e.ctx, harness: "codex" }), {});
+    assert.deepEqual(await runHook("user-prompt-submit", {}, { ...inHermes, background: () => {} }), {});
+    // A config error is its own one line.
+    writeFileSync(join(e.home, ".claude", "skilletor.json"), "{ broken");
+    const broken = await runHook("session-start", { source: "startup" }, inHermes);
+    assert.match(broken.systemMessage!, /^skilletor: /);
+    assert.doesNotMatch(broken.systemMessage!, /to opt in/);
+    assert.equal(broken.hookSpecificOutput, undefined);
+    // Opted in: no line.
+    e.writeCfg("user", { targets: ["claude", "hermes"], ...declared });
+    const opted = await runHook("session-start", { source: "startup" }, inHermes);
+    assert.equal(opted.systemMessage, "skilletor: 1 item(s) updated");
+    assert.equal(existsSync(join(e.hermesHome, "skills/foo/SKILL.md")), true);
+  } finally {
+    e.cleanup();
+  }
+});
+
 // ---- the built CLI ----------------------------------------------------------------------
 
 let built: TmpDir;
@@ -581,15 +669,18 @@ test("CLI: under $HERMES_HOME a sync installs for Hermes; a later run without it
   const m = machine();
   try {
     const src = source(m.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo"), "agents/helper.md": AGENT("helper") });
-    writeFileSync(join(m.home, ".claude/skilletor.json"),
-      JSON.stringify({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"], agents: ["helper@mine"] } }));
+    const declared = { sources: { mine: { local: src } }, install: { skills: ["foo@mine"], agents: ["helper@mine"] } };
+    writeFileSync(join(m.home, ".claude/skilletor.json"), JSON.stringify(declared));
 
-    // Not from here: no harness is in use as far as this run can see.
-    const blind = m.run(["sync"], m.plain);
+    // Not opted in: Hermes is never detected, so no harness is in use – also under its home.
+    const blind = m.run(["sync"], m.inHermes);
     assert.equal(blind.status, 2);
-    assert.match(blind.stderr, /no agent harness detected/);
-    assert.match(blind.stderr, new RegExp(`hermes: ${join(m.home, ".hermes", "config.yaml")}`));
+    assert.match(blind.stderr, /no agent harness detected \(looked for claude: .*; codex: [^;]*\)/);
+    assert.doesNotMatch(blind.stderr, /hermes: /);
     assert.match(blind.stderr, /"targets": \["claude"\], "codex" and\/or "hermes"/);
+    assert.equal(existsSync(join(m.hermesHome, "skills")), false);
+
+    writeFileSync(join(m.home, ".claude/skilletor.json"), JSON.stringify({ targets: ["hermes"], ...declared }));
 
     const r = m.run(["sync"], m.inHermes);
     assert.equal(r.status, 0, r.stderr);
@@ -623,7 +714,7 @@ test("CLI: hook session-start --harness hermes syncs and answers in the hook's J
   try {
     const src = source(m.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo") });
     writeFileSync(join(m.home, ".claude/skilletor.json"),
-      JSON.stringify({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } }));
+      JSON.stringify({ targets: ["hermes"], sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } }));
     const input = JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: m.cwd, session_id: "s1" });
     const r = m.run(["hook", "session-start", "--harness", "hermes"], m.inHermes, input);
     assert.equal(r.status, 0, r.stderr);
@@ -638,6 +729,27 @@ test("CLI: hook session-start --harness hermes syncs and answers in the hook's J
     const prompt = m.run(["hook", "user-prompt-submit", "--harness", "hermes"], m.inHermes,
       JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd: m.cwd, session_id: "s1" }));
     assert.deepEqual([prompt.status, prompt.stdout], [0, ""]);
+  } finally {
+    m.cleanup();
+  }
+});
+
+test("CLI: hook session-start --harness hermes without hermes in targets says how to opt in, exit 0", () => {
+  const m = machine();
+  try {
+    writeFileSync(join(m.home, ".claude.json"), "{}"); // Claude Code is in use
+    const src = source(m.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo") });
+    writeFileSync(join(m.home, ".claude/skilletor.json"),
+      JSON.stringify({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } }));
+    const input = JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: m.cwd, session_id: "s1" });
+    m.run(["sync"], m.plain);
+    const r = m.run(["hook", "session-start", "--harness", "hermes"], m.inHermes, input);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { systemMessage: OPT_IN('["claude", "hermes"]') });
+    assert.equal(existsSync(join(m.hermesHome, "skills")), false);
+    // Claude Code's own hook says nothing of it.
+    const claude = m.run(["hook", "session-start"], m.plain, input);
+    assert.deepEqual([claude.status, claude.stdout], [0, ""]);
   } finally {
     m.cleanup();
   }

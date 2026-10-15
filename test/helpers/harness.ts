@@ -1,7 +1,7 @@
 // Harness fixtures (spec §14.1): tests never detect the real machine's Claude
-// Code, Codex or Hermes. In-process tests inject markers; spawned CLIs get a temp HOME
-// with a Claude marker, a CODEX_HOME that does not exist and no HERMES_HOME (so the
-// Hermes home is the temp HOME's `.hermes`, which does not exist either).
+// Code or Codex, and never install into its Hermes home. In-process tests inject markers;
+// spawned CLIs get a temp HOME with a Claude marker, a CODEX_HOME that does not exist and
+// no HERMES_HOME (so the default Hermes home lies under the temp HOME).
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { HarnessMarkers } from "../../src/targets.ts";
@@ -12,9 +12,11 @@ export function claudeOnly(home: string): HarnessMarkers {
 }
 
 /** The variables that name the home directory: HOME, and on Windows USERPROFILE, which is
- *  what os.homedir() reads there. */
+ *  what os.homedir() reads there, and LOCALAPPDATA, where the default Hermes home lies. */
 export function homeEnv(home: string): NodeJS.ProcessEnv {
-  return process.platform === "win32" ? { HOME: home, USERPROFILE: home } : { HOME: home };
+  return process.platform === "win32"
+    ? { HOME: home, USERPROFILE: home, LOCALAPPDATA: join(home, "AppData", "Local") }
+    : { HOME: home };
 }
 
 /** Env for a spawned CLI whose HOME looks like a Claude-only machine. */

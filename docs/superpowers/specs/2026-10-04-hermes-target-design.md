@@ -10,8 +10,9 @@ that Hermes in a throwaway `HERMES_HOME`, no real model called.
 ## 16. Harness target `hermes`
 
 skilletor installs for a third harness, NousResearch **Hermes Agent** (`hermes`), next to
-`claude` and `codex`. Linux only. Phase 1 covers detection, the layout, **skills** in both
-scopes, and a native Hermes plugin that runs skilletor's existing hooks. Agents and rules
+`claude` and `codex`. Linux only (on native Windows the default Hermes home follows Hermes',
+§16.2; not run there). Phase 1 covers the target – opt-in by `targets`, never detected –, the
+layout, **skills** in both scopes, and a native Hermes plugin that runs skilletor's existing hooks. Agents and rules
 are not installed for Hermes; the report says so (§16.3). The Codex target was built in the
 same three steps (§14, phases 1–3).
 
@@ -35,14 +36,25 @@ loads with `skill_view`. In an untrusted project neither project directory is re
 trusted one both are; `proj-skill` present in `.hermes/skills` **and** `.agents/skills` is
 dropped from the list and `skill_view` answers "Ambiguous skill name … refusing to guess".
 
-### 16.2 Detection, layout, lock
+### 16.2 Opt-in, layout, lock
 
-**Detection.** `hermes` is in use when the Hermes home holds any of `config.yaml`, `.env`,
-`SOUL.md`, `sessions/` – files Hermes creates (`SOUL.md` and `sessions/` on its first run of
-any kind, `hermes_cli/config.py:568`) and skilletor never does. `skills/` is no marker:
-skilletor creates it. `targets` takes `"hermes"` like the other two (§14.1). A marker set
-without a `hermes` entry (an `EngineContext.markers` written before this target) means not
-in use.
+**Opt-in, no detection** (maintainer, 2026-10-15; §16.7). Hermes is never detected: `hermes`
+is a machine target only when the user config's `targets` names it. A project's `targets`
+then narrows it away like the other two (§14.1) and can never add it. As `targets` replaces
+detection whole, a user who opts in lists every harness they want, e.g.
+`"targets": ["claude", "codex", "hermes"]`. `HarnessMarkers` and `defaultMarkers` know
+`claude` and `codex` only, so the config error for an empty machine set names their markers
+alone (and still names `"hermes"` as a value of `targets`).
+
+While `hermes` is no target, a run Hermes started – the plugin's `session-start` with
+`--harness hermes` – answers one line saying how to opt in, naming the machine targets plus
+`hermes` (§16.4). `skilletor sync`, `hermes skilletor sync` included, says nothing of it.
+
+An install of the auto-detecting build (branch `hermes-target`, never released) can hold
+`hermes:` entries in the user lock and a home record with no `targets` naming `hermes`. The
+next user-scope sync removes them as those of an inactive target (§14.3), from the recorded
+home, and drops the record – whatever `HERMES_HOME` that run has: while Hermes is no target
+nothing moves (below).
 
 **Layout** (`LAYOUTS.hermes` in `targets.ts`, lock-key prefix `hermes:`):
 
@@ -75,14 +87,18 @@ serves **one** Hermes home. Which one:
 1. `$HERMES_HOME` of the run, when set – the plugin passes the session's (§16.4);
 2. else the home the last user-scope sync ran under, recorded in the state dir as
    `hermes-home.json` (§6.5) when it is not the default;
-3. else `~/.hermes`.
+3. else Hermes' own default home (`_get_platform_default_hermes_home`,
+   `hermes_constants.py:51-58`; `defaultHermesHome` in `targets.ts`): `~/.hermes`, on
+   native Windows `%LOCALAPPDATA%\hermes` – `<home>\AppData\Local\hermes` when
+   `LOCALAPPDATA` is unset or blank. Hermes' `HERMES_DATA_DIR_SUFFIX` (desktop and channel
+   builds) is not followed.
 
 Rule 2 exists because Hermes is commonly started with a `HERMES_HOME` no other process
 has (a service unit, a development home, `hermes -p <profile>`): without the record, a
-Claude Code session would not detect Hermes, delete the lock's `hermes:` entries as those
-of an inactive target, and the next Hermes session would meet its own files as foreign
-ones. With it every session, whatever started it, agrees on the targets and the root, and
-a Claude Code or Codex SessionStart keeps the Hermes home current too.
+Claude Code session would take the lock's `hermes:` entries for paths under the default
+home, install them anew there and leave the copies Hermes reads behind. With it every
+session, whatever started it, agrees on the root, and a Claude Code or Codex SessionStart
+keeps the Hermes home current too.
 
 When a run's home differs from the recorded one, `check` reports a change (target drift
 of the user scope), and the user-scope sync first **moves**: it deletes what the lock owns
@@ -91,7 +107,9 @@ new home by the ordinary rules – so nothing skilletor did not install is ever 
 own, and nothing is left behind. The record is written before anything is installed under
 the new home, so a sync that stops midway leaves a lock and a record that agree. One
 warning names the move. A project-scope sync alone leaves the record to the user scope.
-The record goes when Hermes is no target any more (its entries went with it).
+While Hermes is no target, a run under another home moves nothing: its entries go as an
+inactive target's, from the recorded home. The record goes when Hermes is no target any
+more (its entries went with it).
 
 **Report.** Hermes items show under their lock key (`hermes:skills/foo`); the hook context
 marks them `(hermes)` with "active from the next Hermes session". Hermes builds its skill
@@ -135,8 +153,12 @@ answer's `additionalContext`; an answer with a `systemMessage` alone (a config e
 warning line – in Claude Code the line the user sees) is passed as that line, since a
 Hermes plugin hook has no user-only channel, and logged.
 
-`--harness hermes` marks the calling harness in the hook context. It changes nothing in
-phase 1; it is there so rules (§16.5) need no new plugin.
+`--harness hermes` marks the calling harness in the hook context. In phase 1 it adds one
+thing: while `hermes` is no machine target (§16.2), the `session-start` answer gets the
+opt-in line – after its `systemMessage`, and after its `additionalContext` when it has one,
+since the plugin hands the model the context when there is one. Once per session start (a
+resumed one's too), never on a turn; with a config error, that error is the answer alone.
+The flag is also there so rules (§16.5) need no new plugin.
 
 **Where the session is.** The project directory is the git top level of the hook input's
 `cwd` (§14.5). The plugin sends Hermes' own answer to "where does this session work"
@@ -197,15 +219,20 @@ is what syncs on a machine, or in a session, where only Hermes runs.
   Measured: Hermes then refuses the bare name ("Ambiguous skill name … use one of
   `<category>/<name>`"), lists the other skill under that path, and skilletor's copy cannot
   be loaded at all. Finding that would mean reading every `SKILL.md` of the home at each sync.
+  The skills of `NousResearch/hermes-agent` – the README's `path` example source (§3) – are
+  this case by construction: Hermes already ships them under `skills/<category>/<name>/`,
+  so with `hermes` among the targets each one skilletor installs collides with Hermes' own.
+  That source is for Claude Code and Codex; there is no per-target selection of items
+  (§16.7, decision 2).
 - **Several Hermes homes at once.** One lock serves one home (§16.2). Two profiles that
   both enable the plugin move the user-scope skills back and forth at each session start.
   Serving them side by side needs ownership per home – a lock per Hermes home, or lock keys
   that name the home.
-- **One checkout, two homes.** Detection is per machine and per `HOME` (§14.6). A Hermes
-  that runs under another `HOME` than the user's Claude Code – a service account – and
-  works in the same checkout sees only itself in use, and its project-scope sync removes
-  the checkout's Claude Code items as those of an inactive target; the next Claude Code
-  session puts them back. Not new with Hermes, but a Hermes service is the likelier case.
+- **One checkout, two homes.** Targets are per machine and per `HOME` (§14.6). A Hermes
+  that runs under another `HOME` than the user's Claude Code – a service account whose
+  `~/.claude/skilletor.json` names `hermes` alone – and works in the same checkout has only
+  itself as a target, and its project-scope sync removes the checkout's Claude Code items as
+  those of an inactive target; the next Claude Code session puts them back. Not new with Hermes, but a Hermes service is the likelier case.
 - **The `skilletor` skill for Hermes.** The plugin does not bundle `skills/skilletor`
   (`ctx.register_skill`); install it like any other skill.
 - **Distribution.** No catalog entry, no `hermes plugins install` path, no marketplace
@@ -213,14 +240,16 @@ is what syncs on a machine, or in a session, where only Hermes runs.
 
 ### 16.6 Tests
 
-- Engine, in process, injected markers and Hermes home: detection, `targets`, layout in
-  both scopes, the lock, removal, the Codex-serves-Hermes rule, notes, the home record and
+- Engine, in process, injected markers and Hermes home: no detection, opt-in by `targets`
+  (a project cannot add it), the upgrade from the auto-detecting build, the default home per
+  platform, the hook's opt-in line through `runHook` and the built CLI, layout in both scopes, the lock, removal, the Codex-serves-Hermes rule, notes, the home record and
   the move, `check` drift, status, report; Claude-only and Codex output unchanged.
 - The plugin against a stand-in CLI (a shell script), driven by the system `python3`:
   payloads, returns, limits, every failure silent, nothing started by `register`.
 - **Real Hermes** (`$HERMES_PYTHON`, else `~/dev/hermes-citiai/.dev/venv/bin/python`;
   skipped without it), a fresh Hermes process per case and a throwaway `HERMES_HOME` on
-  disk: the built CLI installs a skill from a local source for the target `hermes`, and
+  disk: the built CLI installs a skill from a local source for the target `hermes` (named in
+  `targets`), and
   Hermes' own `hermes skills list` and `skills_list` tool see it; the project rules above;
   the plugin loads through `plugins.enabled`, its hooks are registered, Hermes'
   `invoke_hook("on_session_start")` triggers the sync and `invoke_hook("pre_llm_call")`
@@ -231,11 +260,15 @@ is what syncs on a machine, or in a session, where only Hermes runs.
   process the first message is replayed with it while the new one carries nothing. No real
   model is called.
 
-### 16.7 Decisions taken alone, to be confirmed
+### 16.7 Decisions
 
-1. **Hermes is auto-detected** like the other two, so a machine with a Hermes home in use
-   gets its user-scope skills there with the first sync after the upgrade. The alternative
-   is opt-in only (`"targets"` must name `hermes`).
+Taken alone while building phase 1, put to the maintainer, and decided on 2026-10-15: item 1
+changed then, items 2–9 confirmed as written.
+
+1. **Hermes is opt-in only** (maintainer, 2026-10-15): never detected; it is a machine
+   target only when the user config's `"targets"` names it (§16.2). The build first detected
+   it by the files of its home, so a machine with a Hermes home in use got its user-scope
+   skills there with the first sync after the upgrade.
 2. **Every user-scope item goes to every machine target.** There is no way to say "this
    skill for Claude Code, not for Hermes" except a template gate on `harness` in the source,
    or a Hermes that runs under a `HOME` (and so a `~/.claude/skilletor.json`) of its own.

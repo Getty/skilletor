@@ -10,7 +10,7 @@ stripped; every other file is copied byte for byte. Context:
 | `vars.*` | `source defaults < bundle < user < project < local` |
 | `project.dir`, `.name`, `.git_remote` | project scope only |
 | `scope` | `user` or `project` |
-| `harness` | `claude` / `codex` — rendered once per target |
+| `harness` | `claude` / `codex` / `hermes` — rendered once per target |
 | `target.dir` | the install root |
 | `host.name`, `host.os`, `user.name`, `user.home` | machine and user |
 | `item.name`, `item.type`, `item.source` | the item being rendered |

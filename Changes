@@ -1,12 +1,16 @@
 Revision history for skilletor
 
 {{$NEXT}}
-  - Hermes Agent is a third target, `hermes` in `targets`. Skills install
-    into the Hermes home (`$HERMES_HOME`, else `~/.hermes`) and, in a project,
-    into `.hermes/skills`; agents and rules are reported as not installed. The
+  - Hermes Agent is a third target, `hermes` in `targets`. It is opt-in:
+    never detected, so `"targets"` in `~/.claude/skilletor.json` must name it,
+    together with every other harness in use (`["claude", "hermes"]`). Skills
+    install into the Hermes home (`$HERMES_HOME`, else Hermes' own default:
+    `~/.hermes`, `%LOCALAPPDATA%\hermes` on Windows) and, in a project, into
+    `.hermes/skills`; agents and rules are reported as not installed. The
     plugin in `hermes/skilletor` runs skilletor's hooks when a Hermes session
-    starts and on each turn, reports changes to the model, and fails open. On
-    Windows it starts `bin/skilletor.exe`.
+    starts and on each turn, reports changes to the model, says how to opt in
+    while `hermes` is not in `targets`, and fails open. On Windows it starts
+    `bin/skilletor.exe`.
   - A source entry takes an optional `path`, a directory or a list of them
     relative to the source root, for repositories that keep skills outside
     `skills/<name>/`, such as `"path": ["skills", "optional-skills"]` for
