@@ -6,7 +6,8 @@ explicit go-ahead. Everything before step 4 is local and can run anytime.
 ## Per release
 
 1. **Version** — bump `package.json`, `package-lock.json` (root and `packages[""]`),
-   `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` to the same version;
+   `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` and the Hermes plugin's
+   `hermes/skilletor/plugin.yaml` to the same version;
    `npm run build` (the CLI version is injected from `package.json` at build time).
    In `Changes`, turn the `{{$NEXT}}` line into the version line
    (`printf '%-9s %s\n' X.Y.Z "$(date -u '+%F %TZ')"`) and put a fresh `{{$NEXT}}` and a
