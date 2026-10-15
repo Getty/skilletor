@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-10-15T04:01:03Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-15T04:01:03Z
+created: 2026-10-15T02:06:03Z
+id: 133
+priority: low
+started: 2026-10-15T03:22:50Z
+status: done
+tags:
+- windows
+- hooks
+title: 'hooks: background sync starts a detached node without windowsHide'
+updated: 2026-10-15T04:01:03Z
+---
+
+Found during the hermes-target rebase (worker). defaultBackground in src/hooks.ts spawns a detached node without windowsHide: true; on Windows that can flash a console window for each background sync. Set windowsHide and pin it in a test.
+
+2026-10-15 03:34 Started (worker): defaultBackground gets its spawn as a parameter (default node's spawn) and is exported, so a test pins the exact spawn call; then windowsHide.
+
+2026-10-15 03:37 Done (worker): src/hooks.ts defaultBackground spawns with windowsHide: true; it is exported and takes its spawn as an optional parameter (BackgroundSpawn, default node's spawn) so test/hooks.test.ts 'k133: the default background spawn is detached, silent and hides its window' pins the whole call (process.execPath, [bin, hook, __sync-background], detached, stdio ignore, windowsHide, SKILLETOR_PROJECT_DIR, unref; no binPath -> no spawn). Red first on the windowsHide assertion only. Docs: README hooks list, spec §8 table, Changes bullet. Verified: typecheck, npm test 948/948, build, check-dist green. Not live-tested on Windows (no Windows here). The other execFile calls (git, probe) run attached and share the hook's console, so they are left alone.
+
+2026-10-15 04:00 Committed as d85ae48
