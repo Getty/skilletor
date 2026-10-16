@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-10-16T21:59:54Z
+id: 142
+priority: medium
+status: backlog
+tags:
+- sync
+- claude
+- settings
+title: 'claudesettings: honour CLAUDE_CONFIG_DIR when reading the plugin state'
+updated: 2026-10-16T21:59:54Z
+---
+
+Found during k141. Claude Code honours CLAUDE_CONFIG_DIR for its config dir; install.sh's shim reads ${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json, but src/claudesettings.ts (k140) reads <home>/.claude/plugins/installed_plugins.json and known_marketplaces.json only. With CLAUDE_CONFIG_DIR set, the settings.json requirement finds no install and silently adds nothing. Check what else in src/ hard-codes ~/.claude where Claude Code would use CLAUDE_CONFIG_DIR (user scope root, detection) and decide scope: at least the plugin-state lookup. Tests with a temp CLAUDE_CONFIG_DIR.
