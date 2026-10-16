@@ -25,7 +25,8 @@ explicit go-ahead. Everything before step 4 is local and can run anytime.
    edit `Getty/marketplace`, then `python3 scripts/check-manifests.py`. Entries carry no
    version, so a plain release needs no marketplace change.
 
-`refs/karr/*` (the board) is never pushed: `git push origin main` does not include it.
+`git push origin main` does not include `refs/karr/*` (the board); `karr sync` carries the
+board to the remote on its own.
 
 ## Marketplace entries (Getty/marketplace)
 
