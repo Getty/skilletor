@@ -1,0 +1,40 @@
+---
+claimed_at: 2026-10-16T21:59:34Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-16T21:59:27Z
+created: 2026-10-16T21:31:04Z
+id: 141
+priority: high
+started: 2026-10-16T21:31:25Z
+status: done
+tags:
+- cli
+- install
+- docs
+title: 'install.sh: one-line install from a plain shell, a stable skilletor on PATH
+  (issue #1)'
+updated: 2026-10-16T21:59:34Z
+---
+
+Maintainer request 2026-10-16, answering GitHub issue #1 (oalders): 'README: add command-line setup instructions'. He installs plugins from a dotfiles script (claude plugin marketplace add / claude plugin install) and outside a Claude session the plugin's bin/ is not on PATH; his workaround finds the newest bin/skilletor under ~/.claude/plugins/cache/getty/skilletor (depends on the cache layout). Maintainer: make it an install.sh.
+
+Goal: `curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh` (and running it from a clone) sets skilletor up from a plain shell:
+- With the claude CLI present: `claude plugin marketplace add Getty/marketplace` (skip if known) and `claude plugin install skilletor@getty` (skip/update if installed) — check the real claude CLI's syntax and idempotence (claude plugin --help), never against the real ~/.claude in tests.
+- Puts a stable `skilletor` command on PATH (~/.local/bin by default, overridable) that survives plugin updates: e.g. a small shim that resolves the current skilletor@<marketplace> installPath from ~/.claude/plugins/installed_plugins.json and execs its bin/skilletor — NOT a symlink into a versioned cache dir. Without Claude Code (Codex/Hermes-only machine): decide — e.g. clone to a data dir and link bin/skilletor (works since k139), update via the script again.
+- POSIX sh, idempotent, says what it did; checks node >= 18 and git; never sudo; warns if the bin dir is not on PATH. Flags/env for: no plugin install (CLI only), bin dir. Windows: out of scope for the .sh — say what to do (bin/skilletor.exe / PowerShell) in README.
+- Whether npm install -g github:Getty/skilletor should work: tried 2026-10-16 with npm 11 and a temp --prefix → bin link created but lib/node_modules/skilletor missing (broken link). Investigate briefly; fix if trivial (package.json files/prepare?), else don't document it.
+- Docs: README 'From the command line' next to the 30-second start (the issue's ask), Hermes section can point SKILLETOR_BIN at the installed command, hermes/skilletor/after-install.md likewise; bundled skill only if it helps; Changes.
+- Tests: the script against a temp HOME with a fake `claude` on PATH recording its calls, idempotence, the shim resolving installPath (incl. after a simulated plugin update), no-claude path with a local file:// clone, bin dir not on PATH warning. CI runs on Linux+macOS — the test must pass on both.
+
+2026-10-16 21:35 Research (claude 2.1.302, real claude run only against a throwaway HOME+CLAUDE_CONFIG_DIR in the scratchpad): 'claude plugin marketplace add Getty/marketplace' is idempotent (rc 0, 'already on disk'); 'claude plugin install skilletor@getty' twice: rc 0, 'already installed', does NOT update; 'claude plugin update skilletor@getty' rc 0 when current. 'marketplace list --json' = [{name,source,repo,installLocation}], 'plugin list --json' = [{id,version,scope,enabled,installPath,...}]. installed_plugins.json is under $CLAUDE_CONFIG_DIR (default ~/.claude)/plugins: {version:2, plugins:{'skilletor@getty':[{scope:'user'|'project', projectPath?, installPath:.../cache/getty/skilletor/<ver>, version,...}]}} - project entries carry projectPath and can point at older versions. npm -g: npm 11.17 'install -g git+...' links lib/node_modules/skilletor to npm's temp git clone (deleted afterwards) because install-links defaults to false; '--install-links' works (prints 0.7.0). Not fixable from package.json -> not documented.
+
+2026-10-16 21:35 Decisions: (1) plugin mode when 'claude' is on PATH: marketplace add only if 'marketplace list --json' lacks getty (else 'marketplace update getty'); 'plugin install skilletor@getty --scope user' when 'plugin list --json' has no user-scope skilletor@getty, else 'plugin update skilletor@getty --scope user' - so rerunning the script updates. Shim in bin dir reads installed_plugins.json (${CLAUDE_CONFIG_DIR:-$HOME/.claude}) with node, takes the user-scope skilletor@getty entry (else another marketplace's user-scope skilletor), execs its bin/skilletor; never a project-scope install. (2) No claude, or --no-plugin: clone https://github.com/Getty/skilletor (main, like the plugin and Hermes) to ${XDG_DATA_HOME:-~/.local/share}/skilletor, symlink bin/skilletor (k139); rerun = git pull --ff-only. Run from a clone (sh install.sh in a checkout): that checkout is linked instead of a second clone. (3) Flags/env: --bin-dir DIR / SKILLETOR_BIN_DIR (default ~/.local/bin, absolute), --no-plugin / SKILLETOR_NO_PLUGIN=1, SKILLETOR_REPO (clone source; forks, mirrors, tests). (4) npm -g: not documented (see above). (5) A file in the bin dir that is neither our shim nor a symlink is refused, never overwritten.
+
+2026-10-16 21:41 INCIDENT (worker mistake): while linting, I ran 'sh -c ". ./install.sh"' meaning to source the functions; sourcing ran main() against the REAL HOME. Effects: 'claude plugin marketplace update getty' refreshed ~/.claude/plugins/marketplaces/getty; 'claude plugin update skilletor@getty --scope user' moved the real user-scope skilletor from 0.4.2 to 0.7.0 (installed_plugins.json; 0.4.2 cache dir still on disk; project-scope entries untouched); it wrote ~/.local/bin/skilletor (nothing was there before). Reverted: removed ~/.local/bin/skilletor. NOT reverted (needs the maintainer's call): the plugin update to 0.7.0 and the marketplace refresh.
+
+2026-10-16 21:56 Also found (for the dispatcher): (a) src/claudesettings.ts reads <home>/.claude/plugins/*.json and ignores CLAUDE_CONFIG_DIR, which Claude Code honours (the install.sh shim does honour it) - skilletor board, drift. (b) skills/skilletor/references/hermes.md still names only a clone for SKILLETOR_BIN; could mention install.sh - skilletor-skill-author lane, not touched. (c) Hermes' install-time scan rates after-install.md 'caution' for a curl-piped-to-shell line (test/hermes-real.test.ts caught it), so after-install.md links the README section instead of quoting the one-liner.
+
+2026-10-16 21:56 Done: install.sh (POSIX sh, main() on the last line, every command on /dev/null): with claude -> marketplace add Getty/marketplace unless 'marketplace list --json' has getty (else marketplace update getty), plugin install skilletor@getty --scope user unless 'plugin list --json' has a user-scope entry (else plugin update --scope user), then a shim in ~/.local/bin that reads ${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json per run and execs the user-scope install's bin/skilletor. Without claude / --no-plugin: clone to ${XDG_DATA_HOME:-~/.local/share}/skilletor (or the clone it runs from), symlink, rerun pulls --ff-only. Flags/env: --bin-dir/SKILLETOR_BIN_DIR, --no-plugin/SKILLETOR_NO_PLUGIN=1, SKILLETOR_REPO. Tests: test/install.test.ts (12, temp HOME, fake claude test/helpers/fake-claude.mjs logging calls and failing on non-empty stdin; mutation-checked). Docs: README 'From the command line', Codex+Hermes CLI notes, hermes/skilletor/after-install.md, spec §10, Changes. Verified: typecheck, npm test 1029 pass/1 skip (the opt-in Hermes install case, run separately: pass), build, check-dist up to date, shellcheck 0.11.0 clean on install.sh and the generated shim, dash -n. See the INCIDENT note: one accidental real-HOME run updated the real user-scope plugin 0.4.2->0.7.0 (not reverted).
+
+2026-10-16 21:59 Committed as de1d926
