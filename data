@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-10-16T04:36:03Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-16T04:36:03Z
+created: 2026-10-16T04:23:13Z
+id: 139
+priority: medium
+started: 2026-10-16T04:23:28Z
+status: done
+tags:
+- cli
+- launcher
+title: 'bin/skilletor: follow its own symlink to find dist/ (PATH link, npm link,
+  npm install -g)'
+updated: 2026-10-16T04:36:52Z
+---
+
+Found during k138. bin/skilletor resolves dist/ via dirname $0 without following a symlink, so 'ln -s <clone>/bin/skilletor ~/.local/bin/skilletor' fails with 'Cannot find module <linkdir>/../dist/skilletor.js' (reproduced); an npm link / npm install -g bin symlink would too. Fix the POSIX launcher to resolve its own symlink chain (portable sh: no readlink -f on macOS; loop over readlink, handle relative link targets). Check whether bin/skilletor.exe (winlaunch, {root}) has the same issue for Windows symlinks/npm shims. Regression test: a relative and an absolute symlink (and a chain) to bin/skilletor run --version. Then README's Hermes CLI note can offer the PATH link as a one-liner alongside SKILLETOR_BIN.
+
+2026-10-16 04:24 Reproduced: ln -s <clone>/bin/skilletor <dir>/abs; <dir>/abs --version -> Cannot find module <dir>/../dist/skilletor.js. Fix: readlink loop over the link chain (relative targets resolved against the link's dir), then cd -P to the physical bin/.. (also covers a symlink to the bin/ directory itself).
+
+2026-10-16 04:30 Windows: no change needed in this repo. npm's cmd-shim on Windows (package.json bin -> bin/skilletor, shebang /bin/sh) writes skilletor.cmd/.ps1 that run 'sh <real path>\node_modules\skilletor\bin\skilletor' - no symlink, so dirname works; it does need sh on PATH (Git Bash), a separate limitation. bin/skilletor.exe (winlaunch) takes {root} and its script from GetModuleFileNameW, i.e. the path it was started by, not resolved: a symlink to the .exe elsewhere would find no bin/skilletor beside it and exit 0 silently. Windows symlinks need dev mode/admin and the documented way is <clone>\bin on PATH, so not 'clearly broken'; the source of truth is windows-developer tools/winlaunch - if wanted, a ticket on that board: resolve the final path (GetFinalPathNameByHandleW) before deriving self/root.
+
+2026-10-16 04:31 Done: bin/skilletor resolves its own symlink chain (readlink loop, relative targets against the link's dir, then cd -P to the physical bin/..) - no readlink -f, works under dash, bash --posix, busybox sh. New test/launcher.test.ts (6 cases: direct, absolute link, npm -g style relative link through a linked package dir, chain of relative hops in different dirs, link to bin/ dir, this checkout's launcher linked -> --version = package version; skipped on win32); 5 of 6 fail against the old launcher. README (Codex alias note, Hermes CLI note with ln -s one-liner), hermes/skilletor/after-install.md, Hermes spec §16.4, design spec §10 tree, Changes under {{$NEXT}}. typecheck, npm test (1005 pass, 1 pre-existing opt-in skip), build, check-dist green; dist unchanged (no src/ change).
+
+2026-10-16 04:36 Committed as e1f6bd5
+
+2026-10-16 04:36 Amended (trailer only): the commit is 49bc0f0, not e1f6bd5.
