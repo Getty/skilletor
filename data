@@ -1,0 +1,39 @@
+---
+claimed_at: 2026-10-16T19:49:47Z
+claimed_by: skilletor-worker
+class: standard
+completed: 2026-10-16T19:49:47Z
+created: 2026-10-16T19:22:27Z
+id: 140
+priority: high
+started: 2026-10-16T19:23:15Z
+status: done
+tags:
+- sync
+- claude
+- settings
+title: project sync writes the plugin requirement into .claude/settings.json
+updated: 2026-10-16T19:49:54Z
+---
+
+Maintainer request 2026-10-16. Real case: dbio had .claude/skilletor.json from 2026-10-04 but enabled skilletor@getty only on 2026-10-16, so a fresh checkout had skills mentioning skilletor and none of the synced items. Wider: ~95 of the maintainer's repos enable @getty plugins (briefing, ruler) without declaring the getty marketplace in extraKnownMarketplaces (root cause: the getty-agent-team skill's settings template) — fine on his machine, unresolvable on anyone else's.
+
+Goal: when sync runs for a project that uses skilletor (project skilletor.json / skilletor.local.json? decide — local is gitignored, so only the committed skilletor.json should trigger), skilletor makes sure the committed <project>/.claude/settings.json (1) enables skilletor@<marketplace skilletor is installed from> and (2) declares that marketplace in extraKnownMarketplaces; and (3) declares every other marketplace an enabledPlugins entry there references but the file does not declare (this fixes the briefing@getty gap in every skilletor project).
+
+Constraints to design and record on the card:
+- Source of truth for marketplace name and source: the user's Claude Code plugin state (~/.claude/plugins/known_marketplaces.json, installed_plugins.json; CLAUDE_PLUGIN_ROOT when run as plugin). Never write a machine-specific source (a local directory/path source) into a committed file: skip it and say so in the report. claude-plugins-official needs no declaration.
+- Only add, never remove or change existing keys; an explicit enabledPlugins["skilletor@x"] = false is the user's choice — leave it. Respect a settings.local.json? (it's per-machine; don't write there.)
+- Keep the file's JSON valid and stable (key order kept, 2-space indent like Claude Code writes; no rewrite when nothing changes). A settings.json that does not parse: leave it, report.
+- Opt-out config key (user and/or project file), named consistently with existing keys like gitignore; spec + README + bundled skill.
+- Report line asks to commit .claude/settings.json once, like the .gitignore blocks.
+- Codex: no equivalent known — state it.
+- Tests: fresh project, existing settings with other keys, explicit false, path-sourced marketplace, unparseable file, idempotence, non-skilletor project untouched, user scope untouched.
+Also: this repo's own .claude/settings.json enables briefing@getty and ruler@getty without the marketplace — it gets fixed by the feature (or by hand in the same change).
+
+2026-10-16 19:26 Design (worker): new module src/claudesettings.ts, called from the engine's project scope after the .gitignore/.worktreeinclude blocks. Trigger: committed <project>/.claude/skilletor.json exists AND claude is a project target AND opt-out key claudeSettings is not false (local ?? project ?? user, default true). skilletor.local.json alone never triggers (gitignored). Marketplace lookup: <home>/.claude/plugins/installed_plugins.json - a skilletor@M entry whose installPath is CLAUDE_PLUGIN_ROOT (injectable EngineContext.pluginRoot) wins; else the skilletor@M entries of user scope or of this project's projectPath: one marketplace -> it, several -> warn and add none. Source from known_marketplaces.json[M].source, copied whole; only github / git (remote URL) / url (http/https) are written; directory/file/other kinds or a local git path -> not written, warning. claude-plugins-official never declared. Add-only: enabledPlugins gets skilletor@M only when no skilletor@* key exists (true or false - explicit false is the user's); extraKnownMarketplaces gets every marketplace of an enabledPlugins entry that is not false and not declared. Existing keys never changed. settings.local.json neither read nor written. Unparseable/non-object/symlinked settings.json -> left alone + warning. Formatting: key order kept, new keys appended; indent and line ending detected (default 2 spaces, LF, trailing newline as before); file not rewritten unless something is added. check counts missing additions as layout drift (layout:claude-settings) so the next session's hook writes it. Report: settingsUpdated {path, enabled, declared}, text '.claude/settings.json updated (enables …; declares marketplace …) — commit it'; hooks show settings warnings only in runs that changed items or the file. Codex: no project-level plugin requirement known, nothing written.
+
+2026-10-16 19:44 Also found (not in scope, for the dispatcher): (1) .claude/skills/skilletor-core/SKILL.md still says 'Hooks, settings.json and MCP configs are never synced' and its module table lacks claudesettings.ts - skill-author lane, this board. (2) Root cause of the ~95 repos (getty-agent-team skill's settings template enabling @getty plugins without extraKnownMarketplaces) lives in that skill's repo/board; this change only fixes repos that have a committed skilletor.json. (3) status shows nothing about the settings file (sync/check only) - fine for now, maybe later. (4) This repo's .claude/settings.json was fixed by hand to exactly what the feature writes (dry-run of planClaudeSettings, read-only): it now also enables skilletor@getty at project level - harmless on the maintainer's machine (user-scope install already), maintainer may set it false.
+
+2026-10-16 19:44 Done: new src/claudesettings.ts (plan, read-only) + engine wiring (project sync writes atomically; check counts missing additions as layout drift layout:claude-settings), config key claudeSettings (local ?? project ?? user, default true), report fields settingsUpdated {path, enabled, declared} + settingsSkipped (hooks show those warnings only in runs that changed items or the file), EngineContext.pluginRoot (default CLAUDE_PLUGIN_ROOT; test/setup.ts drops it). Docs: spec new §6.8 + §3 key + §6.1 step 6 + §9 note; README 'Sharing a project' rewritten (snippet kept for standalone CLI); bundled SKILL.md (153 -> 151 lines) and references/sync.md; Changes under NEXT (superseded hand-merge bullet amended). This repo's .claude/settings.json fixed. Verified: test/claudesettings.test.ts (12 tests: fresh project + idempotence + check drift, existing keys/order/indent, explicit false + other marketplace, directory/local-git/unknown marketplace, notDeclarable, unparseable/non-object, no committed skilletor.json / local only / Codex-only / opt-out user+project, user scope untouched incl. project==home, CLAUDE_PLUGIN_ROOT + ambiguity + other project's install, CRLF/tab/no final newline, config validation, runHook session-start black box incl. broken files -> {}); npm run typecheck && npm test (1017 pass, 0 fail, 1 skipped as before) && npm run build && npm run check-dist green; hand test of bin/skilletor check/sync with temp HOME/CODEX_HOME and temp project: report line and file as specified, second sync no write, ~/.claude untouched.
+
+2026-10-16 19:49 Committed: 763d886 (feature) and 0b3013e (skilletor-core skill)
