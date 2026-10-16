@@ -8,7 +8,8 @@ Revision history for skilletor
     `hermes plugins update skilletor`. It does not bring the CLI: name a clone's
     `bin/skilletor` as `SKILLETOR_BIN` in `$HERMES_HOME/.env`, or put
     `skilletor` on `PATH`; Hermes shows how after the install. The hand-linked
-    install still runs the checkout's CLI.
+    install still runs the checkout's CLI. The bundled skill states this setup
+    and that `["hermes"]` alone in `targets` drops Claude and Codex.
   - `bin/skilletor` follows its own symlinks to find `dist/`, so a link on
     `PATH` (`ln -s <clone>/bin/skilletor ~/.local/bin/skilletor`), `npm link`
     and `npm install -g` run the CLI instead of failing with "Cannot find

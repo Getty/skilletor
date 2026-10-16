@@ -16,3 +16,8 @@
 - Live check against Claude Code: `claude --plugin-dir <checkout>` from a temp
   project dir in a throwaway `HOME`, with a sentinel skill in a local source;
   confirm the SessionStart report and that the sentinel resolves in the same session.
+- Real Hermes: `test/hermes-real.test.ts` (needs a Hermes Python, `$HERMES_PYTHON`); its
+  `hermes plugins install`/enable/sync/update case runs only with
+  `SKILLETOR_HERMES_INSTALL=1` (network, ~100 s). By hand, `hermes plugins install`
+  gets a throwaway `HERMES_HOME` **and** `HOME`: the first install downloads Hermes'
+  plugin runtime (~450 MB) into the home.

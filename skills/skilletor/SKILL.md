@@ -32,6 +32,8 @@ Hermes Agent gets **skills only** (no agents, no rules): user `<Hermes home>/ski
 (`$HERMES_HOME`, else the last sync's home, else `~/.hermes`), project `.hermes/skills/<name>/`
 — none while `codex` is a target of that project: Hermes reads the Codex copy in
 `.agents/skills/`. Project skills load only after `hermes skills trust` in the project.
+Setup: `hermes` in user `targets`, `hermes plugins install Getty/skilletor/hermes/skilletor --enable`,
+and the CLI it does not bring — `SKILLETOR_BIN=<clone>/bin/skilletor` in `$HERMES_HOME/.env`, else `skilletor` on `PATH`.
 
 A file is managed when its path is in `<scope>/.claude/skilletor.lock.json` (Codex keys
 `codex:skills/<name>` etc., Hermes `hermes:skills/<name>`) — check the lock before editing;
@@ -139,7 +141,7 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
   and `checkInterval` (user file only): [references/sync.md](references/sync.md).
 - `targets` (any of `claude`, `codex`, `hermes`; unset = auto-detected, `hermes` never is):
   it **replaces** detection — list every harness wanted, `["claude", "codex", "hermes"]`
-  to add Hermes, never `["hermes"]` alone. The user file sets the machine's set, a project
+  to add Hermes (`["hermes"]` alone drops the others). The user file sets the machine's set, a project
   or local file only narrows it (`["claude"]` keeps a project's `AGENTS.md` and `.codex/`
   untouched). Details: [references/codex.md](references/codex.md).
 

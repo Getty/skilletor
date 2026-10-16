@@ -14,6 +14,9 @@ explicit go-ahead. Everything before step 4 is local and can run anytime.
    blank line above it — all in the commit that bumps the version.
 2. **Verify** — `npm run typecheck && npm test && npm run build && npm run check-dist`;
    `HOME=$(mktemp -d) bin/skilletor --version` prints the new version.
+   When the Hermes plugin changed, also run the install case against real Hermes:
+   `SKILLETOR_HERMES_INSTALL=1 node --test --import ./test/setup.ts test/hermes-real.test.ts`
+   (network; Hermes downloads its plugin runtime, about 100 s).
 3. **Audit** — run the `skilletor-release-manager` agent: versions, dist, CLI reference in
    README and the bundled skill, marketplace entries, release notes.
 4. **Push and tag** — `git push origin main`, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
@@ -24,6 +27,10 @@ explicit go-ahead. Everything before step 4 is local and can run anytime.
 6. **Marketplace** — only when the descriptions below changed or a harness listing is new:
    edit `Getty/marketplace`, then `python3 scripts/check-manifests.py`. Entries carry no
    version, so a plain release needs no marketplace change.
+
+Hermes users install the plugin from `main` (`hermes plugins install
+Getty/skilletor/hermes/skilletor`), not from a tag: a push to `main` reaches them with their
+next `hermes plugins update skilletor`, release or not.
 
 `git push origin main` does not include `refs/karr/*` (the board); `karr sync` carries the
 board to the remote on its own.
