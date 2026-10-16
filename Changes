@@ -1,6 +1,8 @@
 Revision history for skilletor
 
 {{$NEXT}}
+
+0.7.0     2026-10-16 20:00:22Z
   - The plugin, package and README descriptions name Hermes Agent as the third
     target.
   - The Hermes plugin installs with Hermes' own installer:
