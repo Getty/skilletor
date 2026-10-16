@@ -24,5 +24,17 @@ if [ "$major" -lt 18 ]; then
   exit 1
 fi
 
-dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-exec node "$dir/../dist/skilletor.js" "$@"
+# Follow our own symlink chain (a link on PATH, npm link, npm install -g) to the real
+# file: dist/ sits next to the checkout's bin/, not the link's. No `readlink -f` (macOS
+# sh has none); a relative target is relative to the directory of the link naming it.
+self=$0
+while [ -L "$self" ]; do
+  target=$(readlink -- "$self")
+  case "$target" in
+    /*) self=$target ;;
+    *) self=$(dirname -- "$self")/$target ;;
+  esac
+done
+
+root=$(CDPATH= cd -P -- "$(dirname -- "$self")/.." && pwd)
+exec node "$root/dist/skilletor.js" "$@"

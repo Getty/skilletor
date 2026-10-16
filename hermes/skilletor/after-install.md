@@ -6,5 +6,7 @@ name its launcher in the Hermes home's `.env` (`~/.hermes/.env` by default):
 
     SKILLETOR_BIN=/home/you/src/skilletor/bin/skilletor
 
+or link it onto `PATH`: `ln -s ~/src/skilletor/bin/skilletor ~/.local/bin/skilletor`.
+
 Hermes is never detected: add `"hermes"` to the `targets` of `~/.claude/skilletor.json`.
 Not enabled yet: `hermes plugins enable skilletor`. Check: `hermes skilletor status`.

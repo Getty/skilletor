@@ -9,6 +9,10 @@ Revision history for skilletor
     `bin/skilletor` as `SKILLETOR_BIN` in `$HERMES_HOME/.env`, or put
     `skilletor` on `PATH`; Hermes shows how after the install. The hand-linked
     install still runs the checkout's CLI.
+  - `bin/skilletor` follows its own symlinks to find `dist/`, so a link on
+    `PATH` (`ln -s <clone>/bin/skilletor ~/.local/bin/skilletor`), `npm link`
+    and `npm install -g` run the CLI instead of failing with "Cannot find
+    module".
 
 0.6.0     2026-10-15 17:39:19Z
   - Hermes Agent is a third target, `hermes` in `targets`. It is opt-in:

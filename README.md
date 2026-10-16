@@ -711,9 +711,10 @@ plus the rules delivery.
 - **The CLI is not on `PATH`** inside Codex (Codex cannot add a plugin's `bin/` to it). The
   bundled skill tells the model to run it by absolute path, from the plugin's cache
   directory: `$CODEX_HOME/plugins/cache/<marketplace>/skilletor/<version>/bin/skilletor`.
-  In your own shell, point an alias at that file or at a clone of this repository
-  (`alias skilletor=~/src/skilletor/bin/skilletor` — `dist/` is committed, no `npm install`
-  needed). Use an alias, not a symlink: the launcher finds `dist/` relative to its own path.
+  In your own shell, put that file or a clone of this repository on `PATH`, by a symlink
+  (`ln -s ~/src/skilletor/bin/skilletor ~/.local/bin/skilletor`) or an alias
+  (`alias skilletor=~/src/skilletor/bin/skilletor`) — `dist/` is committed, no `npm install`
+  needed; the launcher follows its own symlinks to find it.
 - Codex sets no `CLAUDE_PROJECT_DIR`; the hook takes the git top level of the session's
   working directory as the project root, so a session started in a subdirectory still
   finds `<repo>/.claude/skilletor.json`.
@@ -808,6 +809,13 @@ its environment, so a clone of this repository is named there once:
 ```bash
 git clone https://github.com/Getty/skilletor ~/src/skilletor
 echo "SKILLETOR_BIN=$HOME/src/skilletor/bin/skilletor" >> "${HERMES_HOME:-$HOME/.hermes}/.env"
+```
+
+Or put the clone's launcher on `PATH` with a symlink, which your shell can use as well
+(`~/.local/bin` must be on the `PATH` Hermes starts with):
+
+```bash
+ln -s ~/src/skilletor/bin/skilletor ~/.local/bin/skilletor
 ```
 
 Keep the clone current with `git pull`; the plugin and the CLI are updated separately.

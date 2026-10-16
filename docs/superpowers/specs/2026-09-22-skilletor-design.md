@@ -1132,7 +1132,7 @@ message naming the option, nothing touched.
 
 ```
 .claude-plugin/plugin.json      hooks/hooks.json
-bin/skilletor                   # shim → node dist/skilletor.js, checks Node ≥ 18 with a clear message
+bin/skilletor                   # shim → node dist/skilletor.js, checks Node ≥ 18 with a clear message; follows its own symlinks
 dist/skilletor.js               # esbuild bundle incl. Nunjucks, committed
 skills/skilletor/SKILL.md
 src/cli.ts                      # arguments, dispatch
