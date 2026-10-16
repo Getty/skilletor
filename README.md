@@ -26,6 +26,40 @@ skilletor add Getty && skilletor install getty-perl-moo@getty
 Using Codex? See [Codex](#codex) — the plugin works there too, with a few differences.
 Using Hermes Agent? See [Hermes Agent](#hermes-agent) — skills, and a plugin of its own.
 
+## From the command line
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh
+skilletor add Getty && skilletor install getty-perl-moo@getty
+```
+
+Outside a Claude Code session the plugin's `bin/` is not on `PATH`; `install.sh` gives you a
+`skilletor` command that is. With `claude` on `PATH` it runs `claude plugin marketplace add
+Getty/marketplace` (or `marketplace update getty` when it is known) and `claude plugin install
+skilletor@getty` in user scope (or `plugin update` when it is installed), then writes
+`~/.local/bin/skilletor`: a small script that looks up the plugin's current user-scope
+install in Claude Code's `installed_plugins.json` and runs its `bin/skilletor`, so plugin
+updates do not break it. Without Claude Code (Codex or Hermes only), or with `--no-plugin`, it
+clones this repository into `~/.local/share/skilletor` (`$XDG_DATA_HOME/skilletor`) and links
+the clone's `bin/skilletor` there instead. Run it again to update either one.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh -s -- --no-plugin --bin-dir ~/bin
+sh install.sh               # in a clone: the same, but the CLI-only path links this clone
+```
+
+`--bin-dir DIR` (`SKILLETOR_BIN_DIR`) puts the command elsewhere, `--no-plugin`
+(`SKILLETOR_NO_PLUGIN=1`) leaves Claude Code alone, `SKILLETOR_REPO` clones another URL (a
+fork, a mirror). It needs Node.js ≥ 18 and `git`, never
+uses `sudo`, says what it did, warns when the directory is not on your `PATH`, and replaces
+no `skilletor` there that it did not write itself (a symlink excepted). Installing the plugin
+yourself (`claude plugin install …` in a dotfiles script, say)? Run the script afterwards
+for the command; it finds the plugin installed and only updates it.
+
+Windows: the script is for macOS and Linux. Install the plugin in Claude Code, and for
+PowerShell or cmd clone this repository and put its `bin\` on your `PATH` — `skilletor`
+there runs `bin\skilletor.exe` (see [Requirements](#requirements)); `git pull` updates it.
+
 ## How it works
 
 ![How skilletor works: sources (git, tarball, local dir) are rendered, diffed against disk and lock, and installed for Claude Code and Codex](assets/concept.png)
@@ -756,7 +790,8 @@ plus the rules delivery.
 - **The CLI is not on `PATH`** inside Codex (Codex cannot add a plugin's `bin/` to it). The
   bundled skill tells the model to run it by absolute path, from the plugin's cache
   directory: `$CODEX_HOME/plugins/cache/<marketplace>/skilletor/<version>/bin/skilletor`.
-  In your own shell, put that file or a clone of this repository on `PATH`, by a symlink
+  In your own shell, [`install.sh`](#from-the-command-line) puts a `skilletor` on `PATH`;
+  or put that file or a clone of this repository there yourself, by a symlink
   (`ln -s ~/src/skilletor/bin/skilletor ~/.local/bin/skilletor`) or an alias
   (`alias skilletor=~/src/skilletor/bin/skilletor`) — `dist/` is committed, no `npm install`
   needed; the launcher follows its own symlinks to find it.
@@ -848,22 +883,21 @@ and enables it (without `--enable` it asks, or — not on a terminal — leaves 
 catalog entry, so Hermes says "custom (unreviewed) source"; its install-time scan passes it.
 
 **The plugin needs the CLI** (Node.js ≥ 18), which it does not bring: `$SKILLETOR_BIN`, else
-`skilletor` on `PATH`; without one it does nothing. Hermes reads `$HERMES_HOME/.env` into
-its environment, so a clone of this repository is named there once:
+`skilletor` on `PATH`; without one it does nothing. [`install.sh`](#from-the-command-line)
+puts one into `~/.local/bin` (a clone's launcher, or on a machine with Claude Code the
+plugin's). Hermes reads `$HERMES_HOME/.env` into its environment, so name it there once:
 
 ```bash
-git clone https://github.com/Getty/skilletor ~/src/skilletor
-echo "SKILLETOR_BIN=$HOME/src/skilletor/bin/skilletor" >> "${HERMES_HOME:-$HOME/.hermes}/.env"
+curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh
+echo "SKILLETOR_BIN=$HOME/.local/bin/skilletor" >> "${HERMES_HOME:-$HOME/.hermes}/.env"
 ```
 
-Or put the clone's launcher on `PATH` with a symlink, which your shell can use as well
-(`~/.local/bin` must be on the `PATH` Hermes starts with):
+— or leave `.env` alone when `~/.local/bin` is on the `PATH` Hermes starts with. Your own
+clone works the same way: `SKILLETOR_BIN=$HOME/src/skilletor/bin/skilletor`, or a symlink
+(`ln -s ~/src/skilletor/bin/skilletor ~/.local/bin/skilletor`).
 
-```bash
-ln -s ~/src/skilletor/bin/skilletor ~/.local/bin/skilletor
-```
-
-Keep the clone current with `git pull`; the plugin and the CLI are updated separately.
+Run `install.sh` again (or `git pull` your clone) to update the CLI; the plugin and the CLI
+are updated separately.
 
 Or install it by hand, as a link into that clone — then the plugin runs the clone's
 `bin/skilletor` itself and a `git pull` updates both:

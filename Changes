@@ -1,6 +1,13 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - `install.sh` sets skilletor up from a plain shell (GitHub issue #1):
+    `curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh`
+    installs the plugin when `claude` is on `PATH` (or updates it) and writes
+    a `~/.local/bin/skilletor` that survives plugin updates; without Claude
+    Code, or with `--no-plugin`, it clones the repository and links
+    `bin/skilletor`. `--bin-dir` picks the directory. The README has it under
+    "From the command line"; the Hermes docs name the command `SKILLETOR_BIN`.
 
 0.7.0     2026-10-16 20:00:22Z
   - The plugin, package and README descriptions name Hermes Agent as the third

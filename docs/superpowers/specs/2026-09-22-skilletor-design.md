@@ -1202,6 +1202,7 @@ message naming the option, nothing touched.
 ```
 .claude-plugin/plugin.json      hooks/hooks.json
 bin/skilletor                   # shim → node dist/skilletor.js, checks Node ≥ 18 with a clear message; follows its own symlinks
+install.sh                      # setup from a plain shell: plugin + a stable `skilletor` on PATH (k141)
 dist/skilletor.js               # esbuild bundle incl. Nunjucks, committed
 skills/skilletor/SKILL.md
 src/cli.ts                      # arguments, dispatch
@@ -1229,6 +1230,23 @@ target filesystem, `apply` nothing about sources. TypeScript, the only runtime
 dependency is Nunjucks (bundled); user requirements: `node ≥ 18`, `git`. Its own repo
 `Getty/skilletor`, an entry in `Getty/marketplace`; develop locally with
 `claude --plugin-dir .`.
+
+**From a plain shell** (`install.sh`, POSIX sh, k141): outside a Claude Code session the
+plugin's `bin/` is not on `PATH`. With `claude` on `PATH` the script adds `Getty/marketplace`
+when `claude plugin marketplace list --json` lacks `getty` (else `marketplace update getty`),
+installs `skilletor@getty` in user scope when `claude plugin list --json` has no user-scope
+entry (else `plugin update --scope user`), and writes `<bin dir>/skilletor` (default
+`~/.local/bin`): a script, not a link into the versioned plugin cache, that on every run
+reads `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json` and execs the
+`bin/skilletor` of the user-scope `skilletor@getty` install (else another marketplace's
+user-scope `skilletor`; project-scope installs never). Without `claude`, or with
+`--no-plugin`, it clones the repository (`main`, as the plugin and Hermes install it) into
+`${XDG_DATA_HOME:-~/.local/share}/skilletor` — or takes the clone it runs from — and
+symlinks its `bin/skilletor`. A rerun updates the plugin or pulls the clone (`--ff-only`). It
+replaces only its own script or a symlink in the bin dir, never uses `sudo`, and runs every
+command on `/dev/null` (under `curl … | sh` stdin is the script). `npm install -g
+github:Getty/skilletor` is not a supported path: npm 11 (seen with 11.17) links a git
+package's temporary clone instead of copying it unless `--install-links` is given.
 
 ## 11. Tests
 
