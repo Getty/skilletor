@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { buildToString } from "../scripts/esbuild.config.mjs";
 import { gitEnv } from "../src/gitenv.ts";
 
@@ -98,8 +98,9 @@ function machine(opts: { enabled?: string[]; trustProject?: boolean } = {}) {
       JSON.stringify({ install: { skills: inProject.map((n) => `${n}@mine`) } }));
   };
   /** The environment of a Hermes (or skilletor) process on this machine: nothing of the
-   *  developer's Hermes, Claude Code, Codex or skilletor, and its temp files on disk. */
-  const env = (more: Record<string, string> = {}): NodeJS.ProcessEnv => {
+   *  developer's Hermes, Claude Code, Codex or skilletor, and its temp files on disk. A
+   *  variable `more` sets to undefined is not passed. */
+  const env = (more: Record<string, string | undefined> = {}): NodeJS.ProcessEnv => {
     const kept = Object.fromEntries(Object.entries(gitEnv()).filter(([k]) =>
       !/^(HERMES_|CLAUDE_|CLAUDECODE|CODEX_|SKILLETOR_|AI_AGENT)/.test(k)));
     return {
@@ -113,13 +114,13 @@ function machine(opts: { enabled?: string[]; trustProject?: boolean } = {}) {
     if (how === "link") symlinkSync(PLUGIN, at);
     else cpSync(PLUGIN, at, { recursive: true, filter: (p) => !p.includes("__pycache__") });
   };
-  const skilletor = (args: string[], cwd = project, more: Record<string, string> = {}) =>
+  const skilletor = (args: string[], cwd = project, more: Record<string, string | undefined> = {}) =>
     spawnSync(cli, args, { encoding: "utf8", env: env(more), cwd });
   /** `hermes <args>`: a fresh Hermes process. */
-  const hermes = (args: string[], cwd = project, more: Record<string, string> = {}) =>
+  const hermes = (args: string[], cwd = project, more: Record<string, string | undefined> = {}) =>
     spawnSync(HERMES, args, { encoding: "utf8", env: env(more), cwd, timeout: 300_000 });
   /** A fresh Hermes process running `body`, which fills `out`; its JSON is the last line. */
-  const python = (body: string, cwd = project, more: Record<string, string> = {}): Record<string, any> => {
+  const python = (body: string, cwd = project, more: Record<string, string | undefined> = {}): Record<string, any> => {
     const r = spawnSync(HERMES_PYTHON, ["-c", HEAD + body + TAIL], { encoding: "utf8", env: env(more), cwd, timeout: 300_000 });
     assert.equal(r.status, 0, r.stderr.slice(-3000));
     return JSON.parse(r.stdout.trim().split("\n").at(-1)!);
@@ -329,6 +330,96 @@ test("hermes plugins doctor --ci passes without a finding", { skip }, () => {
   assert.doesNotMatch(r.stdout, /warning|error/i);
   // Doctor's own temporary Hermes home went to this machine's TMPDIR, on disk, and is gone.
   assert.deepEqual(readdirSync(join(m.dir, "tmp")).filter((n) => n.startsWith("hermes-plugin-doctor-")), []);
+});
+
+/** What a user types to install the plugin (README "The plugin under Hermes"). */
+const INSTALL = "hermes plugins install Getty/skilletor/hermes/skilletor --enable";
+
+test("`hermes plugins install` takes this repository's plugin directory as it is", { skip }, () => {
+  const m = machine();
+  const out = m.python(`
+from pathlib import Path
+from hermes_cli.plugins_cmd import _resolve_git_url
+from hermes_cli.plugins_cmd_install import _read_manifest_for_install
+from tools.plugin_guard import scan_plugin
+out["resolved"] = list(_resolve_git_url(${JSON.stringify(INSTALL.split(" ")[3])}))
+out["name"] = _read_manifest_for_install(Path(${JSON.stringify(PLUGIN)})).get("name")
+scan = scan_plugin(Path(${JSON.stringify(PLUGIN)}), source="test")
+out["scan"] = [scan.verdict, [f"{f.severity} {f.file}: {f.description}" for f in scan.findings if f.severity not in ("low", "medium")]]
+`);
+  // The shorthand is a sparse clone of the repository's hermes/skilletor; the manifest names it.
+  assert.deepEqual(out.resolved, ["https://github.com/Getty/skilletor.git", "hermes/skilletor"]);
+  assert.equal(out.name, "skilletor");
+  // Hermes' install-time scan passes it: no --force, no "Install anyway?" (a bundled
+  // dist/skilletor.js would not pass, see spec §16.4).
+  assert.deepEqual(out.scan, ["safe", []]);
+  assert.ok(readFileSync(join(root, "README.md"), "utf8").includes(INSTALL), "README names the install command");
+});
+
+// Installing prepares Hermes' isolated plugin runtime in the throwaway home – a Python and uv
+// download of some hundred MB – and fetches Hermes' plugin catalog: opt in by
+// SKILLETOR_HERMES_INSTALL=1.
+const network = skip || (process.env.SKILLETOR_HERMES_INSTALL === "1" ? false : "set SKILLETOR_HERMES_INSTALL=1 (downloads Hermes' plugin runtime)");
+
+test("`hermes plugins install <git URL>#hermes/skilletor --enable`: enabled, finds the CLI by the home's .env or PATH, updates", { skip: network }, () => {
+  const m = machine({ enabled: [] });
+  // An upstream with this checkout's plugin directory where it lies here (a file:// clone of
+  // the checkout itself would take its last commit, not the tree under test).
+  const upstream = join(m.dir, "upstream");
+  cpSync(PLUGIN, join(upstream, "hermes", "skilletor"), { recursive: true, filter: (p) => !p.includes("__pycache__") });
+  const git = (...args: string[]) => execFileSync("git", ["-C", upstream, ...args], { env: gitEnv() });
+  const commit = () => {
+    git("add", "-A");
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "plugin");
+  };
+  git("init", "-q", "-b", "main");
+  commit();
+
+  const install = m.hermes(["plugins", "install", `file://${upstream}#hermes/skilletor`, "--enable"]);
+  assert.equal(install.status, 0, install.stdout + install.stderr);
+  const at = join(m.hermesHome, "plugins", "skilletor");
+  assert.deepEqual(readdirSync(at).sort(), ["__init__.py", "after-install.md", "plugin.yaml"]);
+  assert.equal(readFileSync(join(at, "plugin.yaml"), "utf8"), readFileSync(join(PLUGIN, "plugin.yaml"), "utf8"));
+  assert.match(install.stdout, /SKILLETOR_BIN=/); // after-install.md is what Hermes shows
+
+  // A copy, no checkout's: the CLI comes from SKILLETOR_BIN in the Hermes home's .env.
+  m.skill("sk-demo");
+  m.declare(["sk-demo"]);
+  writeFileSync(join(m.hermesHome, ".env"), `SKILLETOR_BIN=${cli}\n`);
+  // No SKILLETOR_BIN, and a PATH without a skilletor (a Claude Code session puts its plugin's on it).
+  const path = (process.env.PATH ?? "").split(delimiter).filter((d) => d && !existsSync(join(d, "skilletor"))).join(delimiter);
+  const noBin = { SKILLETOR_BIN: undefined, PATH: path };
+  const out = m.python(`
+from hermes_cli.env_loader import load_hermes_dotenv
+load_hermes_dotenv()  # as hermes_cli/main.py and run_agent.py do on import
+out.update(plugin())
+out["start"] = session_start()
+out["first"] = turn()
+`, m.project, noBin);
+  assert.deepEqual(out.listed, [{ name: "skilletor", enabled: true, error: null, hooks: 2, source: "user" }]);
+  assert.deepEqual(out.start, []);
+  assert.match(out.first[0].context, /^skilletor synced items:\n- skill sk-demo@mine \(hermes\)/);
+  assert.equal(readFileSync(join(m.hermesHome, "skills", "sk-demo", "SKILL.md"), "utf8"), SKILL("sk-demo"));
+  const status = m.hermes(["skilletor", "status", "--scope", "user"], m.project, noBin);
+  assert.equal(status.status, 0, status.stderr);
+  assert.match(status.stdout, /✓ hermes:skills\/sk-demo @mine/);
+
+  // … else skilletor on PATH; with neither, `hermes skilletor` says what to set.
+  rmSync(join(m.hermesHome, ".env"));
+  const onPath = m.hermes(["skilletor", "status", "--scope", "user"], m.project, { ...noBin, PATH: `${run}${delimiter}${path}` });
+  assert.equal(onPath.status, 0, onPath.stderr);
+  const none = m.hermes(["skilletor", "status"], m.project, noBin);
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /skilletor: CLI not found \(set SKILLETOR_BIN, in the environment or the Hermes home's \.env/);
+
+  // `hermes plugins update skilletor` fetches the recorded source again; still enabled.
+  writeFileSync(join(upstream, "hermes", "skilletor", "__init__.py"),
+    readFileSync(join(PLUGIN, "__init__.py"), "utf8") + "# updated\n");
+  commit();
+  const update = m.hermes(["plugins", "update", "skilletor"]);
+  assert.equal(update.status, 0, update.stdout + update.stderr);
+  assert.match(readFileSync(join(at, "__init__.py"), "utf8"), /# updated\n$/);
+  assert.deepEqual(m.python("out.update(plugin())").listed.map((p: { enabled: boolean }) => p.enabled), [true]);
 });
 
 /** An OpenAI-compatible endpoint that answers every chat request with `STUB-ANSWER` and keeps

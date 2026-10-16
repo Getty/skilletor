@@ -3,6 +3,12 @@ Revision history for skilletor
 {{$NEXT}}
   - The plugin, package and README descriptions name Hermes Agent as the third
     target.
+  - The Hermes plugin installs with Hermes' own installer:
+    `hermes plugins install Getty/skilletor/hermes/skilletor --enable`, then
+    `hermes plugins update skilletor`. It does not bring the CLI: name a clone's
+    `bin/skilletor` as `SKILLETOR_BIN` in `$HERMES_HOME/.env`, or put
+    `skilletor` on `PATH`; Hermes shows how after the install. The hand-linked
+    install still runs the checkout's CLI.
 
 0.6.0     2026-10-15 17:39:19Z
   - Hermes Agent is a third target, `hermes` in `targets`. It is opt-in:

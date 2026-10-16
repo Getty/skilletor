@@ -788,10 +788,34 @@ the plugin move the user-scope skills back and forth; enable it in one.
 `hermes/skilletor/` in this repository is a native Hermes plugin. It runs the same two
 hooks as under Claude Code — a sync when a session starts, the throttled check on each
 later turn — and gives the report to the model with the turn (Hermes appends it to the
-user message). Install it by hand:
+user message). Install it with Hermes:
+
+```bash
+hermes plugins install Getty/skilletor/hermes/skilletor --enable
+```
+
+Hermes clones only that directory of this repository into `$HERMES_HOME/plugins/skilletor`
+and enables it (without `--enable` it asks, or — not on a terminal — leaves it disabled:
+`hermes plugins enable skilletor`). `hermes plugins update skilletor` fetches it again
+(`hermes plugins check-updates` calls such a one-directory install "drift" and cannot tell),
+`hermes plugins remove skilletor` takes it out. It is a custom source to Hermes, not a
+catalog entry, so Hermes says "custom (unreviewed) source"; its install-time scan passes it.
+
+**The plugin needs the CLI** (Node.js ≥ 18), which it does not bring: `$SKILLETOR_BIN`, else
+`skilletor` on `PATH`; without one it does nothing. Hermes reads `$HERMES_HOME/.env` into
+its environment, so a clone of this repository is named there once:
 
 ```bash
 git clone https://github.com/Getty/skilletor ~/src/skilletor
+echo "SKILLETOR_BIN=$HOME/src/skilletor/bin/skilletor" >> "${HERMES_HOME:-$HOME/.hermes}/.env"
+```
+
+Keep the clone current with `git pull`; the plugin and the CLI are updated separately.
+
+Or install it by hand, as a link into that clone — then the plugin runs the clone's
+`bin/skilletor` itself and a `git pull` updates both:
+
+```bash
 ln -s ~/src/skilletor/hermes/skilletor "${HERMES_HOME:-$HOME/.hermes}/plugins/skilletor"
 ```
 
@@ -804,9 +828,7 @@ plugins:
     - skilletor
 ```
 
-Linked like this, the plugin runs `bin/skilletor` of that checkout (Node.js ≥ 18). A copy
-of the directory instead of a link needs `skilletor` on `PATH`, or `SKILLETOR_BIN` set to
-the CLI. `hermes plugins list` shows it; `hermes skilletor status` (any CLI command after
+`hermes plugins list` shows it; `hermes skilletor status` (any CLI command after
 `hermes skilletor`) runs the CLI with that Hermes' home as `HERMES_HOME`.
 
 The plugin never holds a session up for long and never fails one: it gives the sync 20 s
@@ -827,7 +849,7 @@ runs without a message. A delegated subagent triggers nothing.
   `NousResearch/hermes-agent`, is exactly that case: its skills are the ones Hermes already
   ships, so it is a source for Claude Code and Codex — on a machine whose `targets` names
   `hermes`, its skills land next to Hermes' own copies and none of them loads.
-- No `hermes plugins install` path and no catalog entry; the plugin does not bundle the
+- No entry in Hermes' plugin catalog, and the plugin bundles neither the CLI nor the
   `skilletor` skill — install that like any other skill.
 
 ## Security & trust

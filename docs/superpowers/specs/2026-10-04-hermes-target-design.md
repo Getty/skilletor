@@ -169,6 +169,10 @@ a gateway that serves several.
 
 **Which CLI.** In order: `$SKILLETOR_BIN`; `bin/skilletor` of the checkout the plugin
 directory is a symlink into; `skilletor` on `PATH`. None found: the plugin does nothing.
+Hermes loads `$HERMES_HOME/.env` into its environment at start
+(`hermes_cli/env_loader.py`, called from `hermes_cli/main.py` and `run_agent.py`), so
+`SKILLETOR_BIN` can live there. A copy `hermes plugins install` made is no checkout's: it
+has `$SKILLETOR_BIN` and `PATH`.
 
 **Fast and fail-open.** Importing the module and `register(ctx)` start nothing and read
 nothing (Hermes gives a plugin 10 s to load, `hermes_cli/plugins_loader.py:40`). Hermes
@@ -187,9 +191,43 @@ that passes its arguments to the skilletor CLI with the active Hermes home as
 `HERMES_HOME`, and exits with the CLI's code. No slash command: `/skilletor` would collide
 with the `skilletor` skill's own command once that skill is installed.
 
+**Install.** `hermes plugins install Getty/skilletor/hermes/skilletor --enable` – Hermes'
+own installer, with no change to this repository's layout (measured against Hermes
+`ea81748579`, `hermes_cli/plugins_cmd.py`, `plugins_cmd_install.py`, `plugins_cmd_git.py`,
+`plugins_cmd_update.py`):
+
+- It takes a catalog name, a git URL (`https`, `http`, `ssh`, `git@`, `file://`) or
+  `owner/repo`; a subdirectory as `owner/repo/<dir>`, `<url>#<dir>` or a GitHub
+  `/tree/<ref>/<dir>` link. A subdirectory install is a shallow, blobless, sparse clone of
+  the default branch (or of an exact `--ref <sha>`, which pins it); only that directory is
+  published, as `$HERMES_HOME/plugins/<manifest name>` – no `.git`, no `bin/`, no `dist/`.
+- Its install-time scan (`tools/plugin_guard.py`) gives the plugin a `safe` verdict, so no
+  `--force` and no "Install anyway?". A non-catalog source is announced as "custom
+  (unreviewed)"; the catalog's kill list is fetched and checked.
+- `--enable` adds it to `plugins.enabled`; without it Hermes asks on a terminal and leaves
+  it disabled elsewhere. Installing (and enabling) also prepares Hermes' isolated plugin
+  runtime in that home – a Python and uv download on its first use there.
+- `after-install.md` is what Hermes shows after the install: the CLI and the `targets`
+  opt-in, the two things the install cannot do.
+- `hermes plugins update skilletor` re-clones the recorded source (a subdirectory install
+  carries no `.git`) and keeps the selection. `hermes plugins check-updates` cannot tell
+  whether a subdirectory install is behind: it reports it as "provenance drift … the dir
+  has no .git; reinstall from the recorded source" (measured); `update` is unaffected.
+
+The CLI is the user's: the plugin does not bring one. Bundling `dist/skilletor.js` into the
+plugin directory was measured and dropped – Hermes' scan rates the bundle `caution` (five
+high "exfiltration" matches on Nunjucks' `env = … new Environment()`, two obfuscation
+matches on regular expressions), which blocks a non-interactive install and needs `--force`
+or a confirmation on a terminal. Also dropped: the CLI of an installed Claude Code plugin
+(`~/.claude/plugins/installed_plugins.json` – possibly a release without `--harness
+hermes`, one per scope) and fetching a release at run time (network on a session start, code
+the install scan never saw). A clone and `SKILLETOR_BIN=<clone>/bin/skilletor` in
+`$HERMES_HOME/.env` is the documented way; `skilletor` on `PATH` works too.
+
 **Install by hand.** Symlink (or copy) `hermes/skilletor` to
 `$HERMES_HOME/plugins/skilletor` and add `skilletor` to `plugins.enabled` in
-`$HERMES_HOME/config.yaml`. `hermes plugins doctor <path> --ci` passes.
+`$HERMES_HOME/config.yaml`; linked, the plugin runs the checkout's `bin/skilletor`.
+`hermes plugins doctor <path> --ci` passes.
 
 The plugin is not required for Hermes to get its skills: every sync installs for every
 active target, so a Claude Code session start updates the Hermes home as well. The plugin
@@ -235,8 +273,11 @@ is what syncs on a machine, or in a session, where only Hermes runs.
   those of an inactive target; the next Claude Code session puts them back. Not new with Hermes, but a Hermes service is the likelier case.
 - **The `skilletor` skill for Hermes.** The plugin does not bundle `skills/skilletor`
   (`ctx.register_skill`); install it like any other skill.
-- **Distribution.** No catalog entry, no `hermes plugins install` path, no marketplace
-  change. The plugin's version is the package's, enforced by a test.
+- **Distribution.** `hermes plugins install` from this repository (§16.4); no entry in
+  Hermes' plugin catalog (a curated, pinned list in the Hermes repository – an addition
+  there is a pull request against Hermes, not a change here), no marketplace change. The
+  install follows the default branch, not a release tag (`--ref` takes a commit SHA only).
+  The plugin's version is the package's, enforced by a test.
 
 ### 16.6 Tests
 
@@ -254,7 +295,13 @@ is what syncs on a machine, or in a session, where only Hermes runs.
   the plugin loads through `plugins.enabled`, its hooks are registered, Hermes'
   `invoke_hook("on_session_start")` triggers the sync and `invoke_hook("pre_llm_call")`
   returns the report as context; `hermes skilletor status` reaches the CLI;
-  `hermes plugins doctor hermes/skilletor --ci` passes. One case runs a whole turn,
+  `hermes plugins doctor hermes/skilletor --ci` passes; Hermes resolves the README's
+  `hermes plugins install` identifier to this repository's `hermes/skilletor`, reads the
+  name `skilletor` from it, and its install scan rates it `safe`. Opt-in
+  (`SKILLETOR_HERMES_INSTALL=1`, network and Hermes' runtime download): `hermes plugins
+  install file://<upstream>#hermes/skilletor --enable` publishes the three files and
+  enables the plugin, which finds the CLI by `SKILLETOR_BIN` in the home's `.env`, then on
+  `PATH`, and `hermes plugins update skilletor` fetches a new commit. One case runs a whole turn,
   `hermes chat -q` with a local stub as the model endpoint: the user message the stub
   receives is the user's text followed by skilletor's report, and after `--resume` in a new
   process the first message is replayed with it while the new one carries nothing. No real

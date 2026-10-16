@@ -25,12 +25,14 @@ PROMPT_S, are below Hermes' own for a hook callback
 (plugins.hook_callback_timeout, 30 s), after which Hermes abandons the callback
 and skips it for a minute; a child that runs into ours is killed.
 
-The CLI is $SKILLETOR_BIN if set – then that or nothing; else bin/skilletor of
-the checkout this directory is a symlink into (on Windows bin/skilletor.exe, the
-launcher Claude Code starts there: bin/skilletor is a sh script); else
-`skilletor` on PATH. The
-child runs with the session's Hermes home as HERMES_HOME, and skilletor takes
-the project from the `cwd` it is sent.
+The CLI is $SKILLETOR_BIN if set – then that or nothing; Hermes loads the
+Hermes home's .env into the environment, so it can be set there. Else
+bin/skilletor of the checkout this directory is a symlink into (on Windows
+bin/skilletor.exe, the launcher Claude Code starts there: bin/skilletor is a sh
+script); else `skilletor` on PATH. A copy `hermes plugins install` made is no
+checkout's: it has the first and the last. The child runs with the session's
+Hermes home as HERMES_HOME, and skilletor takes the project from the `cwd` it
+is sent.
 
 Importing this module and register() start nothing and read nothing.
 """
@@ -252,8 +254,9 @@ class Adapter:
         """`hermes skilletor <arguments>`: the CLI, for this Hermes home."""
         cli = find_cli(self.environ, self.here)
         if cli is None:
-            print("skilletor: CLI not found (set SKILLETOR_BIN, link this plugin to a "
-                  "skilletor checkout, or put skilletor on PATH)", file=sys.stderr)
+            print("skilletor: CLI not found (set SKILLETOR_BIN, in the environment or the "
+                  "Hermes home's .env; link this plugin to a skilletor checkout; or put "
+                  "skilletor on PATH)", file=sys.stderr)
             raise SystemExit(1)
         raise SystemExit(subprocess.call([cli] + list(args.args), env=self.child_env()))
 
