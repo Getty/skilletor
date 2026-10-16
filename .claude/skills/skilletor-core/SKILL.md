@@ -27,6 +27,7 @@ report.ts     text / json / hook output               targets.ts   harness detec
 convert.ts    agent Markdown → Codex TOML             agentsmd.ts  Codex rules file, AGENTS.md pointer, hook trust
 frontmatter.ts  YAML subset reader                    toml.ts      TOML writer (no dependency)
 fsutil.ts     hash, atomicWrite, innerSegments        gitenv.ts    gitEnv(): the env of every git run
+claudesettings.ts  plan the project settings.json plugin requirement (§6.8); engine writes
 ```
 
 - `sources/*` knows nothing about templating; `render` nothing about the
@@ -36,25 +37,12 @@ fsutil.ts     hash, atomicWrite, innerSegments        gitenv.ts    gitEnv(): the
   an exported `GIT_DIR` (a git hook, `rebase -x`) would aim a cache's `reset --hard` at
   that repository. A user's address or ref goes after `--`.
 - Everything a backend needs (probe, timeout, cache root, `home`, `codexHome`,
-  harness `markers`, `isGitWorkTree`) is injected through `EngineContext`; tests rely
-  on that to run against temp directories and never look at the real machine. Every
-  new `EngineContext` fixture sets `isGitWorkTree: () => false` — the temp dir's real
+  harness `markers`, `isGitWorkTree`, `pluginRoot`) is injected through `EngineContext`;
+  tests rely on that to run against temp directories and never look at the real machine.
+  Every new `EngineContext` fixture sets `isGitWorkTree: () => false` — the temp dir's real
   location must not decide whether user-scope `.gitignore` blocks appear.
-- A catalog item may carry `dir`, its place in the source: a skill via a nested
-  `plugin.json` path, or any item from the source's `.claude/{skills,agents,rules}`
-  (read last, so a name already found wins; best effort — a symlink there skips that
-  directory or item, never the scan; skilletor's own installed copies are not offered).
-  `render` (`installPath`) maps its files to `skills/<name>/…`, `agents/<file>` or
-  `rules/<file>`, so targets never see the source layout.
-- A source entry's `path` replaces that scan: `scan(dir, paths)` offers only the skills
-  beneath those paths (`dir` set) — no layout dirs, `plugin.json`, `.claude/` or bundles;
-  the root `skilletor.json` is still read. Every `scan` call passes `backend.path`. The
-  walk down passes over symlinks and non-skill dot-directories; a name found in two
-  directories is that item's `error`, never a failed scan. `path` is no identity: it keys
-  no cache and binds no trust, and `check` sees a changed one through `sources-read.json`.
-- A source entry without `git`/`url`/`local` only overrides `ref` or `path` of a source
-  another file defines: one file's entries may lack a backend, `loadConfig`'s merged
-  sources never do; `sourceFields` demands one everywhere but config load (`needsBackend`).
+- Before touching `catalog.ts`, a source's `path` or backend-less source entries in
+  `config.ts`, read [references/sources.md](references/sources.md).
 - `briefing.ts` reads installed agent files (never renders) — a warning source, not a
   pipeline stage; it must not block a sync.
 - `apply` knows nothing about harnesses: it gets a lock key → root function.
@@ -85,7 +73,15 @@ fsutil.ts     hash, atomicWrite, innerSegments        gitenv.ts    gitEnv(): the
   `CLAUDE.md` identity) skips only the pointer, even with `--force`.
 - **Installable types are exactly** `skill`, `agent`, `rule` (`ITEM_TYPES` in
   `config.ts`); where each lands is `LAYOUTS[harness].roots[type]` per scope.
-  Hooks, `settings.json` and MCP configs are never synced.
+  Hooks and MCP configs are never synced; settings only as the next bullet says.
+- **`.claude/settings.json` is add-only, project scope only** (spec §6.8). A project
+  sync with a committed `skilletor.json`, `claude` targeted and `claudeSettings` not
+  `false` adds `skilletor@<m>` to `enabledPlugins` and every marketplace an enabled entry
+  needs to `extraKnownMarketplaces`; no existing key changes (a `false` stays). Never
+  `~/.claude/settings.json` or `settings.local.json`. `<m>` and its source are read, never
+  written, from `<home>/.claude/plugins/`; a non-remote source (directory, file, local git
+  path) never enters the committed file — a warning. A missing addition is `check`
+  layout drift (`layout:claude-settings`).
 - **Item names ignore case** on every platform (one directory on macOS/Windows): a new
   comparison or map key of item names goes through `nameKey()` (`config.ts`).
 - **Targets:** machine set = user `targets` ?? detected markers (empty → config
@@ -138,7 +134,7 @@ harnesses or changing the report.
 
 ```bash
 npm run typecheck && npm test        # node:test, temp dirs
-node --test --import ./test/setup.ts test/<file>.test.ts   # one file; setup.ts drops GIT_DIR, HERMES_HOME & co.
+node --test --import ./test/setup.ts test/<file>.test.ts   # one file; setup.ts drops GIT_DIR, HERMES_HOME, CLAUDE_PLUGIN_ROOT & co.
 npm run build && npm run check-dist  # dist/skilletor.js is committed; CI diffs it
 ```
 
