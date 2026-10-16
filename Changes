@@ -14,6 +14,11 @@ Revision history for skilletor
     `PATH` (`ln -s <clone>/bin/skilletor ~/.local/bin/skilletor`), `npm link`
     and `npm install -g` run the CLI instead of failing with "Cannot find
     module".
+  - The bundled skill is shorter, with source, Hermes and sync detail in its
+    references, and says that a project starting to use skilletor declares the
+    getty marketplace and enables `skilletor@getty` in its committed
+    `.claude/settings.json`. The README shows the snippet under "Sharing a
+    project: require the plugin".
 
 0.6.0     2026-10-15 17:39:19Z
   - Hermes Agent is a third target, `hermes` in `targets`. It is opt-in:

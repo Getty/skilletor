@@ -3,7 +3,10 @@
 ## Rendering
 
 A source file ending in `.njk` is rendered with Nunjucks and installed with the `.njk`
-stripped; every other file is copied byte for byte. Context:
+stripped; every other file is copied byte for byte, a skill's executable bit included (a
+`.njk` passes its own on). `f` beside `f.njk` in one item (`SKILL.md[.njk]`,
+`scripts/x.sh[.njk]`, `agents/x.md[.njk]`) is an error of that item: `available` shows it,
+`install` refuses it, `sync` warns and keeps an installed copy. Context:
 
 | Variable | Value |
 |---|---|

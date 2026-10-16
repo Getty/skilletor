@@ -506,6 +506,27 @@ change them in the source, not in place. A sync that stops on a write error (a f
 a permission) still records what it wrote, so the next sync picks up where it stopped;
 until then `status` marks the item `(partial: the last sync stopped midway)`.
 
+### Sharing a project: require the plugin
+
+Installed items are not committed, so a fresh checkout has `skilletor.json`, and skills or
+rules of your own that may mention skilletor, but none of the installed items until
+skilletor syncs it. Make the plugin a requirement of the project in its committed
+`.claude/settings.json` (merge the keys into the existing file):
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "getty": { "source": { "source": "github", "repo": "Getty/marketplace" } }
+  },
+  "enabledPlugins": { "skilletor@getty": true }
+}
+```
+
+When a teammate trusts the checkout, Claude Code offers to add the marketplace and install
+the plugin; the first session then syncs the project. Do it in the same commit that adds
+`skilletor.json`. Codex users install the plugin themselves ([The plugin under
+Codex](#the-plugin-under-codex)).
+
 ## Codex
 
 skilletor installs for Claude Code, the OpenAI Codex CLI, or both — from the same sources

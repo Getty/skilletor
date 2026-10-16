@@ -35,6 +35,23 @@ could not install although its source was there counts once.
 `checkInterval` (user file only, seconds, default 1800) throttles the in-session check;
 `≤ 0` = sync only at session start. In a project file it is a config error (nothing syncs).
 
+## Sharing a project — `.claude/settings.json`
+
+The installed items are gitignored build artifacts; a fresh checkout gets them only from a
+skilletor that runs there. So with the project's first committed `skilletor.json`, merge
+this into the committed `.claude/settings.json` (into existing keys — never a second
+`extraKnownMarketplaces` or `enabledPlugins`), and commit both files together:
+
+```json
+{
+  "extraKnownMarketplaces": { "getty": { "source": { "source": "github", "repo": "Getty/marketplace" } } },
+  "enabledPlugins": { "skilletor@getty": true }
+}
+```
+
+A teammate trusting the checkout gets Claude Code's offer to add the marketplace and install
+the plugin; the first session then syncs. Codex users install the plugin themselves.
+
 ## Git — `gitignore`
 
 `gitignore` (default true) writes fixed ignore rules that never change with the items.

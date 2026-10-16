@@ -14,6 +14,8 @@ description: "skilletor CLI — installs and updates skills, agents and rules fr
   → `…/skilletor/<version>/bin/skilletor`). Take `<version>` from that listed path, never
   from memory — it changes on every plugin update. Codex runs skilletor's hooks only once
   trusted in `/hooks` (again after an update changes them); until then `sync` by hand.
+- **Hermes Agent:** `hermes skilletor <command>` runs the CLI the plugin uses. Setting
+  skilletor up for Hermes (targets, plugin, CLI): [references/hermes.md](references/hermes.md).
 
 ## Do not hand-edit a managed file — change it in the source
 
@@ -28,21 +30,17 @@ overrides the same-named `git` source, read directly on every sync while that ch
 | agent | `.claude/agents/.local.<name>.md` | `.codex/agents/.local.<name>.toml` (user: `$CODEX_HOME/agents/`) |
 | rule | `.claude/rules/.local.<name>.md` | a section of `.codex/skilletor-rules.md` (user: `$CODEX_HOME/skilletor-rules.md`) |
 
-Hermes Agent gets **skills only** (no agents, no rules): user `<Hermes home>/skills/<name>/`
-(`$HERMES_HOME`, else the last sync's home, else `~/.hermes`), project `.hermes/skills/<name>/`
-— none while `codex` is a target of that project: Hermes reads the Codex copy in
-`.agents/skills/`. Project skills load only after `hermes skills trust` in the project.
-Setup: `hermes` in user `targets`, `hermes plugins install Getty/skilletor/hermes/skilletor --enable`,
-and the CLI it does not bring — `SKILLETOR_BIN=<clone>/bin/skilletor` in `$HERMES_HOME/.env`, else `skilletor` on `PATH`.
+Hermes Agent gets **skills only**: `<Hermes home>/skills/<name>/` (user), `.hermes/skills/<name>/`
+(project; none while `codex` is a target there) — [references/hermes.md](references/hermes.md).
 
 A file is managed when its path is in `<scope>/.claude/skilletor.lock.json` (Codex keys
 `codex:skills/<name>` etc., Hermes `hermes:skills/<name>`) — check the lock before editing;
 files not in it are yours. In `AGENTS.md` only the block between `<!-- skilletor:begin -->`
 and `<!-- skilletor:end -->` is managed; in a `.gitignore` and the project's `.worktreeinclude`
-only the one between `# >>> skilletor >>>` and `# <<< skilletor <<<`. A conflict blocks the whole item, and `sync --force`
-can **delete** the user's own files: read [references/sync.md](references/sync.md) before
-forcing, and when a report shows a conflict, a partial item, an overlap or `git rm --cached`
-warning, or a due `check`.
+only the one between `# >>> skilletor >>>` and `# <<< skilletor <<<`. A conflict blocks the
+whole item, and `sync --force` can **delete** the user's own files: read
+[references/sync.md](references/sync.md) before forcing, and when a report shows a conflict,
+a partial item, an overlap or `git rm --cached` warning, or a due `check`.
 
 ## Commands
 
@@ -61,55 +59,33 @@ skilletor trust <source>                  # confirm a project-declared source (s
 `add`, `install`, `uninstall`, `source remove` edit one `skilletor.json`, then sync; a config
 error there → exit 2, the edit stays saved. `uninstall` or `source remove` of an entry or
 source that config does not declare → exit 1, config untouched even with `--force`; the error
-names what covers it or where else it is declared. `source remove` also drops an entry config
-load refuses (an `http://` url) unless load refuses more (exit 1 as above). `check` writes
-nothing; non-zero = a sync is due. An option the command does not take → exit 2, nothing runs
-(`--project-dir` goes with all); `-h` anywhere only prints usage, `-v` only as first argument.
+names what covers it or where else it is declared. `check` writes nothing; non-zero = a sync
+is due. An option the command does not take → exit 2, nothing runs (`--project-dir` goes with
+all); `-h` anywhere only prints usage, `-v` only as first argument.
 
-`add` without a name takes the repo's for a git repo other than `skills` (`Getty/karr`,
-`https://github.com/Getty/karr.git` → `karr`), else the owner's (`Getty` → `getty`), the
-host's or the directory's. A GitHub tree link (`github.com/o/r/tree/<ref>`, also as
-`o/r/tree/<ref>`, `…/releases/tag/<tag>`, `…/commit/<sha>`) adds the repo pinned to `<ref>`,
-one into a directory (`…/tree/<ref>/<dir>`) with `path: <dir>` as well; GitLab (`/-/tree/`),
-Codeberg (`/src/branch/`) and Hugging Face (`/tree/`) links alike. `?query`/`#anchor` are
-dropped, `%`-escapes decoded; the segment after `tree` is always the ref (a ref with `/`:
-`%2F`, or set `ref` by hand); a file link or any other page (`/issues`) is refused. `add` never replaces a source: the same address again keeps the entry as written
-(`ref`, `path`, `local` stay) and syncs. Exit 1, nothing changed or trusted, when config load
-refuses that entry (a hand-written `"ref": ""`: fix it by hand), a tree link pins a ref or
-path the entry lacks (set it by hand or use another name) or the name has another address
-(use another name); `source remove <name>` first gets past all three.
+## Sources
 
-Sources use `skills/<name>/`, `agents/<name>.md`, `rules/<name>.md`. Claude plugin repos
-work too, the skills their `.claude-plugin/plugin.json` lists installed as `skills/<name>/`:
-`skilletor add obra/superpowers`, `skilletor add anthropics` (→ anthropics/skills). A repo's
-own `.claude/skills/<name>/`, `.claude/agents/<name>.md[.njk]` and `.claude/rules/<name>.md[.njk]`
-install like published ones (`skilletor add Getty/karr`), read last, best effort: a name
-found above wins; a symlink and skilletor's installed copies (`.local.` files, a skill
-carrying skilletor's `.gitignore`) are skipped. Names differing only in case (`Foo`, `foo`)
-are one name everywhere — in a source an error of each, in two install entries or two
-sources' offers the same-name conflict — as macOS and Windows install both into one place.
-
-A repo with its skills elsewhere (by category, no `plugin.json`) offers nothing that way: set
-`path` on its source entry — a directory or a list, relative to the repo root —
-
-```json
-"hermes": { "git": "https://github.com/NousResearch/hermes-agent", "path": ["skills", "optional-skills"] }
-```
-
-and every directory beneath it holding a `SKILL.md[.njk]`, at any depth, is one skill named
-after that directory (a category `skills/research` or one skill `skills/research/arxiv` works
-too; skilletor's installed copies are skipped). `path` replaces the layout above: that
-source then offers those skills only — no agents, rules, bundles, `plugin.json` or `.claude/`
-items. The same name in two directories (case ignored) is an error of that skill alone (as
-`f` beside `f.njk`, below). `add` has no option for it: a link into a directory sets it,
-anything else is edited into the entry. (That example source is for Claude Code and Codex:
-under target `hermes` its skills collide with Hermes' own copies and none loads.)
+Sources use `skills/<name>/`, `agents/<name>.md`, `rules/<name>.md`; Claude plugin repos
+work too (`skilletor add obra/superpowers`, `skilletor add anthropics` → anthropics/skills),
+and a repo's own `.claude/` items (`skilletor add Getty/karr`). Skills anywhere else: set
+`path` on the entry. A GitHub/GitLab/Codeberg/Hugging Face tree link
+(`github.com/o/r/tree/<ref>`, `…/releases/tag/<tag>`) adds the repo pinned to `<ref>`. `add`
+never replaces a source: to pin one already configured, set `ref` in its entry by hand
+(`{ "ref": "v2" }` in `skilletor.local.json` pins a project's source on this machine). Read
+[references/sources.md](references/sources.md) for `add`'s default name, every link form, its
+exit-1 cases, `path`, and the rules for source names and entry fields.
 
 ## Config
 
 The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs under `~`),
 `<project>/.claude/skilletor.json` (project, committed), `<project>/.claude/skilletor.local.json`
 (machine-local, not committed; installs like project).
+
+**A project starting to use skilletor** (its first `add`/`install --project`) also declares
+the plugin in its committed `.claude/settings.json` — merge `extraKnownMarketplaces.getty`
+and `enabledPlugins."skilletor@getty"` ([references/sync.md](references/sync.md)) and tell
+the user to commit it with `skilletor.json`. Without it a fresh checkout has the config but
+nothing installs skilletor, and the synced items (gitignored) are missing.
 
 ```json
 {
@@ -125,25 +101,15 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
 ```
 
 - Only `skill`, `agent`, `rule` are installable — never hooks, settings or MCP configs.
-- A source name (its key) is ASCII letters, digits, `.`, `_`, `-`, starting with a letter or
-  digit; `git`/`local` are non-empty strings; `url` is `https://`; `ref` (git) is a plain
-  branch, tag or commit name (no leading `-`, whitespace, `~ ^ : ? * [ \`, `..`, `@{`) —
-  omit it, never `""`, for the remote's HEAD; `path` is a non-empty string or list of them,
-  relative, without `..`, not the root (`.`). Anything else is a config error; `add` refuses
-  such a name or address (an `http://…`/`file://…` tarball too) before writing: exit 1. A
-  `path` that is missing, no directory or a symlink leaves the source unresolved for that
-  sync: a warning, installed items stay. `ref` and `path` are not part of a source's
-  identity (cache, trust) and merge project < user < local, replaced whole. An entry may
-  omit `git`/`url`/`local` when another file gives the source one (`{ "ref": "v2" }` in
-  `skilletor.local.json` pins the project's source); none in any file is a config error. A
-  user entry without one is no user-scope source.
+- `ref` (git) is a plain branch, tag or commit name — omit it, never `""`, for the remote's
+  HEAD; `url` is `https://` only. `ref` and `path` merge project < user < local, replaced whole.
 - `gitignore` (default true: commit `skilletor.json` and each `.gitignore` the report names)
   and `checkInterval` (user file only): [references/sync.md](references/sync.md).
 - `targets` (any of `claude`, `codex`, `hermes`; unset = auto-detected, `hermes` never is):
   it **replaces** detection — list every harness wanted, `["claude", "codex", "hermes"]`
-  to add Hermes (`["hermes"]` alone drops the others). The user file sets the machine's set, a project
-  or local file only narrows it (`["claude"]` keeps a project's `AGENTS.md` and `.codex/`
-  untouched). Details: [references/codex.md](references/codex.md).
+  to add Hermes (`["hermes"]` alone drops the others). The user file sets the machine's set,
+  a project or local file only narrows it (`["claude"]` keeps a project's `AGENTS.md` and
+  `.codex/` untouched). Details: [references/codex.md](references/codex.md).
 
 ### Wildcards and name patterns — `*@source`, `perl-*@source`
 
@@ -159,28 +125,22 @@ An item installed by a wildcard or bundle can't be uninstalled by name: uninstal
 ## Bundles — `install.bundles`
 
 A source's `bundles/<name>.yaml` (or `.yml`) names a set of items; a config declares it
-once. Read [references/bundles.md](references/bundles.md) before writing one, and on a
-bundle error or a `briefing skills not installed` warning.
-
-- Vars: `source defaults < bundle < user < project < local`; outer bundle wins over an
-  included one; explicit entries get no bundle vars.
-- A bundle can name items of other sources (`name@<address>`), matched by resolved URL, not
-  config name. `install bundle:` offers to add a missing one (no TTY: exit 1, prints
-  `skilletor add …`); **`sync` and hooks never add sources** — they warn and skip those items.
-- Put an agent and the skills its `briefing.skills` names in one bundle: they must be
-  installed where its harness looks (a user agent never sees project skills).
+once. Vars: `source defaults < bundle < user < project < local`. A bundle naming another
+source's items (`name@<address>`): `install bundle:` offers to add it (no TTY: exit 1,
+prints `skilletor add …`); **`sync` and hooks never add sources** — they warn and skip those
+items. Put an agent and the skills its `briefing.skills` names in one bundle (a user agent
+never sees project skills). Read [references/bundles.md](references/bundles.md) before
+writing one, and on a bundle error or a `briefing skills not installed` warning.
 
 ## Templates
 
 A source file ending in `.njk` is rendered with Nunjucks (installed with `.njk` stripped);
-every other file is copied byte for byte, a skill's executable bit included (a `.njk` passes
-its own on). `f` beside `f.njk` in one item (`SKILL.md[.njk]`, `scripts/x.sh[.njk]`,
-`agents/x.md[.njk]`) is an error of that item: `available` shows it, `install` refuses it,
-`sync` warns and keeps an installed copy. A `.njk` main file that renders empty (after its
+every other file is copied byte for byte. A `.njk` main file that renders empty (after its
 frontmatter) switches the item off in that scope and target, installed copy removed. A
 `{% if %}` in frontmatter opens with `{%-`, or its blank line silently truncates a
 `briefing:` block. Read [references/templates.md](references/templates.md) before writing or
-debugging a template (context variables, undefined `vars.*`, the on/off pattern).
+debugging a template (context variables, undefined `vars.*`, `f` beside `f.njk`, the on/off
+pattern).
 
 ## Trust
 
