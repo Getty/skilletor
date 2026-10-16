@@ -98,6 +98,10 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
   always fits.
 - `gitignore` (user or project/local, default `true`): see 6.4. In the user config it
   only switches the user-scope blocks off; a project's blocks follow the project/local value.
+- `claudeSettings` (user, project or local, default `true`): see 6.8. The project follows the
+  last file that sets it – local, then the project's `skilletor.json`, then the user config –
+  so a `false` in the user config keeps skilletor out of every project's `settings.json` a
+  project file does not switch back on. The user scope has no such file.
 - `checkInterval` (user only, seconds, default 1800 = 30 min): throttle for the
   in-session check. `0` or a negative value disables it (SessionStart still syncs).
 - `targets` (optional, user, project or local): which agent harnesses to install for,
@@ -655,7 +659,8 @@ can therefore switch individual items on and off per user, project or local conf
 4. Compare output against disk and lock; write only differences (atomically:
    temp file + rename); remove files the item no longer contains.
 5. Delete items no longer declared, per the lock.
-6. Write the lock and the gitignore blocks (§6.4), emit the report.
+6. Write the lock, the gitignore blocks (§6.4) and the plugin requirement in a project's
+   `.claude/settings.json` (§6.8), emit the report.
 
 **Unresolvable sources keep their items:** when a source cannot be resolved or scanned
 (offline without cache, untrusted, broken layout), every locked item it provided stays
@@ -992,6 +997,69 @@ target, and warns about declared skills that would not resolve:
   of the Codex TOML); it never renders. A file it cannot parse is skipped silently – the
   conversion or render warning already covers it.
 
+### 6.8 Plugin requirement in the project's `.claude/settings.json` (k140)
+
+Installed items are gitignored (§6.4), so a fresh checkout has `skilletor.json` but none of
+the items until a skilletor runs there – and skills or rules of the project's own may already
+mention them. Claude Code offers a teammate who trusts the checkout to add the marketplaces a
+committed `.claude/settings.json` declares (`extraKnownMarketplaces`) and to install the
+plugins it enables (`enabledPlugins`); an enabled plugin whose marketplace the file does not
+declare resolves only on a machine that has that marketplace already. A project sync
+therefore keeps two things in that file:
+
+1. `enabledPlugins["skilletor@<m>"]: true`, `<m>` the marketplace skilletor is installed from;
+2. `extraKnownMarketplaces[<n>]` for every marketplace `<n>` an `enabledPlugins` entry of the
+   file needs (`briefing@getty` as well as `skilletor@getty`) and the file does not declare.
+
+- **When.** Project scope only, while the project has a committed `skilletor.json` (a
+  `skilletor.local.json` alone is this machine's and gitignored), `claude` is a target of the
+  project, and `claudeSettings` (§3) is not `false`. The user scope's `~/.claude/settings.json`
+  is never read or written, nor is `settings.local.json` (per machine, never committed).
+- **Which marketplace.** From Claude Code's plugin state, read-only:
+  `<home>/.claude/plugins/installed_plugins.json` lists each `skilletor@<m>` install with its
+  scope, `installPath` and, for a project install, `projectPath`. The install whose
+  `installPath` is `CLAUDE_PLUGIN_ROOT` – the plugin that runs this hook
+  (`EngineContext.pluginRoot`) – names `<m>`; otherwise the installs of user scope and of this
+  project: one marketplace among them is `<m>`, several are ambiguous (a warning, no entry). No
+  install (the standalone CLI): no entry, no warning. A Codex hook's `CLAUDE_PLUGIN_ROOT` names
+  no Claude install and falls through to the same lookup.
+- **Which source.** `<home>/.claude/plugins/known_marketplaces.json` holds each marketplace's
+  `source` object as Claude Code took it; skilletor copies it whole into
+  `{ "source": … }`, but only of a kind that means the same on every machine: `github` with a
+  `repo`, `git` with a remote URL (`https://`, `http://`, `ssh://`, `git://`, `user@host:`),
+  `url` with an `http(s)` URL. A `directory` or `file` source, a `git` URL on a local path, or
+  any other kind is never written into a committed file; neither is skilletor enabled from
+  such a marketplace (it would not resolve for anyone else). A marketplace with no entry there
+  is not invented. Each of these is one warning naming the marketplace, the plugins that need
+  it and why. `claude-plugins-official` is Claude Code's own and never declared.
+- **Add only.** No existing key is changed or removed: a file that names skilletor in
+  `enabledPlugins` at all – `false` (the user's choice), or from another marketplace – gets no
+  second entry; an entry set to `false` needs no marketplace; a declared marketplace keeps the
+  source it has. A key removed by hand comes back on the next sync – `false` or
+  `"claudeSettings": false` keeps it out.
+- **Format.** Key order is kept (new keys go last: `enabledPlugins` and
+  `extraKnownMarketplaces` at the end of the file when missing, new entries at the end of
+  theirs); the indent of the file (default two spaces, as Claude Code writes), its line
+  endings and its final newline are kept. Nothing to add: the file is not rewritten, whatever
+  its formatting. Written atomically (temp file + rename).
+- **Left alone.** A `settings.json` that is not valid JSON (JSONC comments included), not an
+  object, or has an `enabledPlugins` / `extraKnownMarketplaces` that is not an object, a
+  symbolic link or no file is never written: one warning (`.claude/settings.json is not valid
+  JSON (…); plugin requirement not written`). A write that fails is a warning
+  (`.claude/settings.json not updated: …`); the sync goes on.
+- **Report.** A sync that adds to the file says what and asks for the commit, once – like the
+  `.gitignore` blocks: `.claude/settings.json updated (enables skilletor@getty; declares
+  marketplace getty) — commit it`; `settingsUpdated` (`path`, `enabled`, `declared`) in the
+  JSON report, in the hook's commit list (§8). The warnings above go into the scope's
+  warnings and `settingsSkipped`; the hooks show them only in a run that changed items or the
+  file, not in every session (as §6.7).
+- **`check`.** A file that lacks something a sync would add is layout drift
+  (`layoutChanged`), so a project synced before k140 gets it in its next session. What a sync
+  cannot add (warnings) is no drift. Three small files are read; no network.
+- **Codex** has no project file that makes a plugin a requirement of a checkout (as far as
+  known), so nothing equivalent is written for it; Codex users install the plugin themselves
+  (§14.5). Hermes likewise.
+
 ## 7. CLI
 
 ```
@@ -1122,7 +1190,8 @@ message naming the option, nothing touched.
 ## 9. Security
 
 - A fixed type table with fixed target directories; hooks, `settings.json`, and MCP
-  configs are never synchronized.
+  configs are never synchronized. (The one exception to "never touched": the plugin
+  requirement a project sync adds to the project's `.claude/settings.json`, add-only, §6.8.)
 - Path hardening: item names, tar entries, includes and a source's `path` (§4.1) may not
   leave the source or target root; symlinks in sources are rejected (beneath a `path`: passed
   over on the way down, rejected inside a skill); `url` is HTTPS-only.

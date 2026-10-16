@@ -192,7 +192,8 @@ the entry by hand.
 ```
 
 Only `skill`, `agent` and `rule` are installable — skilletor never syncs hooks,
-`settings.json` or MCP configs. An optional `"targets"` key picks the harnesses to install
+`settings.json` or MCP configs (it only adds the plugin requirement to a project's
+`.claude/settings.json`, see [Sharing a project](#sharing-a-project-require-the-plugin)). An optional `"targets"` key picks the harnesses to install
 for (`claude`, `codex`) — see [Codex](#codex).
 
 A source's `git`, `ref` or `local`, when present, must be a non-empty string (omit `ref`
@@ -510,8 +511,33 @@ until then `status` marks the item `(partial: the last sync stopped midway)`.
 
 Installed items are not committed, so a fresh checkout has `skilletor.json`, and skills or
 rules of your own that may mention skilletor, but none of the installed items until
-skilletor syncs it. Make the plugin a requirement of the project in its committed
-`.claude/settings.json` (merge the keys into the existing file):
+skilletor syncs it. So a project sync makes the plugin a requirement of the project in its
+committed `.claude/settings.json`: it enables `skilletor@<marketplace>` — the marketplace
+your Claude Code installed skilletor from — and declares in `extraKnownMarketplaces` every
+marketplace an `enabledPlugins` entry there needs (`briefing@getty` as well), with the
+source Claude Code knows it by. The report says what it added once:
+
+```
+.claude/settings.json updated (enables skilletor@getty; declares marketplace getty) — commit it
+```
+
+Commit it with `skilletor.json`. When a teammate trusts the checkout, Claude Code offers to
+add the marketplace and install the plugin; the first session then syncs the project.
+
+- It runs only for a project with a committed `.claude/skilletor.json` (not
+  `skilletor.local.json` alone) and Claude Code among its targets. `~/.claude/settings.json`
+  and `settings.local.json` are never touched.
+- Add-only: existing keys, their order, the file's indent and line endings stay; nothing to
+  add, no write. An entry `"skilletor@getty": false` (or skilletor from another marketplace)
+  is left as it is; a key you delete comes back — set it to `false` instead.
+- A marketplace with a source that only exists on your machine (a `directory`, a git
+  checkout on disk) is never written, nor is one Claude Code does not know; the report warns.
+  A `settings.json` that does not parse is left alone with a warning.
+- `"claudeSettings": false` in the project's `skilletor.json` (or `skilletor.local.json`, or
+  `~/.claude/skilletor.json` for every project) turns it off.
+
+Running the standalone CLI without the plugin, skilletor knows no marketplace to enable;
+add it by hand (merge the keys into the existing file):
 
 ```json
 {
@@ -522,10 +548,8 @@ skilletor syncs it. Make the plugin a requirement of the project in its committe
 }
 ```
 
-When a teammate trusts the checkout, Claude Code offers to add the marketplace and install
-the plugin; the first session then syncs the project. Do it in the same commit that adds
-`skilletor.json`. Codex users install the plugin themselves ([The plugin under
-Codex](#the-plugin-under-codex)).
+Codex has no equivalent project requirement: Codex users install the plugin themselves
+([The plugin under Codex](#the-plugin-under-codex)).
 
 ## Codex
 

@@ -88,6 +88,18 @@ export interface ScopeReport {
    *  sync created or changed, to be committed (spec §6.4): `.claude/.gitignore`,
    *  `~/.claude/.gitignore`, `.worktreeinclude`. Absent when empty. */
   gitignoreUpdated?: string[];
+  /** The project's `.claude/settings.json`, when this sync added to it (spec §6.8), to be
+   *  committed: the `enabledPlugins` keys and the marketplaces it added. Absent otherwise. */
+  settingsUpdated?: SettingsUpdate;
+  /** What the sync could not add to that file, or why it left it alone (spec §6.8); each also
+   *  has its line in `warnings`. Absent when empty. */
+  settingsSkipped?: string[];
+}
+
+export interface SettingsUpdate {
+  path: string;
+  enabled: string[];
+  declared: string[];
 }
 
 export interface ReportConflict {
@@ -136,7 +148,7 @@ function isNotable(s: ScopeReport): boolean {
   return Boolean(
     s.added.length || s.updated.length || s.removed.length ||
     s.conflicts.length || s.overwritten.length || s.warnings.length || s.trustRequests.length ||
-    s.gitignoreUpdated?.length,
+    s.gitignoreUpdated?.length || s.settingsUpdated,
   );
 }
 
@@ -166,6 +178,7 @@ export function reportText(r: SyncReport): string {
     for (const c of s.conflicts) lines.push(`  conflict: ${c.path} ${conflictHint(c)}`);
     for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${backendLabel(t)}) — run: skilletor trust ${t.name}`);
     for (const g of s.gitignoreUpdated ?? []) lines.push(`  ${commitHint(g)}`);
+    if (s.settingsUpdated) lines.push(`  ${settingsHint(s.settingsUpdated)}`);
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
   for (const w of r.warnings ?? []) lines.push(`skilletor: warning: ${w}`);
@@ -178,14 +191,28 @@ function commitHint(file: string): string {
   return `${file} updated — commit it`;
 }
 
-/** `r` without its briefing warnings (spec §6.7): the hooks show them only in a run
- *  that changed something, instead of in every session. */
-function withoutBriefing(r: SyncReport): SyncReport {
+/** The commit hint for the project's `.claude/settings.json` (spec §6.8), with what was added:
+ *  `.claude/settings.json updated (enables skilletor@getty; declares marketplace getty) — commit it`. */
+function settingsHint(u: SettingsUpdate): string {
+  const what: string[] = [];
+  if (u.enabled.length) what.push(`enables ${u.enabled.join(", ")}`);
+  if (u.declared.length) what.push(`declares marketplace${u.declared.length > 1 ? "s" : ""} ${u.declared.join(", ")}`);
+  return `${u.path} updated (${what.join("; ")}) — commit it`;
+}
+
+/** `r` without its briefing warnings (spec §6.7) – and without the settings warnings
+ *  (spec §6.8) of a scope whose settings file this run left as it was: the hooks show them
+ *  only in a run that changed something, instead of in every session. */
+function withoutRepeats(r: SyncReport): SyncReport {
   return {
     ...r,
     scopes: r.scopes.map((s) => {
-      if (!s.briefingMissing?.length) return s;
-      const lines = new Set(s.briefingMissing.map((b) => briefingWarning(parseLockKey(b.key).name, b.harness, b.missing)));
+      const settings = s.settingsUpdated ? [] : s.settingsSkipped ?? [];
+      if (!s.briefingMissing?.length && !settings.length) return s;
+      const lines = new Set([
+        ...(s.briefingMissing ?? []).map((b) => briefingWarning(parseLockKey(b.key).name, b.harness, b.missing)),
+        ...settings,
+      ]);
       const { briefingMissing: _, ...rest } = s;
       return { ...rest, warnings: s.warnings.filter((w) => !lines.has(w)) };
     }),
@@ -196,7 +223,7 @@ function withoutBriefing(r: SyncReport): SyncReport {
  *  A config error touched nothing, so it is the whole output – one line, as SessionStart gives. */
 export function reportHook(report: SyncReport): { systemMessage?: string; additionalContext?: string } {
   if (report.error) return { systemMessage: displaySafe(`skilletor: ${report.error}`) };
-  const r = hasChanges(report) ? report : withoutBriefing(report);
+  const r = hasChanges(report) ? report : withoutRepeats(report);
   if (!hasNotable(r)) return {};
   const changed: ItemChange[] = [];
   let warnings = 0;
@@ -205,7 +232,7 @@ export function reportHook(report: SyncReport): { systemMessage?: string; additi
     warnings += s.warnings.length + s.conflicts.length + s.trustRequests.length + s.overwritten.length;
   }
   const removed = r.scopes.reduce((n, s) => n + s.removed.length, 0);
-  const gitignores = r.scopes.flatMap((s) => s.gitignoreUpdated ?? []);
+  const gitignores = r.scopes.flatMap((s) => [...s.gitignoreUpdated ?? [], ...(s.settingsUpdated ? [s.settingsUpdated.path] : [])]);
 
   const parts: string[] = [];
   if (changed.length) parts.push(`${changed.length} item(s) updated`);
@@ -230,6 +257,7 @@ export function reportHook(report: SyncReport): { systemMessage?: string; additi
     for (const c of s.conflicts) ctx.push(`- conflict in ${s.scope} scope: ${c.path} ${conflictHint(c)}`);
     for (const t of s.trustRequests) ctx.push(`- untrusted source ${t.name} (${backendLabel(t)}); run: skilletor trust ${t.name}`);
     for (const g of s.gitignoreUpdated ?? []) ctx.push(`- ${commitHint(g)}`);
+    if (s.settingsUpdated) ctx.push(`- ${settingsHint(s.settingsUpdated)}`);
     for (const w of s.warnings) ctx.push(`- warning: ${w}`);
   }
   return { systemMessage, additionalContext: ctx.length ? ctx.map(displaySafe).join("\n") : undefined };

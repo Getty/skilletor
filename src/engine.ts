@@ -39,6 +39,7 @@ import {
   skillGitignorePath, updateGitignore, updateWorktreeInclude, withSkillGitignore, WORKTREE_INCLUDE,
 } from "./gitignore.ts";
 import { briefingWarning, missingSkills, skillRoots, type BriefingMissing } from "./briefing.ts";
+import { planClaudeSettings, type SettingsPlan } from "./claudesettings.ts";
 import {
   emptyScopeReport, keyToTypeName, type ItemChange, type ScopeReport, type SyncReport, type TrustRequest,
 } from "./report.ts";
@@ -67,6 +68,9 @@ export interface EngineContext {
   /** Which of `paths` (relative to the target root `dir`) does git track (spec §6.4)?
    *  Default: one `git ls-files`; outside a work tree, or when git fails, none. */
   gitTracked?: (dir: string, paths: string[]) => string[];
+  /** `CLAUDE_PLUGIN_ROOT` (spec §6.8): the running plugin's install, which names the
+   *  marketplace skilletor is installed from; default from the env. */
+  pluginRoot?: string;
 }
 
 export interface SyncOptions {
@@ -1000,6 +1004,23 @@ async function syncScopeRun(
     }
   }
 
+  // The plugin requirement in the committed `.claude/settings.json` (spec §6.8): add-only,
+  // and a file skilletor cannot read, parse or write never stops the sync.
+  const settings = claudeSettingsPlan(ctx, scope, scopeCfg, harnesses);
+  if (settings) {
+    const label = scopeLabel(scope, base, settingsFileOf(ctx));
+    rep.warnings.push(...settings.warnings);
+    if (settings.warnings.length) rep.settingsSkipped = settings.warnings;
+    if (settings.next !== undefined) {
+      try {
+        atomicWrite(settingsFileOf(ctx), settings.next);
+        rep.settingsUpdated = { path: label, enabled: settings.enabled, declared: settings.declared };
+      } catch (err) {
+        rep.warnings.push(`${label} not updated: ${(err as Error).message}`);
+      }
+    }
+  }
+
   // Managed paths git still tracks (spec §6.4): only what this run wrote or adopted, and
   // git is asked only when there is some (the hook path stays fast).
   if (gitignoreOn) {
@@ -1065,6 +1086,33 @@ async function syncScopeRun(
     state.putRenderInputs(lockPath, renderInputsHash(inputsOf()));
   }
   return rep;
+}
+
+/** The project's committed Claude Code settings file (spec §6.8). */
+function settingsFileOf(ctx: EngineContext): string {
+  return join(targetDirOf(ctx, "project"), "settings.json");
+}
+
+/**
+ * What a sync adds to the project's `.claude/settings.json` (spec §6.8), or undefined when the
+ * file is not skilletor's to touch: the user scope, a project without a committed
+ * `skilletor.json` (a `skilletor.local.json` is this machine's alone), Claude Code no target
+ * of the project, or `"claudeSettings": false`. Reads three small files; never throws.
+ */
+function claudeSettingsPlan(
+  ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig, harnesses: Harness[],
+): SettingsPlan | undefined {
+  if (scope !== "project" || scopeCfg.claudeSettings === false || !harnesses.includes("claude")) return undefined;
+  if (!existsSync(join(targetDirOf(ctx, scope), "skilletor.json"))) return undefined;
+  const file = settingsFileOf(ctx);
+  try {
+    return planClaudeSettings({
+      file, label: scopeLabel(scope, ctx.projectDir!, file), projectDir: ctx.projectDir!, home: ctx.home,
+      pluginRoot: ctx.pluginRoot ?? (process.env.CLAUDE_PLUGIN_ROOT || undefined),
+    });
+  } catch (err) {
+    return { enabled: [], declared: [], warnings: [`${scopeLabel(scope, ctx.projectDir!, file)} not updated: ${(err as Error).message}`] };
+  }
 }
 
 /** Is the project scope in use (spec §6.4): a project config file exists, or the lock
@@ -1440,7 +1488,8 @@ interface Drift {
 }
 
 /** Every drift of a scope: targets, layout, declarations. Reads the lock, the config, a
- *  project's `.worktreeinclude` and at most one small file per root of a project not in use –
+ *  project's `.worktreeinclude`, at most one small file per root of a project not in use and,
+ *  for a project using skilletor, its `.claude/settings.json` and Claude Code's plugin state –
  *  no git, no network. `servedBy` (sync only): the other sources a bundle's entries are
  *  served by (spec §15.6). */
 function scopeDrift(
@@ -1461,6 +1510,11 @@ function scopeDrift(
   if (scope === "user" && harnesses.includes("hermes")) {
     const home = hermesHomeOf(ctx);
     if (!samePath(home, recordedHermesHome(ctx))) out.push({ kind: "targets", id: `hermes-home:${home}`, sources: [] });
+  }
+  // The committed `.claude/settings.json` lacks what a sync would add (spec §6.8): a project
+  // that used skilletor before gets it in the next session. What it cannot add is no drift.
+  if (claudeSettingsPlan(ctx, scope, scopeCfg, harnesses)?.next !== undefined) {
+    out.push({ kind: "layout", id: "layout:claude-settings", sources: [] });
   }
   return [...out, ...layoutDrift(ctx, scope, scopeCfg, lock), ...declaredDrift(scopeCfg, scope, harnesses, lock, servedBy)];
 }

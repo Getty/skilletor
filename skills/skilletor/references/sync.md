@@ -38,19 +38,20 @@ could not install although its source was there counts once.
 ## Sharing a project — `.claude/settings.json`
 
 The installed items are gitignored build artifacts; a fresh checkout gets them only from a
-skilletor that runs there. So with the project's first committed `skilletor.json`, merge
-this into the committed `.claude/settings.json` (into existing keys — never a second
-`extraKnownMarketplaces` or `enabledPlugins`), and commit both files together:
+skilletor that runs there. So a project sync (committed `skilletor.json`, Claude a target)
+adds to the committed `.claude/settings.json`: `enabledPlugins."skilletor@<m>"` (`<m>` the
+marketplace Claude Code installed skilletor from) and an `extraKnownMarketplaces` entry for
+every marketplace an enabled plugin there needs. The report says
+`.claude/settings.json updated (…) — commit it`; commit it with `skilletor.json`.
 
-```json
-{
-  "extraKnownMarketplaces": { "getty": { "source": { "source": "github", "repo": "Getty/marketplace" } } },
-  "enabledPlugins": { "skilletor@getty": true }
-}
-```
-
-A teammate trusting the checkout gets Claude Code's offer to add the marketplace and install
-the plugin; the first session then syncs. Codex users install the plugin themselves.
+- Add-only: nothing is changed or removed; `"skilletor@getty": false` stays (a deleted key
+  comes back — use `false`). Nothing to add: no write.
+- A marketplace on a local path, or unknown to Claude Code, is not written (a warning); a
+  `settings.json` that does not parse is left alone (a warning).
+- `"claudeSettings": false` (project, local, or user file for every project) turns it off.
+- Standalone CLI without the plugin: no marketplace is known — merge by hand:
+  `{ "extraKnownMarketplaces": { "getty": { "source": { "source": "github", "repo": "Getty/marketplace" } } }, "enabledPlugins": { "skilletor@getty": true } }`.
+- Codex has no such file: Codex users install the plugin themselves.
 
 ## Git — `gitignore`
 

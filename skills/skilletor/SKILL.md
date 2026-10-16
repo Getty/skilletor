@@ -81,11 +81,9 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
 `<project>/.claude/skilletor.json` (project, committed), `<project>/.claude/skilletor.local.json`
 (machine-local, not committed; installs like project).
 
-**A project starting to use skilletor** (its first `add`/`install --project`) also declares
-the plugin in its committed `.claude/settings.json` — merge `extraKnownMarketplaces.getty`
-and `enabledPlugins."skilletor@getty"` ([references/sync.md](references/sync.md)) and tell
-the user to commit it with `skilletor.json`. Without it a fresh checkout has the config but
-nothing installs skilletor, and the synced items (gitignored) are missing.
+**A project using skilletor** gets the plugin required in its committed `.claude/settings.json`
+by the next sync (`… updated — commit it`): tell the user to commit it with `skilletor.json`,
+or a fresh checkout lacks the (gitignored) items. Details: [references/sync.md](references/sync.md).
 
 ```json
 {

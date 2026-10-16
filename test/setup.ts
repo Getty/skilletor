@@ -19,6 +19,11 @@ for (const name of REPO_LOCAL_VARS) delete process.env[name];
 // A test that needs one sets it in the env it spawns with (test/e2e.test.ts).
 for (const name of ["CLAUDE_PROJECT_DIR", "SKILLETOR_PROJECT_DIR"]) delete process.env[name];
 
+// k140: the same for the plugin root, which names the marketplace a project's
+// .claude/settings.json is told to enable skilletor from (spec §6.8). A test that needs one
+// injects it (`EngineContext.pluginRoot`).
+delete process.env.CLAUDE_PLUGIN_ROOT;
+
 // The same for the Hermes home (spec §16.2): a suite run from a Hermes session inherits
 // HERMES_HOME, and the engine would take it for the home to install Hermes skills under. A
 // test that needs one injects it (`EngineContext.hermesHome`) or sets it in the env it spawns

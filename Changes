@@ -15,10 +15,21 @@ Revision history for skilletor
     and `npm install -g` run the CLI instead of failing with "Cannot find
     module".
   - The bundled skill is shorter, with source, Hermes and sync detail in its
-    references, and says that a project starting to use skilletor declares the
-    getty marketplace and enables `skilletor@getty` in its committed
-    `.claude/settings.json`. The README shows the snippet under "Sharing a
-    project: require the plugin".
+    references.
+  - A project sync makes the plugin a requirement of the project: in the
+    committed `.claude/settings.json` it enables `skilletor@<marketplace>`,
+    the marketplace Claude Code installed skilletor from, and declares in
+    `extraKnownMarketplaces` every marketplace an `enabledPlugins` entry there
+    needs (`briefing@getty` too), so a fresh checkout offers to install them.
+    The report says what it added and asks to commit the file once. It only
+    adds: existing keys and the file's formatting stay, `false` entries are
+    respected, a marketplace with a source on this machine's disk is never
+    written, and a file that does not parse is left alone with a warning. It
+    runs for projects with a committed `skilletor.json` and Claude Code as a
+    target; `"claudeSettings": false` turns it off. A config with
+    `claudeSettings` is a config error for skilletor 0.6.0 and earlier. The
+    README keeps the snippet for the standalone CLI under "Sharing a project:
+    require the plugin". Codex has no equivalent.
 
 0.6.0     2026-10-15 17:39:19Z
   - Hermes Agent is a third target, `hermes` in `targets`. It is opt-in:

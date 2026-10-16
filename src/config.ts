@@ -103,6 +103,10 @@ export interface ScopeConfig {
   /** Maintain the managed gitignore blocks (default true; spec §6.4). User scope: from the
    *  user config, blocks only inside a git work tree. Project scope: local ?? project value. */
   gitignore?: boolean;
+  /** Maintain the plugin requirement in the project's committed `.claude/settings.json`
+   *  (default true; spec §6.8). Project scope: local ?? project ?? user value; the user
+   *  scope has no such file. */
+  claudeSettings?: boolean;
   /** `targets` as written (project: local over committed); unset = not restricted (spec §14.1). */
   targets?: Harness[];
 }
@@ -133,7 +137,7 @@ export interface LoadOptions {
   unchecked?: { path: string; name: string };
 }
 
-const ALLOWED_KEYS = new Set(["sources", "install", "vars", "gitignore", "checkInterval", "targets"]);
+const ALLOWED_KEYS = new Set(["sources", "install", "vars", "gitignore", "claudeSettings", "checkInterval", "targets"]);
 const SOURCE_KEYS = new Set(["git", "ref", "url", "local", "path"]);
 
 type Json = Record<string, unknown>;
@@ -516,6 +520,7 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
     bundles: userInstall.bundles,
     vars: mergeVars(asObject(user.vars, userPath, "vars")),
     gitignore: boolOr(user.gitignore, true, userPath, "gitignore"),
+    claudeSettings: boolOr(user.claudeSettings, true, userPath, "claudeSettings"),
   };
   const userTargets = targetsOf(user.targets, userPath);
   if (userTargets) userScope.targets = userTargets;
@@ -536,6 +541,9 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
         asObject(local.vars, localPath, "vars"),
       ),
       gitignore: boolOr(local.gitignore ?? project.gitignore, true, projectPath, "gitignore"),
+      // The last file that sets it: local, the committed project file, the user's (spec §6.8).
+      claudeSettings: boolOr(local.claudeSettings, boolOr(project.claudeSettings, userScope.claudeSettings!, projectPath, "claudeSettings"),
+        localPath, "claudeSettings"),
     };
     const projectTargets = targetsOf(project.targets, projectPath);
     const localTargets = targetsOf(local.targets, localPath);

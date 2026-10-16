@@ -170,10 +170,10 @@ var require_lib = __commonJS({
       return ObjProto.toString.call(obj) === "[object String]";
     }
     _exports.isString = isString;
-    function isObject(obj) {
+    function isObject2(obj) {
       return ObjProto.toString.call(obj) === "[object Object]";
     }
-    _exports.isObject = isObject;
+    _exports.isObject = isObject2;
     function _prepareAttributeParts(attr) {
       if (!attr) {
         return [];
@@ -337,7 +337,7 @@ var require_lib = __commonJS({
     function inOperator(key, val) {
       if (isArray(val) || isString(val)) {
         return val.indexOf(key) !== -1;
-      } else if (isObject(val)) {
+      } else if (isObject2(val)) {
         return key in val;
       }
       throw new Error('Cannot use "in" operator to search for "' + key + '" in unexpected types.');
@@ -3965,7 +3965,7 @@ var require_filters = __commonJS({
       return r.copySafeness(str, res);
     }
     _exports.indent = indent;
-    function join17(arr, del, attr) {
+    function join18(arr, del, attr) {
       del = del || "";
       if (attr) {
         arr = lib.map(arr, function(v) {
@@ -3974,7 +3974,7 @@ var require_filters = __commonJS({
       }
       return arr.join(del);
     }
-    _exports.join = join17;
+    _exports.join = join18;
     function last(arr) {
       return arr[arr.length - 1];
     }
@@ -5741,13 +5741,13 @@ import { realpathSync as realpathSync3 } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { join as join16 } from "node:path";
+import { join as join17 } from "node:path";
 
 // src/engine.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname as hostname2, platform, userInfo } from "node:os";
-import { existsSync as existsSync11, readFileSync as readFileSync11, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync5 } from "node:fs";
-import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join14, relative as relative4, resolve as resolvePath5, sep as sep5 } from "node:path";
+import { existsSync as existsSync11, readFileSync as readFileSync12, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync5 } from "node:fs";
+import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join15, relative as relative4, resolve as resolvePath5, sep as sep5 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -5838,7 +5838,7 @@ function isSourceName(name) {
   return SOURCE_NAME.test(name);
 }
 var BACKEND_KINDS = ["git", "url", "local"];
-var ALLOWED_KEYS = /* @__PURE__ */ new Set(["sources", "install", "vars", "gitignore", "checkInterval", "targets"]);
+var ALLOWED_KEYS = /* @__PURE__ */ new Set(["sources", "install", "vars", "gitignore", "claudeSettings", "checkInterval", "targets"]);
 var SOURCE_KEYS = /* @__PURE__ */ new Set(["git", "ref", "url", "local", "path"]);
 function readConfigFile(path) {
   let text;
@@ -6129,7 +6129,8 @@ function loadConfig(opts) {
     wildcards: userInstall.wildcards,
     bundles: userInstall.bundles,
     vars: mergeVars(asObject(user.vars, userPath, "vars")),
-    gitignore: boolOr(user.gitignore, true, userPath, "gitignore")
+    gitignore: boolOr(user.gitignore, true, userPath, "gitignore"),
+    claudeSettings: boolOr(user.claudeSettings, true, userPath, "claudeSettings")
   };
   const userTargets = targetsOf(user.targets, userPath);
   if (userTargets) userScope.targets = userTargets;
@@ -6147,7 +6148,14 @@ function loadConfig(opts) {
         asObject(project.vars, projectPath, "vars"),
         asObject(local.vars, localPath, "vars")
       ),
-      gitignore: boolOr(local.gitignore ?? project.gitignore, true, projectPath, "gitignore")
+      gitignore: boolOr(local.gitignore ?? project.gitignore, true, projectPath, "gitignore"),
+      // The last file that sets it: local, the committed project file, the user's (spec §6.8).
+      claudeSettings: boolOr(
+        local.claudeSettings,
+        boolOr(project.claudeSettings, userScope.claudeSettings, projectPath, "claudeSettings"),
+        localPath,
+        "claudeSettings"
+      )
     };
     const projectTargets = targetsOf(project.targets, projectPath);
     const localTargets = targetsOf(local.targets, localPath);
@@ -9445,6 +9453,146 @@ function briefingWarning(name, harness, missing) {
   return `agent ${name} (${harness}): briefing skills not installed: ${missing.join(", ")} \u2014 install them, or ship the agent and its skills together as a bundle`;
 }
 
+// src/claudesettings.ts
+import { lstatSync as lstatSync8, readFileSync as readFileSync11 } from "node:fs";
+import { join as join14 } from "node:path";
+var OFFICIAL_MARKETPLACE = "claude-plugins-official";
+var PLUGIN = "skilletor";
+function isObject(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+function readObject(path) {
+  try {
+    const v = JSON.parse(readFileSync11(path, "utf8"));
+    return isObject(v) ? v : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function pluginKey(key) {
+  const at = key.lastIndexOf("@");
+  if (at <= 0 || at === key.length - 1) return void 0;
+  return { name: key.slice(0, at), marketplace: key.slice(at + 1) };
+}
+function skilletorInstalls(home) {
+  const file = readObject(join14(home, ".claude", "plugins", "installed_plugins.json"));
+  const plugins = file?.plugins;
+  if (!isObject(plugins)) return [];
+  const out = [];
+  for (const [key, value2] of Object.entries(plugins)) {
+    const k = pluginKey(key);
+    if (k?.name !== PLUGIN) continue;
+    for (const e of Array.isArray(value2) ? value2 : [value2]) {
+      if (!isObject(e)) continue;
+      const str = (x) => typeof x === "string" ? x : void 0;
+      out.push({ marketplace: k.marketplace, scope: str(e.scope), installPath: str(e.installPath), projectPath: str(e.projectPath) });
+    }
+  }
+  return out;
+}
+function skilletorMarketplace(home, projectDir, pluginRoot) {
+  const installs = skilletorInstalls(home);
+  const unique = (xs) => [...new Set(xs.map((x) => x.marketplace))];
+  if (pluginRoot) {
+    const running = unique(installs.filter((i) => i.installPath !== void 0 && samePath(i.installPath, pluginRoot)));
+    if (running.length === 1) return { name: running[0] };
+  }
+  const here = unique(installs.filter((i) => i.scope === "user" || i.projectPath !== void 0 && samePath(i.projectPath, projectDir)));
+  if (here.length === 1) return { name: here[0] };
+  return here.length > 1 ? { ambiguous: here.sort() } : {};
+}
+function isRemoteGit(url) {
+  return /^(https?|ssh|git):\/\//i.test(url) || /^[\w.-]+@[\w.-]+:(?!\/\/)/.test(url);
+}
+function notDeclarable(source) {
+  if (!isObject(source)) return "no readable source";
+  const kind = typeof source.source === "string" ? source.source : "unknown";
+  if (kind === "github" && typeof source.repo === "string" && source.repo) return void 0;
+  if (kind === "git" && typeof source.url === "string" && isRemoteGit(source.url)) return void 0;
+  if (kind === "url" && typeof source.url === "string" && /^https?:\/\//i.test(source.url)) return void 0;
+  if (kind === "git") return "a git source on a local path";
+  return `a ${kind} source`;
+}
+function layoutOf(text) {
+  const m = /^([ \t]+)"/m.exec(text);
+  const indent = m && m[1].length <= 10 ? m[1] : "  ";
+  return { indent, eol: text.includes("\r\n") ? "\r\n" : "\n", final: /\n$/.test(text) };
+}
+function planClaudeSettings(a) {
+  const plan = { enabled: [], declared: [], warnings: [] };
+  const leave = (why) => {
+    plan.warnings.push(`${a.label} ${why}; plugin requirement not written`);
+    return plan;
+  };
+  let text;
+  try {
+    const st = lstatSync8(a.file);
+    if (st.isSymbolicLink()) return leave("is a symbolic link");
+    if (!st.isFile()) return leave("is not a file");
+    text = readFileSync11(a.file, "utf8");
+  } catch (err) {
+    if (err.code !== "ENOENT") return leave(`cannot be read (${err.message})`);
+  }
+  let settings = {};
+  if (text !== void 0) {
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      return leave(`is not valid JSON (${err.message})`);
+    }
+    if (!isObject(parsed)) return leave("is not a JSON object");
+    settings = parsed;
+  }
+  for (const key of ["enabledPlugins", "extraKnownMarketplaces"]) {
+    if (settings[key] !== void 0 && !isObject(settings[key])) return leave(`has an "${key}" that is not an object`);
+  }
+  const enabled = settings.enabledPlugins ?? {};
+  const declared = settings.extraKnownMarketplaces ?? {};
+  const known = readObject(join14(a.home, ".claude", "plugins", "known_marketplaces.json")) ?? {};
+  const sourceOf = (m) => isObject(known[m]) ? known[m].source : void 0;
+  const NEEDS = "a committed file takes a github, git or url source";
+  if (!Object.keys(enabled).some((k) => pluginKey(k)?.name === PLUGIN)) {
+    const own = skilletorMarketplace(a.home, a.projectDir, a.pluginRoot);
+    if (own.ambiguous) {
+      plan.warnings.push(`skilletor is installed from several marketplaces (${own.ambiguous.join(", ")}); ${a.label} does not get it \u2013 enable the one teammates should use`);
+    } else if (own.name !== void 0) {
+      const why = own.name === OFFICIAL_MARKETPLACE || Object.hasOwn(declared, own.name) ? void 0 : known[own.name] === void 0 ? "no entry in Claude Code's known marketplaces" : notDeclarable(sourceOf(own.name));
+      if (why) plan.warnings.push(`skilletor's marketplace "${own.name}" has ${why} on this machine; ${a.label} does not get skilletor@${own.name} (${NEEDS})`);
+      else plan.enabled.push(`${PLUGIN}@${own.name}`);
+    }
+  }
+  const additions = [];
+  const wanted = [...Object.entries(enabled).filter(([, on]) => on !== false).map(([k]) => k), ...plan.enabled];
+  const seen = /* @__PURE__ */ new Set();
+  for (const key of wanted) {
+    const m = pluginKey(key)?.marketplace;
+    if (m === void 0 || seen.has(m)) continue;
+    seen.add(m);
+    if (m === OFFICIAL_MARKETPLACE || Object.hasOwn(declared, m)) continue;
+    const users = wanted.filter((k) => pluginKey(k)?.marketplace === m).join(", ");
+    if (known[m] === void 0) {
+      plan.warnings.push(`marketplace "${m}" (${users}) is not known to Claude Code on this machine; not declared in ${a.label}`);
+      continue;
+    }
+    const why = notDeclarable(sourceOf(m));
+    if (why) {
+      plan.warnings.push(`marketplace "${m}" (${users}) has ${why} on this machine; not declared in ${a.label} (${NEEDS})`);
+      continue;
+    }
+    additions.push([m, { source: structuredClone(sourceOf(m)) }]);
+    plan.declared.push(m);
+  }
+  if (plan.enabled.length === 0 && additions.length === 0) return plan;
+  const next = { ...settings };
+  if (plan.enabled.length) next.enabledPlugins = { ...enabled, ...Object.fromEntries(plan.enabled.map((k) => [k, true])) };
+  if (additions.length) next.extraKnownMarketplaces = { ...declared, ...Object.fromEntries(additions) };
+  const { indent, eol, final } = text === void 0 ? { indent: "  ", eol: "\n", final: true } : layoutOf(text);
+  const body = JSON.stringify(next, null, indent);
+  plan.next = (eol === "\n" ? body : body.split("\n").join(eol)) + (final ? eol : "");
+  return plan;
+}
+
 // src/report.ts
 var ACTIVATION = {
   skill: "active now",
@@ -9492,7 +9640,7 @@ function hasChanges(r) {
 }
 function isNotable(s) {
   return Boolean(
-    s.added.length || s.updated.length || s.removed.length || s.conflicts.length || s.overwritten.length || s.warnings.length || s.trustRequests.length || s.gitignoreUpdated?.length
+    s.added.length || s.updated.length || s.removed.length || s.conflicts.length || s.overwritten.length || s.warnings.length || s.trustRequests.length || s.gitignoreUpdated?.length || s.settingsUpdated
   );
 }
 function hasNotable(r) {
@@ -9517,6 +9665,7 @@ function reportText(r) {
     for (const c of s.conflicts) lines.push(`  conflict: ${c.path} ${conflictHint(c)}`);
     for (const t of s.trustRequests) lines.push(`  trust: source "${t.name}" (${backendLabel(t)}) \u2014 run: skilletor trust ${t.name}`);
     for (const g of s.gitignoreUpdated ?? []) lines.push(`  ${commitHint(g)}`);
+    if (s.settingsUpdated) lines.push(`  ${settingsHint(s.settingsUpdated)}`);
     for (const w of s.warnings) lines.push(`  warning: ${w}`);
   }
   for (const w of r.warnings ?? []) lines.push(`skilletor: warning: ${w}`);
@@ -9526,12 +9675,22 @@ function reportText(r) {
 function commitHint(file) {
   return `${file} updated \u2014 commit it`;
 }
-function withoutBriefing(r) {
+function settingsHint(u) {
+  const what = [];
+  if (u.enabled.length) what.push(`enables ${u.enabled.join(", ")}`);
+  if (u.declared.length) what.push(`declares marketplace${u.declared.length > 1 ? "s" : ""} ${u.declared.join(", ")}`);
+  return `${u.path} updated (${what.join("; ")}) \u2014 commit it`;
+}
+function withoutRepeats(r) {
   return {
     ...r,
     scopes: r.scopes.map((s) => {
-      if (!s.briefingMissing?.length) return s;
-      const lines = new Set(s.briefingMissing.map((b) => briefingWarning(parseLockKey(b.key).name, b.harness, b.missing)));
+      const settings = s.settingsUpdated ? [] : s.settingsSkipped ?? [];
+      if (!s.briefingMissing?.length && !settings.length) return s;
+      const lines = /* @__PURE__ */ new Set([
+        ...(s.briefingMissing ?? []).map((b) => briefingWarning(parseLockKey(b.key).name, b.harness, b.missing)),
+        ...settings
+      ]);
       const { briefingMissing: _, ...rest } = s;
       return { ...rest, warnings: s.warnings.filter((w) => !lines.has(w)) };
     })
@@ -9539,7 +9698,7 @@ function withoutBriefing(r) {
 }
 function reportHook(report) {
   if (report.error) return { systemMessage: displaySafe(`skilletor: ${report.error}`) };
-  const r = hasChanges(report) ? report : withoutBriefing(report);
+  const r = hasChanges(report) ? report : withoutRepeats(report);
   if (!hasNotable(r)) return {};
   const changed = [];
   let warnings = 0;
@@ -9548,7 +9707,7 @@ function reportHook(report) {
     warnings += s.warnings.length + s.conflicts.length + s.trustRequests.length + s.overwritten.length;
   }
   const removed = r.scopes.reduce((n, s) => n + s.removed.length, 0);
-  const gitignores = r.scopes.flatMap((s) => s.gitignoreUpdated ?? []);
+  const gitignores = r.scopes.flatMap((s) => [...s.gitignoreUpdated ?? [], ...s.settingsUpdated ? [s.settingsUpdated.path] : []]);
   const parts = [];
   if (changed.length) parts.push(`${changed.length} item(s) updated`);
   if (removed) parts.push(`${removed} removed`);
@@ -9569,6 +9728,7 @@ function reportHook(report) {
     for (const c of s.conflicts) ctx.push(`- conflict in ${s.scope} scope: ${c.path} ${conflictHint(c)}`);
     for (const t of s.trustRequests) ctx.push(`- untrusted source ${t.name} (${backendLabel(t)}); run: skilletor trust ${t.name}`);
     for (const g of s.gitignoreUpdated ?? []) ctx.push(`- ${commitHint(g)}`);
+    if (s.settingsUpdated) ctx.push(`- ${settingsHint(s.settingsUpdated)}`);
     for (const w of s.warnings) ctx.push(`- warning: ${w}`);
   }
   return { systemMessage, additionalContext: ctx.length ? ctx.map(displaySafe).join("\n") : void 0 };
@@ -9576,10 +9736,10 @@ function reportHook(report) {
 
 // src/engine.ts
 function cacheRootOf(ctx) {
-  return ctx.cacheRoot ?? join14(ctx.stateRoot, "cache");
+  return ctx.cacheRoot ?? join15(ctx.stateRoot, "cache");
 }
 function targetDirOf(ctx, scope) {
-  return join14(baseOf(ctx, scope), ".claude");
+  return join15(baseOf(ctx, scope), ".claude");
 }
 function baseOf(ctx, scope) {
   return scope === "user" ? ctx.home : ctx.projectDir;
@@ -9596,7 +9756,7 @@ function scoped(ctx) {
 }
 function claudeMemoryFiles(ctx, scope) {
   const base = baseOf(ctx, scope);
-  return scope === "user" ? [join14(base, ".claude", "CLAUDE.md")] : [join14(base, "CLAUDE.md"), join14(base, ".claude", "CLAUDE.md")];
+  return scope === "user" ? [join15(base, ".claude", "CLAUDE.md")] : [join15(base, "CLAUDE.md"), join15(base, ".claude", "CLAUDE.md")];
 }
 function codexHomeOf(ctx) {
   return (ctx.codexHome ?? process.env.CODEX_HOME) || void 0;
@@ -9849,16 +10009,16 @@ function runNotes(noCopy) {
 }
 function hookTrustWarning(ctx, targets) {
   if (!targets.user.includes("codex")) return void 0;
-  const codexHome = codexHomeOf(ctx) || join14(ctx.home, ".codex");
+  const codexHome = codexHomeOf(ctx) || join15(ctx.home, ".codex");
   if (codexHookTrusted(codexHome)) return void 0;
-  return `Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${join14(codexHome, "config.toml")}); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules`;
+  return `Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${join15(codexHome, "config.toml")}); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules`;
 }
 async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource, noCopy) {
   try {
     return await syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource, noCopy);
   } catch (err) {
     try {
-      const lockPath = join14(targetDirOf(ctx, scope), "skilletor.lock.json");
+      const lockPath = join15(targetDirOf(ctx, scope), "skilletor.lock.json");
       state.putUnreached(lockPath, []);
       state.putSourcesRead(lockPath, {});
       state.putRenderInputs(lockPath, void 0);
@@ -9873,7 +10033,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   const base = baseOf(ctx, scope);
   const rc = rootContextOf(ctx, scope);
   if (scope === "user" && !harnesses.includes("hermes")) rc.hermesHome = recordedHermesHome(ctx);
-  const lockPath = join14(targetDir, "skilletor.lock.json");
+  const lockPath = join15(targetDir, "skilletor.lock.json");
   if (scope === "user") moveHermesHome(ctx, state, targetDir, rc, harnesses, rep.warnings);
   const oldLock = readLock(lockPath);
   const gitignoreOn = scopeCfg.gitignore !== false;
@@ -10143,7 +10303,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
     keep,
     rootOf: (key) => rootOfKey(rc, key) ?? targetDir
   });
-  const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) || existsSync11(join14(rootOf(rc, "codex", "rule"), RULES_FILE)) ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings }) : { overwritten: [], exists: false, written: false };
+  const rules = Object.values(oldLock).some((e) => e.block) || plan.some((p) => p.inBlock) || existsSync11(join15(rootOf(rc, "codex", "rule"), RULES_FILE)) ? syncCodexRules({ ctx, scope, harnesses, rc, oldLock, plan, lockPath, labelOf, warnings: rep.warnings }) : { overwritten: [], exists: false, written: false };
   {
     const newLock = readLock(lockPath);
     const inUse = scope === "user" || projectInUse(targetDir, newLock);
@@ -10168,17 +10328,31 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
       const enabled = gitignoreOn && entries.length > 0 && (scope === "project" || inWorkTree(rootDir));
       const change = updateGitignore({ dir: rootDir, entries, enabled });
       if (change === "created" || change === "changed") {
-        (rep.gitignoreUpdated ??= []).push(scopeLabel(scope, base, join14(rootDir, ".gitignore")));
+        (rep.gitignoreUpdated ??= []).push(scopeLabel(scope, base, join15(rootDir, ".gitignore")));
       }
     }
     if (scope === "project") {
       try {
         const change = updateWorktreeInclude({ dir: base, entries: worktreeIncludeEntries(rc), enabled: gitignoreOn && inUse });
         if (change === "created" || change === "changed") {
-          (rep.gitignoreUpdated ??= []).push(scopeLabel(scope, base, join14(base, WORKTREE_INCLUDE)));
+          (rep.gitignoreUpdated ??= []).push(scopeLabel(scope, base, join15(base, WORKTREE_INCLUDE)));
         }
       } catch (err) {
         rep.warnings.push(`${WORKTREE_INCLUDE} not updated: ${err.message}`);
+      }
+    }
+  }
+  const settings = claudeSettingsPlan(ctx, scope, scopeCfg, harnesses);
+  if (settings) {
+    const label = scopeLabel(scope, base, settingsFileOf(ctx));
+    rep.warnings.push(...settings.warnings);
+    if (settings.warnings.length) rep.settingsSkipped = settings.warnings;
+    if (settings.next !== void 0) {
+      try {
+        atomicWrite(settingsFileOf(ctx), settings.next);
+        rep.settingsUpdated = { path: label, enabled: settings.enabled, declared: settings.declared };
+      } catch (err) {
+        rep.warnings.push(`${label} not updated: ${err.message}`);
       }
     }
   }
@@ -10199,7 +10373,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   rep.skipped = result.skipped.map(toChange);
   const shown = (c) => {
     const root = rootOfKey(rc, c.key) ?? targetDir;
-    return { path: root === targetDir ? c.path : labelOf(join14(root, c.path)) };
+    return { path: root === targetDir ? c.path : labelOf(join15(root, c.path)) };
   };
   rep.conflicts = result.conflicts.map(({ key, path, ...how }) => ({ ...shown({ key, path }), ...how }));
   rep.overwritten = [...result.overwritten.map(shown), ...rules.overwritten.map((path) => ({ path }))];
@@ -10228,20 +10402,39 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   }
   return rep;
 }
+function settingsFileOf(ctx) {
+  return join15(targetDirOf(ctx, "project"), "settings.json");
+}
+function claudeSettingsPlan(ctx, scope, scopeCfg, harnesses) {
+  if (scope !== "project" || scopeCfg.claudeSettings === false || !harnesses.includes("claude")) return void 0;
+  if (!existsSync11(join15(targetDirOf(ctx, scope), "skilletor.json"))) return void 0;
+  const file = settingsFileOf(ctx);
+  try {
+    return planClaudeSettings({
+      file,
+      label: scopeLabel(scope, ctx.projectDir, file),
+      projectDir: ctx.projectDir,
+      home: ctx.home,
+      pluginRoot: ctx.pluginRoot ?? (process.env.CLAUDE_PLUGIN_ROOT || void 0)
+    });
+  } catch (err) {
+    return { enabled: [], declared: [], warnings: [`${scopeLabel(scope, ctx.projectDir, file)} not updated: ${err.message}`] };
+  }
+}
 function projectInUse(targetDir, lock) {
-  return Object.keys(lock).length > 0 || existsSync11(join14(targetDir, "skilletor.json")) || existsSync11(join14(targetDir, "skilletor.local.json"));
+  return Object.keys(lock).length > 0 || existsSync11(join15(targetDir, "skilletor.json")) || existsSync11(join15(targetDir, "skilletor.local.json"));
 }
 function worktreeIncludeEntries(rc) {
   const at = (abs, suffix = "") => `/${toPosix(relative4(rc.base, abs))}${suffix}`;
-  const claude = join14(rc.base, ".claude");
-  const out = /* @__PURE__ */ new Set([at(join14(claude, "skilletor.lock.json")), at(join14(claude, "skilletor.local.json"))]);
+  const claude = join15(rc.base, ".claude");
+  const out = /* @__PURE__ */ new Set([at(join15(claude, "skilletor.lock.json")), at(join15(claude, "skilletor.local.json"))]);
   for (const h of HARNESSES) {
     for (const type of ITEM_TYPES) {
       const root = rootOf(rc, h, type);
       if (root === void 0) continue;
-      if (isBlockType(h, type)) out.add(at(join14(root, RULES_FILE)));
-      else if (type === "skill") out.add(at(join14(root, "skills"), "/"));
-      else if (LAYOUTS[h].localTypes?.includes(type)) out.add(at(join14(root, `${type}s`), "/**/.local.*"));
+      if (isBlockType(h, type)) out.add(at(join15(root, RULES_FILE)));
+      else if (type === "skill") out.add(at(join15(root, "skills"), "/"));
+      else if (LAYOUTS[h].localTypes?.includes(type)) out.add(at(join15(root, `${type}s`), "/**/.local.*"));
     }
   }
   return [...out].sort();
@@ -10277,8 +10470,8 @@ function trackedWarnings(ctx, scope, base, written) {
       const skill = k?.type === "skill";
       const targets = skill ? [k.target] : paths;
       const r = skill ? " -r" : "";
-      const cmd = scope === "project" ? `git rm${r} --cached ${targets.map((p) => shellWord(scopeLabel(scope, base, join14(root, p)))).join(" ")}` : `git -C ${shellWord(scopeLabel(scope, base, root))} rm${r} --cached ${targets.map(shellWord).join(" ")}`;
-      const label = key ?? scopeLabel(scope, base, join14(root, paths[0]));
+      const cmd = scope === "project" ? `git rm${r} --cached ${targets.map((p) => shellWord(scopeLabel(scope, base, join15(root, p)))).join(" ")}` : `git -C ${shellWord(scopeLabel(scope, base, root))} rm${r} --cached ${targets.map(shellWord).join(" ")}`;
+      const label = key ?? scopeLabel(scope, base, join15(root, paths[0]));
       out.push(`${label} is tracked by git although skilletor manages it \u2014 untrack it: ${cmd}`);
     }
   }
@@ -10300,21 +10493,21 @@ function briefingOf(ctx, scope, lock, only) {
     const file = Object.keys(entry.files)[0];
     if (!root || !file) continue;
     if (!rootsOf.has(k.harness)) rootsOf.set(k.harness, skillRoots(k.harness, scope, roots));
-    const missing = missingSkills(k.harness, join14(root, file), rootsOf.get(k.harness));
+    const missing = missingSkills(k.harness, join15(root, file), rootsOf.get(k.harness));
     if (missing?.length) out.push({ key, harness: k.harness, missing });
   }
   return out;
 }
 function syncCodexRules(a) {
   const { ctx, scope, rc, oldLock, labelOf, warnings } = a;
-  const rulesFile = join14(rootOf(rc, "codex", "rule"), RULES_FILE);
+  const rulesFile = join15(rootOf(rc, "codex", "rule"), RULES_FILE);
   const rulesLabel = labelOf(rulesFile);
-  const agentsFile = join14(scope === "user" ? rootOf(rc, "codex", "rule") : rc.base, "AGENTS.md");
+  const agentsFile = join15(scope === "user" ? rootOf(rc, "codex", "rule") : rc.base, "AGENTS.md");
   const agentsLabel = labelOf(agentsFile);
   const LEGACY = "AGENTS.md";
   let fileText = null;
   try {
-    fileText = readFileSync11(rulesFile, "utf8");
+    fileText = readFileSync12(rulesFile, "utf8");
   } catch {
   }
   const current = fileText === null ? /* @__PURE__ */ new Map() : parseRulesFile(fileText);
@@ -10376,12 +10569,12 @@ function syncCodexRules(a) {
     else atomicWrite(agentsFile, agentsNext);
   }
   if (want) {
-    const override = join14(dirname4(agentsFile), "AGENTS.override.md");
+    const override = join15(dirname4(agentsFile), "AGENTS.override.md");
     if (existsSync11(override)) {
       warnings.push(`${labelOf(override)} exists; Codex reads it instead of AGENTS.md, so the pointer to the skilletor rules is not seen`);
     }
     if (scope === "project" && agentsNext !== null) {
-      const limit = projectDocLimit(codexHomeOf(ctx) || join14(ctx.home, ".codex"));
+      const limit = projectDocLimit(codexHomeOf(ctx) || join15(ctx.home, ".codex"));
       const bytes = Buffer.byteLength(agentsNext, "utf8");
       if (bytes > limit) {
         warnings.push(
@@ -10399,7 +10592,7 @@ function codexRulesFiles(given) {
   const scopes = ctx.projectDir ? ["user", "project"] : ["user"];
   for (const scope of scopes) {
     if (!("error" in loaded) && !loaded.targets[scope].includes("codex")) continue;
-    const file = join14(rootOf(rootContextOf(ctx, scope), "codex", "rule"), RULES_FILE);
+    const file = join15(rootOf(rootContextOf(ctx, scope), "codex", "rule"), RULES_FILE);
     if (existsSync11(file)) out.push(file);
   }
   return out;
@@ -10418,7 +10611,7 @@ async function check(given, opts = {}) {
   if (sel === "user" || sel === "all") scopes.push(["user", config.user]);
   if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
   for (const [scope, scopeCfg] of scopes) {
-    const lockPath = join14(targetDirOf(ctx, scope), "skilletor.lock.json");
+    const lockPath = join15(targetDirOf(ctx, scope), "skilletor.lock.json");
     const oldLock = readLock(lockPath);
     const sources = sourcesOf(config, scope);
     const trust = /* @__PURE__ */ new Map();
@@ -10478,6 +10671,9 @@ function scopeDrift(ctx, scope, scopeCfg, harnesses, lock, servedBy) {
     const home = hermesHomeOf(ctx);
     if (!samePath(home, recordedHermesHome(ctx))) out.push({ kind: "targets", id: `hermes-home:${home}`, sources: [] });
   }
+  if (claudeSettingsPlan(ctx, scope, scopeCfg, harnesses)?.next !== void 0) {
+    out.push({ kind: "layout", id: "layout:claude-settings", sources: [] });
+  }
   return [...out, ...layoutDrift(ctx, scope, scopeCfg, lock), ...declaredDrift(scopeCfg, scope, harnesses, lock, servedBy)];
 }
 function moveHermesHome(ctx, state, targetDir, rc, harnesses, warnings) {
@@ -10485,7 +10681,7 @@ function moveHermesHome(ctx, state, targetDir, rc, harnesses, warnings) {
   const previous = recordedHermesHome(ctx);
   const current = hermesHomeOf(ctx);
   if (samePath(previous, current)) return;
-  const lock = readLock(join14(targetDir, "skilletor.lock.json"));
+  const lock = readLock(join15(targetDir, "skilletor.lock.json"));
   const moved = Object.keys(lock).filter((key) => parseLockKey(key).harness === "hermes");
   if (moved.length > 0) {
     const old = { ...rc, hermesHome: previous };
@@ -10518,7 +10714,7 @@ function layoutDrift(ctx, scope, scopeCfg, lock) {
   if (scope === "project") {
     const rc = rootContextOf(ctx, scope);
     const want = gitignoreOn && inUse ? worktreeIncludeEntries(rc) : [];
-    const have = blockEntries(join14(rc.base, WORKTREE_INCLUDE));
+    const have = blockEntries(join15(rc.base, WORKTREE_INCLUDE));
     if (have.join("\n") !== want.join("\n") && (have.length > 0 || Object.keys(lock).length > 0)) {
       out.push({ kind: "layout", id: "layout:worktreeinclude", sources: [] });
     }
@@ -10571,7 +10767,7 @@ function status(given, opts = {}) {
   const out = { scopes: [] };
   if (sel !== "user" && projectIsHome(given)) out.projectIsHome = true;
   for (const [scope, scopeCfg] of scopes) {
-    const lock = readLock(join14(targetDirOf(ctx, scope), "skilletor.lock.json"));
+    const lock = readLock(join15(targetDirOf(ctx, scope), "skilletor.lock.json"));
     const active = targets[scope];
     const rows = scopeCfg.install.flatMap((i) => receivers(active, i.type, scope).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
     const declaredKeys = new Set(rows.map((r) => r.key));
@@ -10647,7 +10843,7 @@ function status(given, opts = {}) {
 }
 
 // src/commands.ts
-import { dirname as dirname5, join as join15 } from "node:path";
+import { dirname as dirname5, join as join16 } from "node:path";
 
 // src/probe.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
@@ -10691,7 +10887,7 @@ function projectRoot(ctx) {
 }
 function configPath(ctx, project) {
   const root = project ? projectRoot(ctx) : ctx.home;
-  return join15(root, ".claude", "skilletor.json");
+  return join16(root, ".claude", "skilletor.json");
 }
 function load(ctx) {
   return loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx) });
@@ -10833,7 +11029,7 @@ function strandedOverrides(ctx, name, project) {
   if (!givesBackend(sourceEntry(path, name))) return void 0;
   const root = projectDirOf(ctx);
   if (!root) return void 0;
-  const local = join15(root, ".claude", "skilletor.local.json");
+  const local = join16(root, ".claude", "skilletor.local.json");
   const others = [
     {
       path: configPath(ctx, !project),
@@ -10849,7 +11045,7 @@ function strandedOverrides(ctx, name, project) {
 function sourceElsewhere(ctx, name, project) {
   const root = projectDirOf(ctx);
   if (!root) return "; it is not a configured source";
-  const local = join15(root, ".claude", "skilletor.local.json");
+  const local = join16(root, ".claude", "skilletor.local.json");
   const hits = [];
   if (sourceEntry(configPath(ctx, !project), name) !== void 0) {
     hits.push(project ? "the user config declares it (run without --project)" : "the project config declares it (use --project)");
@@ -11039,7 +11235,7 @@ async function cmdUninstall(ctx, args) {
   const project = Boolean(args.project);
   const path = configPath(ctx, project);
   const scopeName = project ? "project" : "user";
-  const lock = readLock(join15(dirname5(path), "skilletor.lock.json"));
+  const lock = readLock(join16(dirname5(path), "skilletor.lock.json"));
   const parsed = args.items.map((spec) => ({ spec, ...parseItemSpec(spec) }));
   const errors = [];
   const hints = [];
@@ -11195,9 +11391,9 @@ function installedSet(ctx, config) {
   for (const i of declaredItems(config)) set.add(`${i.key}@${i.source}`);
   const projectDir = projectDirOf(ctx);
   for (const scope of ["user", "project"]) {
-    const dir = join15(scope === "user" ? ctx.home : projectDir ?? "", ".claude");
+    const dir = join16(scope === "user" ? ctx.home : projectDir ?? "", ".claude");
     if (scope === "project" && !projectDir) continue;
-    for (const [key, entry] of Object.entries(readLock(join15(dir, "skilletor.lock.json")))) {
+    for (const [key, entry] of Object.entries(readLock(join16(dir, "skilletor.lock.json")))) {
       if (entry.skipped) continue;
       set.add(`${parseLockKey(key).target}@${entry.source}`);
     }
@@ -11207,7 +11403,7 @@ function installedSet(ctx, config) {
 
 // src/hooks.ts
 import { execFileSync as execFileSync4, spawn } from "node:child_process";
-import { readFileSync as readFileSync12 } from "node:fs";
+import { readFileSync as readFileSync13 } from "node:fs";
 import { resolve as resolvePath6 } from "node:path";
 var SESSION_START_TIMEOUT_MS = 5e3;
 var DEFAULT_INTERVAL = 600;
@@ -11285,7 +11481,7 @@ function withCodexRules(out, ctx) {
   const problems = [];
   for (const file of codexRulesFiles(ctx)) {
     try {
-      texts.push(readFileSync12(file, "utf8"));
+      texts.push(readFileSync13(file, "utf8"));
     } catch (err) {
       problems.push(`cannot read ${file} (${err.message})`);
     }
@@ -11459,7 +11655,7 @@ function makeContext2(flags) {
     home,
     // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd.
     projectDir: flags.projectDir ?? projectRootOf(process.cwd()),
-    stateRoot: join16(home, ".claude", "skilletor")
+    stateRoot: join17(home, ".claude", "skilletor")
   };
 }
 function ttyPrompter() {
@@ -11691,7 +11887,7 @@ async function runHookCommand(args) {
   const ctx = {
     home,
     projectDir,
-    stateRoot: join16(home, ".claude", "skilletor"),
+    stateRoot: join17(home, ".claude", "skilletor"),
     binPath: fileURLToPath(import.meta.url)
   };
   if (harness === "codex" || harness === "hermes") ctx.harness = harness;
