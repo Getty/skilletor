@@ -1021,15 +1021,17 @@ therefore keeps two things in that file:
   `skilletor.local.json` alone is this machine's and gitignored), `claude` is a target of the
   project, and `claudeSettings` (§3) is not `false`. The user scope's `~/.claude/settings.json`
   is never read or written, nor is `settings.local.json` (per machine, never committed).
-- **Which marketplace.** From Claude Code's plugin state, read-only:
-  `<home>/.claude/plugins/installed_plugins.json` lists each `skilletor@<m>` install with its
+- **Which marketplace.** From Claude Code's plugin state, read-only. `<claude dir>` is
+  `$CLAUDE_CONFIG_DIR` (empty counts as unset; `EngineContext.claudeConfigDir`), else
+  `<home>/.claude`; nothing else of skilletor moves with it (§14.6).
+  `<claude dir>/plugins/installed_plugins.json` lists each `skilletor@<m>` install with its
   scope, `installPath` and, for a project install, `projectPath`. The install whose
   `installPath` is `CLAUDE_PLUGIN_ROOT` – the plugin that runs this hook
   (`EngineContext.pluginRoot`) – names `<m>`; otherwise the installs of user scope and of this
   project: one marketplace among them is `<m>`, several are ambiguous (a warning, no entry). No
   install (the standalone CLI): no entry, no warning. A Codex hook's `CLAUDE_PLUGIN_ROOT` names
   no Claude install and falls through to the same lookup.
-- **Which source.** `<home>/.claude/plugins/known_marketplaces.json` holds each marketplace's
+- **Which source.** `<claude dir>/plugins/known_marketplaces.json` holds each marketplace's
   `source` object as Claude Code took it; skilletor copies it whole into
   `{ "source": … }`, but only of a kind that means the same on every machine: `github` with a
   `repo`, `git` with a remote URL (`https://`, `http://`, `ssh://`, `git://`, `user@host:`),
@@ -1490,7 +1492,8 @@ once per target and names the targets in the scope header when they are not just
 
 - Config, lock and state stay under `.claude/` (`~/.claude/skilletor.json`,
   `<repo>/.claude/skilletor.json`) for both harnesses, even on a Codex-only machine.
-- `CLAUDE_CONFIG_DIR` is not honoured, neither for markers nor for the target directory.
+- `CLAUDE_CONFIG_DIR` is honoured only for Claude Code's plugin state (§6.8, k142); markers, the
+  user-scope target directory, config, lock and state stay under `<home>/.claude`.
 - Detection is re-evaluated on every run: a harness that disappears (e.g. `~/.codex`
   deleted) has its installed items removed on the next sync. Pin `targets` to avoid that.
 - The user-scope Codex agent root follows `$CODEX_HOME` at sync time. Changing

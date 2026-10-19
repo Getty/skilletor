@@ -3,7 +3,7 @@
 // marketplace an `enabledPlugins` entry of the file needs, so a fresh checkout gets Claude
 // Code's offer to install the plugins. Add-only: no existing key is changed or removed. The
 // marketplace and its source come from Claude Code's own plugin state under
-// `<home>/.claude/plugins`; a source that only means something on this machine (a directory)
+// `<claude config dir>/plugins`; a source that only means something on this machine (a directory)
 // is never written into a committed file. Never throws: what it cannot do is a warning.
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -35,8 +35,8 @@ export interface PlanInput {
   label: string;
   /** The project root: a project-scope plugin install counts only for this project. */
   projectDir: string;
-  /** Stands in for `~`: Claude Code's plugin state is `<home>/.claude/plugins`. */
-  home: string;
+  /** Claude Code's config dir (`CLAUDE_CONFIG_DIR`, else `<home>/.claude`): its plugin state is `<dir>/plugins`. */
+  claudeDir: string;
   /** `CLAUDE_PLUGIN_ROOT` of the running plugin, when skilletor runs as one. */
   pluginRoot?: string;
 }
@@ -71,8 +71,8 @@ interface Install {
 
 /** skilletor's installs from `installed_plugins.json` (version 2: a list per key; an older
  *  file's single object is read as a list of one). */
-function skilletorInstalls(home: string): Install[] {
-  const file = readObject(join(home, ".claude", "plugins", "installed_plugins.json"));
+function skilletorInstalls(claudeDir: string): Install[] {
+  const file = readObject(join(claudeDir, "plugins", "installed_plugins.json"));
   const plugins = file?.plugins;
   if (!isObject(plugins)) return [];
   const out: Install[] = [];
@@ -94,9 +94,9 @@ function skilletorInstalls(home: string): Install[] {
  * install and this project's. Several of those: ambiguous, the file gets none.
  */
 export function skilletorMarketplace(
-  home: string, projectDir: string, pluginRoot?: string,
+  claudeDir: string, projectDir: string, pluginRoot?: string,
 ): { name?: string; ambiguous?: string[] } {
-  const installs = skilletorInstalls(home);
+  const installs = skilletorInstalls(claudeDir);
   const unique = (xs: Install[]) => [...new Set(xs.map((x) => x.marketplace))];
   if (pluginRoot) {
     const running = unique(installs.filter((i) => i.installPath !== undefined && samePath(i.installPath, pluginRoot)));
@@ -167,13 +167,13 @@ export function planClaudeSettings(a: PlanInput): SettingsPlan {
   }
   const enabled = (settings.enabledPlugins ?? {}) as Json;
   const declared = (settings.extraKnownMarketplaces ?? {}) as Json;
-  const known = readObject(join(a.home, ".claude", "plugins", "known_marketplaces.json")) ?? {};
+  const known = readObject(join(a.claudeDir, "plugins", "known_marketplaces.json")) ?? {};
   const sourceOf = (m: string): unknown => (isObject(known[m]) ? (known[m] as Json).source : undefined);
   const NEEDS = "a committed file takes a github, git or url source";
 
   // skilletor itself – unless the file names it already, from any marketplace, on or off.
   if (!Object.keys(enabled).some((k) => pluginKey(k)?.name === PLUGIN)) {
-    const own = skilletorMarketplace(a.home, a.projectDir, a.pluginRoot);
+    const own = skilletorMarketplace(a.claudeDir, a.projectDir, a.pluginRoot);
     if (own.ambiguous) {
       plan.warnings.push(`skilletor is installed from several marketplaces (${own.ambiguous.join(", ")}); ` +
         `${a.label} does not get it – enable the one teammates should use`);

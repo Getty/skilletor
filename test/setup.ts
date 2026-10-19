@@ -24,6 +24,10 @@ for (const name of ["CLAUDE_PROJECT_DIR", "SKILLETOR_PROJECT_DIR"]) delete proce
 // injects it (`EngineContext.pluginRoot`).
 delete process.env.CLAUDE_PLUGIN_ROOT;
 
+// k142: Claude Code's plugin state lives in CLAUDE_CONFIG_DIR when it is set; a test that needs
+// one injects it (`EngineContext.claudeConfigDir`) or sets it for the one call.
+delete process.env.CLAUDE_CONFIG_DIR;
+
 // The same for the Hermes home (spec §16.2): a suite run from a Hermes session inherits
 // HERMES_HOME, and the engine would take it for the home to install Hermes skills under. A
 // test that needs one injects it (`EngineContext.hermesHome`) or sets it in the env it spawns

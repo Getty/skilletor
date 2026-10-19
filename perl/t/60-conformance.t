@@ -208,8 +208,9 @@ sub run_case {
 
   local $ENV{GIT_CONFIG_GLOBAL}   = "$tmp/gitconfig";
   local $ENV{GIT_CONFIG_NOSYSTEM} = '1';
-  local @ENV{qw( CODEX_HOME HERMES_HOME CLAUDE_PLUGIN_ROOT )};
-  delete @ENV{qw( CODEX_HOME HERMES_HOME CLAUDE_PLUGIN_ROOT )};
+  local @ENV{qw( CODEX_HOME HERMES_HOME CLAUDE_PLUGIN_ROOT CLAUDE_CONFIG_DIR )};
+  delete @ENV{qw( CODEX_HOME HERMES_HOME CLAUDE_PLUGIN_ROOT CLAUDE_CONFIG_DIR )};
+  $ENV{$_} = concrete( $c->{env}{$_}, $r ) for sort keys %{ $c->{env} // {} };
   build_git( $case_dir, $c, $r );
   path( $r->{home}, '.claude' )->mkpath;
   path( $r->{home}, '.claude.json' )->spew_raw("{}\n");    # Claude Code is in use (spec §14.1)

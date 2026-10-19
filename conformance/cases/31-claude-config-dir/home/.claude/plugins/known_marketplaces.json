@@ -1,0 +1,8 @@
+{
+  "decoy": {
+    "source": {
+      "source": "github",
+      "repo": "someone/decoy"
+    }
+  }
+}

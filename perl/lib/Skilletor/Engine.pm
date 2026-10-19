@@ -70,6 +70,13 @@ has plugin_root => (
   builder => sub { $ENV{CLAUDE_PLUGIN_ROOT} },
 );
 
+# `CLAUDE_CONFIG_DIR` (k142): Claude Code's config dir, where its plugin state lives. Only that
+# state is read from it. Empty means unset, then `<home>/.claude`.
+has claude_config_dir => (
+  is      => 'lazy',
+  builder => sub { $ENV{CLAUDE_CONFIG_DIR} },
+);
+
 sub _git_remote {
   my ( $dir ) = @_;
   my $r = eval { run_command( cmd => [ 'git', '-C', $dir, 'remote', 'get-url', 'origin' ], env => git_env() ) };
@@ -591,7 +598,8 @@ sub _claude_settings_plan {
   my $label = _scope_label( $scope, $self->project_dir_of, $file );
   my $plan  = eval {
     plan_claude_settings(
-      file => $file, label => $label, project_dir => $self->project_dir_of, home => $self->home,
+      file => $file, label => $label, project_dir => $self->project_dir_of,
+      claude_dir => ( defined $self->claude_config_dir && length $self->claude_config_dir ? $self->claude_config_dir : path_join( $self->home, '.claude' ) ),
       plugin_root => ( defined $self->plugin_root && length $self->plugin_root ) ? $self->plugin_root : undef,
     );
   };
@@ -999,6 +1007,12 @@ command that untracks it.
   git_remote => sub { my ( $project_dir ) = @_; return $url }
 
 The project's C<origin>, a render input of the project scope. Default: ask git.
+
+=attr claude_config_dir
+
+C<CLAUDE_CONFIG_DIR> by default, else F<< <home>/.claude >>: Claude Code's config
+dir, where the plugin state for the settings requirement is read. An empty
+value counts as unset.
 
 =attr plugin_root
 

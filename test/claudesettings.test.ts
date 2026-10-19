@@ -4,7 +4,7 @@
 // plugin state lives in the temp home, never the real one.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { check, sync, type EngineContext } from "../src/engine.ts";
@@ -347,6 +347,41 @@ test("k140: session-start adds the requirement and asks for the commit; broken f
     writeFileSync(join(e.home, ".claude", "plugins", "known_marketplaces.json"), "[]");
     assert.deepEqual(await runHook("session-start", { source: "startup" }, e.ctx), {});
     assert.equal(readFileSync(e.settings, "utf8"), "{ not json");
+  } finally {
+    e.cleanup();
+  }
+});
+
+// Asserts (k142): Claude Code's plugin state lives in CLAUDE_CONFIG_DIR when that is set – the
+// injected `claudeConfigDir` or, without one, the environment; an empty value is unset. The
+// state under `<home>/.claude` is then ignored, so a stale copy there cannot decide.
+test("k142: the plugin state is read from CLAUDE_CONFIG_DIR, injected or from the environment", async () => {
+  const e = env();
+  try {
+    const alt = join(e.tmp.dir, "alt-config");
+    mkdirSync(join(alt, "plugins"), { recursive: true });
+    writeFileSync(join(alt, "plugins", "known_marketplaces.json"), JSON.stringify({ getty: { source: GETTY } }));
+    writeFileSync(join(alt, "plugins", "installed_plugins.json"), JSON.stringify({
+      version: 2, plugins: { "skilletor@getty": [{ scope: "user", installPath: join(alt, "plugins", "cache", "getty", "skilletor", "0.7.0") }] },
+    }));
+    e.writeCfg("project", {});
+    // Nothing under <home>/.claude/plugins, no variable: nothing to add.
+    await sync(e.ctx);
+    assert.equal(existsSync(e.settings), false);
+    await sync({ ...e.ctx, claudeConfigDir: alt });
+    assert.deepEqual(JSON.parse(readFileSync(e.settings, "utf8")).enabledPlugins, { "skilletor@getty": true });
+    rmSync(e.settings);
+    process.env.CLAUDE_CONFIG_DIR = alt;
+    try {
+      await sync(e.ctx);
+      assert.deepEqual(JSON.parse(readFileSync(e.settings, "utf8")).enabledPlugins, { "skilletor@getty": true });
+      rmSync(e.settings);
+      process.env.CLAUDE_CONFIG_DIR = "";
+      await sync(e.ctx);
+      assert.equal(existsSync(e.settings), false);
+    } finally {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    }
   } finally {
     e.cleanup();
   }

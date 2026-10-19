@@ -1,0 +1,17 @@
+{
+  "description": "CLAUDE_CONFIG_DIR (k142) moves Claude Code's plugin state: the settings requirement reads skilletor's install and the marketplace sources from ${HOME}/alt-claude/plugins, not from the decoy under ${HOME}/.claude/plugins; check then finds no settings drift.",
+  "env": {
+    "CLAUDE_CONFIG_DIR": "${HOME}/alt-claude"
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    }
+  ]
+}

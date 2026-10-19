@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "plugins": {
+    "skilletor@getty": [
+      {
+        "scope": "user",
+        "installPath": "${HOME}/alt-claude/plugins/cache/getty/skilletor/0.7.0"
+      }
+    ]
+  }
+}

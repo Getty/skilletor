@@ -71,6 +71,9 @@ export interface EngineContext {
   /** `CLAUDE_PLUGIN_ROOT` (spec §6.8): the running plugin's install, which names the
    *  marketplace skilletor is installed from; default from the env. */
   pluginRoot?: string;
+  /** `CLAUDE_CONFIG_DIR` (k142): Claude Code's config dir, where its plugin state lives; default
+   *  from the env, else `<home>/.claude`. Only that state is read from it (spec §6.8). */
+  claudeConfigDir?: string;
 }
 
 export interface SyncOptions {
@@ -118,6 +121,11 @@ function scoped(ctx: EngineContext): EngineContext {
 function claudeMemoryFiles(ctx: EngineContext, scope: ScopeName): string[] {
   const base = baseOf(ctx, scope);
   return scope === "user" ? [join(base, ".claude", "CLAUDE.md")] : [join(base, "CLAUDE.md"), join(base, ".claude", "CLAUDE.md")];
+}
+
+/** Claude Code's config dir: injected, else `$CLAUDE_CONFIG_DIR` (empty means unset), else `<home>/.claude`. */
+function claudeConfigDirOf(ctx: EngineContext): string {
+  return ctx.claudeConfigDir || process.env.CLAUDE_CONFIG_DIR || join(ctx.home, ".claude");
 }
 
 /** `$CODEX_HOME`, injected or from the environment; empty means unset. */
@@ -1143,7 +1151,7 @@ function claudeSettingsPlan(
   const file = settingsFileOf(ctx);
   try {
     return planClaudeSettings({
-      file, label: scopeLabel(scope, ctx.projectDir!, file), projectDir: ctx.projectDir!, home: ctx.home,
+      file, label: scopeLabel(scope, ctx.projectDir!, file), projectDir: ctx.projectDir!, claudeDir: claudeConfigDirOf(ctx),
       pluginRoot: ctx.pluginRoot ?? (process.env.CLAUDE_PLUGIN_ROOT || undefined),
     });
   } catch (err) {

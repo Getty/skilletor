@@ -1,6 +1,12 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - `CLAUDE_CONFIG_DIR` is honoured where skilletor reads Claude Code's
+    plugin state for the project's `.claude/settings.json` requirement:
+    `<dir>/plugins/installed_plugins.json` and `known_marketplaces.json`,
+    default `<home>/.claude` (an empty value counts as unset). Markers, the user-scope root, config, lock and state still live under
+    `<home>/.claude`. The Perl port does the same; conformance case 31 pins
+    it for both engines.
   - Five oddities the Perl port found are fixed. A source serving two foreign
     entries of one bundle asks for trust once, not twice. A `\U` escape above
     U+10FFFF in a bundle file is that bundle's warning instead of an error

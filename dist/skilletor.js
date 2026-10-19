@@ -9483,8 +9483,8 @@ function pluginKey(key) {
   if (at <= 0 || at === key.length - 1) return void 0;
   return { name: key.slice(0, at), marketplace: key.slice(at + 1) };
 }
-function skilletorInstalls(home) {
-  const file = readObject(join14(home, ".claude", "plugins", "installed_plugins.json"));
+function skilletorInstalls(claudeDir) {
+  const file = readObject(join14(claudeDir, "plugins", "installed_plugins.json"));
   const plugins = file?.plugins;
   if (!isObject(plugins)) return [];
   const out = [];
@@ -9499,8 +9499,8 @@ function skilletorInstalls(home) {
   }
   return out;
 }
-function skilletorMarketplace(home, projectDir, pluginRoot) {
-  const installs = skilletorInstalls(home);
+function skilletorMarketplace(claudeDir, projectDir, pluginRoot) {
+  const installs = skilletorInstalls(claudeDir);
   const unique = (xs) => [...new Set(xs.map((x) => x.marketplace))];
   if (pluginRoot) {
     const running = unique(installs.filter((i) => i.installPath !== void 0 && samePath(i.installPath, pluginRoot)));
@@ -9558,11 +9558,11 @@ function planClaudeSettings(a) {
   }
   const enabled = settings.enabledPlugins ?? {};
   const declared = settings.extraKnownMarketplaces ?? {};
-  const known = readObject(join14(a.home, ".claude", "plugins", "known_marketplaces.json")) ?? {};
+  const known = readObject(join14(a.claudeDir, "plugins", "known_marketplaces.json")) ?? {};
   const sourceOf = (m) => isObject(known[m]) ? known[m].source : void 0;
   const NEEDS = "a committed file takes a github, git or url source";
   if (!Object.keys(enabled).some((k) => pluginKey(k)?.name === PLUGIN)) {
-    const own = skilletorMarketplace(a.home, a.projectDir, a.pluginRoot);
+    const own = skilletorMarketplace(a.claudeDir, a.projectDir, a.pluginRoot);
     if (own.ambiguous) {
       plan.warnings.push(`skilletor is installed from several marketplaces (${own.ambiguous.join(", ")}); ${a.label} does not get it \u2013 enable the one teammates should use`);
     } else if (own.name !== void 0) {
@@ -9766,6 +9766,9 @@ function scoped(ctx) {
 function claudeMemoryFiles(ctx, scope) {
   const base = baseOf(ctx, scope);
   return scope === "user" ? [join15(base, ".claude", "CLAUDE.md")] : [join15(base, "CLAUDE.md"), join15(base, ".claude", "CLAUDE.md")];
+}
+function claudeConfigDirOf(ctx) {
+  return ctx.claudeConfigDir || process.env.CLAUDE_CONFIG_DIR || join15(ctx.home, ".claude");
 }
 function codexHomeOf(ctx) {
   return (ctx.codexHome ?? process.env.CODEX_HOME) || void 0;
@@ -10451,7 +10454,7 @@ function claudeSettingsPlan(ctx, scope, scopeCfg, harnesses) {
       file,
       label: scopeLabel(scope, ctx.projectDir, file),
       projectDir: ctx.projectDir,
-      home: ctx.home,
+      claudeDir: claudeConfigDirOf(ctx),
       pluginRoot: ctx.pluginRoot ?? (process.env.CLAUDE_PLUGIN_ROOT || void 0)
     });
   } catch (err) {

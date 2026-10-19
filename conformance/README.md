@@ -84,6 +84,7 @@ Cases run in name order, each in a fresh temp dir; none depends on another.
 | `description` | Required. What the case pins. |
 | `git` | Optional. Git sources, by repository name (below). |
 | `git.<name>.commits[].executable` | Optional. Paths in the commit's tree made executable before it is committed (below). |
+| `env` | Optional. Environment variables set for the whole case, `${HOME}`, `${PROJECT}` and `${TMP}` replaced; only `CLAUDE_CONFIG_DIR` so far. |
 | `steps` | Required, run in order on the same temp dirs: a step sees what the steps before it wrote. |
 | `steps[].id` | Names the expectation: `expected/<id>.json`, `expected/<id>/`. Unique in the case. |
 | `steps[].op` | `resolve`, `sync`, `check` or `status` (below). |
@@ -137,7 +138,8 @@ The engine runs with:
 - state root `${HOME}/.claude/skilletor`, cache root `${HOME}/.claude/skilletor/cache`
   (the defaults the CLI uses);
 - `CODEX_HOME` = `${HOME}/.codex`, which does not exist, so Codex is not detected;
-  `HERMES_HOME` = `${HOME}/.hermes`; `CLAUDE_PLUGIN_ROOT` unset. The active target is Claude
+  `HERMES_HOME` = `${HOME}/.hermes`; `CLAUDE_PLUGIN_ROOT` and `CLAUDE_CONFIG_DIR` unset,
+  unless the case's `env` sets them (below). The active target is Claude
   Code alone, detected from the marker – no case sets `targets` unless it is about them;
 - `GIT_CONFIG_GLOBAL` = `${TMP}/gitconfig` and `GIT_CONFIG_NOSYSTEM=1`, for the engine's git
   runs and the runner's alike, so no user or system git config is read;
@@ -381,6 +383,7 @@ show it, its `description` saying which.
 | `27-rules` | rules of both scopes with one name each install their own `.local.` copy; a hand-written rule stays; a rules wildcard in status |
 | `28-claude-settings` | the plugin requirement added to an existing tab-indented `settings.json`: order, indent, a `false` entry and other keys kept, git and github marketplaces declared, a directory one refused (`settingsSkipped`); a second sync adds nothing |
 | `29-executable` | a skill's executable script keeps its bit, other files and an executable agent source get none; a second sync finds the bits in place |
+| `31-claude-config-dir` | `CLAUDE_CONFIG_DIR` moves Claude Code's plugin state: the settings requirement reads the install and marketplaces there, a decoy under `~/.claude/plugins` is ignored (k142) |
 | `30-untrusted-status` | an untrusted project-only source: `status` names it before any sync, the sync installs nothing but writes the project's blocks, `check` lists the trust request and asks for no sync |
 
 The state files two engines on one machine share – `render-inputs.json` with its hash,

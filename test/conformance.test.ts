@@ -43,6 +43,7 @@ interface Step {
 interface Case {
   description: string;
   git?: Record<string, { url: string; commits: { tree: string; tag?: string; branch?: string; executable?: string[] }[] }>;
+  env?: Record<string, string>;
   steps: Step[];
   engines?: Record<string, { skip?: string; steps?: Record<string, { skip?: string; expected?: string }> }>;
 }
@@ -238,7 +239,8 @@ async function runCase(name: string): Promise<void> {
   try {
     // The git config the engine's git runs with: this case's alone (README: environment).
     Object.assign(process.env, { GIT_CONFIG_GLOBAL: join(tmp, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1" });
-    for (const v of ["CODEX_HOME", "HERMES_HOME", "CLAUDE_PLUGIN_ROOT"]) delete process.env[v];
+    for (const v of ["CODEX_HOME", "HERMES_HOME", "CLAUDE_PLUGIN_ROOT", "CLAUDE_CONFIG_DIR"]) delete process.env[v];
+    for (const [k, v] of Object.entries(c.env ?? {})) process.env[k] = concrete(v, r);
     buildGit(caseDir, c, r, { ...process.env, ...COMMIT_ENV });
     mkdirSync(join(r.home, ".claude"), { recursive: true });
     writeFileSync(join(r.home, ".claude.json"), "{}\n"); // Claude Code is in use (spec §14.1)

@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "plugins": {
+    "skilletor@decoy": [
+      {
+        "scope": "user",
+        "installPath": "${HOME}/.claude/plugins/cache/decoy/skilletor/0.7.0"
+      }
+    ]
+  }
+}

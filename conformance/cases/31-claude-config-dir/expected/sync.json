@@ -1,0 +1,41 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "gitignoreUpdated": [
+        ".claude/.gitignore",
+        ".worktreeinclude"
+      ],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "settingsUpdated": {
+        "declared": [
+          "getty"
+        ],
+        "enabled": [
+          "skilletor@getty"
+        ],
+        "path": ".claude/settings.json"
+      },
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    },
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

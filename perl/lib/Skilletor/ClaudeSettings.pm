@@ -41,8 +41,8 @@ sub _str { js_type( $_[0] ) eq 'string' ? $_[0] : undef }
 # skilletor's installs from installed_plugins.json (a list per key; an older file's single
 # object is read as a list of one).
 sub _skilletor_installs {
-  my ( $home ) = @_;
-  my $file = _read_object( path_join( $home, '.claude', 'plugins', 'installed_plugins.json' ) );
+  my ( $claude_dir ) = @_;
+  my $file = _read_object( path_join( $claude_dir, 'plugins', 'installed_plugins.json' ) );
   my $plugins = $file ? $file->{plugins} : undef;
   return () unless _is_object($plugins);
   my @out;
@@ -66,8 +66,8 @@ sub _unique {
 # The marketplace skilletor is installed from, for this project: the install the running plugin
 # is, else the one marketplace of the user's install and this project's.
 sub skilletor_marketplace {
-  my ( $home, $project_dir, $plugin_root ) = @_;
-  my @installs = _skilletor_installs($home);
+  my ( $claude_dir, $project_dir, $plugin_root ) = @_;
+  my @installs = _skilletor_installs($claude_dir);
   if ( defined $plugin_root && length $plugin_root ) {
     my @running = _unique( grep { defined $_->{installPath} && same_path( $_->{installPath}, $plugin_root ) } @installs );
     return { name => $running[0] } if @running == 1;
@@ -147,13 +147,13 @@ sub plan_claude_settings {
   }
   my $enabled  = $settings->{enabledPlugins}         // js_ordered();
   my $declared = $settings->{extraKnownMarketplaces} // js_ordered();
-  my $known = _read_object( path_join( $a{home}, '.claude', 'plugins', 'known_marketplaces.json' ) ) // {};
+  my $known = _read_object( path_join( $a{claude_dir}, 'plugins', 'known_marketplaces.json' ) ) // {};
   my $source_of = sub { _is_object( $known->{ $_[0] } ) ? $known->{ $_[0] }{source} : undef };
   my $needs = 'a committed file takes a github, git or url source';
 
   # skilletor itself – unless the file names it already, from any marketplace, on or off.
   unless ( grep { my $k = _plugin_key($_); $k && $k->{name} eq PLUGIN } keys %$enabled ) {
-    my $own = skilletor_marketplace( $a{home}, $a{project_dir}, $a{plugin_root} );
+    my $own = skilletor_marketplace( $a{claude_dir}, $a{project_dir}, $a{plugin_root} );
     if ( $own->{ambiguous} ) {
       push @{ $plan->{warnings} }, 'skilletor is installed from several marketplaces ('.join( ', ', @{ $own->{ambiguous} } ).'); '
         .$a{label}.' does not get it – enable the one teammates should use';
@@ -225,7 +225,7 @@ sub plan_claude_settings {
     file        => "$project/.claude/settings.json",
     label       => '.claude/settings.json',
     project_dir => $project,
-    home        => $home,
+    claude_dir  => $claude_dir,   # CLAUDE_CONFIG_DIR, else "$home/.claude"
     plugin_root => $ENV{CLAUDE_PLUGIN_ROOT},
   );
   # { next => $text?, enabled => [ 'skilletor@getty' ], declared => [ 'getty' ], warnings => [ ... ] }
@@ -239,7 +239,7 @@ entry of the file needs, so a fresh checkout gets Claude Code's offer to
 install the plugins. Add-only: no existing key changes, a C<false> stays, new
 keys go last, the file keeps its indent, line endings and final newline. The
 marketplace and its source are read – never written – from Claude Code's
-plugin state under C<< <home>/.claude/plugins >>; a source that only means
+plugin state under C<< <claude_dir>/plugins >> (Claude Code's config dir); a source that only means
 something on this machine (a directory, a file, a git repository on a local
 path) never goes into a committed file, a warning says so. Never throws.
 
@@ -251,7 +251,7 @@ be, one line each).
 
 =func skilletor_marketplace
 
-  skilletor_marketplace( $home, $project_dir, $plugin_root );   # { name } or { ambiguous => [...] } or {}
+  skilletor_marketplace( $claude_dir, $project_dir, $plugin_root );   # { name } or { ambiguous => [...] } or {}
 
 =func not_declarable
 
