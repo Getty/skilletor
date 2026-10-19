@@ -26,7 +26,22 @@ conformance/cases/<NN-slug>/
   expected/<step>/     the expected files after step <step>, when the step has "tree": true
     home/…             relative to ${HOME}
     project/…          relative to ${PROJECT}
+  expected/<step>.executables.json  the files of that tree that carry the executable bit, when any do
+  expected.<engine>/…  an engine's own expectations, where it differs (below)
 ```
+
+### Escaped names
+
+No file or directory in a case is named `.git…`: a `.gitignore` there – the managed block an
+expected `.claude/.gitignore` holds, the `*` of a skill's own – would be live in this
+repository and hide the fixture files beside it from git, so a fresh checkout would lack
+them. Every path segment starting with `.git` is stored with the prefix `dot`
+(`.gitignore` → `dot.gitignore`, `.gitattributes` → `dot.gitattributes`), in every tree of a
+case: `home/`, `project/`, `sources/<tree>/` and the expected trees. A runner unescapes
+(`dot.git…` → `.git…`) when it copies an input or source tree in, and escapes when it names a
+file of a snapshot, for the comparison and when it writes expectations; JSON contents and a
+commit's `executable` list use the real names. Both runners fail a case that holds an
+unescaped name.
 
 A case has a project scope exactly when it has a `project/` directory; without one the engine
 runs with no project dir at all (user scope only). `home/` may be missing (an empty home).
@@ -68,12 +83,13 @@ Cases run in name order, each in a fresh temp dir; none depends on another.
 |---|---|
 | `description` | Required. What the case pins. |
 | `git` | Optional. Git sources, by repository name (below). |
+| `git.<name>.commits[].executable` | Optional. Paths in the commit's tree made executable before it is committed (below). |
 | `steps` | Required, run in order on the same temp dirs: a step sees what the steps before it wrote. |
 | `steps[].id` | Names the expectation: `expected/<id>.json`, `expected/<id>/`. Unique in the case. |
 | `steps[].op` | `resolve`, `sync`, `check` or `status` (below). |
 | `steps[].scope` | `user`, `project` or `all` (default `all`), as `--scope`. |
 | `steps[].force` | `sync` only: `--force`. Default `false`. |
-| `steps[].tree` | After the step, compare the file trees with `expected/<id>/` (below). Default `false`. |
+| `steps[].tree` | After the step, compare the file trees with `expected/<id>/` and their executable bits with `expected/<id>.executables.json` (below). Default `false`. |
 | `engines` | Optional. Where an engine other than the reference does not, or not yet, do what TS does. |
 
 ### Engine variants
@@ -297,14 +313,15 @@ With `"tree": true` the runner compares, after the step:
   files hold timestamps) and the marker `${HOME}/.claude.json`, with `expected/<id>/home/`;
 - every file under `${PROJECT}` with `expected/<id>/project/`.
 
-The sets of relative paths must be equal – a file the engine should not have written fails
+The sets of relative paths (escaped, above) must be equal – a file the engine should not have written fails
 as surely as one it missed – and each file's bytes must be equal after the output
 placeholders are applied. That includes the inputs the step left alone, the lock
 (`.claude/skilletor.lock.json`, byte for byte: key order, two-space indent, final newline),
 `.gitignore` blocks, `.worktreeinclude`, `.claude/settings.json` and every installed file.
 
 Of the file modes, only the owner's executable bit is compared: the tree's files that carry
-it, as a sorted JSON array of their paths (`home/…`, `project/…`), must equal
+it, as a sorted JSON array of their paths as the expected tree names them (`home/…`,
+`project/…`, escaped), must equal
 `expected/<id>.executables.json` – no such file means none may carry it. A source file gets
 the bit through its commit's `executable` list, not through the mode the case's own
 checkout gives it, so a checkout without file modes still builds the same commits.
@@ -346,14 +363,29 @@ show it, its `description` saying which.
 | `06-wildcards` | `perl-*`, `*`, `*-style` overlapping in one source; a bare `*` matching nothing is silent, a pattern matching nothing warns |
 | `07-bundles` | `name@source` and `bundle:` entries, nested bundle vars, an entry of another source served under another name, a missing source and name |
 | `08-overlap` | explicit over a same-source bundle (no bundle vars, `via`) and over another source's wildcard; two sources' wildcards skip a name; a bundle var conflict |
-| `09-templates` | `.njk` items marked `templated`; a sync renders them, a rule gated off by project vars is skipped (sync TS-only) |
+| `09-templates` | `.njk` items marked `templated`; a sync renders them, a rule gated off by project vars is skipped; `check` then finds nothing (Perl: `expected.perl/`, nothing templated installed, `check` asks for a sync) |
 | `10-error-unknown-source` | an entry naming no source is a config error; a sync touches nothing |
 | `11-error-bad-entry` | an entry without `@source` in `skilletor.local.json` is a config error naming that file |
 | `12-missing-items` | an unknown item, an unknown bundle, an agent with `.md` and `.md.njk`: warnings, the rest resolves |
 | `20-sync-user` | user-scope sync of a skill, an agent and a rule: files, lock; `check`, `status`; a second sync changes nothing |
-| `21-sync-project` | project-scope sync: a user source's bundle and a trusted project source; `.gitignore` block, `.worktreeinclude`, `settings.json`, lock `via`; `check`, `status` |
+| `21-sync-project` | project-scope sync: a user source's bundle and a trusted project source; `.gitignore` block, `.worktreeinclude`, `settings.json`, lock `via`; `check`, `status`; a second sync changes nothing and names no file to commit |
+| `22-sync-from-lock` | a lock an earlier sync left: undeclared items removed (files, emptied dirs, an agent's `.local.` file), an edited managed file overwritten and named, the user's own skill untouched |
+| `23-check-drift` | `check` against a lock at an older commit: the source moved on, a declared rule missing from the lock, render inputs never recorded – an edited installed file is no drift; the sync overwrites it, `check` then finds nothing |
+| `24-conflicts-force` | foreign files block their item (a hand-written `SKILL.md`; an agent's plain path, `replace`); `check` does not count lasting conflicts again; `--force` adopts and replaces |
+| `25-gitignore-false` | `"gitignore": false`: no blocks, no `.worktreeinclude`, the source's own skill `.gitignore` installed as shipped, agents still `.local.` |
+| `26-agent-briefing` | an agent's briefing skills: one installed, one missing (warning, `briefingMissing` in sync and status), a `plugin:skill` name unchecked |
+| `27-rules` | rules of both scopes with one name each install their own `.local.` copy; a hand-written rule stays; a rules wildcard in status |
+| `28-claude-settings` | the plugin requirement added to an existing tab-indented `settings.json`: order, indent, a `false` entry and other keys kept, git and github marketplaces declared, a directory one refused (`settingsSkipped`); a second sync adds nothing |
+| `29-executable` | a skill's executable script keeps its bit, other files and an executable agent source get none; a second sync finds the bits in place |
+| `30-untrusted-status` | an untrusted project-only source: `status` names it before any sync, the sync installs nothing but writes the project's blocks, `check` lists the trust request and asks for no sync |
+
+The state files two engines on one machine share – `render-inputs.json` with its hash,
+`sources-read.json`, `unreached.json` – are not compared here: their keys are absolute lock
+paths and the hash covers the project dir, so they differ from one temp dir to the next. The
+Perl port's `t/52-parity-sync.t` has both engines sync one machine and compares them byte for
+byte.
 
 Not covered yet: a `url` source actually fetched (the engine takes `https://` only, so it
 needs a local TLS server), a source whose fetch fails (the warning quotes git's own message),
-removal of an undeclared item by a later sync, conflicts and `--force`, Codex and Hermes
-targets, and the state files (`trust.json` aside) two engines on one machine share.
+symbolic links in a target, a sync that fails midway (`partial`), and Codex and Hermes
+targets (the Perl engine refuses a scope that targets them).

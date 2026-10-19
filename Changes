@@ -8,7 +8,10 @@ Revision history for skilletor
     resolution, and for sync cases the files, lock, check and status) that
     the TypeScript engine and the Perl port both run;
     `SKILLETOR_CONFORMANCE_UPDATE=1` regenerates them from the TypeScript
-    reference.
+    reference. Cases cover removal, conflicts and `--force`, check drift,
+    `"gitignore": false`, briefing, settings.json and executable bits;
+    fixture names starting with `.git` are stored as `dot.git...` so a
+    checkout holds every fixture.
   - `install.sh` sets skilletor up from a plain shell (GitHub issue #1):
     `curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh`
     installs the plugin when `claude` is on `PATH` (or updates it) and writes

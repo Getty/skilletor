@@ -1,0 +1,9 @@
+{
+  "rules/plain": {
+    "source": "shared",
+    "version": "git:0aaeba3",
+    "files": {
+      "rules/.local.plain.md": "sha256:8776db667f3b150aa6dc166f208e6aaef63ec5d110d852ca44fe02ee194c7e88"
+    }
+  }
+}

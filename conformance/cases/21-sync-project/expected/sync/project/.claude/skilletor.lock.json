@@ -1,0 +1,41 @@
+{
+  "agents/reviewer": {
+    "source": "shared",
+    "version": "git:b0d7d96",
+    "files": {
+      "agents/.local.reviewer.md": "sha256:ef25a6d14b5dc22150d3908a305a436bdbf757157171c2c9bb59ad69f97f6244"
+    },
+    "via": [
+      "bundle:perl@shared"
+    ]
+  },
+  "rules/perl-style": {
+    "source": "shared",
+    "version": "git:b0d7d96",
+    "files": {
+      "rules/.local.perl-style.md": "sha256:3b96a332a1d7ca5137336671e21ca27cca7616eec10105febd8f5f298737c206"
+    },
+    "via": [
+      "bundle:perl@shared"
+    ]
+  },
+  "skills/lint": {
+    "source": "crew",
+    "version": "git:1b8f005",
+    "files": {
+      "skills/lint/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/lint/SKILL.md": "sha256:10c6af7269eb2dcc29475296cd5fc8874cbc7a81256b59de88d2287eb92bf9e3"
+    }
+  },
+  "skills/perl-moo": {
+    "source": "shared",
+    "version": "git:b0d7d96",
+    "files": {
+      "skills/perl-moo/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/perl-moo/SKILL.md": "sha256:fa1dd1f19e7ea41f1843d7c3b3aeeaa2203a70c604704704c4acc452d8919722"
+    },
+    "via": [
+      "bundle:perl@shared"
+    ]
+  }
+}

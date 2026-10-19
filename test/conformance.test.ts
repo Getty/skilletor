@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
-  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
+  chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
@@ -138,10 +138,21 @@ function concrete(text: string, r: Roots): string {
   return text;
 }
 
+/** A path as a case stores it (README: escaped names): every name starting with `.git` gets the
+ *  prefix `dot`, since a `.gitignore` in a fixture would be live in this repository. */
+function escapeName(rel: string): string {
+  return rel.split("/").map((s) => (s.startsWith(".git") ? `dot${s}` : s)).join("/");
+}
+
+/** A stored path as the engine sees it: `dot.gitignore` is `.gitignore`. */
+function unescapeName(rel: string): string {
+  return rel.split("/").map((s) => (s.startsWith("dot.git") ? s.slice(3) : s)).join("/");
+}
+
 /** Copy a case's input tree, placeholders substituted in every file (README: inputs). */
 function copyInput(from: string, to: string, r: Roots): void {
   for (const rel of walk(from)) {
-    const dest = join(to, rel);
+    const dest = join(to, unescapeName(rel));
     mkdirSync(dirname(dest), { recursive: true });
     writeFileSync(dest, concrete(readFileSync(join(from, rel), "utf8"), r));
   }
@@ -156,7 +167,12 @@ function buildGit(caseDir: string, c: Case, r: Roots, env: NodeJS.ProcessEnv): v
     git(repo, env, "init", "-q", "-b", "main");
     g.commits.forEach((commit, i) => {
       for (const entry of readdirSync(repo)) if (entry !== ".git") rmSync(join(repo, entry), { recursive: true, force: true });
-      cpSync(join(caseDir, commit.tree), repo, { recursive: true });
+      const tree = join(caseDir, commit.tree);
+      for (const rel of walk(tree)) {
+        const dest = join(repo, unescapeName(rel));
+        mkdirSync(dirname(dest), { recursive: true });
+        copyFileSync(join(tree, rel), dest); // byte for byte
+      }
       for (const rel of commit.executable ?? []) chmodSync(join(repo, rel), 0o755);
       git(repo, env, "add", "-A");
       git(repo, env, "commit", "-q", "--allow-empty", "-m", `conformance ${i + 1}`);
@@ -186,17 +202,22 @@ async function runStep(step: Step, ctx: EngineContext): Promise<unknown> {
 function snapshot(r: Roots): Map<string, string> {
   const out = new Map<string, string>();
   for (const rel of walk(r.home, [".claude/skilletor", ".claude.json"])) {
-    out.set(`home/${rel}`, abstract(readFileSync(join(r.home, rel), "utf8"), r));
+    out.set(`home/${escapeName(rel)}`, abstract(readFileSync(join(r.home, rel), "utf8"), r));
   }
   if (r.project) {
-    for (const rel of walk(r.project)) out.set(`project/${rel}`, abstract(readFileSync(join(r.project, rel), "utf8"), r));
+    for (const rel of walk(r.project)) {
+      out.set(`project/${escapeName(rel)}`, abstract(readFileSync(join(r.project, rel), "utf8"), r));
+    }
   }
   return out;
 }
 
 /** The snapshot's files that carry the owner's executable bit (README: trees), sorted. */
 function executablesOf(r: Roots, have: Map<string, string>): string[] {
-  const abs = (rel: string) => (rel.startsWith("home/") ? join(r.home, rel.slice(5)) : join(r.project!, rel.slice(8)));
+  const abs = (key: string) => {
+    const rel = unescapeName(key);
+    return rel.startsWith("home/") ? join(r.home, rel.slice(5)) : join(r.project!, rel.slice(8));
+  };
   return [...have.keys()].filter((rel) => (statSync(abs(rel)).mode & 0o100) !== 0).sort();
 }
 
@@ -208,6 +229,8 @@ function writeJson(path: string, value: unknown): void {
 async function runCase(name: string): Promise<void> {
   const caseDir = join(ROOT, name);
   const c = JSON.parse(readFileSync(join(caseDir, "case.json"), "utf8")) as Case;
+  const live = walk(caseDir).filter((rel) => rel.split("/").some((s) => s.startsWith(".git")));
+  assert.deepEqual(live, [], `${name}: fixture names starting with .git must be stored escaped (dot.gitignore)`);
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), "skilletor-conformance-")));
   const r: Roots = { tmp, home: join(tmp, "home") };
   if (existsSync(join(caseDir, "project"))) r.project = join(tmp, "project");
@@ -256,7 +279,7 @@ async function runCase(name: string): Promise<void> {
         continue;
       }
       const want = new Map(walk(treeDir).map((rel) => [rel, readFileSync(join(treeDir, rel), "utf8")]));
-      assert.deepEqual([...have.keys()], [...want.keys()], `${name}: step ${step.id}: the files in the tree`);
+      assert.deepEqual([...have.keys()].sort(), [...want.keys()].sort(), `${name}: step ${step.id}: the files in the tree`);
       for (const [rel, text] of want) assert.equal(have.get(rel), text, `${name}: step ${step.id}: ${rel}`);
       const wantExecs = existsSync(execFile) ? JSON.parse(readFileSync(execFile, "utf8")) : [];
       assert.deepEqual(execs, wantExecs, `${name}: step ${step.id}: the files with the executable bit`);

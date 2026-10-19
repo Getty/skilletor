@@ -1,0 +1,24 @@
+{
+  "rules/k8s": {
+    "source": "shared",
+    "version": "git:0aaeba3",
+    "files": {},
+    "skipped": "renders-empty"
+  },
+  "rules/plain": {
+    "source": "shared",
+    "version": "git:0aaeba3",
+    "files": {
+      "rules/.local.plain.md": "sha256:8776db667f3b150aa6dc166f208e6aaef63ec5d110d852ca44fe02ee194c7e88"
+    }
+  },
+  "skills/greet": {
+    "source": "shared",
+    "version": "git:0aaeba3",
+    "files": {
+      "skills/greet/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/greet/SKILL.md": "sha256:c5ac46daf9cb9b51c2a45376311d275117e8597ebb5884d5fe401022de5486ab",
+      "skills/greet/notes.md": "sha256:ce8531f7827b4c42a0081bef38de9e96aa017a9b0e3489492fbe313761f7277b"
+    }
+  }
+}

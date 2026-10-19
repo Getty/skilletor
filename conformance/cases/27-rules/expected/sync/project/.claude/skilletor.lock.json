@@ -1,0 +1,16 @@
+{
+  "rules/commits": {
+    "source": "shared",
+    "version": "git:0bb04a6",
+    "files": {
+      "rules/.local.commits.md": "sha256:619e109c310b5c35417cbf1b7be2ef1382ae9c210d59960cb8a805dda59ab8a2"
+    }
+  },
+  "rules/style": {
+    "source": "shared",
+    "version": "git:0bb04a6",
+    "files": {
+      "rules/.local.style.md": "sha256:9f49db6a6eb18309e5901708a44b347aa61fe824dd4c6e65e3a1f3e8c75c1423"
+    }
+  }
+}
