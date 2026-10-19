@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "plugins": {
+    "skilletor@getty": [
+      {
+        "scope": "user",
+        "installPath": "${HOME}/.claude/plugins/cache/getty/skilletor/0.7.0"
+      }
+    ],
+    "helper@team": [
+      {
+        "scope": "user",
+        "installPath": "${HOME}/.claude/plugins/cache/team/helper/1.0.0"
+      }
+    ]
+  }
+}

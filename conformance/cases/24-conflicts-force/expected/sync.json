@@ -1,0 +1,37 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [
+        {
+          "path": "agents/reviewer.md",
+          "replace": true
+        },
+        {
+          "path": "skills/lint/SKILL.md"
+        }
+      ],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [
+        {
+          "key": "agents/reviewer",
+          "name": "reviewer",
+          "source": "shared",
+          "type": "agent"
+        },
+        {
+          "key": "skills/lint",
+          "name": "lint",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

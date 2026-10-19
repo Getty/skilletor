@@ -1,0 +1,44 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": [
+        "rule k8s@shared is a Nunjucks template (rules/k8s.md.njk) the Perl port of skilletor does not render; an installed copy stays"
+      ]
+    },
+    {
+      "added": [
+        {
+          "key": "rules/plain",
+          "name": "plain",
+          "source": "shared",
+          "type": "rule"
+        }
+      ],
+      "conflicts": [],
+      "gitignoreUpdated": [
+        ".claude/.gitignore",
+        ".worktreeinclude"
+      ],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": [
+        "rule k8s@shared is a Nunjucks template (rules/k8s.md.njk) the Perl port of skilletor does not render; an installed copy stays",
+        "skill greet@shared is a Nunjucks template (skills/greet/SKILL.md.njk) the Perl port of skilletor does not render; an installed copy stays"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "scopes": [
+    {
+      "bundles": [],
+      "declared": [
+        {
+          "installed": false,
+          "key": "rules/k8s",
+          "source": "shared"
+        },
+        {
+          "installed": false,
+          "key": "skills/greet",
+          "source": "shared"
+        },
+        {
+          "installed": true,
+          "key": "rules/plain",
+          "source": "shared"
+        }
+      ],
+      "orphans": [],
+      "scope": "project",
+      "sourceVersions": {
+        "shared": "git:0aaeba3"
+      },
+      "targets": [
+        "claude"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    },
+    {
+      "bundles": [],
+      "declared": [
+        {
+          "installed": false,
+          "key": "rules/k8s",
+          "source": "shared"
+        }
+      ],
+      "orphans": [],
+      "scope": "user",
+      "sourceVersions": {},
+      "targets": [
+        "claude"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    }
+  ]
+}

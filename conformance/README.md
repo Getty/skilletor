@@ -9,7 +9,7 @@ writes, the lock bytes and what `check` and `status` say afterwards.
 Runners:
 
 - TypeScript: `test/conformance.test.ts` (part of `npm test`).
-- Perl: `perl/t/60-conformance.t` (`resolve` steps so far; `sync`, `check` and `status` skip until the port has them).
+- Perl: `perl/t/60-conformance.t` (every step; the Perl engine syncs for Claude Code only).
 
 The format is plain JSON and plain file trees, nothing language-specific: a runner needs a
 JSON parser, a directory copy, `git` and its engine.
@@ -42,7 +42,7 @@ Cases run in name order, each in a fresh temp dir; none depends on another.
       "url": "https://conformance.invalid/shared.git",
       "commits": [
         { "tree": "sources/shared-v1", "tag": "v1" },
-        { "tree": "sources/shared-v2", "branch": "next" }
+        { "tree": "sources/shared-v2", "branch": "next", "executable": ["skills/tool/run.sh"] }
       ]
     }
   },
@@ -88,13 +88,20 @@ implied – a step without an entry there must match `expected/` exactly.
   so a step that reads what a skipped one wrote (a `status` after a skipped `sync`) is
   marked as well.
 - `steps.<id>.expected`: that engine compares against `<value>.json` and, for a tree step,
-  `<value>/` (paths relative to the case dir) instead of `expected/<id>`. Those files are
-  that engine's and written by hand; the TS runner never reads or regenerates them.
+  `<value>/` and `<value>.executables.json` (paths relative to the case dir) instead of
+  `expected/<id>`. Those files are that engine's and written by hand; the TS runner never
+  reads or regenerates them. Why the engine differs is said below.
 
 The one known difference today: the Perl engine renders no Nunjucks. A resolve does not
 render, so `resolve` steps hold for every engine – an item with a `.njk` file carries
-`"templated": true` there – while a `sync` of such an item is TS-only (case `09-templates`).
-An engine that renders nothing must still never install a templated item unrendered.
+`"templated": true` there. A `sync` of such an item differs, and case `09-templates` pins
+the Perl engine's own behaviour in `expected.perl/`: an engine that renders nothing never
+installs a templated item unrendered. It warns
+(`skill greet@shared is a Nunjucks template (skills/greet/SKILL.md.njk) the Perl port of
+skilletor does not render; an installed copy stays`) and leaves the item as it is installed,
+files and lock entry, as a sync does for an item whose source is unreachable. Its source then
+counts as not reached for the scope's records, so `check` keeps asking for a sync, and the
+reference's next sync renders the item.
 
 ## Environment
 
@@ -134,7 +141,8 @@ Each entry of `git` is a repository `${TMP}/git/<name>`, built with exactly thes
 ```sh
 git init -q -b main                     # once
 # per commit, in order (i counts from 1):
-#   delete everything in the repository but .git, then copy <case>/<tree>/ into it
+#   delete everything in the repository but .git, then copy <case>/<tree>/ into it,
+#   then chmod 0755 each path the commit lists in "executable" (relative to the tree)
 git add -A
 git commit -q --allow-empty -m "conformance <i>"
 git tag <tag>                           # when the commit has "tag" (lightweight)
@@ -294,7 +302,13 @@ as surely as one it missed – and each file's bytes must be equal after the out
 placeholders are applied. That includes the inputs the step left alone, the lock
 (`.claude/skilletor.lock.json`, byte for byte: key order, two-space indent, final newline),
 `.gitignore` blocks, `.worktreeinclude`, `.claude/settings.json` and every installed file.
-Directories, empty or not, and file modes are not compared.
+
+Of the file modes, only the owner's executable bit is compared: the tree's files that carry
+it, as a sorted JSON array of their paths (`home/…`, `project/…`), must equal
+`expected/<id>.executables.json` – no such file means none may carry it. A source file gets
+the bit through its commit's `executable` list, not through the mode the case's own
+checkout gives it, so a checkout without file modes still builds the same commits.
+Directories, empty or not, and every other mode bit are not compared.
 
 ## Comparing JSON
 
@@ -313,7 +327,8 @@ The TS engine is the reference, so its runner rewrites every expectation:
 SKILLETOR_CONFORMANCE_UPDATE=1 node --test --import ./test/setup.ts test/conformance.test.ts
 ```
 
-It writes `expected/<id>.json` and replaces `expected/<id>/` for tree steps. Review the diff
+It writes `expected/<id>.json` and, for tree steps, replaces `expected/<id>/` and writes
+`expected/<id>.executables.json` (or removes it when no file carries the bit). Review the diff
 against the spec before keeping it: an expectation that mirrors whatever the code does
 proves nothing. A new case is a directory with `case.json`, its inputs and – after a
 reviewed regeneration – its `expected/`. Keep it small: one behaviour, the fewest items that

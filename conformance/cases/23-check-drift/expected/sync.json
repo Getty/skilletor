@@ -1,0 +1,34 @@
+{
+  "scopes": [
+    {
+      "added": [
+        {
+          "key": "rules/style",
+          "name": "style",
+          "source": "shared",
+          "type": "rule"
+        }
+      ],
+      "conflicts": [],
+      "overwritten": [
+        {
+          "path": "skills/lint/SKILL.md"
+        }
+      ],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [
+        {
+          "key": "skills/lint",
+          "name": "lint",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "warnings": []
+    }
+  ]
+}

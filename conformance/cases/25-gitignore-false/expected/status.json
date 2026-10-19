@@ -1,0 +1,41 @@
+{
+  "scopes": [
+    {
+      "bundles": [],
+      "declared": [],
+      "orphans": [],
+      "scope": "user",
+      "sourceVersions": {},
+      "targets": [
+        "claude"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    },
+    {
+      "bundles": [],
+      "declared": [
+        {
+          "installed": true,
+          "key": "agents/reviewer",
+          "source": "shared"
+        },
+        {
+          "installed": true,
+          "key": "skills/lint",
+          "source": "shared"
+        }
+      ],
+      "orphans": [],
+      "scope": "project",
+      "sourceVersions": {
+        "shared": "git:2bcbcde"
+      },
+      "targets": [
+        "claude"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    }
+  ]
+}

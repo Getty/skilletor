@@ -1,0 +1,54 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    },
+    {
+      "added": [
+        {
+          "key": "skills/lint",
+          "name": "lint",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "conflicts": [],
+      "gitignoreUpdated": [
+        ".claude/.gitignore",
+        ".worktreeinclude"
+      ],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "settingsSkipped": [
+        "marketplace \"devdir\" (local-tool@devdir) has a directory source on this machine; not declared in .claude/settings.json (a committed file takes a github, git or url source)"
+      ],
+      "settingsUpdated": {
+        "declared": [
+          "getty",
+          "team"
+        ],
+        "enabled": [
+          "skilletor@getty"
+        ],
+        "path": ".claude/settings.json"
+      },
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": [
+        "marketplace \"devdir\" (local-tool@devdir) has a directory source on this machine; not declared in .claude/settings.json (a committed file takes a github, git or url source)"
+      ]
+    }
+  ]
+}

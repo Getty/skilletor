@@ -1,0 +1,28 @@
+{
+  "description": "A skill's file keeps its source's executable bit (run.sh), its other files carry none, skilletor's own .gitignore none; an agent whose source file is executable installs without the bit; the lock hashes bytes alone; a second sync finds everything in place.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared",
+          "executable": [
+            "skills/tool/run.sh",
+            "agents/runner.md"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "resync",
+      "op": "sync"
+    }
+  ]
+}

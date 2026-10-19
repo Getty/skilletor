@@ -1,0 +1,32 @@
+{
+  "scopes": [
+    {
+      "bundles": [],
+      "declared": [
+        {
+          "briefingMissing": [
+            "testing"
+          ],
+          "installed": true,
+          "key": "agents/planner",
+          "source": "shared"
+        },
+        {
+          "installed": true,
+          "key": "skills/writing",
+          "source": "shared"
+        }
+      ],
+      "orphans": [],
+      "scope": "user",
+      "sourceVersions": {
+        "shared": "git:96ffd34"
+      },
+      "targets": [
+        "claude"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    }
+  ]
+}

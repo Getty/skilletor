@@ -1,0 +1,40 @@
+{
+  "scopes": [
+    {
+      "added": [
+        {
+          "key": "agents/planner",
+          "name": "planner",
+          "source": "shared",
+          "type": "agent"
+        },
+        {
+          "key": "skills/writing",
+          "name": "writing",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "briefingMissing": [
+        {
+          "harness": "claude",
+          "key": "agents/planner",
+          "missing": [
+            "testing"
+          ]
+        }
+      ],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": [
+        "agent planner (claude): briefing skills not installed: testing — install them, or ship the agent and its skills together as a bundle"
+      ]
+    }
+  ]
+}

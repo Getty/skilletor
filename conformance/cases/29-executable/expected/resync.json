@@ -1,0 +1,29 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [
+        {
+          "key": "agents/runner",
+          "name": "runner",
+          "source": "shared",
+          "type": "agent"
+        },
+        {
+          "key": "skills/tool",
+          "name": "tool",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

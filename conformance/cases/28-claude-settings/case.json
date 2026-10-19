@@ -1,0 +1,28 @@
+{
+  "description": "The plugin requirement (k140) added to an existing tab-indented .claude/settings.json: skilletor@getty enabled last, the git and github marketplaces the enabled entries need declared, a directory marketplace refused with a warning (settingsSkipped), a switched-off entry and every other key left as they were; check finds no settings drift; a second sync adds nothing.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "resync",
+      "op": "sync"
+    }
+  ]
+}

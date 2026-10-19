@@ -1,5 +1,5 @@
 package Skilletor::State;
-# ABSTRACT: Instance state under ~/.claude/skilletor – trust and the sync lock so far
+# ABSTRACT: Instance state under ~/.claude/skilletor – trust, the sync lock and the records a sync keeps
 
 use Moo;
 use Errno ();
@@ -10,7 +10,7 @@ use Sys::Hostname ();
 use Time::HiRes ();
 use Skilletor::Error::LockTimeout;
 use Skilletor::FSUtil qw( read_text write_text path_join );
-use Skilletor::JSON qw( js_parse js_stringify js_ordered js_type );
+use Skilletor::JSON qw( js_parse js_stringify js_ordered js_sort_keys js_type );
 use namespace::clean;
 
 our $VERSION = '0.001';
@@ -74,6 +74,134 @@ sub is_trusted {
   return 0 unless $type eq 'object';
   return ( js_type( $entry->{kind} ) eq 'string' && $entry->{kind} eq $backend->{kind}
       && js_type( $entry->{address} ) eq 'string' && $entry->{address} eq $backend->{address} ) ? 1 : 0;
+}
+
+#### Last check (the in-session check's clock) #########################
+
+sub _now_ms_number { 0 + int( Time::HiRes::time() * 1000 ) }
+
+sub is_due {
+  my ( $self, $scope_key, $interval_seconds ) = @_;
+  my $last = $self->_read_json('last-check.json')->{$scope_key};
+  return 1 unless js_type($last) eq 'number';
+  return _now_ms_number() - $last >= $interval_seconds * 1000 ? 1 : 0;
+}
+
+sub mark_checked {
+  my ( $self, $scope_key ) = @_;
+  my $checks = $self->_read_json('last-check.json');
+  $checks->{$scope_key} = _now_ms_number();
+  $self->_write_json( 'last-check.json', $checks );
+}
+
+sub clear_checked {
+  my ( $self, $scope_key ) = @_;
+  my $checks = $self->_read_json('last-check.json');
+  return unless exists $checks->{$scope_key};
+  delete $checks->{$scope_key};
+  $self->_write_json( 'last-check.json', $checks );
+}
+
+#### Unreached drift (spec §14.3, k70) #################################
+
+# The drift ids the last sync of a scope (keyed by its lock path) left in place although every
+# source it needed was at hand: `check` does not count them again.
+sub unreached {
+  my ( $self, $scope_key ) = @_;
+  my $ids = $self->_read_json('unreached.json')->{$scope_key};
+  return [] unless js_type($ids) eq 'array';
+  return [ grep { js_type($_) eq 'string' } @$ids ];
+}
+
+sub put_unreached {
+  my ( $self, $scope_key, $ids ) = @_;
+  my $all = $self->_read_json('unreached.json');
+  my %seen;
+  my $next = [ js_sort_keys( grep { !$seen{$_}++ } @$ids ) ];
+  return if js_stringify( $all->{$scope_key} // [] ) eq js_stringify($next);
+  if   (@$next) { $all->{$scope_key} = $next }
+  else          { delete $all->{$scope_key} }
+  $self->_write_json( 'unreached.json', $all );
+}
+
+#### Sources read (spec §14.3, k80) ####################################
+
+sub _source_read {
+  my ( $r ) = @_;
+  my $out = js_ordered( kind => $r->{kind}, address => $r->{address}, version => $r->{version} );
+  $out->{ref}  = $r->{ref}  if defined $r->{ref};
+  $out->{path} = $r->{path} if defined $r->{path};
+  return $out;
+}
+
+# What the last sync of a scope read of each source, and through which backend: `check`
+# compares a source with it. A malformed entry counts as none.
+sub sources_read {
+  my ( $self, $scope_key ) = @_;
+  my $record = $self->_read_json('sources-read.json')->{$scope_key};
+  my $out = js_ordered();
+  return $out unless js_type($record) eq 'object';
+  for my $name ( keys %$record ) {
+    my $v = $record->{$name};
+    next unless js_type($v) eq 'object';
+    next unless js_type( $v->{kind} ) eq 'string' && $v->{kind} =~ /\A(?:git|url|local)\z/;
+    next unless js_type( $v->{address} ) eq 'string' && js_type( $v->{version} ) eq 'string';
+    next if exists $v->{ref} && js_type( $v->{ref} ) ne 'string';
+    next if exists $v->{path} && !( js_type( $v->{path} ) eq 'array' && !grep { js_type($_) ne 'string' } @{ $v->{path} } );
+    $out->{$name} = _source_read($v);
+  }
+  return $out;
+}
+
+sub put_sources_read {
+  my ( $self, $scope_key, $record ) = @_;
+  my $all  = $self->_read_json('sources-read.json');
+  my $next = js_ordered();
+  $next->{$_} = _source_read( $record->{$_} ) for js_sort_keys( keys %$record );
+  return if js_stringify( $all->{$scope_key} // {} ) eq js_stringify($next);
+  if   (%$next) { $all->{$scope_key} = $next }
+  else          { delete $all->{$scope_key} }
+  $self->_write_json( 'sources-read.json', $all );
+}
+
+#### Render inputs (spec §14.3, k76) ###################################
+
+sub render_inputs {
+  my ( $self, $scope_key ) = @_;
+  my $hash = $self->_read_json('render-inputs.json')->{$scope_key};
+  return js_type($hash) eq 'string' ? $hash : undef;
+}
+
+# Replace a scope's render-inputs hash, or drop it (undef); written only when it changes.
+sub put_render_inputs {
+  my ( $self, $scope_key, $hash ) = @_;
+  my $all = $self->_read_json('render-inputs.json');
+  if ( defined $hash ) {
+    return if exists $all->{$scope_key} && js_type( $all->{$scope_key} ) eq 'string' && $all->{$scope_key} eq $hash;
+    $all->{$scope_key} = $hash;
+  }
+  else {
+    return unless exists $all->{$scope_key};
+    delete $all->{$scope_key};
+  }
+  $self->_write_json( 'render-inputs.json', $all );
+}
+
+#### Hermes home (spec §16.2) ##########################################
+
+sub hermes_home {
+  my ( $self ) = @_;
+  my $home = $self->_read_json('hermes-home.json')->{home};
+  return ( js_type($home) eq 'string' && length $home ) ? $home : undef;
+}
+
+# Record the Hermes home, or drop the record (undef); written only when it changes.
+sub put_hermes_home {
+  my ( $self, $home ) = @_;
+  my $have = $self->hermes_home;
+  return if ( !defined $have && !defined $home ) || ( defined $have && defined $home && $have eq $home );
+  if ( defined $home ) { $self->_write_json( 'hermes-home.json', js_ordered( home => $home ) ) }
+  else                 { unlink Skilletor::FSUtil::encode_text( $self->_file('hermes-home.json') ) }
 }
 
 #### The sync lock (spec §6.5) #########################################

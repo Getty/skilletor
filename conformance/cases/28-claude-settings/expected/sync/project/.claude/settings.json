@@ -1,0 +1,28 @@
+{
+	"permissions": {
+		"allow": [
+			"Bash(npm test:*)"
+		]
+	},
+	"enabledPlugins": {
+		"local-tool@devdir": true,
+		"helper@team": true,
+		"old@gone": false,
+		"skilletor@getty": true
+	},
+	"model": "opus",
+	"extraKnownMarketplaces": {
+		"team": {
+			"source": {
+				"source": "git",
+				"url": "https://example.invalid/team/marketplace.git"
+			}
+		},
+		"getty": {
+			"source": {
+				"source": "github",
+				"repo": "Getty/marketplace"
+			}
+		}
+	}
+}

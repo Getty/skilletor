@@ -58,7 +58,11 @@ sub _hash_keys {
 
 sub js_stringify {
   my ( $value, $indent ) = @_;
-  my $gap = defined $indent && $indent > 0 ? ' ' x ( $indent > 10 ? 10 : $indent ) : '';
+  # A number: that many spaces (at most 10); a string: its first 10 characters.
+  my $gap = !defined $indent ? ''
+    : ( !ref $indent && !_is_number($indent) ) ? substr( $indent, 0, 10 )
+    : $indent > 0 ? ' ' x ( $indent > 10 ? 10 : $indent )
+    : '';
   return _write( $value, $gap, '' );
 }
 
@@ -460,6 +464,7 @@ C<Expected ',' or '}' after property value in JSON at position 6 (line 1 column 
 
   my $text = js_stringify( $value );      # JSON.stringify(value)
   my $text = js_stringify( $value, 2 );   # JSON.stringify(value, null, 2)
+  my $text = js_stringify( $value, "\t" ); # JSON.stringify(value, null, "\t")
 
 C<JSON.stringify>, byte for byte. Keys of a hash from L</js_parse> or
 L</js_ordered> come in their property order; keys of a plain Perl hash come as

@@ -1,0 +1,28 @@
+{
+  "description": "A project with \"gitignore\": false: no .claude/.gitignore block, no .worktreeinclude, no skilletor .gitignore in the skill – the .gitignore the source ships installs as shipped; agents still install as .local. files; check finds no layout drift.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "status",
+      "op": "status"
+    }
+  ]
+}

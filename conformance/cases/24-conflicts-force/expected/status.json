@@ -1,0 +1,27 @@
+{
+  "scopes": [
+    {
+      "bundles": [],
+      "declared": [
+        {
+          "installed": false,
+          "key": "agents/reviewer",
+          "source": "shared"
+        },
+        {
+          "installed": false,
+          "key": "skills/lint",
+          "source": "shared"
+        }
+      ],
+      "orphans": [],
+      "scope": "user",
+      "sourceVersions": {},
+      "targets": [
+        "claude"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    }
+  ]
+}

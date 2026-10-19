@@ -1,0 +1,40 @@
+{
+  "scopes": [
+    {
+      "bundles": [],
+      "declared": [],
+      "orphans": [],
+      "scope": "user",
+      "sourceVersions": {},
+      "targets": [
+        "claude"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    },
+    {
+      "bundles": [],
+      "declared": [
+        {
+          "installed": false,
+          "key": "skills/deploy",
+          "source": "team"
+        }
+      ],
+      "orphans": [],
+      "scope": "project",
+      "sourceVersions": {},
+      "targets": [
+        "claude"
+      ],
+      "trustRequests": [
+        {
+          "kind": "git",
+          "name": "team",
+          "url": "https://conformance.invalid/team.git"
+        }
+      ],
+      "wildcards": []
+    }
+  ]
+}

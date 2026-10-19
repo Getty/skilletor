@@ -1,0 +1,20 @@
+{
+  "getty": {
+    "source": {
+      "source": "github",
+      "repo": "Getty/marketplace"
+    }
+  },
+  "team": {
+    "source": {
+      "source": "git",
+      "url": "https://example.invalid/team/marketplace.git"
+    }
+  },
+  "devdir": {
+    "source": {
+      "source": "directory",
+      "path": "${HOME}/dev/marketplace"
+    }
+  }
+}

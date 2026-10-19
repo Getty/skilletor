@@ -1,0 +1,17 @@
+{
+  "agents/planner": {
+    "source": "shared",
+    "version": "git:96ffd34",
+    "files": {
+      "agents/.local.planner.md": "sha256:7b2b91debccf67046fdee3ef19bf031e973850b4fd86cfea385c3e2f109724f6"
+    }
+  },
+  "skills/writing": {
+    "source": "shared",
+    "version": "git:96ffd34",
+    "files": {
+      "skills/writing/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/writing/SKILL.md": "sha256:7483abd353c47ec87f28610bfdb2579171e19d391829e6974e018dc28b4d990b"
+    }
+  }
+}

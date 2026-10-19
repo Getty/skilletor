@@ -1,0 +1,40 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "settingsSkipped": [
+        "marketplace \"devdir\" (local-tool@devdir) has a directory source on this machine; not declared in .claude/settings.json (a committed file takes a github, git or url source)"
+      ],
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [
+        {
+          "key": "skills/lint",
+          "name": "lint",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "updated": [],
+      "warnings": [
+        "marketplace \"devdir\" (local-tool@devdir) has a directory source on this machine; not declared in .claude/settings.json (a committed file takes a github, git or url source)"
+      ]
+    },
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

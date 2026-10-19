@@ -1,0 +1,28 @@
+{
+  "description": "A lock an earlier sync left: items no longer declared go (their files and the directories left empty, an agent's .local. file too), a declared skill whose installed SKILL.md was edited is overwritten and named, the user's own skill beside them stays; check then finds nothing.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "status",
+      "op": "status"
+    }
+  ]
+}

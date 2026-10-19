@@ -1,0 +1,13 @@
+{
+	"permissions": {
+		"allow": [
+			"Bash(npm test:*)"
+		]
+	},
+	"enabledPlugins": {
+		"local-tool@devdir": true,
+		"helper@team": true,
+		"old@gone": false
+	},
+	"model": "opus"
+}

@@ -1,0 +1,13 @@
+{
+  "changed": false,
+  "sources": [],
+  "trustRequests": [
+    {
+      "kind": "git",
+      "name": "team",
+      "scope": "project",
+      "url": "https://conformance.invalid/team.git"
+    }
+  ],
+  "warnings": []
+}

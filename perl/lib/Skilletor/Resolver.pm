@@ -246,9 +246,14 @@ sub _merge_chain_vars {
   return $out;
 }
 
-# One scope, as the reference's syncScopeRun runs it with `collect`.
+# One scope, as the reference's syncScopeRun runs it: without $hooks with `collect` (the items
+# into the report), with them for a sync (Skilletor::Engine) – `declare` sees each declared item
+# before its lookup (false: no target gets it, nothing is looked up), `build` each one found,
+# `keep` the target and type of each one a sync must leave as it is installed. In list context
+# also what the sync needs of the run: { resolved, resolved_order, catalogs, served, old_lock }.
 sub _resolve_scope {
-  my ( $self, $config, $scope_cfg, $scope, $state, $run ) = @_;
+  my ( $self, $config, $scope_cfg, $scope, $state, $run, $hooks ) = @_;
+  my $keep_if_locked = $hooks ? $hooks->{keep} : sub { };
   my $rep = { scope => $scope, warnings => [], trustRequests => [], items => [], sources => [] };
   my $warnings = $rep->{warnings};
   my $target_dir = path_join( $self->_base_of($scope), '.claude' );
@@ -307,15 +312,20 @@ sub _resolve_scope {
     my ( $item ) = @_;
     my $r   = $resolved{ $item->{source} };
     my $cat = $catalog_of->( $item->{source} );
-    return undef unless $r && $cat;
+    unless ( $r && $cat ) {
+      $keep_if_locked->( $item->{target}, $item->{type} );
+      return undef;
+    }
     my ($ci) = grep { $_->{type} eq $item->{type} && $_->{name} eq $item->{name} } @{ $cat->{items} };
     unless ($ci) {
       push @$warnings, 'item not found in source '.$item->{source}.': '.$item->{type}.' '.$item->{name};
+      $keep_if_locked->( $item->{target}, $item->{type} );
       return undef;
     }
     if ( defined $ci->{error} ) {
       # An error of the item itself (spec §4.1): it is not built, what it installed stays.
       push @$warnings, $item->{type}.' '.$item->{name}.'@'.$item->{source}.': '.$ci->{error}.'; an installed copy stays';
+      $keep_if_locked->( $item->{target}, $item->{type} );
       return undef;
     }
     return { r => $r, cat => $cat, item => $ci };
@@ -323,6 +333,12 @@ sub _resolve_scope {
 
   my $build_item = sub {
     my ( $item, $extra ) = @_;
+    if ($hooks) {
+      $hooks->{declare}->($item) or return;
+      my $found = $lookup->($item) or return;
+      $hooks->{build}->( $item, $extra // {}, $found, $warnings );
+      return;
+    }
     my $found = $lookup->($item) or return;
     my $ri = {
       type       => $item->{type},
@@ -463,6 +479,7 @@ sub _resolve_scope {
     if ( _uniq( map { $_->{source} // '' } @{ $o->{offers} } ) > 1 ) {
       my @from = _uniq( map { $_->{from} } @{ $o->{offers} } );
       push @$warnings, $o->{type}.' '.join( ' and ', map { '"'.$_.'"' } @names ).' offered by '.join( ' and ', @from ).'; skipped';
+      $keep_if_locked->( $TYPE_DIR{ $o->{type} }.'/'.$_, $o->{type} ) for @names;
       next;
     }
     # One source: installed once, however many of its wildcards and bundles yield it.
@@ -470,7 +487,10 @@ sub _resolve_scope {
     for my $name (@names) {
       my @mine = grep { $_->{name} eq $name } @{ $o->{offers} };
       my @live = grep { $_->{live} } @mine;
-      next unless @live;
+      unless (@live) {
+        $keep_if_locked->( $TYPE_DIR{ $o->{type} }.'/'.$name, $o->{type} );
+        next;
+      }
       unless ( _valid_item_name($name) ) {
         push @$warnings, $o->{type}.' "'.$name.'" from '.$live[0]{from}.' skipped: invalid item name';
         next;
@@ -494,6 +514,19 @@ sub _resolve_scope {
   }
   for my $k (@conflict_order) {
     push @$warnings, 'bundle vars conflict on '.$k.' set different values; neither applies to '.join( ', ', @{ $conflicts{$k} } );
+  }
+
+  if ($hooks) {
+    my $run_info = {
+      resolved       => \%resolved,
+      resolved_order => \@resolved_order,
+      catalogs       => \%catalogs,
+      old_lock       => $old_lock,
+      # Per bundle label, the other sources its entries are served by (spec §15.6).
+      served => { map { ( $_->{label} => [ map { defined $_->{served} ? $_->{served} : () } @{ $_->{foreign} } ] ) } @expansions },
+    };
+    undef $_ for $resolve_all, $catalog_of, $lookup, $build_item, $offer, $set;
+    return wantarray ? ( $rep, $run_info ) : $rep;
   }
 
   # The sources the scope needed, and what became of them.

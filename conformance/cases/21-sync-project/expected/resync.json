@@ -1,0 +1,53 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [
+        {
+          "key": "agents/reviewer",
+          "name": "reviewer",
+          "source": "shared",
+          "type": "agent"
+        },
+        {
+          "key": "rules/perl-style",
+          "name": "perl-style",
+          "source": "shared",
+          "type": "rule"
+        },
+        {
+          "key": "skills/lint",
+          "name": "lint",
+          "source": "crew",
+          "type": "skill"
+        },
+        {
+          "key": "skills/perl-moo",
+          "name": "perl-moo",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "updated": [],
+      "warnings": []
+    },
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

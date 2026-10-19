@@ -1,0 +1,29 @@
+{
+  "scopes": [
+    {
+      "added": [
+        {
+          "key": "agents/reviewer",
+          "name": "reviewer",
+          "source": "shared",
+          "type": "agent"
+        },
+        {
+          "key": "skills/lint",
+          "name": "lint",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

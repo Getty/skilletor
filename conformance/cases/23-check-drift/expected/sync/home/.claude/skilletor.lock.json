@@ -1,0 +1,17 @@
+{
+  "rules/style": {
+    "source": "shared",
+    "version": "git:00f1c12",
+    "files": {
+      "rules/.local.style.md": "sha256:9f49db6a6eb18309e5901708a44b347aa61fe824dd4c6e65e3a1f3e8c75c1423"
+    }
+  },
+  "skills/lint": {
+    "source": "shared",
+    "version": "git:00f1c12",
+    "files": {
+      "skills/lint/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/lint/SKILL.md": "sha256:2dfdc7d0653dda1cd204df2b7773d42833949ffcc06eef00d0565e4ab402bffc"
+    }
+  }
+}

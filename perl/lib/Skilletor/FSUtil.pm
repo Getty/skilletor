@@ -20,7 +20,7 @@ our @EXPORT_OK = qw(
   inner_segments hash_bytes is_executable
   atomic_write write_text
   path_join path_normalize path_resolve is_absolute
-  real_or_resolved same_path to_posix
+  real_or_resolved same_path same_file to_posix
   node_fs_error
 );
 
@@ -171,6 +171,37 @@ sub real_or_resolved {
 sub same_path {
   my ( $a, $b ) = @_;
   return real_or_resolved($a) eq real_or_resolved($b) ? 1 : 0;
+}
+
+sub _dirname { my ( $p ) = @_; ( my $d = $p ) =~ s{/[^/]*\z}{}; return length $d ? $d : '/' }
+sub _basename { my ( $p ) = @_; return ( $p =~ m{([^/]*)\z} )[0] }
+
+# Where a file path ends up once symlinks are followed, also for a missing file or a dangling
+# link (then: the real parent dir joined with the final name).
+sub _file_target {
+  my ( $path ) = @_;
+  my $p = path_resolve($path);
+  for ( 1 .. 40 ) {
+    my $bytes = encode_text($p);
+    if ( -e $bytes ) {
+      my $real = eval { Cwd::abs_path($bytes) };
+      return Encode::decode( 'UTF-8', $real ) if defined $real;
+    }
+    last unless -l $bytes;
+    my $to = readlink $bytes;
+    last unless defined $to;
+    $p = path_resolve( _dirname($p), Encode::decode( 'UTF-8', $to ) );
+  }
+  return path_join( real_or_resolved( _dirname($p) ), _basename($p) );
+}
+
+# True when writing $a would write $b: the same target path, or the same inode. Never throws.
+sub same_file {
+  my ( $a, $b ) = @_;
+  return 1 if _file_target($a) eq _file_target($b);
+  my @sa = stat encode_text($a) or return 0;
+  my @sb = stat encode_text($b) or return 0;
+  return ( $sa[0] == $sb[0] && $sa[1] == $sb[1] ) ? 1 : 0;
 }
 
 #### Errors ############################################################
@@ -325,6 +356,13 @@ The real path of an existing path, else its L</path_resolve> form.
 =func same_path
 
 True when two paths name the same location once symlinks are resolved.
+
+=func same_file
+
+True when writing one path would write the other: the same target once links
+are followed (a missing file or dangling link by its real parent), or the same
+inode (a hard link). What tells two spellings of a name apart on a
+case-insensitive file system. Never throws.
 
 =func to_posix
 

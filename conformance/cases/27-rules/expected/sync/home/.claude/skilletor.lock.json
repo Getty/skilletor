@@ -1,0 +1,9 @@
+{
+  "rules/style": {
+    "source": "shared",
+    "version": "git:0bb04a6",
+    "files": {
+      "rules/.local.style.md": "sha256:9f49db6a6eb18309e5901708a44b347aa61fe824dd4c6e65e3a1f3e8c75c1423"
+    }
+  }
+}

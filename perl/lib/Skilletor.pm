@@ -3,10 +3,11 @@ package Skilletor;
 
 use Moo;
 use Carp qw( croak );
+use Skilletor::Engine;
 use Skilletor::Entry qw( name_key );
+use Skilletor::Error::Ambiguous;
 use Skilletor::Error::Unsupported;
 use Skilletor::FSUtil qw( path_join );
-use Skilletor::Resolver;
 use namespace::clean;
 
 our $VERSION = '0.001';
@@ -30,7 +31,7 @@ has require_harness => (
   default => sub { 0 },
 );
 
-has [qw( state_root cache_root codex_home timeout_ms lock_timeout_ms )] => (
+has [qw( state_root cache_root codex_home timeout_ms lock_timeout_ms is_git_work_tree git_tracked git_remote plugin_root )] => (
   is => 'ro',
 );
 
@@ -38,15 +39,36 @@ has resolver => (
   is      => 'lazy',
   builder => sub {
     my ( $self ) = @_;
-    return Skilletor::Resolver->new(
+    return Skilletor::Engine->new(
       home            => $self->home,
       project_dir     => $self->project_dir,
       fetch           => $self->fetch,
       require_harness => $self->require_harness,
-      map { defined $self->$_ ? ( $_ => $self->$_ ) : () } qw( state_root cache_root codex_home timeout_ms lock_timeout_ms ),
+      map { defined $self->$_ ? ( $_ => $self->$_ ) : () }
+        qw( state_root cache_root codex_home timeout_ms lock_timeout_ms is_git_work_tree git_tracked git_remote plugin_root ),
     );
   },
 );
+
+sub engine { $_[0]->resolver }
+
+# A sync changes what the lookups would answer: the resolution they answer from goes with it.
+sub sync {
+  my ( $self, %opts ) = @_;
+  my $report = $self->resolver->sync(%opts);
+  $self->refresh;
+  return $report;
+}
+
+sub check {
+  my ( $self, %opts ) = @_;
+  return $self->resolver->check(%opts);
+}
+
+sub status {
+  my ( $self, %opts ) = @_;
+  return $self->resolver->status(%opts);
+}
 
 # The resolution of every scope that resolve_* answer from, made on first use.
 has _resolution => (
@@ -107,55 +129,95 @@ sub _scope_report {
   return $rep;
 }
 
-sub _scopes_for {
-  my ( $scope ) = @_;
-  $scope //= 'all';
-  croak 'scope must be user, project or all' unless $scope =~ /\A(?:user|project|all)\z/;
-  return $scope eq 'all' ? qw( project user ) : ($scope);
+# Claude Code's order per type when both scopes hold an item of one name: a personal skill wins
+# over a project one, a project agent over a personal one; rules do not override each other –
+# both load, the user's first.
+my %ORDER = ( skill => [qw( user project )], agent => [qw( project user )], rule => [qw( user project )] );
+my %SHADOWS = ( skill => 1, agent => 1, rule => 0 );
+my @TYPES = qw( skill agent rule );
+
+sub _check_type {
+  my ( $type ) = @_;
+  croak 'type must be skill, agent or rule' unless defined $type && $ORDER{$type};
 }
 
-# Every item, one per type and name: the project's shadows the user's.
-sub items {
-  my ( $self, %opts ) = @_;
+sub _scopes_for {
+  my ( $scope, $type ) = @_;
+  $scope //= 'all';
+  croak 'scope must be user, project or all' unless $scope =~ /\A(?:user|project|all)\z/;
+  return $scope eq 'all' ? @{ $ORDER{$type} } : ($scope);
+}
+
+# Every record of a type, in the type's order: one per name where one scope's item wins.
+sub _items_of {
+  my ( $self, $type, $scope, $key ) = @_;
   my ( %seen, @out );
-  for my $scope ( _scopes_for( $opts{scope} ) ) {
-    my $rep = $self->_scope_report($scope) or next;
+  for my $s ( _scopes_for( $scope, $type ) ) {
+    my $rep = $self->_scope_report($s) or next;
     for my $ri ( @{ $rep->{items} } ) {
-      next if defined $opts{type} && $ri->{type} ne $opts{type};
-      next if $seen{ $ri->{type}.'/'.name_key( $ri->{name} ) }++;
-      push @out, $self->_record( $scope, $ri );
+      next unless $ri->{type} eq $type;
+      my $k = name_key( $ri->{name} );
+      next if defined $key && $k ne $key;
+      next if $SHADOWS{$type} && $seen{$k}++;
+      push @out, $self->_record( $s, $ri );
     }
   }
-  return \@out;
+  return @out;
+}
+
+sub items {
+  my ( $self, %opts ) = @_;
+  _check_type( $opts{type} ) if defined $opts{type};
+  return [ map { $self->_items_of( $_, $opts{scope} ) } defined $opts{type} ? ( $opts{type} ) : @TYPES ];
+}
+
+sub resolve_items {
+  my ( $self, $type, $name, %opts ) = @_;
+  _check_type($type);
+  return [] unless defined $name && length $name;
+  my $key = name_key($name);
+  my @all;
+  for my $s ( _scopes_for( $opts{scope}, $type ) ) {
+    push @all, grep { $_->{scope} eq $s } $self->_items_of( $type, $s, $key );
+  }
+  return \@all;
 }
 
 sub resolve_item {
   my ( $self, $type, $name, %opts ) = @_;
-  croak 'type must be skill, agent or rule' unless defined $type && $type =~ /\A(?:skill|agent|rule)\z/;
-  return undef unless defined $name && length $name;
-  my $key = name_key($name);
-  for my $scope ( _scopes_for( $opts{scope} ) ) {
-    my $rep = $self->_scope_report($scope) or next;
-    for my $ri ( @{ $rep->{items} } ) {
-      return $self->_record( $scope, $ri ) if $ri->{type} eq $type && name_key( $ri->{name} ) eq $key;
-    }
+  my @found = @{ $self->resolve_items( $type, $name, %opts ) };
+  return undef unless @found;
+  if ( @found > 1 && !$SHADOWS{$type} ) {
+    Skilletor::Error::Ambiguous->throw( $type.' '.$found[0]{name}.' is declared in the user and the project scope; '
+      .'Claude Code loads both (neither overrides the other) – ask resolve_'.$type.'s, or pass a scope' );
   }
-  return undef;
+  return $found[0];
+}
+
+sub _refuse_template {
+  my ( $rec ) = @_;
+  return unless $rec->{templated};
+  Skilletor::Error::Unsupported->throw( $rec->{type}.' '.$rec->{name}.'@'.$rec->{source}.' is a Nunjucks template ('
+    .join( ', ', @{ $rec->{templates} } ).'); the Perl port of skilletor renders no templates' );
 }
 
 sub _main_file {
   my ( $self, $type, $name, %opts ) = @_;
   my $rec = $self->resolve_item( $type, $name, %opts ) or return undef;
-  if ( $rec->{templated} ) {
-    Skilletor::Error::Unsupported->throw( $type.' '.$rec->{name}.'@'.$rec->{source}.' is a Nunjucks template ('
-      .join( ', ', @{ $rec->{templates} } ).'); the Perl port of skilletor renders no templates' );
-  }
+  _refuse_template($rec);
   return $rec->{file};
 }
 
 sub resolve_skill { my $self = shift; return $self->_main_file( skill => @_ ) }
 sub resolve_agent { my $self = shift; return $self->_main_file( agent => @_ ) }
 sub resolve_rule  { my $self = shift; return $self->_main_file( rule  => @_ ) }
+
+sub resolve_rules {
+  my ( $self, $name, %opts ) = @_;
+  my @recs = @{ $self->resolve_items( rule => $name, %opts ) };
+  _refuse_template($_) for @recs;
+  return map { $_->{file} } @recs;
+}
 
 1;
 

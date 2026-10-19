@@ -1,0 +1,24 @@
+{
+  "description": "Rules in both scopes: the user's style rule and the project's rules wildcard, which yields a style rule of the same name – each scope installs its own .local. copy (Claude Code loads both); the project's hand-written rules/team.md stays untouched; status counts the wildcard's rules.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "status",
+      "op": "status"
+    }
+  ]
+}

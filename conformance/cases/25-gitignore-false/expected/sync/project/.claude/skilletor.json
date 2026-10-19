@@ -1,0 +1,11 @@
+{
+  "gitignore": false,
+  "install": {
+    "skills": [
+      "lint@shared"
+    ],
+    "agents": [
+      "reviewer@shared"
+    ]
+  }
+}

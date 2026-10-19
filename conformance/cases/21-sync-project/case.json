@@ -1,5 +1,5 @@
 {
-  "description": "Project-scope sync: a bundle of a user source and a skill of a trusted project source; .claude/.gitignore block, .worktreeinclude, the plugin requirement in .claude/settings.json, the lock with via; check and status.",
+  "description": "Project-scope sync: a bundle of a user source and a skill of a trusted project source; .claude/.gitignore block, .worktreeinclude, the plugin requirement in .claude/settings.json, the lock with via; check and status; a second sync changes nothing and names no file to commit.",
   "git": {
     "shared": {
       "url": "https://conformance.invalid/shared.git",
@@ -31,6 +31,14 @@
     {
       "id": "status",
       "op": "status"
+    },
+    {
+      "id": "resync",
+      "op": "sync"
+    },
+    {
+      "id": "recheck",
+      "op": "check"
     }
   ]
 }

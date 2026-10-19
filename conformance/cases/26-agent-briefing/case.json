@@ -1,0 +1,24 @@
+{
+  "description": "An agent declaring briefing skills: one installed by the same sync resolves, one installed nowhere is named (a warning and briefingMissing in the sync, briefingMissing in status), a plugin:skill name is not checked.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "status",
+      "op": "status"
+    }
+  ]
+}

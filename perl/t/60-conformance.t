@@ -15,7 +15,7 @@ use JSON::MaybeXS ();
 use Path::Tiny qw( path tempdir );
 use Skilletor::FSUtil qw( encode_text read_text );
 use Skilletor::JSON qw( js_parse js_sort_keys js_stringify js_type );
-use Skilletor::Resolver;
+use Skilletor::Engine;
 
 my $ROOT = path( $FindBin::Bin, '..', '..', 'conformance', 'cases' );
 plan skip_all => 'needs the shared conformance cases (../conformance, a skilletor checkout)' unless $ROOT->is_dir;
@@ -166,6 +166,7 @@ sub build_git {
       $i++;
       $_->basename eq '.git' or $_->remove_tree( { safe => 0 } ) for $repo->children;
       copy_tree( "$case_dir/$commit->{tree}", "$repo" );
+      chmod 0755, "$repo/$_" for @{ $commit->{executable} // [] };
       git_ok( "$repo", 'add', '-A' );
       git_ok( "$repo", 'commit', '-q', '--allow-empty', '-m', "conformance $i" );
       git_ok( "$repo", 'tag', $commit->{tag} )       if defined $commit->{tag};
@@ -210,12 +211,14 @@ sub run_case {
     path( $r->{project} )->mkpath;
     copy_input( "$case_dir/project", $r->{project}, $r );
   }
-  my $resolver = Skilletor::Resolver->new(
-    home            => $r->{home},
+  my $sk = Skilletor::Engine->new(
+    home             => $r->{home},
     ( $r->{project} ? ( project_dir => $r->{project} ) : () ),
-    state_root      => "$r->{home}/.claude/skilletor",
-    codex_home      => "$r->{home}/.codex",
-    require_harness => 1,    # the reference's resolve: a machine without a harness is an error
+    state_root       => "$r->{home}/.claude/skilletor",
+    codex_home       => "$r->{home}/.codex",
+    require_harness  => 1,              # the reference's resolve: a machine without a harness is an error
+    is_git_work_tree => sub { 0 },      # neither dir lies in a work tree, git tracks none of their files
+    git_tracked      => sub { [] },
   );
 
   for my $step ( @{ $c->{steps} } ) {
@@ -225,13 +228,15 @@ sub run_case {
       pass( "step $id skipped: $variant->{skip}" );
       next;
     }
-    if ( $step->{op} ne 'resolve' ) {
-      pass( "step $id ($step->{op}) skipped: phase 3 (sync, check and status are not ported yet)" );
-      next;
-    }
     my $expected = defined $variant->{expected} ? "$case_dir/$variant->{expected}" : "$case_dir/expected/$id";
-    my $view   = resolve_view( $resolver->resolve( scope => $step->{scope} // 'all' ) );
-    my $actual = canonical( js_parse( abstract( js_stringify($view), $r ) ) );
+    my %opts = ( scope => $step->{scope} // 'all' );
+    my $result =
+        $step->{op} eq 'resolve' ? resolve_view( $sk->resolve(%opts) )
+      : $step->{op} eq 'sync'    ? $sk->sync( %opts, force => $step->{force} ? 1 : 0 )
+      : $step->{op} eq 'check'   ? $sk->check(%opts)
+      : $step->{op} eq 'status'  ? $sk->status(%opts)
+      :                            die "unknown op $step->{op}";
+    my $actual = canonical( js_parse( abstract( js_stringify($result), $r ) ) );
     my $want   = canonical( js_parse( read_text("$expected.json") ) );
     is( js_stringify( $actual, 2 ), js_stringify( $want, 2 ), "step $id" );
     next unless $step->{tree};
@@ -239,6 +244,12 @@ sub run_case {
     my %want  = map { ( $_ => read_text("$expected/$_") ) } walk($expected);
     is_deeply( [ sort keys %$have ], [ sort keys %want ], "step $id: the files in the tree" );
     is( $have->{$_}, $want{$_}, "step $id: $_" ) for sort keys %want;
+    my @execs = grep {
+      my ( $where, $rel ) = m{\A(home|project)/(.*)\z}s;
+      ( ( stat( $r->{$where}.'/'.$rel ) )[2] // 0 ) & 0100;
+    } sort keys %$have;
+    my $want_execs = -f "$expected.executables.json" ? js_parse( read_text("$expected.executables.json") ) : [];
+    is_deeply( \@execs, [@$want_execs], "step $id: the files with the executable bit" );
   }
 }
 

@@ -1,0 +1,40 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [
+        {
+          "path": "skills/lint/SKILL.md"
+        }
+      ],
+      "removed": [
+        {
+          "key": "agents/gone",
+          "name": "gone",
+          "source": "shared",
+          "type": "agent"
+        },
+        {
+          "key": "skills/old",
+          "name": "old",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [
+        {
+          "key": "skills/lint",
+          "name": "lint",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "warnings": []
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "description": "Files the lock does not hold block their whole item: a hand-written skills/lint/SKILL.md (force adopts it, the source's bytes replace it) and a hand-written agent at the agent's plain path agents/reviewer.md (force deletes it and installs .local.reviewer.md); check does not count the lasting conflicts again; status before and after.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "status",
+      "op": "status"
+    },
+    {
+      "id": "force",
+      "op": "sync",
+      "force": true,
+      "tree": true
+    },
+    {
+      "id": "status-forced",
+      "op": "status"
+    }
+  ]
+}

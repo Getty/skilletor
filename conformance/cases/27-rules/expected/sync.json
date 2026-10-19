@@ -1,0 +1,52 @@
+{
+  "scopes": [
+    {
+      "added": [
+        {
+          "key": "rules/commits",
+          "name": "commits",
+          "source": "shared",
+          "type": "rule"
+        },
+        {
+          "key": "rules/style",
+          "name": "style",
+          "source": "shared",
+          "type": "rule"
+        }
+      ],
+      "conflicts": [],
+      "gitignoreUpdated": [
+        ".claude/.gitignore",
+        ".worktreeinclude"
+      ],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    },
+    {
+      "added": [
+        {
+          "key": "rules/style",
+          "name": "style",
+          "source": "shared",
+          "type": "rule"
+        }
+      ],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

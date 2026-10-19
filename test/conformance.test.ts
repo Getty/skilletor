@@ -12,7 +12,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
-  cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
+  chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
@@ -42,7 +42,7 @@ interface Step {
 
 interface Case {
   description: string;
-  git?: Record<string, { url: string; commits: { tree: string; tag?: string; branch?: string }[] }>;
+  git?: Record<string, { url: string; commits: { tree: string; tag?: string; branch?: string; executable?: string[] }[] }>;
   steps: Step[];
   engines?: Record<string, { skip?: string; steps?: Record<string, { skip?: string; expected?: string }> }>;
 }
@@ -157,6 +157,7 @@ function buildGit(caseDir: string, c: Case, r: Roots, env: NodeJS.ProcessEnv): v
     g.commits.forEach((commit, i) => {
       for (const entry of readdirSync(repo)) if (entry !== ".git") rmSync(join(repo, entry), { recursive: true, force: true });
       cpSync(join(caseDir, commit.tree), repo, { recursive: true });
+      for (const rel of commit.executable ?? []) chmodSync(join(repo, rel), 0o755);
       git(repo, env, "add", "-A");
       git(repo, env, "commit", "-q", "--allow-empty", "-m", `conformance ${i + 1}`);
       if (commit.tag) git(repo, env, "tag", commit.tag);
@@ -191,6 +192,12 @@ function snapshot(r: Roots): Map<string, string> {
     for (const rel of walk(r.project)) out.set(`project/${rel}`, abstract(readFileSync(join(r.project, rel), "utf8"), r));
   }
   return out;
+}
+
+/** The snapshot's files that carry the owner's executable bit (README: trees), sorted. */
+function executablesOf(r: Roots, have: Map<string, string>): string[] {
+  const abs = (rel: string) => (rel.startsWith("home/") ? join(r.home, rel.slice(5)) : join(r.project!, rel.slice(8)));
+  return [...have.keys()].filter((rel) => (statSync(abs(rel)).mode & 0o100) !== 0).sort();
 }
 
 function writeJson(path: string, value: unknown): void {
@@ -236,7 +243,11 @@ async function runCase(name: string): Promise<void> {
       if (!step.tree) continue;
       const treeDir = join(caseDir, "expected", step.id);
       const have = snapshot(r);
+      const execFile = join(caseDir, "expected", `${step.id}.executables.json`);
+      const execs = executablesOf(r, have);
       if (UPDATE) {
+        if (execs.length > 0) writeJson(execFile, execs);
+        else rmSync(execFile, { force: true });
         rmSync(treeDir, { recursive: true, force: true });
         for (const [rel, text] of have) {
           mkdirSync(dirname(join(treeDir, rel)), { recursive: true });
@@ -247,6 +258,8 @@ async function runCase(name: string): Promise<void> {
       const want = new Map(walk(treeDir).map((rel) => [rel, readFileSync(join(treeDir, rel), "utf8")]));
       assert.deepEqual([...have.keys()], [...want.keys()], `${name}: step ${step.id}: the files in the tree`);
       for (const [rel, text] of want) assert.equal(have.get(rel), text, `${name}: step ${step.id}: ${rel}`);
+      const wantExecs = existsSync(execFile) ? JSON.parse(readFileSync(execFile, "utf8")) : [];
+      assert.deepEqual(execs, wantExecs, `${name}: step ${step.id}: the files with the executable bit`);
     }
   } finally {
     for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];

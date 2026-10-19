@@ -1,0 +1,12 @@
+{
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    }
+  },
+  "install": {
+    "rules": [
+      "k8s@shared"
+    ]
+  }
+}

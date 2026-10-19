@@ -44,6 +44,7 @@ my $user_src = files( "$root/user-src",
 my $proj_src = files( "$root/proj-src",
   'skills/Perl-Moo/SKILL.md' => skill('project moo'),
   'agents/helper.md.njk'     => skill('{{ vars.x }}'),
+  'agents/reviewer.md'       => skill('project reviewer'),
   'rules/style.md'           => skill('project style'),
 );
 write_json( "$home/.claude/skilletor.json", {
@@ -53,7 +54,7 @@ write_json( "$home/.claude/skilletor.json", {
 } );
 write_json( "$proj/.claude/skilletor.local.json", {
   sources => { p => { local => $proj_src } },
-  install => { skills => ['Perl-Moo@p'], agents => ['helper@p'], rules => ['style@p'] },
+  install => { skills => ['Perl-Moo@p'], agents => [ 'helper@p', 'reviewer@p' ], rules => ['style@p'] },
   vars    => { level => 'local' },
 } );
 
@@ -68,18 +69,37 @@ subtest 'resolve needs no agent harness here' => sub {
   is_deeply( $strict->{scopes}, [], 'and nothing resolved' );
 };
 
-subtest 'resolve_skill: the main file in the source tree, the project shadowing the user' => sub {
-  is( $sk->resolve_skill('perl-moo'), "$proj_src/skills/Perl-Moo/SKILL.md", 'project first; names ignore case' );
+subtest 'resolve_skill and co: the main file in the source tree, by Claude Code\'s precedence' => sub {
+  is( $sk->resolve_skill('perl-moo'), "$user_src/skills/perl-moo/SKILL.md", 'a skill: the personal one wins over the project\'s' );
+  is( $sk->resolve_skill('PERL-MOO'), "$user_src/skills/perl-moo/SKILL.md", 'names ignore case' );
   is( $sk->resolve_skill( 'perl-moo', scope => 'user' ), "$user_src/skills/perl-moo/SKILL.md", 'scope => user' );
   is( $sk->resolve_skill( 'PERL-MOO', scope => 'project' ), "$proj_src/skills/Perl-Moo/SKILL.md", 'scope => project' );
   is( $sk->resolve_skill('only-user'), "$user_src/skills/only-user/SKILL.md", 'a user item the project lacks' );
   is( $sk->resolve_skill( 'only-user', scope => 'project' ), undef, 'not declared in the project scope' );
   is( $sk->resolve_skill('nope'), undef, 'unknown: undef' );
   is( $sk->resolve_skill(''), undef, 'empty: undef' );
-  is( $sk->resolve_agent('reviewer'), "$user_src/agents/reviewer.md", 'an agent via a wildcard' );
-  is( $sk->resolve_rule('style'), "$proj_src/rules/style.md", 'a rule: the project\'s' );
-  is( $sk->resolve_rule( 'style', scope => 'user' ), "$user_src/rules/style.md", 'and the user\'s' );
+  is( $sk->resolve_agent('reviewer'), "$proj_src/agents/reviewer.md", 'an agent: the project\'s wins over the personal one' );
+  is( $sk->resolve_agent( 'reviewer', scope => 'user' ), "$user_src/agents/reviewer.md", 'scope => user: the one a wildcard declares' );
   is( $sk->resolve_skill('reviewer'), undef, 'types do not mix' );
+};
+
+subtest 'rules: both scopes load, neither shadows the other' => sub {
+  is_deeply( [ $sk->resolve_rules('style') ], [ "$user_src/rules/style.md", "$proj_src/rules/style.md" ], 'resolve_rules: the user\'s first' );
+  is_deeply( [ $sk->resolve_rules( 'style', scope => 'project' ) ], ["$proj_src/rules/style.md"], 'one scope' );
+  is_deeply( [ $sk->resolve_rules('nope') ], [], 'unknown: none' );
+  my $err;
+  eval { $sk->resolve_rule('style'); 1 } or $err = $@;
+  isa_ok( $err, 'Skilletor::Error::Ambiguous', 'resolve_rule of a rule both scopes declare' );
+  like( $err->message, qr/\Arule style is declared in the user and the project scope; Claude Code loads both/, 'the message' );
+  my $item_err;
+  eval { $sk->resolve_item( rule => 'style' ); 1 } or $item_err = $@;
+  isa_ok( $item_err, 'Skilletor::Error::Ambiguous', 'resolve_item too' );
+  is( $sk->resolve_rule( 'style', scope => 'user' ), "$user_src/rules/style.md", 'a scope narrows it: the user\'s' );
+  is( $sk->resolve_rule( 'style', scope => 'project' ), "$proj_src/rules/style.md", 'and the project\'s' );
+  is_deeply( [ map { "$_->{scope}:$_->{name}" } @{ $sk->resolve_items( rule => 'STYLE' ) } ], [ 'user:style', 'project:style' ],
+    'resolve_items: every record, in load order' );
+  is_deeply( [ map { "$_->{scope}:$_->{name}" } @{ $sk->items( type => 'rule' ) } ], [ 'user:style', 'project:style' ],
+    'items: both rules' );
 };
 
 subtest 'resolve_item: the record' => sub {
@@ -105,12 +125,17 @@ subtest 'resolve_item: the record' => sub {
     },
     'a skill',
   );
-  my $agent = $sk->resolve_item( agent => 'reviewer' );
+  my $agent = $sk->resolve_item( agent => 'reviewer', scope => 'user' );
   is( $agent->{dir}, "$user_src/agents", 'an agent\'s dir: the one holding its file' );
   is_deeply( $agent->{declaredBy}, ['*@u'], 'declared by the wildcard' );
-  is( $sk->resolve_item( rule => 'style' )->{vars}{level}, 'local', 'project items: local vars win' );
+  is( $sk->resolve_item( rule => 'style', scope => 'project' )->{vars}{level}, 'local', 'project items: local vars win' );
   is_deeply( [ map { "$_->{scope}:$_->{name}" } @{ $sk->items( type => 'skill' ) } ],
-    [ 'project:Perl-Moo', 'user:only-user', 'user:tmpl' ], 'items: one per name, the project\'s first' );
+    [ 'user:perl-moo', 'user:only-user', 'user:tmpl' ], 'items: one skill per name, the user\'s winning' );
+  is_deeply( [ map { "$_->{scope}:$_->{name}" } @{ $sk->items( type => 'agent' ) } ],
+    [ 'project:helper', 'project:reviewer' ], 'one agent per name, the project\'s winning' );
+  is_deeply( [ map { "$_->{type}:$_->{scope}" } @{ $sk->items } ],
+    [ 'skill:user', 'skill:user', 'skill:user', 'agent:project', 'agent:project', 'rule:user', 'rule:project' ],
+    'every type: skills, agents, rules' );
   is( scalar @{ $sk->items( scope => 'user' ) }, 5, 'items of one scope' );
   like( error_of( sub { $sk->resolve_item( widget => 'x' ) } ), qr/type must be skill, agent or rule/, 'a type is checked' );
 };

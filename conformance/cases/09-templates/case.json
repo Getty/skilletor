@@ -24,16 +24,23 @@
     {
       "id": "status",
       "op": "status"
+    },
+    {
+      "id": "check",
+      "op": "check"
     }
   ],
   "engines": {
     "perl": {
       "steps": {
         "sync": {
-          "skip": "renders .njk templates; the Perl engine renders none (resolve marks them templated)"
+          "expected": "expected.perl/sync"
         },
         "status": {
-          "skip": "follows the TS-only sync"
+          "expected": "expected.perl/status"
+        },
+        "check": {
+          "expected": "expected.perl/check"
         }
       }
     }

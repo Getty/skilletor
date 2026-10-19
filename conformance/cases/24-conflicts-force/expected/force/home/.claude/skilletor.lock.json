@@ -1,0 +1,17 @@
+{
+  "agents/reviewer": {
+    "source": "shared",
+    "version": "git:d4c51f3",
+    "files": {
+      "agents/.local.reviewer.md": "sha256:11dcefe8681462f36289bd96d581be93215d00431df82161f3982bbe1814065d"
+    }
+  },
+  "skills/lint": {
+    "source": "shared",
+    "version": "git:d4c51f3",
+    "files": {
+      "skills/lint/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/lint/SKILL.md": "sha256:635e62493a3e4bf5139fa4f9293dbf3ed2f24d3e87f4b38edd9b9135c892d03b"
+    }
+  }
+}

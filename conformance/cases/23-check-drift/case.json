@@ -1,0 +1,32 @@
+{
+  "description": "check against a lock an earlier sync left at v1: the source moved on (main is v2), a declared rule has no lock entry, nothing recorded what the scope rendered with; an installed file edited by hand is no drift (check never reads installed files) – the sync overwrites and names it, and check afterwards finds nothing.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared-v1",
+          "tag": "v1"
+        },
+        {
+          "tree": "sources/shared-v2"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "recheck",
+      "op": "check"
+    }
+  ]
+}

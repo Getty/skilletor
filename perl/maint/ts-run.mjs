@@ -1,5 +1,5 @@
 // The reference implementation, driven from the Perl test suite (t/50-parity.t,
-// t/51-parity-resolve.t): reads one JSON request on stdin, runs it against ../src, prints the
+// t/51-parity-resolve.t, t/52-parity-sync.t): reads one JSON request on stdin, runs it against ../src, prints the
 // answer as JSON. Never part of the CPAN dist; the tests skip without it, without node or without
 // the TypeScript tree beside perl/.
 //
@@ -9,15 +9,21 @@
 //   { "op": "trust", "root": "/s", "name": "x", "backend": {...} }  -> State.isTrusted
 //   { "op": "sweep", "root": "/c" }                                 -> sweepGitCache + sweepUrlCache
 //   { "op": "resolve", "home": "/h", "projectDir": "/p", "scope": "all" } -> resolveItems
+//   { "op": "sync" | "check" | "status", "home": "/h", "projectDir": "/p", "scope": "all", "force": false }
 //   { "op": "lock", "root": "/s", "timeoutMs": 200, "holdMs": 0 }  -> State.withLock: "ran"
 // Answer: { "result": ... } or { "error": message }.
 import { readFileSync } from "node:fs";
-import { resolveBackend, resolveItems } from "../../src/engine.ts";
+import { check, resolveBackend, resolveItems, status, sync } from "../../src/engine.ts";
 import { GitSource, sweepGitCache } from "../../src/sources/git.ts";
 import { UrlSource, sweepUrlCache } from "../../src/sources/url.ts";
 import { State } from "../../src/state.ts";
 
 const req = JSON.parse(readFileSync(0, "utf8"));
+/** The engine context of a run on a temp home: no work tree, nothing tracked. */
+const ctxOf = (r) => ({
+  home: r.home, projectDir: r.projectDir ?? undefined, stateRoot: `${r.home}/.claude/skilletor`,
+  codexHome: `${r.home}/.codex`, hermesHome: `${r.home}/.hermes`, isGitWorkTree: () => false, gitTracked: () => [],
+});
 const run = async () => {
   switch (req.op) {
     case "backend":
@@ -33,10 +39,13 @@ const run = async () => {
     case "trust":
       return new State(req.root).isTrusted(req.name, req.backend);
     case "resolve":
-      return resolveItems({
-        home: req.home, projectDir: req.projectDir ?? undefined, stateRoot: `${req.home}/.claude/skilletor`,
-        codexHome: `${req.home}/.codex`, hermesHome: `${req.home}/.hermes`, isGitWorkTree: () => false, gitTracked: () => [],
-      }, { scope: req.scope ?? "all" });
+      return resolveItems(ctxOf(req), { scope: req.scope ?? "all" });
+    case "sync":
+      return sync(ctxOf(req), { scope: req.scope ?? "all", force: req.force ?? false });
+    case "check":
+      return check(ctxOf(req), { scope: req.scope ?? "all" });
+    case "status":
+      return status(ctxOf(req), { scope: req.scope ?? "all" });
     case "lock":
       return new State(req.root).withLock(() => new Promise((done) => setTimeout(() => done("ran"), req.holdMs ?? 0)), { timeoutMs: req.timeoutMs });
     case "sweep":

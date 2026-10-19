@@ -1,0 +1,18 @@
+{
+  "description": "A source only the project declares, never trusted: status names it in trustRequests before any sync; the sync fetches nothing and installs nothing but still writes the project's .gitignore block and .worktreeinclude (the project uses skilletor); check lists the trust request and asks for no sync.",
+  "steps": [
+    {
+      "id": "status",
+      "op": "status"
+    },
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    }
+  ]
+}
