@@ -26,10 +26,10 @@ import { atomicWrite, hashBuffer, sameFile, samePath, toPosix } from "./fsutil.t
 import { gitEnv } from "./gitenv.ts";
 import { convertForTarget } from "./convert.ts";
 import { expandHome, LocalSource } from "./sources/local.ts";
-import { GitSource, sweepGitCache } from "./sources/git.ts";
-import { sweepUrlCache, UrlSource } from "./sources/url.ts";
+import { gitCacheName, GitSource, sweepGitCache } from "./sources/git.ts";
+import { sweepUrlCache, urlCacheName, UrlSource } from "./sources/url.ts";
 import type { Source, SourceLocation } from "./sources/types.ts";
-import { scan, type Catalog } from "./catalog.ts";
+import { scan, type Catalog, type CatalogItem } from "./catalog.ts";
 import { build, executables, rendersEmpty, type RenderContext } from "./render.ts";
 import { apply, isValidItemName, type PlanItem } from "./apply.ts";
 import { readLock, writeLock, type Lock, type LockEntry, type SkipReason } from "./lock.ts";
@@ -407,6 +407,14 @@ function renderSources(scopeCfg: ScopeConfig, lock: Lock): string[] {
   return [...new Set([...scopeSources(scopeCfg), ...Object.values(lock).map((e) => e.source)])];
 }
 
+/** An item's `vars`: source defaults < bundle vars (bundle items only) < user < project < local
+ *  (spec §5, §15.3). */
+function itemVars(
+  inputs: RenderInputs, sourceVars: Record<string, unknown>, bundleVars: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return { ...sourceVars, ...bundleVars, ...inputs.vars };
+}
+
 function makeContext(
   ctx: EngineContext,
   inputs: RenderInputs,
@@ -418,8 +426,7 @@ function makeContext(
   bundleVars: Record<string, unknown> = {},
 ): RenderContext {
   return {
-    // source defaults < bundle vars (bundle items only) < user < project < local (spec §5, §15.3)
-    vars: { ...sourceVars, ...bundleVars, ...inputs.vars },
+    vars: itemVars(inputs, sourceVars, bundleVars),
     project: inputs.project,
     scope,
     harness,
@@ -614,6 +621,9 @@ async function syncScopeRun(
   state: State,
   resolveSource: Resolver,
   noCopy: NoCopy[],
+  /** `resolveItems` (k143): collect what the scope resolves to here, then stop before anything
+   *  is built or written – the report holds the warnings and trust requests up to that point. */
+  collect?: ScopeResolution,
 ): Promise<ScopeReport> {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
@@ -622,7 +632,7 @@ async function syncScopeRun(
   // Hermes no target: its entries go as an inactive target's, from the home they were synced under.
   if (scope === "user" && !harnesses.includes("hermes")) rc.hermesHome = recordedHermesHome(ctx);
   const lockPath = join(targetDir, "skilletor.lock.json");
-  if (scope === "user") moveHermesHome(ctx, state, targetDir, rc, harnesses, rep.warnings);
+  if (scope === "user" && !collect) moveHermesHome(ctx, state, targetDir, rc, harnesses, rep.warnings);
   const oldLock = readLock(lockPath);
   const gitignoreOn = scopeCfg.gitignore !== false;
   // Read once, when the first item renders: every item renders with the same, and the record
@@ -695,10 +705,47 @@ async function syncScopeRun(
     }
   };
 
+  type Declared = { type: ItemType; name: string; source: string; target: string };
+  /** What a declared item is built from, or undefined – warned, an installed copy kept – when
+   *  its source is unavailable, or the item is missing from it or carries an error. */
+  const lookup = (item: Declared): { r: { dir: string; version: string }; cat: Catalog; catItem: CatalogItem } | undefined => {
+    const r = resolved.get(item.source);
+    const cat = catalogOf(item.source);
+    if (!r || !cat) {
+      keepIfLocked(item.target, item.type);
+      return undefined;
+    }
+    const catItem = cat.items.find((ci) => ci.type === item.type && ci.name === item.name);
+    if (!catItem) {
+      rep.warnings.push(`item not found in source ${item.source}: ${item.type} ${item.name}`);
+      keepIfLocked(item.target, item.type);
+      return undefined;
+    }
+    if (catItem.error !== undefined) {
+      // An error of the item itself (spec §4.1, k100): it is not built, what it installed stays.
+      rep.warnings.push(`${item.type} ${item.name}@${item.source}: ${catItem.error}; an installed copy stays`);
+      keepIfLocked(item.target, item.type);
+      return undefined;
+    }
+    return { r, cat, catItem };
+  };
+
   const buildItem = (
-    item: { type: ItemType; name: string; source: string; target: string },
-    extra: { bundleVars?: Record<string, unknown>; via?: string[] } = {},
+    item: Declared,
+    extra: { bundleVars?: Record<string, unknown>; via?: string[]; declaredBy?: string[] } = {},
   ) => {
+    if (collect) {
+      // Resolve only: what would be built, for every target alike – no harness decides it.
+      const found = lookup(item);
+      if (!found) return;
+      const ri: ResolvedItem = {
+        type: item.type, name: item.name, source: item.source, declaredBy: extra.declaredBy ?? [],
+        sourceDir: found.r.dir, item: found.catItem, vars: itemVars(inputsOf(), found.cat.meta.vars ?? {}, extra.bundleVars),
+      };
+      if (extra.via?.length) ri.via = extra.via;
+      collect.items.push(ri);
+      return;
+    }
     const targets = harnessesFor(item.type);
     for (const h of harnesses) {
       if (targets.includes(h)) continue;
@@ -710,24 +757,9 @@ async function syncScopeRun(
       const key = lockKey(h, item.target);
       keyInfo.set(key, { key, type: item.type, name: item.name, source: item.source });
     }
-    const r = resolved.get(item.source);
-    const cat = catalogOf(item.source);
-    if (!r || !cat) {
-      keepIfLocked(item.target, item.type);
-      return;
-    }
-    const catItem = cat.items.find((ci) => ci.type === item.type && ci.name === item.name);
-    if (!catItem) {
-      rep.warnings.push(`item not found in source ${item.source}: ${item.type} ${item.name}`);
-      keepIfLocked(item.target, item.type);
-      return;
-    }
-    if (catItem.error !== undefined) {
-      // An error of the item itself (spec §4.1, k100): it is not built, what it installed stays.
-      rep.warnings.push(`${item.type} ${item.name}@${item.source}: ${catItem.error}; an installed copy stays`);
-      keepIfLocked(item.target, item.type);
-      return;
-    }
+    const found = lookup(item);
+    if (!found) return;
+    const { r, cat, catItem } = found;
     // Rendered once per target, with that target's harness and root (spec §14.3).
     for (const h of targets) {
       const key = lockKey(h, item.target);
@@ -890,7 +922,7 @@ async function syncScopeRun(
     explicit.set(targetKey(item.type, item.name), { source: item.source, raw: item.raw });
     const via = (offers.get(targetKey(item.type, item.name))?.offers ?? [])
       .flatMap((x) => (x.via && x.source === item.source && x.name === item.name ? [x.via] : []));
-    buildItem(item, { via });
+    buildItem(item, { via, declaredBy: [item.raw] });
   }
   // Bundle var conflicts (spec §15.3), reported once per key and pair of bundles.
   const varConflicts = new Map<string, string[]>();
@@ -932,11 +964,15 @@ async function syncScopeRun(
         const k = `"${key}": ${setters.join(" and ")}`;
         varConflicts.set(k, [...(varConflicts.get(k) ?? []), `${o.type} ${name}`]);
       });
-      buildItem({ type: o.type, name, source, target }, { bundleVars, via });
+      buildItem({ type: o.type, name, source, target }, { bundleVars, via, declaredBy: [...new Set(live.map((x) => x.from))] });
     }
   }
   for (const [k, items] of varConflicts) {
     rep.warnings.push(`bundle vars conflict on ${k} set different values; neither applies to ${items.join(", ")}`);
+  }
+  if (collect) {
+    collectSources(collect, ctx, sources, resolved, catalogs, rep);
+    return rep;
   }
 
   /** A path for the report: relative to the scope base when under it, else absolute. */
@@ -1370,6 +1406,114 @@ export function codexRulesFiles(given: EngineContext): string[] {
     if (existsSync(file)) out.push(file);
   }
   return out;
+}
+
+// ---- resolve ----------------------------------------------------------------
+
+/** One item a scope resolves to (k143): what a sync would build it from, never built. */
+export interface ResolvedItem {
+  type: ItemType;
+  name: string;
+  source: string;
+  /** The entries that declare it, as written: an explicit entry alone (`perl-moo@shared`), or
+   *  the wildcards and bundles yielding it (`*@shared`, `bundle:perl@shared`). */
+  declaredBy: string[];
+  /** The bundles recorded in its lock entry's `via` (spec §15.5). Absent when none. */
+  via?: string[];
+  /** The resolved source tree the item lies in: a `local` directory or a cache dir. */
+  sourceDir: string;
+  /** The catalog item: its files, relative to `sourceDir`, and where it lies. */
+  item: CatalogItem;
+  /** Its `vars`: source defaults < bundle vars < user < project < local (spec §5, §15.3). */
+  vars: Record<string, unknown>;
+}
+
+/** A source a scope needed, and what became of it (k143). */
+export interface ResolvedSourceInfo {
+  name: string;
+  /** `unknown`: no source of that name; `untrusted`: not fetched (spec §4.3); `failed`: its
+   *  resolve or scan failed (a warning says why). */
+  state: "resolved" | "untrusted" | "failed" | "unknown";
+  backend?: ResolvedBackend;
+  /** git/url: the cache dir's name under the cache root (spec §4.4), resolved or not. */
+  cache?: string;
+  /** Resolved: the tree and its version. */
+  dir?: string;
+  version?: string;
+}
+
+/** What `resolveItems` collects for one scope. */
+export interface ScopeResolution {
+  items: ResolvedItem[];
+  sources: ResolvedSourceInfo[];
+}
+
+export interface ResolveReport {
+  scopes: ({ scope: ScopeName; warnings: string[]; trustRequests: TrustRequest[] } & ScopeResolution)[];
+  /** Config error: nothing was resolved. */
+  error?: string;
+}
+
+/**
+ * What each scope resolves to (k143): a sync's own steps 1–3 (spec §6.1) – config, trust,
+ * every needed source resolved into its cache, wildcards and bundles expanded with the overlap
+ * rules – stopped before anything is built: no render, no write to a target, the lock or the
+ * state's records. It holds the sync lock, as every resolve does (spec §6.5). Its items are
+ * the same for every target; a harness only decides where a copy goes.
+ */
+export async function resolveItems(given: EngineContext, opts: SyncOptions = {}): Promise<ResolveReport> {
+  return withSyncLock(given, async (state) => {
+    const ctx = scoped(given);
+    const loaded = loadWithTargets(ctx);
+    if ("error" in loaded) return { scopes: [], error: loaded.error };
+    const { config, targets } = loaded;
+    const sel = opts.scope ?? "all";
+    const resolveSource = runResolver(cacheRootOf(ctx), ctx.timeoutMs);
+    const scopes: [ScopeName, ScopeConfig][] = [];
+    if (sel === "user" || sel === "all") scopes.push(["user", config.user]);
+    if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
+    const out: ResolveReport = { scopes: [] };
+    for (const [scope, scopeCfg] of scopes) {
+      const collect: ScopeResolution = { items: [], sources: [] };
+      const rep = await syncScopeRun(ctx, config, scopeCfg, scope, targets[scope], {}, state, resolveSource, [], collect);
+      if (scope === "project") rep.warnings.unshift(...targets.warnings);
+      out.scopes.push({ scope, warnings: rep.warnings, trustRequests: rep.trustRequests, ...collect });
+    }
+    return out;
+  });
+}
+
+/** The sources a resolve-only run needed (`resolved` holds each it tried), into `collect`. */
+function collectSources(
+  collect: ScopeResolution, ctx: EngineContext, sources: Map<string, ResolvedSource>,
+  resolved: Map<string, { dir: string; version: string; backend: ResolvedBackend } | null>,
+  catalogs: Map<string, Catalog | null>, rep: ScopeReport,
+): void {
+  for (const [name, r] of resolved) {
+    const src = sources.get(name);
+    let backend = r?.backend;
+    if (!backend && src) {
+      try {
+        backend = resolveBackend(src, ctx.home);
+      } catch {
+        // no backend: the warning names it
+      }
+    }
+    const info: ResolvedSourceInfo = { name, state: "failed" };
+    if (!src) info.state = "unknown";
+    else if (r && catalogs.get(name) !== null) info.state = "resolved";
+    else if (!r && rep.trustRequests.some((t) => t.name === name)) info.state = "untrusted";
+    if (backend) {
+      info.backend = backend;
+      if (backend.kind === "git") info.cache = gitCacheName(backend.address, backend.ref);
+      if (backend.kind === "url") info.cache = urlCacheName(backend.address);
+    }
+    if (r) {
+      info.dir = r.dir;
+      info.version = r.version;
+    }
+    collect.sources.push(info);
+  }
 }
 
 // ---- check ------------------------------------------------------------------

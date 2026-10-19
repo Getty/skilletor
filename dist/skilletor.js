@@ -7713,6 +7713,10 @@ import { existsSync as existsSync4, lstatSync as lstatSync3, mkdirSync as mkdirS
 import { join as join6, resolve as resolvePath } from "node:path";
 var DEFAULT_TIMEOUT_MS = 6e4;
 var CHECKOUT_AS_IS = process.platform === "win32" ? ["-c", "core.autocrlf=false", "-c", "core.eol=lf", "-c", "core.longpaths=true"] : [];
+function gitCacheName(url, ref) {
+  const identity = ref ? JSON.stringify([url, ref]) : url;
+  return createHash2("sha256").update(identity).digest("hex").slice(0, 16);
+}
 var ORIGIN_REFSPEC = "+refs/heads/*:refs/remotes/origin/*";
 var CacheRejected = class extends Error {
 };
@@ -7722,9 +7726,7 @@ var GitSource = class {
     this.opts = opts;
   }
   cacheDir() {
-    const identity = this.opts.ref ? JSON.stringify([this.opts.url, this.opts.ref]) : this.opts.url;
-    const hash = createHash2("sha256").update(identity).digest("hex").slice(0, 16);
-    return join6(this.opts.cacheRoot, hash);
+    return join6(this.opts.cacheRoot, gitCacheName(this.opts.url, this.opts.ref));
   }
   run(cwd, args, timeoutMs, env = {}) {
     return new Promise((resolvePromise, reject) => {
@@ -7951,14 +7953,16 @@ var TarError = class extends Error {
 var DEFAULT_TIMEOUT_MS2 = 6e4;
 var URL_VERSION_FILE = ".skilletor-version";
 var URL_CACHE_FORMAT = "format 2";
+function urlCacheName(url) {
+  return createHash3("sha256").update(url).digest("hex").slice(0, 16);
+}
 var UrlSource = class {
   opts;
   constructor(opts) {
     this.opts = opts;
   }
   cacheDir() {
-    const hash = createHash3("sha256").update(this.opts.url).digest("hex").slice(0, 16);
-    return join7(this.opts.cacheRoot, hash);
+    return join7(this.opts.cacheRoot, urlCacheName(this.opts.url));
   }
   assertScheme() {
     const u = new URL(this.opts.url);
@@ -9914,10 +9918,12 @@ function renderInputsHash(inputs) {
 function renderSources(scopeCfg, lock) {
   return [.../* @__PURE__ */ new Set([...scopeSources(scopeCfg), ...Object.values(lock).map((e) => e.source)])];
 }
+function itemVars(inputs, sourceVars, bundleVars = {}) {
+  return { ...sourceVars, ...bundleVars, ...inputs.vars };
+}
 function makeContext(ctx, inputs, scope, harness, targetDir, item, sourceVars, bundleVars = {}) {
   return {
-    // source defaults < bundle vars (bundle items only) < user < project < local (spec §5, §15.3)
-    vars: { ...sourceVars, ...bundleVars, ...inputs.vars },
+    vars: itemVars(inputs, sourceVars, bundleVars),
     project: inputs.project,
     scope,
     harness,
@@ -10027,14 +10033,14 @@ async function syncScope(ctx, config, scopeCfg, scope, harnesses, opts, state, r
     throw err;
   }
 }
-async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource, noCopy) {
+async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state, resolveSource, noCopy, collect) {
   const rep = emptyScopeReport(scope);
   const targetDir = targetDirOf(ctx, scope);
   const base = baseOf(ctx, scope);
   const rc = rootContextOf(ctx, scope);
   if (scope === "user" && !harnesses.includes("hermes")) rc.hermesHome = recordedHermesHome(ctx);
   const lockPath = join15(targetDir, "skilletor.lock.json");
-  if (scope === "user") moveHermesHome(ctx, state, targetDir, rc, harnesses, rep.warnings);
+  if (scope === "user" && !collect) moveHermesHome(ctx, state, targetDir, rc, harnesses, rep.warnings);
   const oldLock = readLock(lockPath);
   const gitignoreOn = scopeCfg.gitignore !== false;
   let inputs;
@@ -10092,7 +10098,43 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
       if (key in oldLock) keep.push(key);
     }
   };
+  const lookup = (item) => {
+    const r = resolved.get(item.source);
+    const cat = catalogOf(item.source);
+    if (!r || !cat) {
+      keepIfLocked(item.target, item.type);
+      return void 0;
+    }
+    const catItem = cat.items.find((ci) => ci.type === item.type && ci.name === item.name);
+    if (!catItem) {
+      rep.warnings.push(`item not found in source ${item.source}: ${item.type} ${item.name}`);
+      keepIfLocked(item.target, item.type);
+      return void 0;
+    }
+    if (catItem.error !== void 0) {
+      rep.warnings.push(`${item.type} ${item.name}@${item.source}: ${catItem.error}; an installed copy stays`);
+      keepIfLocked(item.target, item.type);
+      return void 0;
+    }
+    return { r, cat, catItem };
+  };
   const buildItem = (item, extra = {}) => {
+    if (collect) {
+      const found2 = lookup(item);
+      if (!found2) return;
+      const ri = {
+        type: item.type,
+        name: item.name,
+        source: item.source,
+        declaredBy: extra.declaredBy ?? [],
+        sourceDir: found2.r.dir,
+        item: found2.catItem,
+        vars: itemVars(inputsOf(), found2.cat.meta.vars ?? {}, extra.bundleVars)
+      };
+      if (extra.via?.length) ri.via = extra.via;
+      collect.items.push(ri);
+      return;
+    }
     const targets = harnessesFor(item.type);
     for (const h of harnesses) {
       if (targets.includes(h)) continue;
@@ -10104,23 +10146,9 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
       const key = lockKey(h, item.target);
       keyInfo.set(key, { key, type: item.type, name: item.name, source: item.source });
     }
-    const r = resolved.get(item.source);
-    const cat = catalogOf(item.source);
-    if (!r || !cat) {
-      keepIfLocked(item.target, item.type);
-      return;
-    }
-    const catItem = cat.items.find((ci) => ci.type === item.type && ci.name === item.name);
-    if (!catItem) {
-      rep.warnings.push(`item not found in source ${item.source}: ${item.type} ${item.name}`);
-      keepIfLocked(item.target, item.type);
-      return;
-    }
-    if (catItem.error !== void 0) {
-      rep.warnings.push(`${item.type} ${item.name}@${item.source}: ${catItem.error}; an installed copy stays`);
-      keepIfLocked(item.target, item.type);
-      return;
-    }
+    const found = lookup(item);
+    if (!found) return;
+    const { r, cat, catItem } = found;
     for (const h of targets) {
       const key = lockKey(h, item.target);
       const root = rootOf(rc, h, item.type);
@@ -10248,7 +10276,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   for (const item of scopeCfg.install) {
     explicit.set(targetKey(item.type, item.name), { source: item.source, raw: item.raw });
     const via = (offers.get(targetKey(item.type, item.name))?.offers ?? []).flatMap((x) => x.via && x.source === item.source && x.name === item.name ? [x.via] : []);
-    buildItem(item, { via });
+    buildItem(item, { via, declaredBy: [item.raw] });
   }
   const varConflicts = /* @__PURE__ */ new Map();
   for (const [key, o] of offers) {
@@ -10287,11 +10315,15 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
         const k = `"${key2}": ${setters.join(" and ")}`;
         varConflicts.set(k, [...varConflicts.get(k) ?? [], `${o.type} ${name}`]);
       });
-      buildItem({ type: o.type, name, source, target }, { bundleVars, via });
+      buildItem({ type: o.type, name, source, target }, { bundleVars, via, declaredBy: [...new Set(live.map((x) => x.from))] });
     }
   }
   for (const [k, items] of varConflicts) {
     rep.warnings.push(`bundle vars conflict on ${k} set different values; neither applies to ${items.join(", ")}`);
+  }
+  if (collect) {
+    collectSources(collect, ctx, sources, resolved, catalogs, rep);
+    return rep;
   }
   const labelOf = (abs) => {
     const rel = relative4(base, abs);
@@ -10596,6 +10628,32 @@ function codexRulesFiles(given) {
     if (existsSync11(file)) out.push(file);
   }
   return out;
+}
+function collectSources(collect, ctx, sources, resolved, catalogs, rep) {
+  for (const [name, r] of resolved) {
+    const src = sources.get(name);
+    let backend = r?.backend;
+    if (!backend && src) {
+      try {
+        backend = resolveBackend(src, ctx.home);
+      } catch {
+      }
+    }
+    const info = { name, state: "failed" };
+    if (!src) info.state = "unknown";
+    else if (r && catalogs.get(name) !== null) info.state = "resolved";
+    else if (!r && rep.trustRequests.some((t) => t.name === name)) info.state = "untrusted";
+    if (backend) {
+      info.backend = backend;
+      if (backend.kind === "git") info.cache = gitCacheName(backend.address, backend.ref);
+      if (backend.kind === "url") info.cache = urlCacheName(backend.address);
+    }
+    if (r) {
+      info.dir = r.dir;
+      info.version = r.version;
+    }
+    collect.sources.push(info);
+  }
 }
 var DRIFT_FIELD = { targets: "targetsChanged", layout: "layoutChanged", declared: "declaredChanged" };
 async function check(given, opts = {}) {

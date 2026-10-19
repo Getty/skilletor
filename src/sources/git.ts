@@ -42,6 +42,13 @@ const CHECKOUT_AS_IS = process.platform === "win32"
   ? ["-c", "core.autocrlf=false", "-c", "core.eol=lf", "-c", "core.longpaths=true"]
   : [];
 
+/** The name of a git source's cache dir under the cache root (spec §4.4): 16 hex digits of the
+ *  sha256 of its identity – the URL alone when unpinned, else the JSON array `[url, ref]`. */
+export function gitCacheName(url: string, ref?: string): string {
+  const identity = ref ? JSON.stringify([url, ref]) : url;
+  return createHash("sha256").update(identity).digest("hex").slice(0, 16);
+}
+
 /** The fetch refspec `git remote add` gives `origin`. */
 const ORIGIN_REFSPEC = "+refs/heads/*:refs/remotes/origin/*";
 
@@ -57,9 +64,7 @@ export class GitSource implements Source {
   }
 
   private cacheDir(): string {
-    const identity = this.opts.ref ? JSON.stringify([this.opts.url, this.opts.ref]) : this.opts.url;
-    const hash = createHash("sha256").update(identity).digest("hex").slice(0, 16);
-    return join(this.opts.cacheRoot, hash);
+    return join(this.opts.cacheRoot, gitCacheName(this.opts.url, this.opts.ref));
   }
 
   private run(cwd: string, args: string[], timeoutMs?: number, env: Record<string, string> = {}): Promise<string> {

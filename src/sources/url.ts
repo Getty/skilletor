@@ -52,6 +52,12 @@ export const URL_VERSION_FILE = ".skilletor-version";
  *  alone. */
 export const URL_CACHE_FORMAT = "format 2";
 
+/** The name of a url source's cache dir under the cache root (spec §4.4): 16 hex digits of the
+ *  sha256 of its URL, the scheme git caches use. */
+export function urlCacheName(url: string): string {
+  return createHash("sha256").update(url).digest("hex").slice(0, 16);
+}
+
 export class UrlSource implements Source {
   private readonly opts: UrlSourceOptions;
 
@@ -60,8 +66,7 @@ export class UrlSource implements Source {
   }
 
   private cacheDir(): string {
-    const hash = createHash("sha256").update(this.opts.url).digest("hex").slice(0, 16);
-    return join(this.opts.cacheRoot, hash);
+    return join(this.opts.cacheRoot, urlCacheName(this.opts.url));
   }
 
   private assertScheme(): void {
