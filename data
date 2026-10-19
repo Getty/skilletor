@@ -1,0 +1,58 @@
+---
+claimed_at: 2026-10-19T06:50:35Z
+claimed_by: strom-s
+class: standard
+completed: 2026-10-19T06:50:34Z
+created: 2026-10-19T04:06:52Z
+id: 143
+priority: high
+started: 2026-10-19T04:08:30Z
+status: done
+tags:
+- perl
+- raider
+title: Perl distribution Skilletor next to the TypeScript one, with shared conformance
+  fixtures
+updated: 2026-10-19T06:50:35Z
+---
+
+Strom S aus /home/getty/dev/perl-developer/docs/superpowers/specs/2026-10-19-raider-claude-code-flow.md. Gettys Entscheidung 2026-10-19: eigene Perl-Dist im skilletor-Repo (perl/), gleicher Fluss wie TS, gemeinsame conformance/-Fixtures gegen Divergenz. Nutzer: langertha-raider (Skill als Include, briefing.skills).
+
+2026-10-19 04:12 Plan (orchestrator, worktree .claude/worktrees/strom-s, branch worktree-strom-s from local main de1d926):
+Phase 1 parallel: (W1) conformance/ case format + test/conformance.test.ts driving the TS engine; (W2) perl/ dist skeleton [@Author::GETTY], Skilletor::Config (user/project/local precedence, author mode, trust), spec parsing, cache path hashing identical to src/sources/*.ts, sources git/local/url.
+Phase 2: Perl resolution (wildcards, bundles, type: prefix, explicit before wildcard, vars) + resolve_skill/agent/rule API + Perl conformance runner.
+Phase 3: Perl sync/check/status for the Claude target, byte-identical lock + files; sync cases in conformance/ on both sides.
+Phase 4: README/CLAUDE.md perl/ section, docs/perl.md design note; release-manager WIP commit after each phase.
+Decisions: Moo (lean; Moose consumers like raider take Moo classes as-is). .njk -> reported unsupported, never rendered. TS stays reference; TS bugs found go as notes here (small unambiguous fixes ok, own commit).
+
+2026-10-19 04:35 Phase 1 TS side committed (6780f30, 28ce633), perl WIP 9092e81; details follow
+
+TS oddity 1, not fixed: spec 6.2 lock example keys files item-relative (SKILL.md), but code and lock.ts use root-relative paths (skills/perl-moo/SKILL.md); a spec doc fix
+
+TS oddity 2, not fixed: resolveItems, like sync, fails with no agent harness detected when neither Claude nor Codex markers exist, although resolution is harness-independent; the Perl API will not require a harness
+
+Conformance gaps: url fetch offline (only the cache name is pinned, case 05), failing-fetch wording, removal of undeclared items, conflicts and force, Codex and Hermes targets, file modes, shared state files
+
+2026-10-19 05:06 Perl phase 1 done: Config, Entry, Spec, Backend, Source Local/Git/Url with Tar and Gzip ports, Cache, State (trust), Targets, own JSON layer byte-identical to JSON.stringify; t/50-parity.t drives TS and Perl against the same remotes and cache; prove 15 files 1897 tests PASS
+
+TS bug A (important, not fixed yet): src/sources/url.ts parseTar loops forever on a negative tar size field (-1000 parses as -512, offset never advances); any url source can hang a sync. Perl reads a negative size as no data
+
+TS bugs B-D (not fixed): config.ts:331 key in INSTALL_KEYS accepts inherited keys such as constructor, entry silently ignored; spec.ts FORGES lookup at lines 306/330 sees inherited keys (add constructor/foo); removeInstallEntries throws e.lastIndexOf is not a function on a non-string entry. Perl reports B as an error, a known divergence in t/20-config.t
+
+Perl known divergences: HTTP::Tiny honours https_proxy while Node fetch does not; timeout per read, not per request; CA store may differ; sources synchronous; URL subset without full UTS46 or IPv6 normalisation; Windows paths untested
+
+2026-10-19 05:16 TS bug A fixed in TS: parseTar now throws corrupt tar entry (size) for a negative or non-octal size, cache fallback applies; Perl Tar.pm being aligned in phase 2. Remaining note: a size larger than the rest of the archive (truncated tarball) is still read quietly as a short last file, existing behaviour, maybe its own ticket
+
+2026-10-19 05:47 Perl phase 2 done: Skilletor facade with resolve, resolve_skill/agent/rule, resolve_item, items; fetch always/missing/never; no harness required (require_harness restores TS error); .njk refused as Error Unsupported; 14 of 14 conformance resolve steps pass; prove 20 files 1947 tests PASS; Perl Tar aligned with the TS fix
+
+TS oddities from phase 2 (not fixed, Perl mirrors them): duplicate trust request when one untrusted source serves two foreign bundle entries (resolveAll filters names before the parallel resolves); a bundle escape above 10FFFF throws RangeError and fails the whole source scan instead of only that bundle (spec 15.4); catalog frontmatter reader loses description for CRLF or BOM files; source vars given as array accepted; hand-edited lock via as string matches by substring
+
+2026-10-19 06:25 Found: conformance fixture trees hold live .gitignore files written by skilletor, so git ignored expected lock and skill files since 28ce633; a fresh checkout would fail the conformance tests. Fix assigned to phase 3 worker: escaped fixture name for .gitignore in both runners, plus verification. WIP 1220ee5 snapshot of phase 3
+
+2026-10-19 06:36 Perl phase 3 done: sync, check, status for Claude Code with byte-identical lock, files, state records (t/52-parity-sync.t); Codex and Hermes scopes refused untouched; .njk warned, installed copy kept, source left unreached so the TS hooks render it; precedence per Claude Code docs: skills user over project, agents project over user, rules both (resolve_rule throws Ambiguous); conformance 24 of 24 on both sides; prove 22 files 1979 tests PASS
+
+Follow-ups (not done here): port Codex and Hermes targets, hooks.ts and pending reports; conformance cases for url fetch (needs TLS), symlink conflicts, partial syncs; a sync test with fetch never; Windows untested; TS force adopting a foreign file with different bytes replaces it without naming it in overwritten (case 24); .claude/rules/skilletor-rules.md should list perl/ and conformance/ as behaviour-relevant (rule text, skill-author lane; CLAUDE.md already says so)
+
+2026-10-19 06:42 Ready for review on branch worktree-strom-s (10 commits on local main de1d926, not merged, not pushed). npm test 1056 pass 1 skip; prove 22 files 1979 PASS; dzil test 1989 PASS; fresh clone conformance TS 24 of 24, Perl 24 of 24
+
+Koordinator 2026-10-19: geprüft (npm test grün, perl prove grün, check-dist ok), zwei WIP-Commits bereinigt, nach main gemerged (1f8c690). Folgepunkte siehe Notizen (Codex/Hermes, hooks, url-TLS-Fälle, TS-Auffälligkeiten).
