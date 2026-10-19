@@ -2014,6 +2014,22 @@ test("a foreign entry matching nothing in its source warns; an untrusted project
   }
 });
 
+test("k144: one untrusted source serving two foreign bundle entries asks for trust once", async () => {
+  const e = env();
+  try {
+    const own = bundleSource(e.tmp.dir, "dtown", { a: "description: A\nrules: [\"p-one@gitlab.com/peter\", \"p-two@gitlab.com/peter\"]\n" });
+    e.writeCfg("user", { sources: { shared: { local: own } } });
+    e.writeCfg("project", {
+      sources: { pm: { git: "https://gitlab.com/peter/skills" } },
+      install: { bundles: ["a@shared"] },
+    });
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(r.scopes[0]!.trustRequests.map((t) => t.name), ["pm"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
 // k115: a declared bundle that gains an entry `x@http://host/x.tar.gz` upstream (or by hand)
 // made sync warn "needs … run skilletor install bundle:…", an install that refuses the source
 // (k110): a url config load refuses can never be configured. Asserts: that entry is an error

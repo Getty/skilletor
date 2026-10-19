@@ -367,6 +367,10 @@ show it, its `description` saying which.
 | `10-error-unknown-source` | an entry naming no source is a config error; a sync touches nothing |
 | `11-error-bad-entry` | an entry without `@source` in `skilletor.local.json` is a config error naming that file |
 | `12-missing-items` | an unknown item, an unknown bundle, an agent with `.md` and `.md.njk`: warnings, the rest resolves |
+| `13-error-proto-key` | an install key only `Object.prototype` knows (`constructor`) is no type: a config error (k144) |
+| `14-trust-once` | a project-only untrusted source serving two foreign entries of one bundle: one trust request (k144) |
+| `15-bundle-escape` | a `\U` escape above U+10FFFF in a bundle file is that bundle's warning; the scan goes on and another bundle resolves (k144) |
+| `16-frontmatter-crlf-bom` | a skill, agent and rule file with CRLF and/or a BOM keep their `description` (k144; `.gitattributes` keeps the bytes) |
 | `20-sync-user` | user-scope sync of a skill, an agent and a rule: files, lock; `check`, `status`; a second sync changes nothing |
 | `21-sync-project` | project-scope sync: a user source's bundle and a trusted project source; `.gitignore` block, `.worktreeinclude`, `settings.json`, lock `via`; `check`, `status`; a second sync changes nothing and names no file to commit |
 | `22-sync-from-lock` | a lock an earlier sync left: undeclared items removed (files, emptied dirs, an agent's `.local.` file), an edited managed file overwritten and named, the user's own skill untouched |

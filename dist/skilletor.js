@@ -37,9 +37,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// node_modules/nunjucks/src/lib.js
+// ../../../node_modules/nunjucks/src/lib.js
 var require_lib = __commonJS({
-  "node_modules/nunjucks/src/lib.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/lib.js"(exports, module) {
     "use strict";
     var ArrayProto = Array.prototype;
     var ObjProto = Object.prototype;
@@ -346,9 +346,9 @@ var require_lib = __commonJS({
   }
 });
 
-// node_modules/asap/raw.js
+// ../../../node_modules/asap/raw.js
 var require_raw = __commonJS({
-  "node_modules/asap/raw.js"(exports, module) {
+  "../../../node_modules/asap/raw.js"(exports, module) {
     "use strict";
     var domain;
     var hasSetImmediate = typeof setImmediate === "function";
@@ -402,9 +402,9 @@ var require_raw = __commonJS({
   }
 });
 
-// node_modules/asap/asap.js
+// ../../../node_modules/asap/asap.js
 var require_asap = __commonJS({
-  "node_modules/asap/asap.js"(exports, module) {
+  "../../../node_modules/asap/asap.js"(exports, module) {
     "use strict";
     var rawAsap = require_raw();
     var freeTasks = [];
@@ -447,9 +447,9 @@ var require_asap = __commonJS({
   }
 });
 
-// node_modules/a-sync-waterfall/index.js
+// ../../../node_modules/a-sync-waterfall/index.js
 var require_a_sync_waterfall = __commonJS({
-  "node_modules/a-sync-waterfall/index.js"(exports, module) {
+  "../../../node_modules/a-sync-waterfall/index.js"(exports, module) {
     (function(globals) {
       "use strict";
       var executeSync = function() {
@@ -531,9 +531,9 @@ var require_a_sync_waterfall = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/lexer.js
+// ../../../node_modules/nunjucks/src/lexer.js
 var require_lexer = __commonJS({
-  "node_modules/nunjucks/src/lexer.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/lexer.js"(exports, module) {
     "use strict";
     var lib = require_lib();
     var whitespaceChars = " \n	\r\xA0";
@@ -941,9 +941,9 @@ var require_lexer = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/object.js
+// ../../../node_modules/nunjucks/src/object.js
 var require_object = __commonJS({
-  "node_modules/nunjucks/src/object.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/object.js"(exports, module) {
     "use strict";
     function _defineProperties(target, props) {
       for (var i = 0; i < props.length; i++) {
@@ -1077,9 +1077,9 @@ var require_object = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/nodes.js
+// ../../../node_modules/nunjucks/src/nodes.js
 var require_nodes = __commonJS({
-  "node_modules/nunjucks/src/nodes.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/nodes.js"(exports, module) {
     "use strict";
     function _defineProperties(target, props) {
       for (var i = 0; i < props.length; i++) {
@@ -1457,9 +1457,9 @@ var require_nodes = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/parser.js
+// ../../../node_modules/nunjucks/src/parser.js
 var require_parser = __commonJS({
-  "node_modules/nunjucks/src/parser.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/parser.js"(exports, module) {
     "use strict";
     function _inheritsLoose(subClass, superClass) {
       subClass.prototype = Object.create(superClass.prototype);
@@ -2395,9 +2395,9 @@ var require_parser = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/transformer.js
+// ../../../node_modules/nunjucks/src/transformer.js
 var require_transformer = __commonJS({
-  "node_modules/nunjucks/src/transformer.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/transformer.js"(exports, module) {
     "use strict";
     var nodes = require_nodes();
     var lib = require_lib();
@@ -2556,9 +2556,9 @@ var require_transformer = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/runtime.js
+// ../../../node_modules/nunjucks/src/runtime.js
 var require_runtime = __commonJS({
-  "node_modules/nunjucks/src/runtime.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/runtime.js"(exports, module) {
     "use strict";
     var lib = require_lib();
     var arrayFrom = Array.from;
@@ -2875,9 +2875,9 @@ var require_runtime = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/compiler.js
+// ../../../node_modules/nunjucks/src/compiler.js
 var require_compiler = __commonJS({
-  "node_modules/nunjucks/src/compiler.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/compiler.js"(exports, module) {
     "use strict";
     function _inheritsLoose(subClass, superClass) {
       subClass.prototype = Object.create(superClass.prototype);
@@ -3821,9 +3821,9 @@ var require_compiler = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/filters.js
+// ../../../node_modules/nunjucks/src/filters.js
 var require_filters = __commonJS({
-  "node_modules/nunjucks/src/filters.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/filters.js"(exports, module) {
     "use strict";
     var lib = require_lib();
     var r = require_runtime();
@@ -4310,9 +4310,9 @@ var require_filters = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/loader.js
+// ../../../node_modules/nunjucks/src/loader.js
 var require_loader = __commonJS({
-  "node_modules/nunjucks/src/loader.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/loader.js"(exports, module) {
     "use strict";
     function _inheritsLoose(subClass, superClass) {
       subClass.prototype = Object.create(superClass.prototype);
@@ -4346,9 +4346,9 @@ var require_loader = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/precompiled-loader.js
+// ../../../node_modules/nunjucks/src/precompiled-loader.js
 var require_precompiled_loader = __commonJS({
-  "node_modules/nunjucks/src/precompiled-loader.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/precompiled-loader.js"(exports, module) {
     "use strict";
     function _inheritsLoose(subClass, superClass) {
       subClass.prototype = Object.create(superClass.prototype);
@@ -4392,9 +4392,9 @@ var require_precompiled_loader = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/node-loaders.js
+// ../../../node_modules/nunjucks/src/node-loaders.js
 var require_node_loaders = __commonJS({
-  "node_modules/nunjucks/src/node-loaders.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/node-loaders.js"(exports, module) {
     "use strict";
     function _inheritsLoose(subClass, superClass) {
       subClass.prototype = Object.create(superClass.prototype);
@@ -4537,17 +4537,17 @@ var require_node_loaders = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/loaders.js
+// ../../../node_modules/nunjucks/src/loaders.js
 var require_loaders = __commonJS({
-  "node_modules/nunjucks/src/loaders.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/loaders.js"(exports, module) {
     "use strict";
     module.exports = require_node_loaders();
   }
 });
 
-// node_modules/nunjucks/src/tests.js
+// ../../../node_modules/nunjucks/src/tests.js
 var require_tests = __commonJS({
-  "node_modules/nunjucks/src/tests.js"(exports) {
+  "../../../node_modules/nunjucks/src/tests.js"(exports) {
     "use strict";
     var SafeString = require_runtime().SafeString;
     function callable(value2) {
@@ -4654,9 +4654,9 @@ var require_tests = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/globals.js
+// ../../../node_modules/nunjucks/src/globals.js
 var require_globals = __commonJS({
-  "node_modules/nunjucks/src/globals.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/globals.js"(exports, module) {
     "use strict";
     function _cycler(items) {
       var index = -1;
@@ -4719,9 +4719,9 @@ var require_globals = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/express-app.js
+// ../../../node_modules/nunjucks/src/express-app.js
 var require_express_app = __commonJS({
-  "node_modules/nunjucks/src/express-app.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/express-app.js"(exports, module) {
     "use strict";
     var path = __require("path");
     module.exports = function express(env, app) {
@@ -4747,9 +4747,9 @@ var require_express_app = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/environment.js
+// ../../../node_modules/nunjucks/src/environment.js
 var require_environment = __commonJS({
-  "node_modules/nunjucks/src/environment.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/environment.js"(exports, module) {
     "use strict";
     function _inheritsLoose(subClass, superClass) {
       subClass.prototype = Object.create(superClass.prototype);
@@ -5251,9 +5251,9 @@ var require_environment = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/precompile-global.js
+// ../../../node_modules/nunjucks/src/precompile-global.js
 var require_precompile_global = __commonJS({
-  "node_modules/nunjucks/src/precompile-global.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/precompile-global.js"(exports, module) {
     "use strict";
     function precompileGlobal(templates, opts) {
       var out = "";
@@ -5273,9 +5273,9 @@ var require_precompile_global = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/precompile.js
+// ../../../node_modules/nunjucks/src/precompile.js
 var require_precompile = __commonJS({
-  "node_modules/nunjucks/src/precompile.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/precompile.js"(exports, module) {
     "use strict";
     var fs = __require("fs");
     var path = __require("path");
@@ -5370,9 +5370,9 @@ var require_precompile = __commonJS({
   }
 });
 
-// node_modules/nunjucks/src/jinja-compat.js
+// ../../../node_modules/nunjucks/src/jinja-compat.js
 var require_jinja_compat = __commonJS({
-  "node_modules/nunjucks/src/jinja-compat.js"(exports, module) {
+  "../../../node_modules/nunjucks/src/jinja-compat.js"(exports, module) {
     "use strict";
     function installCompat() {
       "use strict";
@@ -5651,9 +5651,9 @@ var require_jinja_compat = __commonJS({
   }
 });
 
-// node_modules/nunjucks/index.js
+// ../../../node_modules/nunjucks/index.js
 var require_nunjucks = __commonJS({
-  "node_modules/nunjucks/index.js"(exports, module) {
+  "../../../node_modules/nunjucks/index.js"(exports, module) {
     "use strict";
     var lib = require_lib();
     var _require = require_environment();
@@ -5970,7 +5970,7 @@ var BUNDLES_KEY = "bundles";
 function parseInstall(obj, path, scope, known, overrides = /* @__PURE__ */ new Set()) {
   const install = asObject(obj.install, path, "install");
   for (const key of Object.keys(install)) {
-    if (!(key in INSTALL_KEYS) && key !== BUNDLES_KEY) {
+    if (!Object.hasOwn(INSTALL_KEYS, key) && key !== BUNDLES_KEY) {
       throw new ConfigError(`${path}: install.${key} is not a valid type (skills, agents, rules, bundles)`);
     }
   }
@@ -6295,7 +6295,7 @@ function removeInstallEntries(path, name, source, type) {
     const list = install[key];
     if (!Array.isArray(list)) continue;
     const kept = list.filter((e) => {
-      const match = entryMatches(e, name, source);
+      const match = typeof e === "string" && entryMatches(e, name, source);
       if (match) removed++;
       return !match;
     });
@@ -6599,7 +6599,9 @@ function unescapeDouble(s, line) {
     if (hexLen) {
       const hex = s.slice(i + 1, i + 1 + hexLen);
       if (!new RegExp(`^[0-9a-fA-F]{${hexLen}}$`).test(hex)) fail(line, `bad \\${e} escape`);
-      out += String.fromCodePoint(parseInt(hex, 16));
+      const cp = parseInt(hex, 16);
+      if (cp > 1114111) fail(line, `bad \\${e} escape`);
+      out += String.fromCodePoint(cp);
       i += hexLen;
     } else if (e in ESCAPES) {
       out += ESCAPES[e];
@@ -6719,6 +6721,7 @@ var FORGES = {
   "hf.co": "Hugging Face",
   "huggingface.co": "Hugging Face"
 };
+var isForge = (host) => Object.hasOwn(FORGES, host);
 var DEFAULT_REPO = "skills";
 var FALLBACK_NAME = "source";
 function normalizeName(raw) {
@@ -6906,7 +6909,7 @@ function resolveAddress(spec, probe) {
     const value2 = lowerScheme(s);
     const kind = isTarball(value2) ? "url" : "git";
     const forge = /^https:\/\/([^/?#]+)\//.exec(value2);
-    if (kind === "git" && forge && FORGES[forge[1].toLowerCase()] !== void 0) {
+    if (kind === "git" && forge && isForge(forge[1].toLowerCase())) {
       return forgeLink(spec, forge[1], value2.slice(forge[0].length), value2.split(/[?#]/, 1)[0]);
     }
     return { kind, value: value2, derivedName: nameFromUrl(value2, kind) };
@@ -6919,7 +6922,7 @@ function resolveAddress(spec, probe) {
   const slash = s.indexOf("/");
   const firstSeg = slash === -1 ? s : s.slice(0, slash);
   const rest = slash === -1 ? "" : s.slice(slash + 1);
-  if (FORGES[firstSeg.toLowerCase()] !== void 0 && slash !== -1) return forgeLink(spec, firstSeg, rest);
+  if (isForge(firstSeg.toLowerCase()) && slash !== -1) return forgeLink(spec, firstSeg, rest);
   const colon = firstSeg.indexOf(":");
   if (colon !== -1 && !firstSeg.includes(".")) {
     throw new SpecError(`cannot resolve "${spec}": unknown prefix "${firstSeg.slice(0, colon + 1)}"; ${FORMS}`);
@@ -8334,7 +8337,8 @@ function walkFiles(dir, sourceDir) {
   }
   return out.sort();
 }
-function frontmatter(text) {
+function frontmatter(raw) {
+  const text = (raw.startsWith("\uFEFF") ? raw.slice(1) : raw).replace(/\r\n/g, "\n");
   if (!text.startsWith("---")) return {};
   const firstNl = text.indexOf("\n");
   if (firstNl === -1) return {};
@@ -10050,7 +10054,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   const sources = sourcesOf(config, scope);
   const resolved = /* @__PURE__ */ new Map();
   const resolveAll = (names) => Promise.all(
-    names.filter((n) => !resolved.has(n)).map(async (name) => {
+    [...new Set(names)].filter((n) => !resolved.has(n)).map(async (name) => {
       const src = sources.get(name);
       if (!src) {
         rep.warnings.push(`unknown source: ${name}`);

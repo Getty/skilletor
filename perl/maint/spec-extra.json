@@ -61,5 +61,9 @@
   "https://example.com/a?b/c",
   "https://example.com/a#b/c",
   "https://example.com/C%C3%BC/x",
-  "https://example.com/\u0001x/y"
+  "https://example.com/\u0001x/y",
+  "constructor/foo",
+  "__proto__/x",
+  "toString/x",
+  "https://constructor/foo/bar.git"
 ]

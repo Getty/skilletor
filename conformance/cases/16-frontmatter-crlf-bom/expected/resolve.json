@@ -1,0 +1,83 @@
+{
+  "scopes": [
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "*@shared"
+          ],
+          "description": "Rule with CRLF",
+          "files": [
+            "rules/crlf-rule.md"
+          ],
+          "name": "crlf-rule",
+          "path": "rules/crlf-rule.md",
+          "source": "shared",
+          "templated": false,
+          "type": "rule",
+          "vars": {}
+        },
+        {
+          "declaredBy": [
+            "*@shared"
+          ],
+          "description": "With CRLF line ends",
+          "files": [
+            "skills/crlf/SKILL.md"
+          ],
+          "name": "crlf",
+          "path": "skills/crlf",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {}
+        },
+        {
+          "declaredBy": [
+            "*@shared"
+          ],
+          "description": "With a BOM",
+          "files": [
+            "skills/bom/SKILL.md"
+          ],
+          "name": "bom",
+          "path": "skills/bom",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {}
+        },
+        {
+          "declaredBy": [
+            "*@shared"
+          ],
+          "description": "With both",
+          "files": [
+            "agents/both.md"
+          ],
+          "name": "both",
+          "path": "agents/both.md",
+          "source": "shared",
+          "templated": false,
+          "type": "agent",
+          "vars": {}
+        }
+      ],
+      "scope": "user",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:175cd07"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": []
+    }
+  ]
+}

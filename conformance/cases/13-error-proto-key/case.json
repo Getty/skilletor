@@ -1,0 +1,9 @@
+{
+  "description": "An install key that only Object.prototype knows (`constructor`) is no type: a config error, like any other unknown key (k144).",
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

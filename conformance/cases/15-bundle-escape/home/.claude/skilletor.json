@@ -1,0 +1,13 @@
+{
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    }
+  },
+  "install": {
+    "bundles": [
+      "bad@shared",
+      "good@shared"
+    ]
+  }
+}

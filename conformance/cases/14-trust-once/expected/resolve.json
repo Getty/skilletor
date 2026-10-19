@@ -1,0 +1,43 @@
+{
+  "scopes": [
+    {
+      "items": [],
+      "scope": "project",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/peter.git",
+          "cache": "5a5726ef9dcf4f7a",
+          "kind": "git",
+          "name": "peter",
+          "origin": "project",
+          "state": "untrusted"
+        },
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:55ca758"
+        }
+      ],
+      "trustRequests": [
+        {
+          "kind": "git",
+          "name": "peter",
+          "url": "https://conformance.invalid/peter.git"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "items": [],
+      "scope": "user",
+      "sources": [],
+      "trustRequests": [],
+      "warnings": []
+    }
+  ]
+}

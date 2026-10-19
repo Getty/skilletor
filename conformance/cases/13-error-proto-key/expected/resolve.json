@@ -1,0 +1,4 @@
+{
+  "error": "${HOME}/.claude/skilletor.json: install.constructor is not a valid type (skills, agents, rules, bundles)",
+  "scopes": []
+}

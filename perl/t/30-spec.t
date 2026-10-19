@@ -14,15 +14,6 @@ use Skilletor::Spec qw( resolve_spec decode_uri_component normalize_name );
 # test/spec.test.ts and maint/spec-extra.json, with the probe below (maint/oracle-spec.mjs).
 my $oracle = js_parse( path( $FindBin::Bin, 'data', 'spec-oracle.json' )->slurp_utf8 );
 
-# Where the port knowingly differs: spec.ts looks a forge up as FORGES[host], which an
-# inherited property passes – "constructor/foo" became https://constructor/foo/skills.
-my %DIVERGES = (
-  'constructor/foo' => { kind => 'git', value => 'https://github.com/constructor/foo', derivedName => 'foo' },
-  '__proto__/x'     => 'cannot resolve "__proto__/x": GitHub owner "__proto__" may only contain ASCII letters, digits and "-"; '
-    .'expected a local path (/path, ./path, ../path, ~/path), scheme://..., transport::address, user@host:path, '
-    .'github:owner[/repo], owner[/repo] or host.tld[/path]',
-);
-
 for my $case (@$oracle) {
   my $spec = $case->{spec};
   my @probed;
@@ -42,14 +33,6 @@ for my $case (@$oracle) {
     is_deeply( $result, { %{ $case->{result} } }, 'result for '.$label );
   }
   is_deeply( \@probed, $case->{probed}, 'probed for '.$label );
-}
-
-for my $spec ( sort keys %DIVERGES ) {
-  my $want = $DIVERGES{$spec};
-  my $result;
-  my $err = error_of( sub { $result = resolve_spec( $spec, sub { {} } ) } );
-  if ( ref $want ) { is_deeply( $result, $want, 'known divergence (inherited key): '.$spec ) }
-  else             { is( $err, $want, 'known divergence (inherited key): '.$spec ) }
 }
 
 is( decode_uri_component('a%20b%C3%BC%2F'), "a b\x{fc}/", 'decodeURIComponent' );

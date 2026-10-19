@@ -56,7 +56,6 @@ sub label { my $t = js_stringify( $_[0] ); return length $t > 60 ? substr( $t, 0
 subtest 'parse_yaml_document' => sub {
   for my $case ( @{ $oracle->{yaml} } ) {
     my $got = attempt( sub { plain( parse_yaml_document( $case->{text} ) ) }, FrontmatterError => 'Skilletor::Error::Frontmatter' );
-    $got->{class} = 'RangeError' if ( $got->{class} // '' ) eq 'Error' && ( $case->{class} // '' ) eq 'RangeError';
     my %want = map { ( $_ => $case->{$_} ) } grep { $_ ne 'text' } keys %$case;
     same( $got, \%want, label( $case->{text} ) );
   }
@@ -66,7 +65,6 @@ subtest 'split_frontmatter' => sub {
   for my $case ( @{ $oracle->{frontmatter} } ) {
     my $got = attempt( sub { split_frontmatter( $case->{text} ) }, FrontmatterError => 'Skilletor::Error::Frontmatter' );
     $got = $got->{result} ? { data => plain( $got->{result}{data} ), body => $got->{result}{body} } : $got;
-    $got->{class} = 'RangeError' if ( $got->{class} // '' ) eq 'Error' && ( $case->{class} // '' ) eq 'RangeError';
     my %want = map { ( $_ => $case->{$_} ) } grep { $_ ne 'text' } keys %$case;
     same( $got, \%want, label( $case->{text} ) );
   }
@@ -75,7 +73,6 @@ subtest 'split_frontmatter' => sub {
 subtest 'parse_bundle' => sub {
   for my $case ( @{ $oracle->{bundles} } ) {
     my $got = attempt( sub { parse_bundle( $case->{text} ) }, BundleError => 'Skilletor::Error::Bundle' );
-    $got->{class} = 'RangeError' if ( $got->{class} // '' ) eq 'Error' && ( $case->{class} // '' ) eq 'RangeError';
     my %want = map { ( $_ => $case->{$_} ) } grep { $_ ne 'text' } keys %$case;
     same( $got, \%want, label( $case->{text} ) );
   }

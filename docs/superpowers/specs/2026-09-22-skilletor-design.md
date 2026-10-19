@@ -678,10 +678,16 @@ automatically as a result.
 ```json
 { "skills/perl-moo": {
     "source": "shared", "version": "git:ab12cd3",
-    "files": { "SKILL.md": "sha256:…", "reference.md": "sha256:…" } },
+    "files": { "skills/perl-moo/SKILL.md": "sha256:…", "skills/perl-moo/reference.md": "sha256:…" } },
   "rules/k8s": {
     "source": "shared", "version": "git:ab12cd3", "files": {}, "skipped": "renders-empty" } }
 ```
+
+A `files` key is a path relative to the root its lock key belongs to, not to the item: for the
+unprefixed Claude keys that is the scope's `.claude/` directory (`skills/perl-moo/SKILL.md`,
+`agents/.local.reviewer.md`), for another harness's key (`codex:…`, `hermes:…`) that
+harness's root. So the lock names every file a sync may overwrite or delete without knowing
+the item's layout.
 
 An item that rendered empty (§5) keeps a lock entry with no files and
 `"skipped": "renders-empty"`. It owns no path, so a file someone else put at its target

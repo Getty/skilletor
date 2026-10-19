@@ -1,0 +1,19 @@
+{
+  "description": "A skill, an agent and a rule whose main file has CRLF line ends and/or a BOM keep their description in the catalog (k144). The source files are byte-exact: .gitattributes marks this case -text.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

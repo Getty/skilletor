@@ -1,0 +1,19 @@
+{
+  "description": "A project-only source nobody trusts serves two foreign entries of one user bundle: one trust request, not one per entry (k144).",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

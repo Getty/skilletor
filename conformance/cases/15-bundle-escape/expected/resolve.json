@@ -1,0 +1,43 @@
+{
+  "scopes": [
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "bundle:good@shared"
+          ],
+          "description": "Fine",
+          "files": [
+            "skills/ok/SKILL.md"
+          ],
+          "name": "ok",
+          "path": "skills/ok",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {},
+          "via": [
+            "bundle:good@shared"
+          ]
+        }
+      ],
+      "scope": "user",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:2c4ae3a"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": [
+        "bundle:bad@shared: bundle bad: bundles/bad.yaml: line 1: bad \\U escape; its installed items are kept"
+      ]
+    }
+  ]
+}

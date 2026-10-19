@@ -16,13 +16,6 @@ use Skilletor::JSON qw( js_parse );
 # (maint/oracle-config.mjs) – the files byte for byte, and the loaded config or the error.
 my $oracle = js_parse( path( $FindBin::Bin, 'data', 'config-oracle.json' )->slurp_utf8 );
 
-# Where the Perl port knowingly differs from the reference (a reference bug, reported).
-my %DIVERGES = (
-  # config.ts checks install keys with `key in INSTALL_KEYS`, which an inherited property
-  # (constructor, toString, __proto__, …) passes: the reference loads this silently.
-  'install proto key' => '<HOME>/.claude/skilletor.json: install.constructor is not a valid type (skills, agents, rules, bundles)',
-);
-
 # Plain data: booleans as strings, tied hashes as plain ones – what is_deeply can compare.
 sub plain {
   my ( $v ) = @_;
@@ -69,10 +62,6 @@ for my $case ( @{ $oracle } ) {
 
     my $config;
     my $err = error_of( sub { $config = Skilletor::Config->new(%args) } );
-    if ( my $diverges = $DIVERGES{ $case->{name} } ) {
-      is( $err, placeholders( $diverges, "$home", "$project" ), 'known divergence from the reference' );
-      return;
-    }
     if ( exists $case->{error} ) {
       is( $err, placeholders( $case->{error}, "$home", "$project" ), 'same error' );
       return;

@@ -265,7 +265,10 @@ function unescapeDouble(s: string, line: Line): string {
     if (hexLen) {
       const hex = s.slice(i + 1, i + 1 + hexLen);
       if (!new RegExp(`^[0-9a-fA-F]{${hexLen}}$`).test(hex)) fail(line, `bad \\${e} escape`);
-      out += String.fromCodePoint(parseInt(hex, 16));
+      const cp = parseInt(hex, 16);
+      // Above U+10FFFF String.fromCodePoint throws a RangeError, which no caller expects (k144).
+      if (cp > 0x10ffff) fail(line, `bad \\${e} escape`);
+      out += String.fromCodePoint(cp);
       i += hexLen;
     } else if (e in ESCAPES) {
       out += ESCAPES[e];

@@ -267,8 +267,9 @@ sub _resolve_scope {
     $resolved{$name} = $value;
   };
   my $resolve_all = sub {
-    # The names not resolved yet, decided up front, as the reference starts them all at once.
-    for my $name ( grep { !exists $resolved{$_} } @_ ) {
+    # The names not resolved yet, each once, decided up front, as the reference starts them all at once.
+    my %once;
+    for my $name ( grep { !exists $resolved{$_} && !$once{$_}++ } @_ ) {
       my $src = $config->source_of( $scope, $name );
       unless ($src) {
         push @$warnings, 'unknown source: '.$name;

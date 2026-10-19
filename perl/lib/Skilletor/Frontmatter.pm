@@ -285,8 +285,8 @@ sub _unescape_double {
       my $hex = substr $s, $i + 1, $hex_len;
       _fail( $line, 'bad \\'.$e.' escape' ) unless $hex =~ /\A[0-9a-fA-F]{$hex_len}\z/;
       my $cp = hex $hex;
-      # String.fromCodePoint's RangeError: no FrontmatterError, so it is no bundle's error either.
-      Skilletor::Error->throw( 'Invalid code point '.$cp ) if $cp > 0x10FFFF;
+      # Above U+10FFFF the reference refuses the escape like any other bad one.
+      _fail( $line, 'bad \\'.$e.' escape' ) if $cp > 0x10FFFF;
       no warnings qw( surrogate nonchar non_unicode );
       $out .= chr $cp;
       $i += $hex_len;

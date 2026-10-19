@@ -28,16 +28,12 @@ my %METHOD = (
   removeBundleEntries  => 'remove_bundle_entries',
 );
 
-# Where the port knowingly differs: config.ts's removeInstallEntries calls lastIndexOf on every
-# entry of a list and throws a TypeError on one that is no string; the port keeps such an entry.
-my %DIVERGES = ( 'non-string install entry' => [ { result => 1, file => qq({\n  "install": {\n    "skills": [\n      5\n    ]\n  }\n}\n) } ] );
-
 for my $run ( @$oracle ) {
   subtest $run->{name} => sub {
     my $dir  = tempdir;
     my $file = $dir->child('skilletor.json');
     $file->spew_utf8( $run->{start} ) if defined $run->{start};
-    my @steps = @{ $DIVERGES{ $run->{name} } // $run->{steps} };
+    my @steps = @{ $run->{steps} };
     for my $i ( 0 .. $#steps ) {
       my $step = $steps[$i];
       my ( $op, @args ) = @{ $run->{steps}[$i]{op} };

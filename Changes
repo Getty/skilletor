@@ -1,6 +1,15 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - Five oddities the Perl port found are fixed. A source serving two foreign
+    entries of one bundle asks for trust once, not twice. A `\U` escape above
+    U+10FFFF in a bundle file is that bundle's warning instead of an error
+    that aborted the whole source scan. A `SKILL.md`, agent or rule with CRLF
+    line ends or a BOM keeps its description in the catalog. An install key
+    only `Object.prototype` knows (`constructor`, `__proto__`) is an unknown
+    type, and a spec such as `constructor/foo` is no forge link.
+    `uninstall` no longer throws on a non-string entry in an install list.
+    Conformance cases 13 to 16 pin them for both engines.
   - A `url` source serving a tarball with a corrupt header size no longer
     hangs a sync: the update fails as a corrupt archive and keeps the last
     good cache, with a warning.

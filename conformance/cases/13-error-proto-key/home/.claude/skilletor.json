@@ -1,0 +1,12 @@
+{
+  "sources": {
+    "s": {
+      "git": "https://conformance.invalid/shared.git"
+    }
+  },
+  "install": {
+    "constructor": [
+      "a@s"
+    ]
+  }
+}

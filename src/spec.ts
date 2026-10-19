@@ -34,6 +34,8 @@ export class SpecError extends Error {
 const FORGES: Record<string, string> = {
   "github.com": "GitHub", "gitlab.com": "GitLab", "codeberg.org": "Codeberg", "hf.co": "Hugging Face", "huggingface.co": "Hugging Face",
 };
+/** Whether a host is a known forge: an own key, never one inherited from Object.prototype (k144). */
+const isForge = (host: string): boolean => Object.hasOwn(FORGES, host);
 const DEFAULT_REPO = "skills";
 /** The derived name of a spec normalization leaves nothing of (`/`, `~`, `~/日本`) (k95). */
 const FALLBACK_NAME = "source";
@@ -303,7 +305,7 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
     const value = lowerScheme(s);
     const kind: SourceKind = isTarball(value) ? "url" : "git";
     const forge = /^https:\/\/([^/?#]+)\//.exec(value);
-    if (kind === "git" && forge && FORGES[forge[1]!.toLowerCase()] !== undefined) {
+    if (kind === "git" && forge && isForge(forge[1]!.toLowerCase())) {
       return forgeLink(spec, forge[1]!, value.slice(forge[0].length), value.split(/[?#]/, 1)[0]!);
     }
     return { kind, value, derivedName: nameFromUrl(value, kind) };
@@ -327,7 +329,7 @@ function resolveAddress(spec: string, probe: Probe): ResolvedSpec {
   //    forge whatever a URL path segment holds but whitespace, control characters, ":" and "@".
   //    A browser link (github.com/o/r/tree/<ref>[/<dir>], gitlab.com/g/r/-/tree/<ref>, …) is the
   //    repo at that ref, its skills beneath <dir> when the link names one (k119, k125, k126).
-  if (FORGES[firstSeg.toLowerCase()] !== undefined && slash !== -1) return forgeLink(spec, firstSeg, rest);
+  if (isForge(firstSeg.toLowerCase()) && slash !== -1) return forgeLink(spec, firstSeg, rest);
 
   // 5. and 6. take a first segment without a dot as a GitHub owner, which cannot contain a
   //    colon: `gitlab:u/r` is an unknown prefix, never https://github.com/gitlab:u/r (k109).

@@ -84,6 +84,7 @@ const bundles = [
   "description: D\nskills: [\"a@-x\"]\n",
   "description: D\nskills: [\"a@ext::sh -c x\"]\n",
   "description: D\nbundles: [x@y]\n", "description: D\nbundles: [x-*]\n", "description: D\nbundles: [\"\"]\n",
+  "description: \"x\\U00110000\"\n", "description: \"x\\U0010FFFF\"\n",
   "skills: [a]\n", "description: \"\"\n", "description: 5\n", "description: [a]\n", "description:   \n",
   "description: D\nextra: 1\n", "description: D\nskills: a\n", "description: D\nskills: [1, 2]\n", "description: D\nskills: [\"  \"]\n",
   "description: D\nskills: [\" padded \"]\n", "description: D\nskills: [null]\n", "description: D\nskills: [1.5]\n", "description: D\nskills: [true]\n",

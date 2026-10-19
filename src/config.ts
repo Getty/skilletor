@@ -328,7 +328,7 @@ function parseInstall(
 ): ParsedInstall {
   const install = asObject(obj.install, path, "install");
   for (const key of Object.keys(install)) {
-    if (!(key in INSTALL_KEYS) && key !== BUNDLES_KEY) {
+    if (!Object.hasOwn(INSTALL_KEYS, key) && key !== BUNDLES_KEY) {
       throw new ConfigError(`${path}: install.${key} is not a valid type (skills, agents, rules, bundles)`);
     }
   }
@@ -727,8 +727,8 @@ export function removeInstallEntries(path: string, name: string, source?: string
   for (const key of type ? [INSTALL_KEY[type]] : Object.values(INSTALL_KEY)) {
     const list = install[key];
     if (!Array.isArray(list)) continue;
-    const kept = (list as string[]).filter((e) => {
-      const match = entryMatches(e, name, source);
+    const kept = (list as unknown[]).filter((e) => {
+      const match = typeof e === "string" && entryMatches(e, name, source);
       if (match) removed++;
       return !match;
     });

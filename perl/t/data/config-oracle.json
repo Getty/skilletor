@@ -2169,51 +2169,7 @@
   },
   "noProject": false,
   "unchecked": null,
-  "loaded": {
-   "sources": [
-    [
-     "s",
-     {
-      "name": "s",
-      "origins": {
-       "git": "user"
-      },
-      "git": "https://x"
-     }
-    ]
-   ],
-   "checkInterval": 1800,
-   "user": {
-    "scope": "user",
-    "install": [],
-    "wildcards": [],
-    "bundles": [],
-    "vars": {},
-    "gitignore": true,
-    "claudeSettings": true
-   },
-   "project": {
-    "scope": "project",
-    "install": [],
-    "wildcards": [],
-    "bundles": [],
-    "vars": {},
-    "gitignore": true,
-    "claudeSettings": true
-   },
-   "userSources": [
-    [
-     "s",
-     {
-      "name": "s",
-      "origins": {
-       "git": "user"
-      },
-      "git": "https://x"
-     }
-    ]
-   ]
-  }
+  "error": "<HOME>/.claude/skilletor.json: install.constructor is not a valid type (skills, agents, rules, bundles)"
  },
  {
   "name": "install list not array",

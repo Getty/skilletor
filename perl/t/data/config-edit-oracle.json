@@ -282,8 +282,8 @@
      "removeInstallEntries",
      "y"
     ],
-    "error": "e.lastIndexOf is not a function",
-    "file": "{\"install\":{\"skills\":[\"y@b\",5]}}"
+    "result": 1,
+    "file": "{\n  \"install\": {\n    \"skills\": [\n      5\n    ]\n  }\n}\n"
    }
   ]
  },

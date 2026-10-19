@@ -175,8 +175,8 @@
   },
   {
    "text": "a: \"\\U00110000\"",
-   "error": "Invalid code point 1114112",
-   "class": "RangeError"
+   "error": "line 1: bad \\U escape",
+   "class": "FrontmatterError"
   },
   {
    "text": "a: \"tail\\\"",
@@ -1185,8 +1185,8 @@
   },
   {
    "text": "---\na: \"\\U00110000\"\n---\nBODY\n",
-   "error": "Invalid code point 1114112",
-   "class": "RangeError"
+   "error": "frontmatter line 2: bad \\U escape",
+   "class": "FrontmatterError"
   },
   {
    "text": "---\na: \"tail\\\"\n---\nBODY\n",
@@ -2203,6 +2203,21 @@
    "text": "description: D\nbundles: [\"\"]\n",
    "error": "bundles has an empty entry",
    "class": "BundleError"
+  },
+  {
+   "text": "description: \"x\\U00110000\"\n",
+   "error": "line 1: bad \\U escape",
+   "class": "BundleError"
+  },
+  {
+   "text": "description: \"x\\U0010FFFF\"\n",
+   "result": {
+    "description": "x􏿿",
+    "items": [],
+    "foreign": [],
+    "bundles": [],
+    "vars": {}
+   }
   },
   {
    "text": "skills: [a]\n",
@@ -3876,14 +3891,16 @@
         "name": "bom",
         "files": [
          "agents/bom.md"
-        ]
+        ],
+        "description": "bom"
        },
        {
         "type": "agent",
         "name": "crlf",
         "files": [
          "agents/crlf.md"
-        ]
+        ],
+        "description": "crlf"
        },
        {
         "type": "agent",

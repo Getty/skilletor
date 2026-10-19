@@ -1,0 +1,12 @@
+{
+  "sources": {
+    "peter": {
+      "git": "https://conformance.invalid/peter.git"
+    }
+  },
+  "install": {
+    "bundles": [
+      "pair@shared"
+    ]
+  }
+}

@@ -121,4 +121,9 @@ It also requires each engine's `check` to accept the other engine's sync.
 - There are no conformance cases for a `url` fetch (it needs TLS), for symlink
   conflicts, or for partial syncs. `perl/t/62-engine.t` covers partial syncs.
 
-Known divergences and TS oddities are kept on karr #143.
+Known divergences are kept on karr #143. The TS oddities the port found (duplicate trust
+requests, a `\U` escape above U+10FFFF aborting a source scan, a lost `description` with CRLF
+or a BOM, an inherited object key such as `constructor` accepted as an install key or a forge,
+a non-string install entry crashing `removeInstallEntries`) were fixed in the reference
+(k144) and are pinned by cases 13 to 16 and the oracles in `perl/t/data/`; the port mirrors
+none of them any more.

@@ -1,0 +1,19 @@
+{
+  "description": "A bundle file with a \\U escape above U+10FFFF is that bundle's error (a warning); the source scan goes on and the other bundle still resolves (spec 15.4, k144).",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

@@ -4343,5 +4343,37 @@
    "derivedName": "y"
   },
   "probed": []
+ },
+ {
+  "spec": "constructor/foo",
+  "result": {
+   "kind": "git",
+   "value": "https://github.com/constructor/foo",
+   "derivedName": "foo"
+  },
+  "probed": []
+ },
+ {
+  "spec": "__proto__/x",
+  "error": "cannot resolve \"__proto__/x\": GitHub owner \"__proto__\" may only contain ASCII letters, digits and \"-\"; expected a local path (/path, ./path, ../path, ~/path), scheme://..., transport::address, user@host:path, github:owner[/repo], owner[/repo] or host.tld[/path]",
+  "probed": []
+ },
+ {
+  "spec": "toString/x",
+  "result": {
+   "kind": "git",
+   "value": "https://github.com/toString/x",
+   "derivedName": "x"
+  },
+  "probed": []
+ },
+ {
+  "spec": "https://constructor/foo/bar.git",
+  "result": {
+   "kind": "git",
+   "value": "https://constructor/foo/bar.git",
+   "derivedName": "bar"
+  },
+  "probed": []
  }
 ]

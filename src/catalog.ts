@@ -115,7 +115,8 @@ function walkFiles(dir: string, sourceDir: string): string[] {
 }
 
 /** Extract a top-level frontmatter scalar (name/description). */
-function frontmatter(text: string): Record<string, string> {
+function frontmatter(raw: string): Record<string, string> {
+  const text = (raw.startsWith("\uFEFF") ? raw.slice(1) : raw).replace(/\r\n/g, "\n"); // a BOM and CRLF are no part of a value (k144)
   if (!text.startsWith("---")) return {};
   const firstNl = text.indexOf("\n");
   if (firstNl === -1) return {};

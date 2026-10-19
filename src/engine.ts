@@ -647,7 +647,7 @@ async function syncScopeRun(
   const sources = sourcesOf(config, scope);
   const resolved = new Map<string, { dir: string; version: string; backend: ResolvedBackend } | null>();
   const resolveAll = (names: string[]) => Promise.all(
-    names.filter((n) => !resolved.has(n)).map(async (name) => {
+    [...new Set(names)].filter((n) => !resolved.has(n)).map(async (name) => {
       const src = sources.get(name);
       if (!src) {
         rep.warnings.push(`unknown source: ${name}`);

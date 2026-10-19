@@ -143,6 +143,9 @@ sub scan {
 # A top-level frontmatter scalar per key (name, description): the catalog's own reader, read raw.
 sub _frontmatter {
   my ( $text ) = @_;
+  # A BOM and CRLF line ends are no part of a value.
+  $text =~ s/\A\x{FEFF}//;
+  $text =~ s/\r\n/\n/g;
   return {} unless substr( $text, 0, 3 ) eq '---';
   my $first_nl = index $text, "\n";
   return {} if $first_nl == -1;
