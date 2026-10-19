@@ -1,6 +1,9 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - A `url` source serving a tarball with a corrupt header size no longer
+    hangs a sync: the update fails as a corrupt archive and keeps the last
+    good cache, with a warning.
   - `conformance/` holds cases (config, source trees, the expected
     resolution, and for sync cases the files, lock, check and status) that
     the TypeScript engine and the Perl port both run;

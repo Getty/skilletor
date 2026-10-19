@@ -16,7 +16,8 @@
 // Unpacking is dependency-free: zlib gunzip + a minimal tar reader (no external
 // tar). Entries with `..`, absolute paths, symlinks or hardlinks are rejected; a
 // single GitHub-style top-level directory is stripped; of an entry's mode only the
-// owner's executable bit is kept (k99). Offline with a cache reuses it and warns;
+// owner's executable bit is kept (k99). A header whose size is not a non-negative number fails
+// the update like a corrupt download (k143). Offline with a cache reuses it and warns;
 // without a cache it errors. Production is https-only; `allowHttp` (tests only)
 // permits http://127.0.0.1.
 //
@@ -165,6 +166,9 @@ function parseTar(buf: Buffer): TarEntry[] {
     const prefix = readString(block, 345, 155);
     const size = readOctal(block, 124, 12);
     const typeflag = String.fromCharCode(block[156] ?? 0);
+    // A size that parses negative stepped back over this header for ever (k143), a non-octal one
+    // (NaN) quietly ended the walk. Corrupt like a failed gunzip, not unsafe: the cache stays.
+    if (!(size >= 0)) throw new Error(`corrupt tar entry (size): ${rawName}`);
     offset += 512;
     const data = buf.subarray(offset, offset + size);
     offset += Math.ceil(size / 512) * 512;

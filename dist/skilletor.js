@@ -8040,6 +8040,7 @@ function parseTar(buf) {
     const prefix = readString(block, 345, 155);
     const size = readOctal(block, 124, 12);
     const typeflag = String.fromCharCode(block[156] ?? 0);
+    if (!(size >= 0)) throw new Error(`corrupt tar entry (size): ${rawName}`);
     offset += 512;
     const data = buf.subarray(offset, offset + size);
     offset += Math.ceil(size / 512) * 512;

@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import fs, { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { basename, join } from "node:path";
+import { once } from "node:events";
+import { Worker } from "node:worker_threads";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { sweepUrlCache, UrlSource, URL_CACHE_FORMAT, URL_VERSION_FILE } from "../src/sources/url.ts";
 import { sync, type EngineContext } from "../src/engine.ts";
 import { cmdAvailable } from "../src/commands.ts";
@@ -474,5 +477,70 @@ for (const [layout, entries] of [
       return new Response(null, { status: 304 });
     });
     assert.deepEqual(await src.resolve(), first);
+  });
+}
+
+// k143: a size field that parses negative stepped the reader back over its own header, and a
+// sync hung for ever. parseTar is synchronous – a test timeout cannot interrupt it – so the
+// resolves run in a worker the test terminates when it does not answer.
+/** The archive with the size field of its first header replaced by `size` (no checksum check). */
+function withSizeField(archive: Buffer, size: string): Buffer {
+  const tar = gunzipSync(archive);
+  tar.fill(0, 124, 136).write(size, 124, "ascii");
+  return gzipSync(tar);
+}
+
+const RESOLVE_IN_WORKER = `
+const { parentPort, workerData: d } = require("node:worker_threads");
+(async () => {
+  const { UrlSource } = await import(d.module);
+  const serve = (body, etag) => { globalThis.fetch = async () => new Response(body, { headers: { etag } }); };
+  serve(d.good, '"old"');
+  const src = new UrlSource({ url: d.url, cacheRoot: d.cached });
+  const first = await src.resolve();
+  serve(d.bad, '"bad"');
+  const fallback = await src.resolve();
+  let fresh = "resolved";
+  try { await new UrlSource({ url: d.url, cacheRoot: d.empty }).resolve(); } catch (e) { fresh = e.message; }
+  parentPort.postMessage({ first, fallback, fresh });
+})().catch((e) => parentPort.postMessage({ error: String((e && e.stack) || e) }));
+`;
+
+interface WorkerAnswer {
+  hang?: true;
+  error?: string;
+  first: { dir: string; version: string };
+  fallback: { dir: string; version: string; warning?: string };
+  fresh: string;
+}
+
+for (const [what, size] of [["negative", "-0000001000"], ["small negative", "-1"], ["non-octal", "zzz"]] as const) {
+  test(`a tar header with a ${what} size is a corrupt archive, not a hang`, async (t) => {
+    const tmp = makeTmpDir();
+    t.after(tmp.cleanup);
+    const cached = join(tmp.dir, "cached");
+    const empty = join(tmp.dir, "empty");
+    const bad = withSizeField(makeTarGz([
+      { name: "pkg/skills/new/SKILL.md", data: "x".repeat(600) },
+      { name: "pkg/skills/later/SKILL.md", data: "later" },
+    ]), size);
+    const worker = new Worker(RESOLVE_IN_WORKER, {
+      eval: true,
+      workerData: { module: import.meta.resolve("../src/sources/url.ts"), url: URL, cached, empty, good: goodArchive(), bad },
+    });
+    let timer: NodeJS.Timeout | undefined;
+    const answer = await Promise.race([
+      once(worker, "message").then(([msg]) => msg as WorkerAnswer),
+      new Promise<WorkerAnswer>((done) => { timer = setTimeout(() => done({ hang: true } as WorkerAnswer), 10_000); }),
+    ]);
+    clearTimeout(timer);
+    await worker.terminate();
+    assert.equal(answer.hang, undefined, "resolve hangs on the archive");
+    assert.equal(answer.error, undefined);
+    assert.equal(answer.fallback.version, answer.first.version);
+    assert.match(answer.fallback.warning ?? "", /using cache \(corrupt tar entry \(size\): pkg\/skills\/new\/SKILL\.md\)/);
+    assert.equal(readFileSync(join(answer.first.dir, "skills/old/SKILL.md"), "utf8"), OLD);
+    assert.equal(answer.fresh, `url source ${URL} failed: corrupt tar entry (size): pkg/skills/new/SKILL.md`);
+    assert.equal(existsSync(empty) ? readdirSync(empty).length : 0, 0, "no partial tree is published");
   });
 }
