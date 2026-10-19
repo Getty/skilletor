@@ -5,6 +5,15 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 /** `p` with "/" between its parts: the form of every path inside an item, a lock key or a
  *  `.gitignore` line, on Windows too. The identity where the separator already is "/". */
+/**
+ * Claude Code's config dir (k145): the injected one, else `$CLAUDE_CONFIG_DIR` (empty means
+ * unset), else `<home>/.claude`. The user scope's config, lock, state and roots, and Claude's
+ * own plugin state, all live under it.
+ */
+export function claudeConfigDirOf(home: string, injected?: string): string {
+  return injected || process.env.CLAUDE_CONFIG_DIR || join(home, ".claude");
+}
+
 export function toPosix(p: string): string {
   return sep === "/" ? p : p.split(sep).join("/");
 }

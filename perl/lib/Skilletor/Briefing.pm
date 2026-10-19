@@ -48,10 +48,10 @@ sub _subdirs {
   return js_sort_keys( grep { my $p = encode_text( path_join( $dir, $_ ) ); !-l $p && -d $p } map { Encode::decode( 'UTF-8', $_ ) } @names );
 }
 
-# ~/.claude/plugins/cache/*/skills and …/cache/*/*/skills, as far as they exist.
+# <claude config dir>/plugins/cache/*/skills and …/cache/*/*/skills, as far as they exist.
 sub _plugin_cache_roots {
-  my ( $home ) = @_;
-  my $cache = path_join( $home, '.claude', 'plugins', 'cache' );
+  my ( $claude_dir ) = @_;
+  my $cache = path_join( $claude_dir, 'plugins', 'cache' );
   my @out;
   for my $a ( _subdirs($cache) ) {
     push @out, path_join( $cache, $a, 'skills' );
@@ -61,7 +61,7 @@ sub _plugin_cache_roots {
 }
 
 # The skill roots the harness's briefing lookup searches for an agent of this scope.
-# $r: { home, codex_home?, project_dir? }.
+# $r: { home, claude_dir?, codex_home?, project_dir? }; claude_dir defaults to <home>/.claude.
 sub skill_roots {
   my ( $harness, $scope, $r ) = @_;
   my $project = ( $scope eq 'project' && defined $r->{project_dir} && length $r->{project_dir} ) ? $r->{project_dir} : undef;
@@ -70,8 +70,9 @@ sub skill_roots {
     my @user = ( path_join( $codex_home, 'skills' ), path_join( $r->{home}, '.agents', 'skills' ) );
     return $project ? [ path_join( $project, '.agents', 'skills' ), path_join( $project, '.codex', 'skills' ), @user ] : \@user;
   }
-  return [ ( $project ? path_join( $project, '.claude', 'skills' ) : () ), path_join( $r->{home}, '.claude', 'skills' ),
-    _plugin_cache_roots( $r->{home} ) ];
+  my $claude_dir = ( defined $r->{claude_dir} && length $r->{claude_dir} ) ? $r->{claude_dir} : path_join( $r->{home}, '.claude' );
+  return [ ( $project ? path_join( $project, '.claude', 'skills' ) : () ), path_join( $claude_dir, 'skills' ),
+    _plugin_cache_roots($claude_dir) ];
 }
 
 # Bare declared skill names of the agent file that resolve in none of the roots; undef when the

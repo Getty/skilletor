@@ -127,7 +127,7 @@ resolved – macOS `/var` is `/private/var`):
 
 | Path | What |
 |---|---|
-| `${TMP}/home` = `${HOME}` | The home dir. The runner creates `${HOME}/.claude/` and writes `${HOME}/.claude.json` as `{}` + newline – the marker that Claude Code is in use (spec §14.1) – then copies `home/`. |
+| `${TMP}/home` = `${HOME}` | The home dir. The runner creates `${HOME}/.claude/` and writes `${HOME}/.claude.json` as `{}` + newline – the marker that Claude Code is in use (spec §14.1) – then, when the case sets `CLAUDE_CONFIG_DIR`, creates it with its own `.claude.json` (Claude Code keeps the marker there then), then copies `home/`. |
 | `${TMP}/project` = `${PROJECT}` | The project dir, when the case has `project/`: created, then `project/` copied. |
 | `${TMP}/git/<name>` | The git sources (below). |
 | `${TMP}/gitconfig` | The git config every git run of the case uses (below). |
@@ -385,6 +385,8 @@ show it, its `description` saying which.
 | `29-executable` | a skill's executable script keeps its bit, other files and an executable agent source get none; a second sync finds the bits in place |
 | `31-claude-config-dir` | `CLAUDE_CONFIG_DIR` moves Claude Code's plugin state: the settings requirement reads the install and marketplaces there, a decoy under `~/.claude/plugins` is ignored (k142) |
 | `30-untrusted-status` | an untrusted project-only source: `status` names it before any sync, the sync installs nothing but writes the project's blocks, `check` lists the trust request and asks for no sync |
+| `32-claude-config-dir-user` | `CLAUDE_CONFIG_DIR` is the user scope's `.claude`: config, skill, lock and the detection marker (`<dir>/.claude.json`) live there, a decoy config under `~/.claude` is ignored (k145) |
+| `33-error-source-vars` | a source's `skilletor.json` with an array as `vars` fails its scan (k145); a lock `via` that is no array of strings is refused by `readLock`, pinned by each engine's own tests (a throw is no resolve answer) |
 
 The state files two engines on one machine share – `render-inputs.json` with its hash,
 `sources-read.json`, `unreached.json` – are not compared here: their keys are absolute lock

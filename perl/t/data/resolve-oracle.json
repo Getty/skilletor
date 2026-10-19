@@ -4343,10 +4343,10 @@
        }
       ],
       "meta": {
-       "vars": [
-        "a",
-        "b"
-       ]
+       "vars": {
+        "a": 1,
+        "b": 2
+       }
       }
      }
     },
@@ -4398,10 +4398,10 @@
       ],
       "bundles": [],
       "meta": {
-       "vars": [
-        "a",
-        "b"
-       ]
+       "vars": {
+        "a": 1,
+        "b": 2
+       }
       }
      }
     },
@@ -4423,10 +4423,10 @@
       ],
       "bundles": [],
       "meta": {
-       "vars": [
-        "a",
-        "b"
-       ]
+       "vars": {
+        "a": 1,
+        "b": 2
+       }
       }
      }
     },
@@ -4448,10 +4448,10 @@
       ],
       "bundles": [],
       "meta": {
-       "vars": [
-        "a",
-        "b"
-       ]
+       "vars": {
+        "a": 1,
+        "b": 2
+       }
       }
      }
     },
@@ -4474,10 +4474,10 @@
       ],
       "bundles": [],
       "meta": {
-       "vars": [
-        "a",
-        "b"
-       ]
+       "vars": {
+        "a": 1,
+        "b": 2
+       }
       }
      }
     }
@@ -5357,15 +5357,32 @@
    ]
   },
   {
+   "name": "meta-array-vars",
+   "scans": [
+    {
+     "paths": null,
+     "error": "${DIR}/skilletor.json: \"vars\" must be an object",
+     "class": "CatalogError"
+    }
+   ]
+  },
+  {
+   "name": "meta-string-vars",
+   "scans": [
+    {
+     "paths": null,
+     "error": "${DIR}/skilletor.json: \"vars\" must be an object",
+     "class": "CatalogError"
+    }
+   ]
+  },
+  {
    "name": "meta-null-vars",
    "scans": [
     {
      "paths": null,
-     "result": {
-      "items": [],
-      "bundles": [],
-      "meta": {}
-     }
+     "error": "${DIR}/skilletor.json: \"vars\" must be an object",
+     "class": "CatalogError"
     }
    ]
   },

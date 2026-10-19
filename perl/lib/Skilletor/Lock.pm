@@ -41,6 +41,14 @@ sub read_lock {
   my $ok = eval {
     $value = js_parse($text);
     die { message => 'expected an object' } unless js_type($value) eq 'object';
+    # k145: `via` is matched against bundle labels exactly; anything but an array of strings is refused.
+    for my $key ( keys %$value ) {
+      my $entry = $value->{$key};
+      next unless js_type($entry) eq 'object' && exists $entry->{via};
+      my $via = $entry->{via};
+      die { message => $key.': "via" must be an array of strings' }
+        unless js_type($via) eq 'array' && !grep { js_type($_) ne 'string' } @$via;
+    }
     1;
   };
   unless ($ok) {

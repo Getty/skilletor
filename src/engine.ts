@@ -22,7 +22,7 @@ import {
   codexHookTrusted, inspectAgentsMd, parseRulesFile, pointerLines, projectDocLimit, rulesFileText, RULES_FILE, withBlock,
   type Inspection, type Section,
 } from "./agentsmd.ts";
-import { atomicWrite, hashBuffer, sameFile, samePath, toPosix } from "./fsutil.ts";
+import { atomicWrite, claudeConfigDirOf, hashBuffer, sameFile, samePath, toPosix } from "./fsutil.ts";
 import { gitEnv } from "./gitenv.ts";
 import { convertForTarget } from "./convert.ts";
 import { expandHome, LocalSource } from "./sources/local.ts";
@@ -89,7 +89,7 @@ export function cacheRootOf(ctx: EngineContext): string {
 
 /** The scope's `.claude` directory: config, lock and the claude target root. */
 export function targetDirOf(ctx: EngineContext, scope: ScopeName): string {
-  return join(baseOf(ctx, scope), ".claude");
+  return scope === "user" ? claudeConfigDirOf(ctx.home, ctx.claudeConfigDir) : join(ctx.projectDir!, ".claude");
 }
 
 /** The directory every target root of a scope lives under: `~` or the project root. */
@@ -120,12 +120,7 @@ function scoped(ctx: EngineContext): EngineContext {
 /** The CLAUDE.md files Claude Code reads for a scope (spec §14.8). */
 function claudeMemoryFiles(ctx: EngineContext, scope: ScopeName): string[] {
   const base = baseOf(ctx, scope);
-  return scope === "user" ? [join(base, ".claude", "CLAUDE.md")] : [join(base, "CLAUDE.md"), join(base, ".claude", "CLAUDE.md")];
-}
-
-/** Claude Code's config dir: injected, else `$CLAUDE_CONFIG_DIR` (empty means unset), else `<home>/.claude`. */
-function claudeConfigDirOf(ctx: EngineContext): string {
-  return ctx.claudeConfigDir || process.env.CLAUDE_CONFIG_DIR || join(ctx.home, ".claude");
+  return scope === "user" ? [join(claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), "CLAUDE.md")] : [join(base, "CLAUDE.md"), join(base, ".claude", "CLAUDE.md")];
 }
 
 /** `$CODEX_HOME`, injected or from the environment; empty means unset. */
@@ -161,12 +156,12 @@ function hermesHomeOf(ctx: EngineContext): string {
 
 /** Where a scope's roots live (spec §14.2, §16.2). */
 function rootContextOf(ctx: EngineContext, scope: ScopeName): RootContext {
-  return { base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx), hermesHome: hermesHomeOf(ctx) };
+  return { base: baseOf(ctx, scope), scope, claudeDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), codexHome: codexHomeOf(ctx), hermesHome: hermesHomeOf(ctx) };
 }
 
 /** Active targets per scope (spec §14.1); throws a TargetError when none apply. */
 export function targetsOf(ctx: EngineContext, config: LoadedConfig): TargetSelection {
-  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx));
+  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx), ctx.claudeConfigDir || process.env.CLAUDE_CONFIG_DIR || undefined);
   return selectTargets({ user: config.user.targets, project: config.project?.targets }, detectHarnesses(markers), markers);
 }
 
@@ -179,7 +174,7 @@ export function targetsOf(ctx: EngineContext, config: LoadedConfig): TargetSelec
 export function hermesOptInHint(ctx: EngineContext): string | undefined {
   let machine: Harness[];
   try {
-    machine = targetsOf(ctx, loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx) })).user;
+    machine = targetsOf(ctx, loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: projectDirOf(ctx) })).user;
   } catch {
     return undefined;
   }
@@ -191,7 +186,7 @@ export function hermesOptInHint(ctx: EngineContext): string | undefined {
 /** Load config and select targets; either failure is one message, nothing touched. */
 function loadWithTargets(ctx: EngineContext): { config: LoadedConfig; targets: TargetSelection } | { error: string } {
   try {
-    const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+    const config = loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: ctx.projectDir });
     return { config, targets: targetsOf(ctx, config) };
   } catch (err) {
     return { error: (err as Error).message };
@@ -1151,7 +1146,7 @@ function claudeSettingsPlan(
   const file = settingsFileOf(ctx);
   try {
     return planClaudeSettings({
-      file, label: scopeLabel(scope, ctx.projectDir!, file), projectDir: ctx.projectDir!, claudeDir: claudeConfigDirOf(ctx),
+      file, label: scopeLabel(scope, ctx.projectDir!, file), projectDir: ctx.projectDir!, claudeDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir),
       pluginRoot: ctx.pluginRoot ?? (process.env.CLAUDE_PLUGIN_ROOT || undefined),
     });
   } catch (err) {
@@ -1262,7 +1257,7 @@ function shellWord(s: string): string {
  *  (spec §6.7). Reads only the disk; a file that cannot be parsed is skipped. */
 function briefingOf(ctx: EngineContext, scope: ScopeName, lock: Lock, only?: Set<string>): BriefingMissing[] {
   const rc = rootContextOf(ctx, scope);
-  const roots = { home: ctx.home, codexHome: codexHomeOf(ctx), projectDir: scope === "project" ? ctx.projectDir : undefined };
+  const roots = { home: ctx.home, claudeConfigDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), codexHome: codexHomeOf(ctx), projectDir: scope === "project" ? ctx.projectDir : undefined };
   const rootsOf = new Map<Harness, string[]>();
   const out: BriefingMissing[] = [];
   for (const [key, entry] of Object.entries(lock)) {

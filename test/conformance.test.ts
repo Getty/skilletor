@@ -244,6 +244,11 @@ async function runCase(name: string): Promise<void> {
     buildGit(caseDir, c, r, { ...process.env, ...COMMIT_ENV });
     mkdirSync(join(r.home, ".claude"), { recursive: true });
     writeFileSync(join(r.home, ".claude.json"), "{}\n"); // Claude Code is in use (spec §14.1)
+    const cfgDir = process.env.CLAUDE_CONFIG_DIR; // Claude Code keeps its .claude.json inside a custom config dir
+    if (cfgDir) {
+      mkdirSync(cfgDir, { recursive: true });
+      writeFileSync(join(cfgDir, ".claude.json"), "{}\n");
+    }
     copyInput(join(caseDir, "home"), r.home, r);
     if (r.project) {
       mkdirSync(r.project, { recursive: true });

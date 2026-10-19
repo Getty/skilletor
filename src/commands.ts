@@ -16,7 +16,7 @@ import {
 } from "./engine.ts";
 import type { SyncReport } from "./report.ts";
 import { scan, type Catalog } from "./catalog.ts";
-import { innerSegments } from "./fsutil.ts";
+import { claudeConfigDirOf, innerSegments } from "./fsutil.ts";
 import { State } from "./state.ts";
 import { readLock, type Lock } from "./lock.ts";
 import { parseLockKey } from "./targets.ts";
@@ -50,13 +50,13 @@ function projectRoot(ctx: CommandContext): string {
 
 /** The config file an edit command writes: the user config, or the project config with --project. */
 export function configPath(ctx: CommandContext, project: boolean): string {
-  const root = project ? projectRoot(ctx) : ctx.home;
-  return join(root, ".claude", "skilletor.json");
+  const root = project ? join(projectRoot(ctx), ".claude") : claudeConfigDirOf(ctx.home, ctx.claudeConfigDir);
+  return join(root, "skilletor.json");
 }
 
 /** Config as the engine sees it: no project config when the project dir is the home dir. */
 function load(ctx: CommandContext): LoadedConfig {
-  return loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx) });
+  return loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: projectDirOf(ctx) });
 }
 
 const TYPE_DIR: Record<ItemType, string> = { skill: "skills", agent: "agents", rule: "rules" };
@@ -259,7 +259,7 @@ function removalConfig(ctx: CommandContext, path: string, name: string): LoadedC
     return load(ctx);
   } catch (err) {
     if (!(err instanceof ConfigError)) throw err;
-    return loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx), unchecked: { path, name } });
+    return loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: projectDirOf(ctx), unchecked: { path, name } });
   }
 }
 
@@ -784,7 +784,7 @@ function installedSet(ctx: CommandContext, config: LoadedConfig): Set<string> {
   for (const i of declaredItems(config)) set.add(`${i.key}@${i.source}`);
   const projectDir = projectDirOf(ctx);
   for (const scope of ["user", "project"] as const) {
-    const dir = join(scope === "user" ? ctx.home : projectDir ?? "", ".claude");
+    const dir = scope === "user" ? claudeConfigDirOf(ctx.home, ctx.claudeConfigDir) : join(projectDir ?? "", ".claude");
     if (scope === "project" && !projectDir) continue;
     for (const [key, entry] of Object.entries(readLock(join(dir, "skilletor.lock.json")))) {
       if (entry.skipped) continue; // renders empty here: nothing installed

@@ -31,6 +31,11 @@ has home => (
   required => 1,
 );
 
+# `CLAUDE_CONFIG_DIR` (k145): the user config's dir; unset or empty means `<home>/.claude`.
+has claude_config_dir => (
+  is => 'ro',
+);
+
 has project_dir => (
   is => 'ro',
 );
@@ -44,7 +49,11 @@ has user_path => (
   init_arg => undef,
 );
 
-sub _build_user_path { path_join( $_[0]->home, '.claude', 'skilletor.json' ) }
+sub _build_user_path {
+  my ( $self ) = @_;
+  my $cd = $self->claude_config_dir;
+  return path_join( ( defined $cd && length $cd ) ? $cd : path_join( $self->home, '.claude' ), 'skilletor.json' );
+}
 
 has project_path => (
   is       => 'lazy',

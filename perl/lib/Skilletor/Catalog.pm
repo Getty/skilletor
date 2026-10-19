@@ -467,9 +467,11 @@ sub _read_source_meta {
   return {} if $type eq 'array';    # no own `description` or `vars`
   my %meta;
   $meta{description} = $parsed->{description} if js_type( $parsed->{description} ) eq 'string';
-  # An object – or an array, as the reference takes it (its items' vars spread it by index).
-  my $vt = js_type( $parsed->{vars} );
-  $meta{vars} = $parsed->{vars} if $vt eq 'object' || $vt eq 'array';
+  # k145: defaults are keyed by name; an array (or anything else) would spread by index.
+  if ( exists $parsed->{vars} ) {
+    _fail( $p.': "vars" must be an object' ) unless js_type( $parsed->{vars} ) eq 'object';
+    $meta{vars} = $parsed->{vars};
+  }
   return \%meta;
 }
 

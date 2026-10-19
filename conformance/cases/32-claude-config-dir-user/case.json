@@ -1,0 +1,31 @@
+{
+  "description": "CLAUDE_CONFIG_DIR (k145) is the user scope's .claude: the user config, the skill, its lock and the detection marker are read and written under ${HOME}/cfg; the decoy config under ${HOME}/.claude is ignored and stays untouched.",
+  "env": {
+    "CLAUDE_CONFIG_DIR": "${HOME}/cfg"
+  },
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "status",
+      "op": "status"
+    }
+  ]
+}

@@ -33,9 +33,16 @@ has project_dir => (
   is => 'ro',
 );
 
+# `CLAUDE_CONFIG_DIR` (k145): Claude Code's config dir, which is the user scope's `.claude` –
+# config, lock, state, roots – and where its plugin state lives. Empty means unset.
+has claude_config_dir => (
+  is      => 'lazy',
+  builder => sub { $ENV{CLAUDE_CONFIG_DIR} },
+);
+
 has state_root => (
   is      => 'lazy',
-  builder => sub { Skilletor::State->default_root( $_[0]->home ) },
+  builder => sub { Skilletor::State->default_root( $_[0]->home, $_[0]->claude_config_dir ) },
 );
 
 has cache_root => (
@@ -54,7 +61,8 @@ has markers => (
   builder => sub {
     my ( $self ) = @_;
     my $cx = $self->codex_home;
-    return default_markers( $self->home, ( defined $cx && length $cx ) ? $cx : undef );
+    my $cd = $self->claude_config_dir;
+    return default_markers( $self->home, ( defined $cx && length $cx ) ? $cx : undef, ( defined $cd && length $cd ) ? $cd : undef );
   },
 );
 
@@ -92,6 +100,19 @@ sub project_dir_of {
   return $p;
 }
 
+# Claude Code's config dir: the explicit one, else `<home>/.claude`.
+sub claude_dir {
+  my ( $self ) = @_;
+  my $cd = $self->claude_config_dir;
+  return ( defined $cd && length $cd ) ? $cd : path_join( $self->home, '.claude' );
+}
+
+# The scope's `.claude` directory: config, lock and the claude target root.
+sub _target_dir {
+  my ( $self, $scope ) = @_;
+  return $scope eq 'user' ? $self->claude_dir : path_join( $self->_base_of($scope), '.claude' );
+}
+
 sub _base_of {
   my ( $self, $scope ) = @_;
   return $scope eq 'user' ? $self->home : $self->project_dir_of;
@@ -101,7 +122,7 @@ sub _base_of {
 # needs one); without it a machine with none resolves all the same, with no targets warnings.
 sub _load {
   my ( $self ) = @_;
-  my $config = Skilletor::Config->load( home => $self->home, project_dir => $self->project_dir_of );
+  my $config = Skilletor::Config->load( home => $self->home, claude_config_dir => $self->claude_config_dir, project_dir => $self->project_dir_of );
   my $markers = $self->markers;
   my $wanted = { user => $config->user->{targets}, project => $config->project ? $config->project->{targets} : undef };
   my $targets = eval { select_targets( $wanted, detect_harnesses($markers), $markers ) };
@@ -211,12 +232,11 @@ sub _uniq {
 
 sub _str_eq { defined $_[0] && defined $_[1] && !ref $_[0] && $_[0] eq $_[1] }
 
-# `entry.via?.includes(label)`: an array holding it, or a string containing it.
+# `entry.via?.includes(label)`: the array holds exactly the label (read_lock refuses any other `via`).
 sub _via_has {
   my ( $via, $label ) = @_;
-  return 0 unless defined $via;
-  return ( grep { _str_eq( $_, $label ) } @$via ) ? 1 : 0 if ref $via eq 'ARRAY';
-  return ( !ref $via && index( $via, $label ) >= 0 ) ? 1 : 0;
+  return 0 unless ref $via eq 'ARRAY';
+  return ( grep { _str_eq( $_, $label ) } @$via ) ? 1 : 0;
 }
 
 sub _valid_item_name { $_[0] =~ /\A[A-Za-z0-9._\-]+\z/ ? 1 : 0 }
@@ -256,7 +276,7 @@ sub _resolve_scope {
   my $keep_if_locked = $hooks ? $hooks->{keep} : sub { };
   my $rep = { scope => $scope, warnings => [], trustRequests => [], items => [], sources => [] };
   my $warnings = $rep->{warnings};
-  my $target_dir = path_join( $self->_base_of($scope), '.claude' );
+  my $target_dir = $self->_target_dir($scope);
   my $old_lock = read_lock( path_join( $target_dir, 'skilletor.lock.json' ) );
 
   # Every needed source, trust checked and resolved against the one chosen backend.
@@ -626,9 +646,16 @@ Required.
 
 The project; none, or the home dir itself, means no project scope.
 
+=attr claude_config_dir
+
+C<CLAUDE_CONFIG_DIR> by default; an empty value counts as unset, then F<< <home>/.claude >>.
+Claude Code's config dir is the user scope's C<.claude>: the user config, the lock, the
+Claude roots, the state dir, Claude's own marker (C<.claude.json>) and plugin state, and
+the briefing lookup's skills all lie under it.
+
 =attr state_root
 
-Default C<< <home>/.claude/skilletor >> (trust, the sync lock).
+Default C<< <claude_config_dir>/skilletor >>, so F<< <home>/.claude/skilletor >> (trust, the sync lock).
 
 =attr cache_root
 

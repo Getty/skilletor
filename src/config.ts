@@ -9,7 +9,7 @@
 // that can go wrong throws a ConfigError naming the file and the offending key.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { atomicWrite, innerSegments } from "./fsutil.ts";
+import { atomicWrite, claudeConfigDirOf, innerSegments } from "./fsutil.ts";
 
 export type ItemType = "skill" | "agent" | "rule";
 export const ITEM_TYPES: readonly ItemType[] = ["skill", "agent", "rule"];
@@ -130,6 +130,8 @@ export interface LoadedConfig {
 export interface LoadOptions {
   /** Stands in for `~`; the user config is `<home>/.claude/skilletor.json`. */
   home: string;
+  /** `CLAUDE_CONFIG_DIR` (k145); default from the env, else `<home>/.claude`: the user config's dir. */
+  claudeConfigDir?: string;
   /** Project root; omit to load only the user scope. */
   projectDir?: string;
   /** Source `name` of config file `path` is declared but not checked, and has no backend:
@@ -463,7 +465,7 @@ function mergeVars(...objs: (Json | undefined)[]): Record<string, unknown> {
 }
 
 export function loadConfig(opts: LoadOptions): LoadedConfig {
-  const userPath = join(opts.home, ".claude", "skilletor.json");
+  const userPath = join(claudeConfigDirOf(opts.home, opts.claudeConfigDir), "skilletor.json");
   const user = readConfigFile(userPath);
   const hasProject = opts.projectDir !== undefined;
   const projectPath = hasProject ? join(opts.projectDir!, ".claude", "skilletor.json") : "";

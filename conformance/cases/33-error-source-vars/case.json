@@ -1,0 +1,19 @@
+{
+  "description": "A source's skilletor.json whose vars is an array (not an object) is a catalog error, not silently spread by index (k145).",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

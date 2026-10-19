@@ -59,9 +59,13 @@ sub parse_tar {
   my $len    = length $buf;
   my $offset = 0;
   my ( $long_name, $pax_path );
+  my $ended = 0;
   while ( $offset + 512 <= $len ) {
     my $block = substr $buf, $offset, 512;
-    last if $block !~ /[^\0]/;    # end of archive
+    if ( $block !~ /[^\0]/ ) {    # end of archive
+      $ended = 1;
+      last;
+    }
 
     my $raw_name = _read_string( $block, 0, 100 );
     my $mode     = _read_octal( $block, 100, 8 );
@@ -73,7 +77,9 @@ sub parse_tar {
     # a url source falls back to its cache.
     Skilletor::Error->throw( 'corrupt tar entry (size): '.$raw_name ) unless defined $size && $size >= 0;
     $offset += 512;
-    my $data = $size > 0 && $offset < $len ? substr( $buf, $offset, $size ) : '';
+    # k145: a stream cut short inside an entry's data (or its padding) is no smaller archive.
+    Skilletor::Error->throw( 'corrupt tar (truncated): '.$raw_name ) if $offset + _ceil_blocks($size) > $len;
+    my $data = $size > 0 ? substr( $buf, $offset, $size ) : '';
     $offset += _ceil_blocks($size);
 
     if ( $typeflag eq 'L' ) {
@@ -101,6 +107,8 @@ sub parse_tar {
       push @entries, { name => $name, type => 'file', data => $data, executable => is_executable($mode) };
     }
   }
+  # k145: every archive ends with a zero block; running out of bytes first is a truncated one.
+  Skilletor::Error->throw('corrupt tar (truncated: no end-of-archive marker)') unless $ended;
   return \@entries;
 }
 
@@ -158,7 +166,8 @@ are skipped; symlinks, hardlinks, absolute paths and C<..> are refused with a
 L<Skilletor::Error::Tar>. A header whose size field is no non-negative octal
 number is a corrupt archive – a plain L<Skilletor::Error>
 C<corrupt tar entry (size): E<lt>nameE<gt>>, so a url source falls back to its
-cache as for a failed download. Of an entry's mode only the owner's executable bit is
+cache as for a failed download; so is an archive cut short (C<corrupt tar (truncated): ...>,
+or no end-of-archive block). Of an entry's mode only the owner's executable bit is
 kept. Names are decoded as UTF-8 the way Node decodes them.
 
 =func parse_tar

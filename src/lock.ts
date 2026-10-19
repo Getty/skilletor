@@ -53,6 +53,14 @@ export function readLock(path: string): Lock {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
       throw new Error("expected an object");
     }
+    // k145: `via` is matched against bundle labels exactly; a hand-edited string would match
+    // by substring (`String.includes`), so anything but an array of strings is refused.
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      const via = entry !== null && typeof entry === "object" ? (entry as Record<string, unknown>).via : undefined;
+      if (via !== undefined && !(Array.isArray(via) && via.every((v) => typeof v === "string"))) {
+        throw new Error(`${key}: "via" must be an array of strings`);
+      }
+    }
     return value as Lock;
   } catch (err) {
     throw new LockError(`${path}: invalid lock JSON (${(err as Error).message})`);

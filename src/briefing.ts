@@ -7,9 +7,12 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Harness } from "./config.ts";
 import { splitFrontmatter } from "./frontmatter.ts";
+import { claudeConfigDirOf } from "./fsutil.ts";
 
 export interface BriefingRoots {
   home: string;
+  /** The Claude config dir (k145); unset means `<home>/.claude`. */
+  claudeConfigDir?: string;
   /** `$CODEX_HOME`; unset means `<home>/.codex`. */
   codexHome?: string;
   /** The project root, for a project-scope agent. */
@@ -58,13 +61,14 @@ export function skillRoots(harness: Harness, scope: "user" | "project", r: Brief
     const user = [join(codexHome, "skills"), join(r.home, ".agents", "skills")];
     return project ? [join(project, ".agents", "skills"), join(project, ".codex", "skills"), ...user] : user;
   }
-  const user = join(r.home, ".claude", "skills");
-  return [...(project ? [join(project, ".claude", "skills")] : []), user, ...pluginCacheRoots(r.home)];
+  const claudeDir = claudeConfigDirOf(r.home, r.claudeConfigDir);
+  const user = join(claudeDir, "skills");
+  return [...(project ? [join(project, ".claude", "skills")] : []), user, ...pluginCacheRoots(claudeDir)];
 }
 
-/** `~/.claude/plugins/cache/*\/skills` and `…/cache/*\/*\/skills`, as far as they exist. */
-function pluginCacheRoots(home: string): string[] {
-  const cache = join(home, ".claude", "plugins", "cache");
+/** `<claude config dir>/plugins/cache/*\/skills` and `…/cache/*\/*\/skills`, as far as they exist. */
+function pluginCacheRoots(claudeDir: string): string[] {
+  const cache = join(claudeDir, "plugins", "cache");
   const out: string[] = [];
   for (const a of subdirs(cache)) {
     out.push(join(cache, a, "skills"));

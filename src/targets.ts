@@ -20,6 +20,8 @@ export class TargetError extends Error {
 export interface RootContext {
   base: string;
   scope: "user" | "project";
+  /** Claude Code's config dir (k145; only the user scope uses it); unset or empty means `<home>/.claude`. */
+  claudeDir?: string;
   /** `$CODEX_HOME`; unset or empty means `<home>/.codex` (only the user scope uses it). */
   codexHome?: string;
   /** The Hermes home (spec §16.2); unset or empty means Hermes' default for `<home>`
@@ -51,6 +53,7 @@ export interface TargetLayout {
 }
 
 const under = (dir: string) => (r: RootContext) => join(r.base, dir);
+const claudeDir = (r: RootContext) => (r.scope === "user" && r.claudeDir) || join(r.base, ".claude");
 const codexHomeDir = (r: RootContext) => r.codexHome || join(r.base, ".codex");
 const hermesHomeDir = (r: RootContext) => r.hermesHome || defaultHermesHome(r.base);
 
@@ -58,7 +61,7 @@ export const LAYOUTS: Record<Harness, TargetLayout> = {
   claude: {
     harness: "claude",
     keyPrefix: "",
-    roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") },
+    roots: { skill: claudeDir, agent: claudeDir, rule: claudeDir },
     localTypes: ["agent", "rule"],
   },
   // Skills (phase 1), agents as TOML (phase 2, convert.ts), rules as sections of
@@ -133,10 +136,13 @@ export function defaultHermesHome(
   return win32.join(env.LOCALAPPDATA?.trim() || win32.join(home, "AppData", "Local"), "hermes");
 }
 
-export function defaultMarkers(home: string, codexHome: string | undefined): HarnessMarkers {
+/** `claudeDir` is an explicit `CLAUDE_CONFIG_DIR`: Claude Code keeps `.claude.json` inside it then. */
+export function defaultMarkers(home: string, codexHome: string | undefined, claudeDir?: string): HarnessMarkers {
   const cx = codexHome || join(home, ".codex");
   return {
-    claude: [join(home, ".claude.json"), join(home, ".claude", "settings.json"), join(home, ".claude", "projects")],
+    claude: claudeDir
+      ? [join(claudeDir, ".claude.json"), join(claudeDir, "settings.json"), join(claudeDir, "projects")]
+      : [join(home, ".claude.json"), join(home, ".claude", "settings.json"), join(home, ".claude", "projects")],
     codex: ["config.toml", "auth.json", "sessions", "installation_id"].map((f) => join(cx, f)),
   };
 }

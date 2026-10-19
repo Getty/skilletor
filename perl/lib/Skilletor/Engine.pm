@@ -70,13 +70,6 @@ has plugin_root => (
   builder => sub { $ENV{CLAUDE_PLUGIN_ROOT} },
 );
 
-# `CLAUDE_CONFIG_DIR` (k142): Claude Code's config dir, where its plugin state lives. Only that
-# state is read from it. Empty means unset, then `<home>/.claude`.
-has claude_config_dir => (
-  is      => 'lazy',
-  builder => sub { $ENV{CLAUDE_CONFIG_DIR} },
-);
-
 sub _git_remote {
   my ( $dir ) = @_;
   my $r = eval { run_command( cmd => [ 'git', '-C', $dir, 'remote', 'get-url', 'origin' ], env => git_env() ) };
@@ -116,7 +109,6 @@ sub _codex_home_of {
   return ( defined $cx && length $cx ) ? $cx : undef;
 }
 
-sub _target_dir { my ( $self, $scope ) = @_; return path_join( $self->_base_of($scope), '.claude' ) }
 sub _lock_path  { my ( $self, $scope ) = @_; return path_join( $self->_target_dir($scope), 'skilletor.lock.json' ) }
 
 # Where a scope's roots live. Hermes is never a target here: its home is the recorded one.
@@ -126,6 +118,7 @@ sub _root_context {
   return {
     base        => $self->_base_of($scope),
     scope       => $scope,
+    claude_dir  => $self->claude_dir,
     codex_home  => $self->_codex_home_of,
     hermes_home => $recorded // default_hermes_home( $self->home ),
   };
@@ -153,7 +146,7 @@ sub _shell_word {
 # Config and targets as a sync needs them: no harness is a config error.
 sub _load_strict {
   my ( $self ) = @_;
-  my $config  = Skilletor::Config->load( home => $self->home, project_dir => $self->project_dir_of );
+  my $config  = Skilletor::Config->load( home => $self->home, claude_config_dir => $self->claude_config_dir, project_dir => $self->project_dir_of );
   my $markers = $self->markers;
   my $targets = select_targets( { user => $config->user->{targets}, project => $config->project ? $config->project->{targets} : undef },
     detect_harnesses($markers), $markers );
@@ -599,7 +592,7 @@ sub _claude_settings_plan {
   my $plan  = eval {
     plan_claude_settings(
       file => $file, label => $label, project_dir => $self->project_dir_of,
-      claude_dir => ( defined $self->claude_config_dir && length $self->claude_config_dir ? $self->claude_config_dir : path_join( $self->home, '.claude' ) ),
+      claude_dir => $self->claude_dir,
       plugin_root => ( defined $self->plugin_root && length $self->plugin_root ) ? $self->plugin_root : undef,
     );
   };
@@ -648,7 +641,7 @@ sub _tracked_warnings {
 sub _briefing_of {
   my ( $self, $scope, $lock, $only ) = @_;
   my $rc = $self->_root_context($scope);
-  my $roots = { home => $self->home, codex_home => $self->_codex_home_of, project_dir => $scope eq 'project' ? $self->project_dir_of : undef };
+  my $roots = { home => $self->home, claude_dir => $self->claude_dir, codex_home => $self->_codex_home_of, project_dir => $scope eq 'project' ? $self->project_dir_of : undef };
   my ( %roots_of, @out );
   for my $key ( keys %$lock ) {
     my $entry = $lock->{$key};
@@ -1007,12 +1000,6 @@ command that untracks it.
   git_remote => sub { my ( $project_dir ) = @_; return $url }
 
 The project's C<origin>, a render input of the project scope. Default: ask git.
-
-=attr claude_config_dir
-
-C<CLAUDE_CONFIG_DIR> by default, else F<< <home>/.claude >>: Claude Code's config
-dir, where the plugin state for the settings requirement is read. An empty
-value counts as unset.
 
 =attr plugin_root
 

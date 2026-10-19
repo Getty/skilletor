@@ -1,0 +1,23 @@
+{
+  "scopes": [
+    {
+      "added": [
+        {
+          "key": "skills/perl-moo",
+          "name": "perl-moo",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

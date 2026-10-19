@@ -1023,7 +1023,7 @@ therefore keeps two things in that file:
   is never read or written, nor is `settings.local.json` (per machine, never committed).
 - **Which marketplace.** From Claude Code's plugin state, read-only. `<claude dir>` is
   `$CLAUDE_CONFIG_DIR` (empty counts as unset; `EngineContext.claudeConfigDir`), else
-  `<home>/.claude`; nothing else of skilletor moves with it (§14.6).
+  `<home>/.claude`; it is also the user scope's `.claude` (§14.6).
   `<claude dir>/plugins/installed_plugins.json` lists each `skilletor@<m>` install with its
   scope, `installPath` and, for a project install, `projectPath`. The install whose
   `installPath` is `CLAUDE_PLUGIN_ROOT` – the plugin that runs this hook
@@ -1492,8 +1492,11 @@ once per target and names the targets in the scope header when they are not just
 
 - Config, lock and state stay under `.claude/` (`~/.claude/skilletor.json`,
   `<repo>/.claude/skilletor.json`) for both harnesses, even on a Codex-only machine.
-- `CLAUDE_CONFIG_DIR` is honoured only for Claude Code's plugin state (§6.8, k142); markers, the
-  user-scope target directory, config, lock and state stay under `<home>/.claude`.
+- `CLAUDE_CONFIG_DIR` (k145) is the user scope's `.claude`, as it is Claude Code's: the user config, the
+  lock, the Claude roots, the state dir (`<dir>/skilletor`), the briefing lookup's skills and plugin
+  cache, Claude Code's plugin state (§6.8) and its detection markers (`<dir>/.claude.json`,
+  `settings.json`, `projects`) all lie under it; an empty value is unset. The project scope is
+  unaffected. Codex and Hermes homes have their own variables.
 - Detection is re-evaluated on every run: a harness that disappears (e.g. `~/.codex`
   deleted) has its installed items removed on the next sync. Pin `targets` to avoid that.
 - The user-scope Codex agent root follows `$CODEX_HOME` at sync time. Changing

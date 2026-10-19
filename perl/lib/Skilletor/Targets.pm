@@ -22,11 +22,14 @@ our @EXPORT_OK = qw(
 # Only Claude and Codex are detected; Hermes is a target only when `targets` names it.
 use constant DETECTED => qw( claude codex );
 
+# $claude_config_dir: an explicit CLAUDE_CONFIG_DIR, inside which Claude Code keeps its .claude.json.
 sub default_markers {
-  my ( $home, $codex_home ) = @_;
+  my ( $home, $codex_home, $claude_config_dir ) = @_;
   my $cx = ( defined $codex_home && length $codex_home ) ? $codex_home : path_join( $home, '.codex' );
   return {
-    claude => [ path_join( $home, '.claude.json' ), path_join( $home, '.claude', 'settings.json' ), path_join( $home, '.claude', 'projects' ) ],
+    claude => ( defined $claude_config_dir && length $claude_config_dir )
+      ? [ map { path_join( $claude_config_dir, $_ ) } qw( .claude.json settings.json projects ) ]
+      : [ path_join( $home, '.claude.json' ), path_join( $home, '.claude', 'settings.json' ), path_join( $home, '.claude', 'projects' ) ],
     codex  => [ map { path_join( $cx, $_ ) } qw( config.toml auth.json sessions installation_id ) ],
   };
 }
@@ -81,6 +84,11 @@ sub select_targets {
 
 sub _under { my ( $dir ) = @_; return sub { path_join( $_[0]{base}, $dir ) } }
 
+sub _claude_root {
+  my ( $r ) = @_;
+  return ( $r->{scope} eq 'user' && defined $r->{claude_dir} && length $r->{claude_dir} ) ? $r->{claude_dir} : path_join( $r->{base}, '.claude' );
+}
+
 sub _codex_home_dir {
   my ( $r ) = @_;
   return ( defined $r->{codex_home} && length $r->{codex_home} ) ? $r->{codex_home} : path_join( $r->{base}, '.codex' );
@@ -101,7 +109,7 @@ sub _hermes_root {
 my %LAYOUTS = (
   claude => {
     prefix      => '',
-    roots       => [ skill => _under('.claude'), agent => _under('.claude'), rule => _under('.claude') ],
+    roots       => [ skill => \&_claude_root, agent => \&_claude_root, rule => \&_claude_root ],
     local_types => { agent => 1, rule => 1 },
   },
   codex => {

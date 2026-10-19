@@ -214,7 +214,7 @@ async function userPromptSubmit(input: HookInput, ctx: HookContext): Promise<Hoo
 
   let interval = DEFAULT_INTERVAL;
   try {
-    interval = loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx) }).checkInterval;
+    interval = loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: projectDirOf(ctx) }).checkInterval;
   } catch {
     // config error: fall back to the default throttle; the background sync reports it
   }

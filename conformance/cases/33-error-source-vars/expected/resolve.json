@@ -1,0 +1,24 @@
+{
+  "scopes": [
+    {
+      "items": [],
+      "scope": "user",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "failed",
+          "version": "git:e16b292"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": [
+        "source shared: ${HOME}/.claude/skilletor/cache/79eb247685294166/skilletor.json: \"vars\" must be an object"
+      ]
+    }
+  ]
+}

@@ -4,6 +4,7 @@ import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { claudeConfigDirOf } from "./fsutil.ts";
 import { sync, check, status, type EngineContext } from "./engine.ts";
 import { backendLabel, displaySafe, reportJson, reportText, type SyncReport } from "./report.ts";
 import {
@@ -113,7 +114,7 @@ function makeContext(flags: Flags): EngineContext {
     home,
     // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd.
     projectDir: flags.projectDir ?? projectRootOf(process.cwd()),
-    stateRoot: join(home, ".claude", "skilletor"),
+    stateRoot: join(claudeConfigDirOf(home), "skilletor"),
   };
 }
 
@@ -382,7 +383,7 @@ async function runHookCommand(args: string[]): Promise<number> {
   const ctx: HookContext = {
     home,
     projectDir,
-    stateRoot: join(home, ".claude", "skilletor"),
+    stateRoot: join(claudeConfigDirOf(home), "skilletor"),
     binPath: fileURLToPath(import.meta.url),
   };
   if (harness === "codex" || harness === "hermes") ctx.harness = harness;

@@ -1,12 +1,21 @@
 Revision history for skilletor
 
 {{$NEXT}}
-  - `CLAUDE_CONFIG_DIR` is honoured where skilletor reads Claude Code's
-    plugin state for the project's `.claude/settings.json` requirement:
-    `<dir>/plugins/installed_plugins.json` and `known_marketplaces.json`,
-    default `<home>/.claude` (an empty value counts as unset). Markers, the user-scope root, config, lock and state still live under
-    `<home>/.claude`. The Perl port does the same; conformance case 31 pins
-    it for both engines.
+  - `CLAUDE_CONFIG_DIR` is Claude Code's config dir and now the user scope's
+    `.claude` everywhere: the user config, the lock, the installed items, the
+    state dir, the briefing lookup, the plugin state read for the project's
+    `.claude/settings.json` requirement and the Claude detection markers
+    (`<dir>/.claude.json`, `settings.json`, `projects`). Default
+    `<home>/.claude`; an empty value counts as unset. The Perl port does the
+    same; conformance cases 31 and 32 pin it for both engines.
+  - Three inputs are refused instead of read loosely. A source's
+    `skilletor.json` with a `vars` that is no object (an array was spread by
+    index) fails the source's scan. A hand-edited lock whose `via` is no array
+    of strings (a string matched bundle labels by substring) is an invalid
+    lock. A url tarball cut short, inside an entry or without its
+    end-of-archive block, is a corrupt archive (the cache stays) instead of a
+    smaller one. The Perl port does the same; conformance case 33 pins the
+    vars.
   - Five oddities the Perl port found are fixed. A source serving two foreign
     entries of one bundle asks for trust once, not twice. A `\U` escape above
     U+10FFFF in a bundle file is that bundle's warning instead of an error

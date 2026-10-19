@@ -506,6 +506,12 @@ function readSourceMeta(dir: string): SourceMeta {
   const obj = parsed as Record<string, unknown>;
   const meta: SourceMeta = {};
   if (typeof obj.description === "string") meta.description = obj.description;
-  if (obj.vars && typeof obj.vars === "object") meta.vars = obj.vars as Record<string, unknown>;
+  if (obj.vars !== undefined) {
+    // k145: defaults are keyed by name; an array (or anything else) would spread by index.
+    if (obj.vars === null || typeof obj.vars !== "object" || Array.isArray(obj.vars)) {
+      throw new CatalogError(`${p}: "vars" must be an object`);
+    }
+    meta.vars = obj.vars as Record<string, unknown>;
+  }
   return meta;
 }

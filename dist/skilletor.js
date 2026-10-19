@@ -5743,20 +5743,13 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join as join17 } from "node:path";
 
-// src/engine.ts
-import { execFileSync as execFileSync2 } from "node:child_process";
-import { hostname as hostname2, platform, userInfo } from "node:os";
-import { existsSync as existsSync11, readFileSync as readFileSync12, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync5 } from "node:fs";
-import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join15, relative as relative4, resolve as resolvePath5, sep as sep5 } from "node:path";
-
-// src/config.ts
-import { existsSync, readFileSync } from "node:fs";
-import { join as join2 } from "node:path";
-
 // src/fsutil.ts
 import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+function claudeConfigDirOf(home, injected) {
+  return injected || process.env.CLAUDE_CONFIG_DIR || join(home, ".claude");
+}
 function toPosix(p) {
   return sep === "/" ? p : p.split(sep).join("/");
 }
@@ -5821,7 +5814,15 @@ function sameFile(a, b) {
   }
 }
 
+// src/engine.ts
+import { execFileSync as execFileSync2 } from "node:child_process";
+import { hostname as hostname2, platform, userInfo } from "node:os";
+import { existsSync as existsSync11, readFileSync as readFileSync12, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync5 } from "node:fs";
+import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join15, relative as relative4, resolve as resolvePath5, sep as sep5 } from "node:path";
+
 // src/config.ts
+import { existsSync, readFileSync } from "node:fs";
+import { join as join2 } from "node:path";
 var ITEM_TYPES = ["skill", "agent", "rule"];
 var INSTALL_KEYS = { skills: "skill", agents: "agent", rules: "rule" };
 var HARNESSES = ["claude", "codex", "hermes"];
@@ -6088,7 +6089,7 @@ function mergeVars(...objs) {
   return out;
 }
 function loadConfig(opts) {
-  const userPath = join2(opts.home, ".claude", "skilletor.json");
+  const userPath = join2(claudeConfigDirOf(opts.home, opts.claudeConfigDir), "skilletor.json");
   const user = readConfigFile(userPath);
   const hasProject = opts.projectDir !== void 0;
   const projectPath = hasProject ? join2(opts.projectDir, ".claude", "skilletor.json") : "";
@@ -7131,13 +7132,14 @@ var TargetError = class extends Error {
   name = "TargetError";
 };
 var under = (dir) => (r) => join3(r.base, dir);
+var claudeDir = (r) => r.scope === "user" && r.claudeDir || join3(r.base, ".claude");
 var codexHomeDir = (r) => r.codexHome || join3(r.base, ".codex");
 var hermesHomeDir = (r) => r.hermesHome || defaultHermesHome(r.base);
 var LAYOUTS = {
   claude: {
     harness: "claude",
     keyPrefix: "",
-    roots: { skill: under(".claude"), agent: under(".claude"), rule: under(".claude") },
+    roots: { skill: claudeDir, agent: claudeDir, rule: claudeDir },
     localTypes: ["agent", "rule"]
   },
   // Skills (phase 1), agents as TOML (phase 2, convert.ts), rules as sections of
@@ -7184,10 +7186,10 @@ function defaultHermesHome(home, platform2 = process.platform, env = process.env
   if (platform2 !== "win32") return join3(home, ".hermes");
   return win32.join(env.LOCALAPPDATA?.trim() || win32.join(home, "AppData", "Local"), "hermes");
 }
-function defaultMarkers(home, codexHome) {
+function defaultMarkers(home, codexHome, claudeDir2) {
   const cx = codexHome || join3(home, ".codex");
   return {
-    claude: [join3(home, ".claude.json"), join3(home, ".claude", "settings.json"), join3(home, ".claude", "projects")],
+    claude: claudeDir2 ? [join3(claudeDir2, ".claude.json"), join3(claudeDir2, "settings.json"), join3(claudeDir2, "projects")] : [join3(home, ".claude.json"), join3(home, ".claude", "settings.json"), join3(home, ".claude", "projects")],
     codex: ["config.toml", "auth.json", "sessions", "installation_id"].map((f) => join3(cx, f))
   };
 }
@@ -8035,9 +8037,13 @@ function parseTar(buf) {
   let offset = 0;
   let longName;
   let paxPath;
+  let ended = false;
   while (offset + 512 <= buf.length) {
     const block = buf.subarray(offset, offset + 512);
-    if (block.every((b) => b === 0)) break;
+    if (block.every((b) => b === 0)) {
+      ended = true;
+      break;
+    }
     const rawName = readString(block, 0, 100);
     const mode = readOctal(block, 100, 8);
     const prefix = readString(block, 345, 155);
@@ -8045,6 +8051,7 @@ function parseTar(buf) {
     const typeflag = String.fromCharCode(block[156] ?? 0);
     if (!(size >= 0)) throw new Error(`corrupt tar entry (size): ${rawName}`);
     offset += 512;
+    if (offset + Math.ceil(size / 512) * 512 > buf.length) throw new Error(`corrupt tar (truncated): ${rawName}`);
     const data = buf.subarray(offset, offset + size);
     offset += Math.ceil(size / 512) * 512;
     if (typeflag === "L") {
@@ -8069,6 +8076,7 @@ function parseTar(buf) {
       entries.push({ name, type: "file", data, executable: isExecutable(mode) });
     }
   }
+  if (!ended) throw new Error("corrupt tar (truncated: no end-of-archive marker)");
   return entries;
 }
 function parsePaxPath(data) {
@@ -8636,7 +8644,12 @@ function readSourceMeta(dir) {
   const obj = parsed;
   const meta = {};
   if (typeof obj.description === "string") meta.description = obj.description;
-  if (obj.vars && typeof obj.vars === "object") meta.vars = obj.vars;
+  if (obj.vars !== void 0) {
+    if (obj.vars === null || typeof obj.vars !== "object" || Array.isArray(obj.vars)) {
+      throw new CatalogError(`${p}: "vars" must be an object`);
+    }
+    meta.vars = obj.vars;
+  }
   return meta;
 }
 
@@ -8734,6 +8747,12 @@ function readLock(path) {
     const value2 = JSON.parse(text);
     if (value2 === null || typeof value2 !== "object" || Array.isArray(value2)) {
       throw new Error("expected an object");
+    }
+    for (const [key, entry] of Object.entries(value2)) {
+      const via = entry !== null && typeof entry === "object" ? entry.via : void 0;
+      if (via !== void 0 && !(Array.isArray(via) && via.every((v) => typeof v === "string"))) {
+        throw new Error(`${key}: "via" must be an array of strings`);
+      }
     }
     return value2;
   } catch (err) {
@@ -9422,11 +9441,12 @@ function skillRoots(harness, scope, r) {
     const user2 = [join13(codexHome, "skills"), join13(r.home, ".agents", "skills")];
     return project ? [join13(project, ".agents", "skills"), join13(project, ".codex", "skills"), ...user2] : user2;
   }
-  const user = join13(r.home, ".claude", "skills");
-  return [...project ? [join13(project, ".claude", "skills")] : [], user, ...pluginCacheRoots(r.home)];
+  const claudeDir2 = claudeConfigDirOf(r.home, r.claudeConfigDir);
+  const user = join13(claudeDir2, "skills");
+  return [...project ? [join13(project, ".claude", "skills")] : [], user, ...pluginCacheRoots(claudeDir2)];
 }
-function pluginCacheRoots(home) {
-  const cache = join13(home, ".claude", "plugins", "cache");
+function pluginCacheRoots(claudeDir2) {
+  const cache = join13(claudeDir2, "plugins", "cache");
   const out = [];
   for (const a of subdirs(cache)) {
     out.push(join13(cache, a, "skills"));
@@ -9483,8 +9503,8 @@ function pluginKey(key) {
   if (at <= 0 || at === key.length - 1) return void 0;
   return { name: key.slice(0, at), marketplace: key.slice(at + 1) };
 }
-function skilletorInstalls(claudeDir) {
-  const file = readObject(join14(claudeDir, "plugins", "installed_plugins.json"));
+function skilletorInstalls(claudeDir2) {
+  const file = readObject(join14(claudeDir2, "plugins", "installed_plugins.json"));
   const plugins = file?.plugins;
   if (!isObject(plugins)) return [];
   const out = [];
@@ -9499,8 +9519,8 @@ function skilletorInstalls(claudeDir) {
   }
   return out;
 }
-function skilletorMarketplace(claudeDir, projectDir, pluginRoot) {
-  const installs = skilletorInstalls(claudeDir);
+function skilletorMarketplace(claudeDir2, projectDir, pluginRoot) {
+  const installs = skilletorInstalls(claudeDir2);
   const unique = (xs) => [...new Set(xs.map((x) => x.marketplace))];
   if (pluginRoot) {
     const running = unique(installs.filter((i) => i.installPath !== void 0 && samePath(i.installPath, pluginRoot)));
@@ -9748,7 +9768,7 @@ function cacheRootOf(ctx) {
   return ctx.cacheRoot ?? join15(ctx.stateRoot, "cache");
 }
 function targetDirOf(ctx, scope) {
-  return join15(baseOf(ctx, scope), ".claude");
+  return scope === "user" ? claudeConfigDirOf(ctx.home, ctx.claudeConfigDir) : join15(ctx.projectDir, ".claude");
 }
 function baseOf(ctx, scope) {
   return scope === "user" ? ctx.home : ctx.projectDir;
@@ -9765,10 +9785,7 @@ function scoped(ctx) {
 }
 function claudeMemoryFiles(ctx, scope) {
   const base = baseOf(ctx, scope);
-  return scope === "user" ? [join15(base, ".claude", "CLAUDE.md")] : [join15(base, "CLAUDE.md"), join15(base, ".claude", "CLAUDE.md")];
-}
-function claudeConfigDirOf(ctx) {
-  return ctx.claudeConfigDir || process.env.CLAUDE_CONFIG_DIR || join15(ctx.home, ".claude");
+  return scope === "user" ? [join15(claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), "CLAUDE.md")] : [join15(base, "CLAUDE.md"), join15(base, ".claude", "CLAUDE.md")];
 }
 function codexHomeOf(ctx) {
   return (ctx.codexHome ?? process.env.CODEX_HOME) || void 0;
@@ -9788,16 +9805,16 @@ function hermesHomeOf(ctx) {
   return given ? resolvePath5(expandHome(given, ctx.home)) : recordedHermesHome(ctx);
 }
 function rootContextOf(ctx, scope) {
-  return { base: baseOf(ctx, scope), scope, codexHome: codexHomeOf(ctx), hermesHome: hermesHomeOf(ctx) };
+  return { base: baseOf(ctx, scope), scope, claudeDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), codexHome: codexHomeOf(ctx), hermesHome: hermesHomeOf(ctx) };
 }
 function targetsOf2(ctx, config) {
-  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx));
+  const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx), ctx.claudeConfigDir || process.env.CLAUDE_CONFIG_DIR || void 0);
   return selectTargets({ user: config.user.targets, project: config.project?.targets }, detectHarnesses(markers), markers);
 }
 function hermesOptInHint(ctx) {
   let machine;
   try {
-    machine = targetsOf2(ctx, loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx) })).user;
+    machine = targetsOf2(ctx, loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: projectDirOf(ctx) })).user;
   } catch {
     return void 0;
   }
@@ -9807,7 +9824,7 @@ function hermesOptInHint(ctx) {
 }
 function loadWithTargets(ctx) {
   try {
-    const config = loadConfig({ home: ctx.home, projectDir: ctx.projectDir });
+    const config = loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: ctx.projectDir });
     return { config, targets: targetsOf2(ctx, config) };
   } catch (err) {
     return { error: err.message };
@@ -9890,8 +9907,8 @@ function checkedVersion(read, backend, lock, name) {
   const same = read.kind === backend.kind && read.address === backend.address && read.ref === backend.ref && JSON.stringify(read.path ?? null) === JSON.stringify(backend.path ?? null);
   return same ? read.version : void 0;
 }
-function userClaudeEntries(claudeDir, stateRoot) {
-  const rel = relative4(claudeDir, stateRoot);
+function userClaudeEntries(claudeDir2, stateRoot) {
+  const rel = relative4(claudeDir2, stateRoot);
   const under2 = rel !== "" && !rel.startsWith("..") && !isAbsolute2(rel);
   return ["skilletor.lock.json", ...under2 ? [rel.split(sep5).join("/") + "/"] : [], ...LOCAL_ENTRIES];
 }
@@ -10454,7 +10471,7 @@ function claudeSettingsPlan(ctx, scope, scopeCfg, harnesses) {
       file,
       label: scopeLabel(scope, ctx.projectDir, file),
       projectDir: ctx.projectDir,
-      claudeDir: claudeConfigDirOf(ctx),
+      claudeDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir),
       pluginRoot: ctx.pluginRoot ?? (process.env.CLAUDE_PLUGIN_ROOT || void 0)
     });
   } catch (err) {
@@ -10523,7 +10540,7 @@ function shellWord(s) {
 }
 function briefingOf(ctx, scope, lock, only) {
   const rc = rootContextOf(ctx, scope);
-  const roots = { home: ctx.home, codexHome: codexHomeOf(ctx), projectDir: scope === "project" ? ctx.projectDir : void 0 };
+  const roots = { home: ctx.home, claudeConfigDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), codexHome: codexHomeOf(ctx), projectDir: scope === "project" ? ctx.projectDir : void 0 };
   const rootsOf = /* @__PURE__ */ new Map();
   const out = [];
   for (const [key, entry] of Object.entries(lock)) {
@@ -10952,11 +10969,11 @@ function projectRoot(ctx) {
   );
 }
 function configPath(ctx, project) {
-  const root = project ? projectRoot(ctx) : ctx.home;
-  return join16(root, ".claude", "skilletor.json");
+  const root = project ? join16(projectRoot(ctx), ".claude") : claudeConfigDirOf(ctx.home, ctx.claudeConfigDir);
+  return join16(root, "skilletor.json");
 }
 function load(ctx) {
-  return loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx) });
+  return loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: projectDirOf(ctx) });
 }
 var TYPE_DIR2 = { skill: "skills", agent: "agents", rule: "rules" };
 async function cmdAdd(ctx, args) {
@@ -11084,7 +11101,7 @@ function removalConfig(ctx, path, name) {
     return load(ctx);
   } catch (err) {
     if (!(err instanceof ConfigError)) throw err;
-    return loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx), unchecked: { path, name } });
+    return loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: projectDirOf(ctx), unchecked: { path, name } });
   }
 }
 function givesBackend(entry) {
@@ -11457,7 +11474,7 @@ function installedSet(ctx, config) {
   for (const i of declaredItems(config)) set.add(`${i.key}@${i.source}`);
   const projectDir = projectDirOf(ctx);
   for (const scope of ["user", "project"]) {
-    const dir = join16(scope === "user" ? ctx.home : projectDir ?? "", ".claude");
+    const dir = scope === "user" ? claudeConfigDirOf(ctx.home, ctx.claudeConfigDir) : join16(projectDir ?? "", ".claude");
     if (scope === "project" && !projectDir) continue;
     for (const [key, entry] of Object.entries(readLock(join16(dir, "skilletor.lock.json")))) {
       if (entry.skipped) continue;
@@ -11602,7 +11619,7 @@ async function userPromptSubmit(input, ctx) {
   const pending = state.takePendingReport(key);
   let interval = DEFAULT_INTERVAL;
   try {
-    interval = loadConfig({ home: ctx.home, projectDir: projectDirOf(ctx) }).checkInterval;
+    interval = loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: projectDirOf(ctx) }).checkInterval;
   } catch {
   }
   if (interval > 0 && state.isDue(key, interval)) {
@@ -11721,7 +11738,7 @@ function makeContext2(flags) {
     home,
     // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd.
     projectDir: flags.projectDir ?? projectRootOf(process.cwd()),
-    stateRoot: join17(home, ".claude", "skilletor")
+    stateRoot: join17(claudeConfigDirOf(home), "skilletor")
   };
 }
 function ttyPrompter() {
@@ -11953,7 +11970,7 @@ async function runHookCommand(args) {
   const ctx = {
     home,
     projectDir,
-    stateRoot: join17(home, ".claude", "skilletor"),
+    stateRoot: join17(claudeConfigDirOf(home), "skilletor"),
     binPath: fileURLToPath(import.meta.url)
   };
   if (harness === "codex" || harness === "hermes") ctx.harness = harness;

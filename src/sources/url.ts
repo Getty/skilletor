@@ -157,9 +157,13 @@ function parseTar(buf: Buffer): TarEntry[] {
   let longName: string | undefined;
   let paxPath: string | undefined;
 
+  let ended = false;
   while (offset + 512 <= buf.length) {
     const block = buf.subarray(offset, offset + 512);
-    if (block.every((b) => b === 0)) break; // end of archive
+    if (block.every((b) => b === 0)) { // end of archive
+      ended = true;
+      break;
+    }
 
     const rawName = readString(block, 0, 100);
     const mode = readOctal(block, 100, 8);
@@ -170,6 +174,8 @@ function parseTar(buf: Buffer): TarEntry[] {
     // (NaN) quietly ended the walk. Corrupt like a failed gunzip, not unsafe: the cache stays.
     if (!(size >= 0)) throw new Error(`corrupt tar entry (size): ${rawName}`);
     offset += 512;
+    // k145: a stream cut short inside an entry's data (or its padding) is no smaller archive.
+    if (offset + Math.ceil(size / 512) * 512 > buf.length) throw new Error(`corrupt tar (truncated): ${rawName}`);
     const data = buf.subarray(offset, offset + size);
     offset += Math.ceil(size / 512) * 512;
 
@@ -198,6 +204,8 @@ function parseTar(buf: Buffer): TarEntry[] {
       entries.push({ name, type: "file", data, executable: isExecutable(mode) });
     }
   }
+  // k145: every archive ends with a zero block; running out of bytes first is a truncated one.
+  if (!ended) throw new Error("corrupt tar (truncated: no end-of-archive marker)");
   return entries;
 }
 

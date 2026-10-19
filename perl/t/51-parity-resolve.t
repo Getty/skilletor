@@ -101,11 +101,11 @@ subtest 'the lock keeps offering what an unreachable source or bundle installed'
   write_json( "$m->{home}/.claude/skilletor.lock.json", {
     'skills/x'       => { source => 'a', version => 'local', files => {} },
     'skills/y'       => { source => 'a', version => 'local', files => {}, via => ['bundle:z@a'] },
-    'skills/z'       => { source => 'c', version => 'local', files => {}, via => 'bundle:z@a' },
+    'skills/z'       => { source => 'c', version => 'local', files => {}, via => ['bundle:z@a'] },
     'codex:skills/x' => { source => 'a', version => 'local', files => {} },
     'weird:skills/q' => { source => 'a', version => 'local', files => {} },
   } );
-  my $p = same_resolve( $m, 'kept offers collide; a string via counts too', project => undef );
+  my $p = same_resolve( $m, 'kept offers collide', project => undef );
   ok( ( grep { /offered by/ } @{ $p->{result}{scopes}[0]{warnings} } ), 'a collision with a kept offer is named' );
 };
 

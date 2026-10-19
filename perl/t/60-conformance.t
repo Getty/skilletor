@@ -214,6 +214,10 @@ sub run_case {
   build_git( $case_dir, $c, $r );
   path( $r->{home}, '.claude' )->mkpath;
   path( $r->{home}, '.claude.json' )->spew_raw("{}\n");    # Claude Code is in use (spec §14.1)
+  if ( defined $ENV{CLAUDE_CONFIG_DIR} ) {    # Claude Code keeps its .claude.json inside a custom config dir
+    path( $ENV{CLAUDE_CONFIG_DIR} )->mkpath;
+    path( $ENV{CLAUDE_CONFIG_DIR}, '.claude.json' )->spew_raw("{}\n");
+  }
   copy_input( "$case_dir/home", $r->{home}, $r );
   if ( $r->{project} ) {
     path( $r->{project} )->mkpath;

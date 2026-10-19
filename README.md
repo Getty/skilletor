@@ -206,6 +206,9 @@ the entry by hand.
 | `<project>/.claude/skilletor.json` | project (committed) | `<project>/.claude/{skills,agents,rules}` |
 | `<project>/.claude/skilletor.local.json` | machine-local (not committed) | as project |
 
+With `CLAUDE_CONFIG_DIR` set, Claude Code's config dir stands in for `~/.claude` everywhere in the user scope:
+the user config, the lock, the installed items, the state dir and the detection markers.
+
 ```json
 {
   "sources": {

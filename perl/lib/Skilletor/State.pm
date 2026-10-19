@@ -31,8 +31,8 @@ sub for_home {
 }
 
 sub default_root {
-  my ( $class, $home ) = @_;
-  return path_join( $home, '.claude', 'skilletor' );
+  my ( $class, $home, $claude_config_dir ) = @_;
+  return path_join( ( defined $claude_config_dir && length $claude_config_dir ) ? $claude_config_dir : path_join( $home, '.claude' ), 'skilletor' );
 }
 
 sub _file { path_join( $_[0]->root, $_[1] ) }
