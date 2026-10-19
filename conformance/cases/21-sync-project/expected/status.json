@@ -1,0 +1,62 @@
+{
+  "scopes": [
+    {
+      "bundles": [],
+      "declared": [],
+      "orphans": [],
+      "scope": "user",
+      "sourceVersions": {},
+      "targets": [
+        "claude"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    },
+    {
+      "bundles": [
+        {
+          "entry": "perl@shared",
+          "installed": 3,
+          "name": "perl",
+          "source": "shared"
+        }
+      ],
+      "declared": [
+        {
+          "installed": true,
+          "key": "agents/reviewer",
+          "source": "shared",
+          "via": "bundle:perl@shared"
+        },
+        {
+          "installed": true,
+          "key": "rules/perl-style",
+          "source": "shared",
+          "via": "bundle:perl@shared"
+        },
+        {
+          "installed": true,
+          "key": "skills/lint",
+          "source": "crew"
+        },
+        {
+          "installed": true,
+          "key": "skills/perl-moo",
+          "source": "shared",
+          "via": "bundle:perl@shared"
+        }
+      ],
+      "orphans": [],
+      "scope": "project",
+      "sourceVersions": {
+        "crew": "git:1b8f005",
+        "shared": "git:b0d7d96"
+      },
+      "targets": [
+        "claude"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "description": "Vars merge source < user < project < local for project items, source < user for user items; project and local install lists add up; a user source serves the project.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

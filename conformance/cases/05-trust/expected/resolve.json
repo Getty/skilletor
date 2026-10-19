@@ -1,0 +1,72 @@
+{
+  "scopes": [
+    {
+      "items": [],
+      "scope": "user",
+      "sources": [],
+      "trustRequests": [],
+      "warnings": []
+    },
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "lint@crew"
+          ],
+          "description": "Lints",
+          "files": [
+            "skills/lint/SKILL.md"
+          ],
+          "name": "lint",
+          "path": "skills/lint",
+          "source": "crew",
+          "templated": false,
+          "type": "skill",
+          "vars": {}
+        }
+      ],
+      "scope": "project",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/crew.git",
+          "cache": "545420dc10a1966e",
+          "dir": "${HOME}/.claude/skilletor/cache/545420dc10a1966e",
+          "kind": "git",
+          "name": "crew",
+          "origin": "project",
+          "state": "resolved",
+          "version": "git:1b8f005"
+        },
+        {
+          "address": "https://conformance.invalid/skills.tar.gz",
+          "cache": "f56b50c322ccf003",
+          "kind": "url",
+          "name": "tarballs",
+          "origin": "project",
+          "state": "untrusted"
+        },
+        {
+          "address": "https://conformance.invalid/team.git",
+          "cache": "3233be11a755ff11",
+          "kind": "git",
+          "name": "team",
+          "origin": "project",
+          "state": "untrusted"
+        }
+      ],
+      "trustRequests": [
+        {
+          "kind": "git",
+          "name": "team",
+          "url": "https://conformance.invalid/team.git"
+        },
+        {
+          "kind": "url",
+          "name": "tarballs",
+          "url": "https://conformance.invalid/skills.tar.gz"
+        }
+      ],
+      "warnings": []
+    }
+  ]
+}

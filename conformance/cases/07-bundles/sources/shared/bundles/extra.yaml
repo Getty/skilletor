@@ -1,0 +1,5 @@
+description: Items of other sources
+skills:
+  - lint@https://conformance.invalid/other.git
+  - deploy@https://conformance.invalid/missing.git
+  - nope

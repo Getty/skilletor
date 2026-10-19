@@ -1,0 +1,7 @@
+description: Everything for Perl
+skills: [perl-*]
+agents: [reviewer]
+bundles: [base]
+vars:
+  perl_version: "5.40"
+  level: perl

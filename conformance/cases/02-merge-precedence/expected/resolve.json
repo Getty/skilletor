@@ -1,0 +1,101 @@
+{
+  "scopes": [
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "commit-style@shared"
+          ],
+          "files": [
+            "rules/commit-style.md"
+          ],
+          "name": "commit-style",
+          "path": "rules/commit-style.md",
+          "source": "shared",
+          "templated": false,
+          "type": "rule",
+          "vars": {
+            "a": "user",
+            "b": "project",
+            "c": "local",
+            "d": "source"
+          }
+        },
+        {
+          "declaredBy": [
+            "testing@shared"
+          ],
+          "description": "Write tests",
+          "files": [
+            "skills/testing/SKILL.md"
+          ],
+          "name": "testing",
+          "path": "skills/testing",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {
+            "a": "user",
+            "b": "project",
+            "c": "local",
+            "d": "source"
+          }
+        }
+      ],
+      "scope": "project",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:6ea83f9"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": []
+    },
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "perl-moo@shared"
+          ],
+          "description": "Write Moo classes",
+          "files": [
+            "skills/perl-moo/SKILL.md"
+          ],
+          "name": "perl-moo",
+          "path": "skills/perl-moo",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {
+            "a": "user",
+            "b": "user",
+            "c": "user",
+            "d": "source"
+          }
+        }
+      ],
+      "scope": "user",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:6ea83f9"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": []
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    },
+    "other": {
+      "git": "https://conformance.invalid/other.git"
+    }
+  },
+  "install": {
+    "skills": [
+      "perl-*@shared"
+    ],
+    "agents": [
+      "nothing-*@shared"
+    ],
+    "rules": [
+      "*@shared",
+      "rule:*-style@shared",
+      "*@other"
+    ]
+  }
+}

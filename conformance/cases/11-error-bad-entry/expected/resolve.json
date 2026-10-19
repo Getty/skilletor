@@ -1,0 +1,4 @@
+{
+  "error": "${PROJECT}/.claude/skilletor.local.json: install.skills[0] \"perl-moo\" must be name@source",
+  "scopes": []
+}

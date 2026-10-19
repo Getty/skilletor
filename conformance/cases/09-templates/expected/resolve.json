@@ -1,0 +1,118 @@
+{
+  "scopes": [
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "greet@shared"
+          ],
+          "description": "Greets {{ vars.who }}",
+          "files": [
+            "skills/greet/SKILL.md.njk",
+            "skills/greet/notes.md"
+          ],
+          "name": "greet",
+          "path": "skills/greet",
+          "source": "shared",
+          "templated": true,
+          "type": "skill",
+          "vars": {
+            "k8s_namespace": "default",
+            "kubernetes": false,
+            "who": "local"
+          }
+        },
+        {
+          "declaredBy": [
+            "k8s@shared"
+          ],
+          "description": "Kubernetes",
+          "files": [
+            "rules/k8s.md.njk"
+          ],
+          "name": "k8s",
+          "path": "rules/k8s.md.njk",
+          "source": "shared",
+          "templated": true,
+          "type": "rule",
+          "vars": {
+            "k8s_namespace": "default",
+            "kubernetes": false,
+            "who": "local"
+          }
+        },
+        {
+          "declaredBy": [
+            "plain@shared"
+          ],
+          "files": [
+            "rules/plain.md"
+          ],
+          "name": "plain",
+          "path": "rules/plain.md",
+          "source": "shared",
+          "templated": false,
+          "type": "rule",
+          "vars": {
+            "k8s_namespace": "default",
+            "kubernetes": false,
+            "who": "local"
+          }
+        }
+      ],
+      "scope": "project",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:0aaeba3"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": []
+    },
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "k8s@shared"
+          ],
+          "description": "Kubernetes",
+          "files": [
+            "rules/k8s.md.njk"
+          ],
+          "name": "k8s",
+          "path": "rules/k8s.md.njk",
+          "source": "shared",
+          "templated": true,
+          "type": "rule",
+          "vars": {
+            "k8s_namespace": "default",
+            "kubernetes": true,
+            "who": "world"
+          }
+        }
+      ],
+      "scope": "user",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:0aaeba3"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": []
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "scopes": [
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "lint@other"
+          ],
+          "description": "Lint from git",
+          "files": [
+            "skills/lint/SKILL.md"
+          ],
+          "name": "lint",
+          "path": "skills/lint",
+          "source": "other",
+          "templated": false,
+          "type": "skill",
+          "vars": {}
+        },
+        {
+          "declaredBy": [
+            "perl-moo@shared"
+          ],
+          "description": "From the author's checkout",
+          "files": [
+            "skills/perl-moo/SKILL.md"
+          ],
+          "name": "perl-moo",
+          "path": "skills/perl-moo",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {}
+        }
+      ],
+      "scope": "user",
+      "sources": [
+        {
+          "address": "${HOME}/dev/shared",
+          "dir": "${HOME}/dev/shared",
+          "kind": "local",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "local"
+        },
+        {
+          "address": "https://conformance.invalid/other.git",
+          "cache": "7df6d996cf1d0bdb",
+          "dir": "${HOME}/.claude/skilletor/cache/7df6d996cf1d0bdb",
+          "kind": "git",
+          "name": "other",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:5bb73d2"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": []
+    },
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "perl-moo@shared"
+          ],
+          "description": "From the author's checkout",
+          "files": [
+            "skills/perl-moo/SKILL.md"
+          ],
+          "name": "perl-moo",
+          "path": "skills/perl-moo",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {}
+        }
+      ],
+      "scope": "project",
+      "sources": [
+        {
+          "address": "${HOME}/dev/shared",
+          "dir": "${HOME}/dev/shared",
+          "kind": "local",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "local"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": []
+    }
+  ]
+}

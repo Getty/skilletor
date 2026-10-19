@@ -1,0 +1,14 @@
+{
+  "install": {
+    "skills": [
+      "greet@shared"
+    ],
+    "rules": [
+      "k8s@shared",
+      "plain@shared"
+    ]
+  },
+  "vars": {
+    "kubernetes": false
+  }
+}

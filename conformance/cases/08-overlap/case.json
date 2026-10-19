@@ -1,0 +1,27 @@
+{
+  "description": "Overlap: an explicit entry wins over a same-source bundle (no bundle vars, recorded in via) and over another source's wildcard (warning); two sources' wildcards yielding one name skip it; two bundles setting one var differently drop it.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    },
+    "team": {
+      "url": "https://conformance.invalid/team.git",
+      "commits": [
+        {
+          "tree": "sources/team"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

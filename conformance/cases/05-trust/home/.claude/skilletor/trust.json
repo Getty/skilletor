@@ -1,0 +1,10 @@
+{
+  "crew": {
+    "kind": "git",
+    "address": "https://conformance.invalid/crew.git"
+  },
+  "team": {
+    "kind": "git",
+    "address": "https://conformance.invalid/old-team.git"
+  }
+}

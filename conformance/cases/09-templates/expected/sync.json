@@ -1,0 +1,59 @@
+{
+  "scopes": [
+    {
+      "added": [
+        {
+          "key": "rules/k8s",
+          "name": "k8s",
+          "source": "shared",
+          "type": "rule"
+        }
+      ],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    },
+    {
+      "added": [
+        {
+          "key": "rules/plain",
+          "name": "plain",
+          "source": "shared",
+          "type": "rule"
+        },
+        {
+          "key": "skills/greet",
+          "name": "greet",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "conflicts": [],
+      "gitignoreUpdated": [
+        ".claude/.gitignore",
+        ".worktreeinclude"
+      ],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "skipped": [
+        {
+          "key": "rules/k8s",
+          "name": "k8s",
+          "source": "shared",
+          "type": "rule"
+        }
+      ],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

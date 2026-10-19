@@ -1,0 +1,17 @@
+{
+  "sources": {
+    "shared": {
+      "local": "~/dev/shared"
+    },
+    "other": {
+      "git": "https://conformance.invalid/other.git",
+      "local": "~/dev/missing"
+    }
+  },
+  "install": {
+    "skills": [
+      "perl-moo@shared",
+      "lint@other"
+    ]
+  }
+}

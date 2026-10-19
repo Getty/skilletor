@@ -1,0 +1,32 @@
+{
+  "description": "User-scope sync of a skill, an agent and a rule from a git source: files, lock, ~/.claude/.gitignore stays out (no git work tree); check finds nothing to do; status; a second sync changes nothing.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "status",
+      "op": "status"
+    },
+    {
+      "id": "resync",
+      "op": "sync"
+    }
+  ]
+}

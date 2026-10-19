@@ -1,0 +1,15 @@
+{
+  "sources": {
+    "crew": {
+      "git": "https://conformance.invalid/crew.git"
+    }
+  },
+  "install": {
+    "skills": [
+      "lint@crew"
+    ],
+    "bundles": [
+      "perl@shared"
+    ]
+  }
+}

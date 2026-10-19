@@ -1,0 +1,42 @@
+{
+  "scopes": [
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "perl-moo@shared"
+          ],
+          "description": "Moo",
+          "files": [
+            "skills/perl-moo/SKILL.md"
+          ],
+          "name": "perl-moo",
+          "path": "skills/perl-moo",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {}
+        }
+      ],
+      "scope": "user",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:5b4474a"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": [
+        "agent dup@shared: both agents/dup.md and agents/dup.md.njk exist; an installed copy stays",
+        "bundle:ghost@shared: bundle ghost not found; its installed items are kept",
+        "item not found in source shared: skill nope"
+      ]
+    }
+  ]
+}

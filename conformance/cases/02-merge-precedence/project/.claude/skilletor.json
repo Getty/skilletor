@@ -1,0 +1,11 @@
+{
+  "install": {
+    "skills": [
+      "testing@shared"
+    ]
+  },
+  "vars": {
+    "b": "project",
+    "c": "project"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "description": "An install entry without `@source` in the local config is a config error naming that file.",
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+{
+  "scopes": [
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "bundle:alt@shared",
+            "bundle:perl@shared"
+          ],
+          "description": "Tests from shared",
+          "files": [
+            "skills/testing/SKILL.md"
+          ],
+          "name": "testing",
+          "path": "skills/testing",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {
+            "from_bundle": "source",
+            "perl_only": true
+          },
+          "via": [
+            "bundle:alt@shared",
+            "bundle:perl@shared"
+          ]
+        },
+        {
+          "declaredBy": [
+            "perl-moo@shared"
+          ],
+          "description": "Moo from shared",
+          "files": [
+            "skills/perl-moo/SKILL.md"
+          ],
+          "name": "perl-moo",
+          "path": "skills/perl-moo",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {
+            "from_bundle": "source"
+          },
+          "via": [
+            "bundle:perl@shared"
+          ]
+        },
+        {
+          "declaredBy": [
+            "style@team"
+          ],
+          "files": [
+            "rules/style.md"
+          ],
+          "name": "style",
+          "path": "rules/style.md",
+          "source": "team",
+          "templated": false,
+          "type": "rule",
+          "vars": {}
+        }
+      ],
+      "scope": "user",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:ef7a788"
+        },
+        {
+          "address": "https://conformance.invalid/team.git",
+          "cache": "3233be11a755ff11",
+          "dir": "${HOME}/.claude/skilletor/cache/3233be11a755ff11",
+          "kind": "git",
+          "name": "team",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:610ab9b"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": [
+        "bundle vars conflict on \"from_bundle\": bundle:perl@shared and bundle:alt@shared set different values; neither applies to skill testing",
+        "rule \"style\" from *@shared ignored: explicitly declared as style@team",
+        "skill \"lint\" offered by *@team and l*@shared; skipped",
+        "skill \"perl-moo\" from *@team ignored: explicitly declared as perl-moo@shared"
+      ]
+    }
+  ]
+}

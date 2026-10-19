@@ -1,0 +1,14 @@
+{
+  "description": "An install entry naming no configured source is a config error: nothing is resolved, a sync touches nothing.",
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    },
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    }
+  ]
+}

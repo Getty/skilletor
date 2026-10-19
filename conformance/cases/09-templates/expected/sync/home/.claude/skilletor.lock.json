@@ -1,0 +1,9 @@
+{
+  "rules/k8s": {
+    "source": "shared",
+    "version": "git:0aaeba3",
+    "files": {
+      "rules/.local.k8s.md": "sha256:c20e2b2553dbc57fd4251eb7b8af1629d548a0be718fedc30c200cd33e4560a0"
+    }
+  }
+}

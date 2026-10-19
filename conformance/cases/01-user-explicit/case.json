@@ -1,0 +1,20 @@
+{
+  "description": "User config only: a git source, an item of each type, `name@source` and `type:name@source`; source default vars under the user's. A resolve writes nothing outside the cache.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve",
+      "tree": true
+    }
+  ]
+}

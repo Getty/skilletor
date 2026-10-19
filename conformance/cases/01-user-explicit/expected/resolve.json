@@ -1,0 +1,80 @@
+{
+  "scopes": [
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "agent:reviewer@shared"
+          ],
+          "description": "Reviews Perl code",
+          "files": [
+            "agents/reviewer.md"
+          ],
+          "name": "reviewer",
+          "path": "agents/reviewer.md",
+          "source": "shared",
+          "templated": false,
+          "type": "agent",
+          "vars": {
+            "level": 1,
+            "team": "core",
+            "tone": "warm"
+          }
+        },
+        {
+          "declaredBy": [
+            "perl-moo@shared"
+          ],
+          "description": "Write Moo classes",
+          "files": [
+            "skills/perl-moo/SKILL.md",
+            "skills/perl-moo/reference.md"
+          ],
+          "name": "perl-moo",
+          "path": "skills/perl-moo",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {
+            "level": 1,
+            "team": "core",
+            "tone": "warm"
+          }
+        },
+        {
+          "declaredBy": [
+            "rule:commit-style@shared"
+          ],
+          "files": [
+            "rules/commit-style.md"
+          ],
+          "name": "commit-style",
+          "path": "rules/commit-style.md",
+          "source": "shared",
+          "templated": false,
+          "type": "rule",
+          "vars": {
+            "level": 1,
+            "team": "core",
+            "tone": "warm"
+          }
+        }
+      ],
+      "scope": "user",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:f26fe91"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": []
+    }
+  ]
+}

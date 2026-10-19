@@ -1,0 +1,27 @@
+{
+  "description": "Wildcards and patterns: `perl-*`, `*`, `*-style` overlapping in one source (installed once), a bare `*` matching nothing (silent), a pattern matching nothing (warning).",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    },
+    "other": {
+      "url": "https://conformance.invalid/other.git",
+      "commits": [
+        {
+          "tree": "sources/other"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

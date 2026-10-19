@@ -1,0 +1,27 @@
+{
+  "description": "Bundles: `name@source` and `bundle:name@source`, a nested bundle (outer vars win), an entry of another source served by a configured source of that address under another name, a missing source and a missing name (warnings).",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    },
+    "other": {
+      "url": "https://conformance.invalid/other.git",
+      "commits": [
+        {
+          "tree": "sources/other"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

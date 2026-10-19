@@ -1,0 +1,20 @@
+{
+  "sources": {
+    "team": {
+      "git": "https://conformance.invalid/team.git"
+    },
+    "crew": {
+      "git": "https://conformance.invalid/crew.git"
+    },
+    "tarballs": {
+      "url": "https://conformance.invalid/skills.tar.gz"
+    }
+  },
+  "install": {
+    "skills": [
+      "deploy@team",
+      "lint@crew",
+      "pack@tarballs"
+    ]
+  }
+}

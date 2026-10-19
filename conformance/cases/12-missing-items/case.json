@@ -1,0 +1,19 @@
+{
+  "description": "What a source lacks is a warning, never an error: an unknown item, an unknown bundle, an agent with both `<name>.md` and `<name>.md.njk`; the rest resolves.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

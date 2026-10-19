@@ -1,0 +1,73 @@
+{
+  "scopes": [
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "perl-moo@shared"
+          ],
+          "description": "Moo, as of v1",
+          "files": [
+            "skills/perl-moo/SKILL.md"
+          ],
+          "name": "perl-moo",
+          "path": "skills/perl-moo",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {}
+        }
+      ],
+      "scope": "project",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "b966aec947fa313b",
+          "dir": "${HOME}/.claude/skilletor/cache/b966aec947fa313b",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "ref": "v1",
+          "state": "resolved",
+          "version": "git:30993b3"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": []
+    },
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "perl-moo@shared"
+          ],
+          "description": "Moo, as of v2",
+          "files": [
+            "skills/perl-moo/SKILL.md"
+          ],
+          "name": "perl-moo",
+          "path": "skills/perl-moo",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {}
+        }
+      ],
+      "scope": "user",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:e988aea"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": []
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "description": "A git ref: the user scope tracks HEAD, the project pins tag v1 through a backend-less local entry (k128); each gets its own cache dir.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared-v1",
+          "tag": "v1"
+        },
+        {
+          "tree": "sources/shared-v2"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

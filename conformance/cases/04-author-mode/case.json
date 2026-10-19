@@ -1,0 +1,19 @@
+{
+  "description": "Author mode: a user `local` beside the project's `git` wins while its directory exists (user origin, trusted, no fetch); a missing `local` falls back to `git`.",
+  "git": {
+    "other": {
+      "url": "https://conformance.invalid/other.git",
+      "commits": [
+        {
+          "tree": "sources/other"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

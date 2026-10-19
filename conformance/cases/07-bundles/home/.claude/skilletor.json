@@ -1,0 +1,19 @@
+{
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    },
+    "tools": {
+      "git": "https://conformance.invalid/other.git"
+    }
+  },
+  "install": {
+    "bundles": [
+      "perl@shared",
+      "bundle:extra@shared"
+    ]
+  },
+  "vars": {
+    "tone": "user"
+  }
+}

@@ -1,0 +1,173 @@
+{
+  "scopes": [
+    {
+      "items": [
+        {
+          "declaredBy": [
+            "bundle:extra@shared"
+          ],
+          "description": "Lint, from another source",
+          "files": [
+            "skills/lint/SKILL.md"
+          ],
+          "name": "lint",
+          "path": "skills/lint",
+          "source": "tools",
+          "templated": false,
+          "type": "skill",
+          "vars": {
+            "level": "other",
+            "tone": "user"
+          },
+          "via": [
+            "bundle:extra@shared"
+          ]
+        },
+        {
+          "declaredBy": [
+            "bundle:perl@shared"
+          ],
+          "description": "DBI",
+          "files": [
+            "skills/perl-dbi/SKILL.md"
+          ],
+          "name": "perl-dbi",
+          "path": "skills/perl-dbi",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {
+            "level": "perl",
+            "only_source": true,
+            "perl_version": "5.40",
+            "tone": "user"
+          },
+          "via": [
+            "bundle:perl@shared"
+          ]
+        },
+        {
+          "declaredBy": [
+            "bundle:perl@shared"
+          ],
+          "description": "Moo",
+          "files": [
+            "skills/perl-moo/SKILL.md"
+          ],
+          "name": "perl-moo",
+          "path": "skills/perl-moo",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {
+            "level": "perl",
+            "only_source": true,
+            "perl_version": "5.40",
+            "tone": "user"
+          },
+          "via": [
+            "bundle:perl@shared"
+          ]
+        },
+        {
+          "declaredBy": [
+            "bundle:perl@shared"
+          ],
+          "description": "Reviews",
+          "files": [
+            "agents/reviewer.md"
+          ],
+          "name": "reviewer",
+          "path": "agents/reviewer.md",
+          "source": "shared",
+          "templated": false,
+          "type": "agent",
+          "vars": {
+            "level": "perl",
+            "only_source": true,
+            "perl_version": "5.40",
+            "tone": "user"
+          },
+          "via": [
+            "bundle:perl@shared"
+          ]
+        },
+        {
+          "declaredBy": [
+            "bundle:perl@shared"
+          ],
+          "description": "Tests",
+          "files": [
+            "skills/testing/SKILL.md"
+          ],
+          "name": "testing",
+          "path": "skills/testing",
+          "source": "shared",
+          "templated": false,
+          "type": "skill",
+          "vars": {
+            "base_only": true,
+            "level": "perl",
+            "only_source": true,
+            "perl_version": "5.40",
+            "tone": "user"
+          },
+          "via": [
+            "bundle:perl@shared"
+          ]
+        },
+        {
+          "declaredBy": [
+            "bundle:perl@shared"
+          ],
+          "files": [
+            "rules/perl-style.md"
+          ],
+          "name": "perl-style",
+          "path": "rules/perl-style.md",
+          "source": "shared",
+          "templated": false,
+          "type": "rule",
+          "vars": {
+            "base_only": true,
+            "level": "perl",
+            "only_source": true,
+            "perl_version": "5.40",
+            "tone": "user"
+          },
+          "via": [
+            "bundle:perl@shared"
+          ]
+        }
+      ],
+      "scope": "user",
+      "sources": [
+        {
+          "address": "https://conformance.invalid/other.git",
+          "cache": "7df6d996cf1d0bdb",
+          "dir": "${HOME}/.claude/skilletor/cache/7df6d996cf1d0bdb",
+          "kind": "git",
+          "name": "tools",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:0bd9a1e"
+        },
+        {
+          "address": "https://conformance.invalid/shared.git",
+          "cache": "79eb247685294166",
+          "dir": "${HOME}/.claude/skilletor/cache/79eb247685294166",
+          "kind": "git",
+          "name": "shared",
+          "origin": "user",
+          "state": "resolved",
+          "version": "git:7dda536"
+        }
+      ],
+      "trustRequests": [],
+      "warnings": [
+        "bundle extra@shared needs https://conformance.invalid/missing.git (https://conformance.invalid/missing.git): run skilletor install bundle:extra@shared",
+        "bundle extra@shared: skill nope not found in the source"
+      ]
+    }
+  ]
+}

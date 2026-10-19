@@ -1,0 +1,27 @@
+{
+  "description": "Project-only sources: one trusted for its exact address, one whose trust lapsed (other address), one url source never trusted – no fetch, its cache dir name still pinned.",
+  "git": {
+    "team": {
+      "url": "https://conformance.invalid/team.git",
+      "commits": [
+        {
+          "tree": "sources/team"
+        }
+      ]
+    },
+    "crew": {
+      "url": "https://conformance.invalid/crew.git",
+      "commits": [
+        {
+          "tree": "sources/crew"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve"
+    }
+  ]
+}

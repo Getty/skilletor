@@ -1,0 +1,25 @@
+{
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    },
+    "team": {
+      "git": "https://conformance.invalid/team.git"
+    }
+  },
+  "install": {
+    "skills": [
+      "perl-moo@shared",
+      "*@team",
+      "l*@shared"
+    ],
+    "rules": [
+      "style@team",
+      "*@shared"
+    ],
+    "bundles": [
+      "perl@shared",
+      "alt@shared"
+    ]
+  }
+}

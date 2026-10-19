@@ -1,0 +1,7 @@
+{
+  "vars": {
+    "kubernetes": true,
+    "k8s_namespace": "default",
+    "who": "world"
+  }
+}

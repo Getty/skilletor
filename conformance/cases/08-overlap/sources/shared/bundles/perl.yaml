@@ -1,0 +1,5 @@
+description: Perl
+skills: [perl-moo, testing]
+vars:
+  from_bundle: perl
+  perl_only: true

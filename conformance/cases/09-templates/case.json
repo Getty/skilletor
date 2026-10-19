@@ -1,0 +1,41 @@
+{
+  "description": "`.njk` items: resolve marks them `templated`; a sync renders them with the merged vars, and a rule gated off by the project's vars is skipped (renders-empty) while the user scope installs it.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "resolve",
+      "op": "resolve",
+      "tree": true
+    },
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "status",
+      "op": "status"
+    }
+  ],
+  "engines": {
+    "perl": {
+      "steps": {
+        "sync": {
+          "skip": "renders .njk templates; the Perl engine renders none (resolve marks them templated)"
+        },
+        "status": {
+          "skip": "follows the TS-only sync"
+        }
+      }
+    }
+  }
+}

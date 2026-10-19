@@ -1,0 +1,10 @@
+{
+  "install": {
+    "rules": [
+      "commit-style@shared"
+    ]
+  },
+  "vars": {
+    "c": "local"
+  }
+}

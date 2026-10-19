@@ -1,0 +1,19 @@
+{
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    }
+  },
+  "install": {
+    "skills": [
+      "perl-moo@shared",
+      "nope@shared"
+    ],
+    "agents": [
+      "dup@shared"
+    ],
+    "bundles": [
+      "ghost@shared"
+    ]
+  }
+}
