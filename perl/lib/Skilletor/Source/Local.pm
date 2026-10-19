@@ -1,0 +1,96 @@
+package Skilletor::Source::Local;
+# ABSTRACT: A source read straight from a local directory (author mode)
+
+use Moo;
+use Skilletor::Error::Source;
+use Skilletor::FSUtil qw( path_join );
+use namespace::clean;
+
+with 'Skilletor::Role::Source';
+
+our $VERSION = '0.001';
+
+has local_path => (
+  is       => 'ro',
+  required => 1,
+);
+
+has home => (
+  is => 'ro',
+);
+
+has dir => (
+  is       => 'lazy',
+  init_arg => undef,
+);
+
+sub _build_dir {
+  my ( $self ) = @_;
+  return defined $self->home ? $self->expand_home( $self->local_path, $self->home ) : $self->local_path;
+}
+
+# A leading ~ or ~/ against the home; other paths pass through.
+sub expand_home {
+  my ( $self, $path, $home ) = @_;
+  return $home if $path eq '~';
+  return path_join( $home, substr( $path, 2 ) ) if $path =~ m{\A~/} || ( $^O eq 'MSWin32' && $path =~ m{\A~\\} );
+  return $path;
+}
+
+sub exists { -d $_[0]->dir ? 1 : 0 }
+
+sub resolve {
+  my ( $self ) = @_;
+  Skilletor::Error::Source->throw( 'local source directory does not exist: '.$self->dir ) unless -e $self->dir;
+  return { dir => $self->dir, version => 'local' };
+}
+
+# Local sources are always re-rendered.
+sub check { 1 }
+
+1;
+
+=synopsis
+
+  use Skilletor::Source::Local;
+
+  my $src = Skilletor::Source::Local->new( local_path => '~/dev/skills', home => $ENV{HOME} );
+  my $loc = $src->resolve;    # { dir => '/home/me/dev/skills', version => 'local' }
+
+=description
+
+The reference's C<sources/local.ts> (spec §4.4): a directory read directly, no
+fetch and no cache. The version is always C<local> and L</check> always says
+changed, so every run re-renders it. A missing directory is no error until
+L</resolve>: L</exists> lets the caller fall back to the source's git or url.
+
+=attr local_path
+
+The path as configured; a leading C<~> is expanded when L</home> is given.
+Without C<home> the path is taken as is.
+
+=attr home
+
+Stands in for C<~> in L</local_path>.
+
+=attr dir
+
+The directory read.
+
+=method expand_home
+
+  $src->expand_home( '~/dev', '/home/me' );   # /home/me/dev
+
+=method exists
+
+True when L</dir> is a directory.
+
+=method resolve
+
+C<< { dir, version => 'local' } >>; throws L<Skilletor::Error::Source> for a missing directory.
+
+=method check
+
+Always true: a local source is re-rendered every run.
+
+=cut

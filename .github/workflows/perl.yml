@@ -1,0 +1,35 @@
+# The Perl port (perl/, a [@Author::GETTY] dist of its own). Separate from ci.yml, which
+# builds and tests the TypeScript reference. Node is installed too: t/50-parity.t drives the
+# reference in src/ against the port; without node it would skip.
+name: Perl
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        perl-version: ["5.36", "5.38", "5.40"]
+    runs-on: ubuntu-latest
+    container:
+      image: perl:${{ matrix.perl-version }}-bookworm
+    env:
+      PERL_CPANM_OPT: --mirror https://cpan.metacpan.org --mirror-only
+    steps:
+      - uses: actions/checkout@v6
+      - name: Fix safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: npm ci
+      - name: Install dependencies
+        working-directory: perl
+        run: cpanm -nq --installdeps .
+      - name: prove
+        working-directory: perl
+        run: prove -lr -j4 t

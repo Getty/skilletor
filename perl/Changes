@@ -1,0 +1,29 @@
+Revision history for Skilletor
+
+{{$NEXT}}
+  - Initial release: the Perl port of skilletor, beside the TypeScript
+    reference in the same repository, sharing its config files, its
+    ~/.claude/skilletor/cache and its trust.json.
+  - Skilletor::Config loads the user, project and local config with the
+    reference's merge and precedence rules (per-field source merge with
+    origins, author mode, entries without a backend, "ref": null, vars,
+    gitignore, claudeSettings, targets), reports the same errors in the same
+    order, and edits a config file as `add`/`install`/`uninstall` do.
+  - Skilletor::Entry parses [type:]name@source, patterns and
+    [bundle:]name@source; Skilletor::Spec resolves `add` shorthands (forge
+    links, scp-like and transport::address forms, probed generic hosts).
+  - Sources: Skilletor::Source::Local, ::Git (shallow fetch, refs, SHA pins,
+    offline cache reuse, repair and restore after killed runs, lock-file
+    sweep) and ::Url (https tarball, ETag or sha256 version, staged swap,
+    sweep). Skilletor::Cache names cache directories as the reference does,
+    so both implementations share one fetch.
+  - Skilletor::Backend picks a source's backend (author mode) for trust and
+    fetch alike; Skilletor::State reads and writes trust.json;
+    Skilletor::Targets detects harnesses and merges targets.
+  - Skilletor::JSON parses like JSON.parse (key order, V8's messages) and
+    writes like JSON.stringify(value, null, 2), byte for byte;
+    Skilletor::URL, ::Gzip, ::Tar, ::JSString and ::FSUtil carry the Node
+    behaviour that reaches a name, a byte or a message.
+  - Tests replay oracles recorded from the reference (t/data) and, in a
+    checkout with node, drive the reference and the port against the same
+    remotes and cache (t/50-parity.t).
