@@ -4,6 +4,14 @@ Claude Code plugin + CLI that installs skills, agents and rules from remote
 sources. Design: `docs/superpowers/specs/2026-09-22-skilletor-design.md`.
 Build/test: `npm run typecheck && npm test && npm run build && npm run check-dist`.
 
+`perl/` is the Perl port (dist `Skilletor`, design notes in `docs/perl.md`). Test it with
+`cd perl && PERL5LIB=/home/getty/dev/langertha/lib:$PERL5LIB prove -lr -j4 t`.
+TypeScript is the reference. `conformance/` holds cases that both
+`test/conformance.test.ts` and `perl/t/60-conformance.t` run. A change to sync or
+resolve behaviour updates the cases (`SKILLETOR_CONFORMANCE_UPDATE=1`, then
+hand-review them) and the Perl port together, or notes the divergence on the card.
+`perl/` counts as behaviour-relevant code, so it is the `skilletor-worker`'s lane.
+
 ## Delegation
 
 The main agent delegates behavior-relevant code and skill text to the right agent instead of

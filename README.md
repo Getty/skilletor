@@ -1023,6 +1023,32 @@ never write the source cache or your items at once. While another skilletor run 
 (a session's sync, say), a command waits up to 5 s, then stops with `timed out acquiring
 sync lock`; run it again.
 
+## Perl port
+
+`perl/` holds `Skilletor`, a Perl distribution of skilletor for Perl programs that
+must resolve skills, agents and rules the way skilletor does, without Node.
+[langertha-raider](https://github.com/Getty/langertha-raider) uses it to load a
+skill or agent straight from its source. It reads the same config files, fetches
+into the same cache (`~/.claude/skilletor/cache`, so one fetch serves both), takes the
+same sync lock and keeps the same trust records. For the Claude target it also
+syncs, checks and reports status, writing the same files and the same lock.
+
+```perl
+use Skilletor;
+my $sk   = Skilletor->new( home => $ENV{HOME}, project_dir => $project );
+my $file = $sk->resolve_skill('perl-moo');   # path into the local source or the cache
+```
+
+The TypeScript version stays the reference. `conformance/` holds shared cases:
+configs and source trees, plus the expected resolution and, for sync cases, the
+files, lock, check and status they should produce. Both
+`test/conformance.test.ts` and `perl/t/60-conformance.t` run them, and
+`SKILLETOR_CONFORMANCE_UPDATE=1 npm test` regenerates them from TypeScript.
+
+The Perl port does not render `.njk` templates; it reports them as unsupported.
+It only syncs to the Claude target. See [`perl/README.md`](perl/README.md) for the
+API and [`docs/perl.md`](docs/perl.md) for the design decisions.
+
 ## Requirements
 
 - Node.js ≥ 18 and `git`. The only bundled runtime dependency is Nunjucks.
