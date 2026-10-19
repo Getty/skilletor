@@ -392,15 +392,31 @@ sub _stop_heartbeat {
 
 =description
 
-The reference's C<state.ts>, so far its trust part (spec §4.3) and the sync
-lock (spec §6.5). A source only a project config declares is not fetched until
-the user trusts it, and the confirmation – name, backend kind and address –
-lives in C<trust.json> under the state root. Both implementations read and
-write the same file, the same bytes: entries keep their order, a new name is
-appended, and an unreadable file counts as empty.
+The reference's C<state.ts>: trust (spec §4.3), the sync lock (spec §6.5) and
+the records a sync keeps for C<check> (spec §14.3). Both implementations read
+and write the same files, the same bytes: entries keep their order, a new key
+is appended, a file is written only when its content changes, and an
+unreadable file counts as empty.
 
-Last-check marks, pending reports and the other state files come with the sync
-phase.
+=over 4
+
+=item * C<trust.json>: a source only a project config declares is not fetched
+until the user trusts it – name, backend kind and address.
+
+=item * C<unreached.json>, C<sources-read.json>, C<render-inputs.json>: per
+scope, keyed by its lock path – the drift the last sync left in place with
+every source at hand (k70), what it read of each source and through which
+backend (k80), the hash of what it rendered with (k76). L<Skilletor::Engine>
+writes and reads them.
+
+=item * C<last-check.json>: when the in-session check last ran per key.
+
+=item * C<hermes-home.json>: the Hermes home the user scope was synced under;
+the port, which never targets Hermes, only ever drops it as the reference does.
+
+=back
+
+Pending reports belong to the reference's hooks and are not ported.
 
 =attr root
 
@@ -423,6 +439,47 @@ Replaces an earlier entry of the name.
 =method is_trusted
 
   $state->is_trusted( $name, { kind => ..., address => ..., origin => 'user' | 'project' } );
+
+=method unreached
+
+  my $ids = $state->unreached($lock_path);   # [ 'missing:skills/x@shared', ... ]
+
+=method put_unreached
+
+  $state->put_unreached( $lock_path, \@ids );   # sorted, deduplicated; none drops the key
+
+=method sources_read
+
+  my $read = $state->sources_read($lock_path);
+  # { shared => { kind, address, version, ref?, path? } } – malformed entries left out
+
+=method put_sources_read
+
+  $state->put_sources_read( $lock_path, \%read );   # names sorted; none drops the key
+
+=method render_inputs
+
+  my $hash = $state->render_inputs($lock_path);   # 'sha256:…' or undef
+
+=method put_render_inputs
+
+  $state->put_render_inputs( $lock_path, $hash );   # undef drops it
+
+=method is_due
+
+  $state->is_due( $key, $interval_seconds );
+
+True when no check was marked for the key, or the interval has passed.
+
+=method mark_checked
+
+=method clear_checked
+
+=method hermes_home
+
+=method put_hermes_home
+
+  $state->put_hermes_home(undef);   # drop the record
 
 =method with_lock
 

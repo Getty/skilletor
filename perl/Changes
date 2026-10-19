@@ -26,9 +26,12 @@ Revision history for Skilletor
     behaviour that reaches a name, a byte or a message.
   - Skilletor resolves skills, agents and rules as a sync would install
     them, without installing: resolve_skill, resolve_agent, resolve_rule
-    give the main file in the source tree or the shared cache,
-    resolve_item and items the whole record; a project item shadows a
-    user item of the same type and name. fetch => always, missing or never
+    and resolve_rules give the main file in the source tree or the shared
+    cache, resolve_item, resolve_items and items the whole record. Both
+    scopes declaring a name follow Claude Code's precedence: the personal
+    skill wins, the project's agent wins, rules of both scopes apply (the
+    user's first) – resolve_rule throws Skilletor::Error::Ambiguous rather
+    than hide one. fetch => always, missing or never
     picks the network use; no agent harness is needed (require_harness
     restores the reference's check). An item with a .njk file is flagged
     templated and refused as an include (Skilletor::Error::Unsupported):
@@ -48,7 +51,27 @@ Revision history for Skilletor
   - Skilletor::Tar refuses a header whose size field is no non-negative
     number as a corrupt archive ("corrupt tar entry (size): <name>"), as
     the reference now does: a url source falls back to its cache.
-  - t/60-conformance.t runs the shared conformance cases (resolve steps).
+  - Skilletor->sync, ->check and ->status (Skilletor::Engine) port the
+    reference's commands for the Claude Code target: the same installed
+    files and executable bits, lock, .gitignore blocks, .worktreeinclude
+    and .claude/settings.json plugin requirement (k140), conflicts and
+    force, removal of what is no longer declared, partial entries after a
+    failed write, the briefing check, the same JSON reports and the same
+    state records (render-inputs.json, sources-read.json, unreached.json),
+    so either implementation's check accepts what the other synced. A
+    scope targeting Codex or Hermes, or a sync where the CLI left their
+    state, is refused with nothing touched. A .njk item is never installed
+    unrendered: the sync warns, keeps what the CLI installed, and leaves the
+    scope open for the CLI's next sync.
+  - Skilletor::Apply, ::Render (copy only), ::Gitignore, ::ClaudeSettings,
+    ::Briefing and ::Report port apply.ts, the copy half of render.ts,
+    gitignore.ts, claudesettings.ts, briefing.ts and report.ts (with the
+    CLI's status text and exit codes); Skilletor::Lock writes locks,
+    Skilletor::State keeps the records check reads, Skilletor::Targets has
+    the layout table, Skilletor::JSON takes a string indent.
+  - t/60-conformance.t runs every step of the shared conformance cases;
+    t/52-parity-sync.t has the reference and the port sync one machine and
+    compares every byte they leave.
   - Tests replay oracles recorded from the reference (t/data) and, in a
     checkout with node, drive the reference and the port against the same
     remotes and cache (t/50-parity.t).

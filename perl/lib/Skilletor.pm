@@ -228,18 +228,27 @@ sub resolve_rules {
   my $sk = Skilletor->new( home => $ENV{HOME}, project_dir => $project );
 
   # The skill as an include, straight from the source tree or the shared cache:
-  my $file = $sk->resolve_skill('perl-moo');    # …/cache/79eb247685294166/skills/perl-moo/SKILL.md
-  my $item = $sk->resolve_item( skill => 'perl-moo' );
+  my $file  = $sk->resolve_skill('perl-moo');   # …/cache/79eb247685294166/skills/perl-moo/SKILL.md
+  my $agent = $sk->resolve_agent('reviewer');   # the project's wins over the personal one
+  my @rules = $sk->resolve_rules('style');      # both scopes' rules, the user's first
+  my $item  = $sk->resolve_item( skill => 'perl-moo' );
   # { type, name, scope, source, version, source_dir, path, dir, file, files,
   #   description, vars, declaredBy, via?, templated, templates }
 
-  for my $agent ( @{ $sk->items( type => 'agent' ) } ) { ... }
+  for my $rule ( @{ $sk->items( type => 'rule' ) } ) { ... }
 
   # Startup without the network: what the cache holds.
   my $offline = Skilletor->new( home => $ENV{HOME}, project_dir => $project, fetch => 'never' );
 
+  # Install for Claude Code, as `skilletor sync` does:
+  use Skilletor::Report qw( report_text exit_code );
+  my $report = $sk->sync;                      # the reference's SyncReport
+  print report_text($report) || 'skilletor: up to date', "\n";
+  my $due = $sk->check->{changed};             # is a sync due?
+  my $status = $sk->status;
+
   # The reference's resolveItems, field for field:
-  my $report = $sk->resolve( scope => 'all' );
+  my $resolution = $sk->resolve( scope => 'all' );
 
 =description
 
@@ -249,33 +258,58 @@ directories) into Claude Code, Codex and Hermes, at user and project scope.
 Its reference implementation is TypeScript; this distribution is its Perl
 port, living in the same repository, for Perl programs – an agent such as
 L<Langertha::Raider> – that must resolve skills exactly as skilletor does,
-straight from the same config and the same cache, without Node.
+straight from the same config and the same cache, without Node, and sync them
+into Claude Code's directories as the CLI does.
 
 The port shares everything on disk with the reference: the config files
 (C<~/.claude/skilletor.json>, C<< <project>/.claude/skilletor.json >>,
 C<skilletor.local.json>), the source cache under C<~/.claude/skilletor/cache>
 (the same directory names, so one fetch serves both), C<trust.json>, the sync
-lock, and the JSON bytes either writes. Error messages and warnings are the
-reference's, word for word; the shared conformance cases
-(F<conformance/> in the repository) hold both to that.
+lock, the lock files and the state records C<check> reads, and the bytes
+either writes. Error messages and warnings are the reference's, word for word;
+the shared conformance cases (F<conformance/> in the repository) hold both to
+that.
 
-This class answers "where is skill X" the way a sync would install it, but
-without installing anything: an item is served from the source tree it lies
-in – a C<local> directory or the cache dir a git or url source was fetched
-into.
+The lookups (L</resolve_skill> and its siblings, L</items>) answer "where is
+skill X" the way a sync would install it, but without installing anything: an
+item is served from the source tree it lies in – a C<local> directory or the
+cache dir a git or url source was fetched into. L</sync>, L</check> and
+L</status> are the CLI's commands for the Claude Code target
+(L<Skilletor::Engine>).
 
-=head2 Scopes and shadowing
+=head2 Scopes and precedence
 
 Every scope resolves on its own, as a sync installs it: the user scope from
 the user config alone, the project scope from the merged project, local and
-user config (spec §3). The reference installs an item declared in both scopes
-twice – once per scope – and has no rule which one wins; here a lookup without
-a C<scope> asks the project scope first: B<a project item shadows a user item
-of the same type and name> (names ignore case, as everywhere in skilletor).
+user config (spec §3). Within a scope a type and name is one item at most –
+the overlap rules (explicit entries over wildcards and bundles, two sources
+offering one name skip it) see to that. Across the scopes a sync installs an
+item declared in both twice, once per scope; which one Claude Code then uses
+depends on the type, and a lookup without a C<scope> follows Claude Code's
+documented rules (names ignore case, as everywhere in skilletor):
+
+=over 4
+
+=item * B<Skills: the personal one wins.> "Enterprise over personal, and
+personal over project": with C<deploy> in both C<~/.claude/skills/> and the
+project's C<.claude/skills/>, C</deploy> runs the personal one
+(code.claude.com/docs/en/skills). L</resolve_skill> answers the user's.
+
+=item * B<Agents: the project's wins.> Claude Code takes managed, then
+C<--agents>, then the project's C<.claude/agents/>, then C<~/.claude/agents/>,
+then plugins (code.claude.com/docs/en/sub-agents). L</resolve_agent> answers
+the project's.
+
+=item * B<Rules: neither wins.> Claude Code loads the user's rules before the
+project's, and neither set overrides the other (code.claude.com/docs/en/memory):
+both are in effect. L</resolve_rules> answers both, the user's first;
+L</resolve_rule> answers one only when one scope declares it – with both it
+throws L<Skilletor::Error::Ambiguous> rather than hide one.
+
+=back
+
 Pass C<< scope => 'user' >> or C<< scope => 'project' >> to look in one scope
-only. Within a scope a type and name is one item at most – the overlap rules
-(explicit entries over wildcards and bundles, two sources offering one name
-skip it) see to that.
+only; then there is never more than one.
 
 =head2 Fetching
 
@@ -284,21 +318,35 @@ sync does – a git fetch, a url download, a failure falling back to the cache
 with a warning; C<missing> fetches only a source with no usable cache yet;
 C<never> touches no network and serves what the cache holds, a source that was
 never fetched being a warning. Every lookup method answers from one resolution
-of every scope, made at the first call; L</refresh> drops it.
+of every scope, made at the first call; L</refresh> drops it, and so does
+L</sync>. The policy holds for L</sync> too: with C<never> it syncs from the
+cache alone.
 
 =head2 Templates
 
 The Perl port renders no Nunjucks. An item with a C<.njk> file resolves like
 any other – its record says C<< templated => 1 >> and lists the C<templates> –
-but L</resolve_skill>, L</resolve_agent> and L</resolve_rule> refuse it with a
+but L</resolve_skill> and its siblings refuse it with a
 L<Skilletor::Error::Unsupported>: an unrendered template is never served as if
-it were the item.
+it were the item. A L</sync> never installs one either: it warns and leaves
+such an item as the reference installed it, and its scope stays open for the
+reference's next sync (L<Skilletor::Engine/Templates>).
+
+=head2 Claude Code only
+
+L</sync>, L</check> and L</status> serve Claude Code alone. A scope that
+targets Codex or Hermes – by C<"targets">, or by Codex detected on the machine
+without C<"targets"> – is refused with an C<error> in the report, and a sync
+is refused where the reference left Codex or Hermes state behind; nothing is
+written then (L<Skilletor::Engine/Claude Code only>). Unlike the lookups, they
+need an agent harness, as the reference does.
 
 =head2 Modules
 
 =over 4
 
-=item * L<Skilletor::Resolver> – the resolve itself (the reference's C<resolveItems>).
+=item * L<Skilletor::Resolver> – the resolve (the reference's C<resolveItems>);
+L<Skilletor::Engine> – sync, check, status on top of it.
 
 =item * L<Skilletor::Config> – load, merge and validate the three config files; edit them.
 
@@ -315,17 +363,23 @@ source trees, bundle files and their YAML subset.
 – the backends (L<Skilletor::Role::Source>), with L<Skilletor::Cache>,
 L<Skilletor::Tar> and L<Skilletor::Gzip>.
 
-=item * L<Skilletor::State> – trust and the sync lock; L<Skilletor::Lock> – lock files.
+=item * L<Skilletor::Render> – an item's files in memory; L<Skilletor::Apply> – onto
+the disk, against the lock; L<Skilletor::Lock> – lock files.
 
-=item * L<Skilletor::Targets> – harness detection and the targets merge.
+=item * L<Skilletor::Gitignore>, L<Skilletor::ClaudeSettings>, L<Skilletor::Briefing>
+– the managed blocks, the project's plugin requirement, the briefing check.
+
+=item * L<Skilletor::State> – trust, the sync lock and the records C<check> reads.
+
+=item * L<Skilletor::Targets> – harness detection, the targets merge, the layout table.
+
+=item * L<Skilletor::Report> – the reports' text and exit codes, as the CLI words them.
 
 =item * L<Skilletor::JSON>, L<Skilletor::JSString>, L<Skilletor::URL>,
 L<Skilletor::FSUtil>, L<Skilletor::GitEnv>, L<Skilletor::Process> – JavaScript and
 Node behaviour where it reaches a byte, a name or a message.
 
 =back
-
-Rendering and the C<sync>/C<check>/C<status> pipeline follow.
 
 =head1 CONVENTIONS
 
@@ -349,9 +403,10 @@ C<always> (default), C<missing> or C<never>; see L</Fetching>.
 
 =attr require_harness
 
-True: fail as the reference does when no agent harness (Claude Code, Codex)
-is detected and the user config names no C<targets>. Default false: resolving
-needs no harness.
+True: the lookups fail as the reference does when no agent harness (Claude
+Code, Codex) is detected and the user config names no C<targets>. Default
+false: resolving needs no harness. L</sync>, L</check> and L</status> always
+need one.
 
 =attr state_root
 
@@ -365,9 +420,24 @@ needs no harness.
 
 Passed to L<Skilletor::Resolver>; its defaults without them.
 
+=attr is_git_work_tree
+
+=attr git_tracked
+
+=attr git_remote
+
+=attr plugin_root
+
+Passed to L<Skilletor::Engine>, where they are described; the questions to git
+and the plugin root they answer default to git and C<CLAUDE_PLUGIN_ROOT>.
+
 =attr resolver
 
-The L<Skilletor::Resolver> doing the work.
+The L<Skilletor::Engine> (a L<Skilletor::Resolver>) doing the work.
+
+=method engine
+
+The same as L</resolver>.
 
 =method resolve
 
@@ -381,9 +451,10 @@ C<< { scopes => [], error => $message } >> on a config error.
 
   my $rec = $sk->resolve_item( skill => 'perl-moo', scope => 'all' );
 
-The item record, or undef for a name no scope resolves to (also when the item
-was declared but its source or the item itself could not be read – the
-warning in L</resolve> says why):
+The record of the item a lookup finds by the type's precedence
+(L</Scopes and precedence>), or undef for a name no scope resolves to (also
+when the item was declared but its source or the item itself could not be
+read – the warning in L</resolve> says why):
 
   {
     type => 'skill', name => 'perl-moo', scope => 'project',
@@ -398,32 +469,79 @@ warning in L</resolve> says why):
     templated => 0, templates => [],             # the .njk files, relative
   }
 
-A config error throws L<Skilletor::Error::Config>; an unreadable lock file and
-a sync lock held too long throw too.
+A rule both scopes declare throws L<Skilletor::Error::Ambiguous> unless a
+C<scope> is given. A config error throws L<Skilletor::Error::Config>; an
+unreadable lock file and a sync lock held too long throw too.
+
+=method resolve_items
+
+  my $recs = $sk->resolve_items( rule => 'style' );
+
+Every record of the type and name, one per scope that declares it, in the
+type's order: skills user then project, agents project then user, rules user
+then project. The first is the one Claude Code uses for a skill or an agent;
+for rules all are in effect.
 
 =method resolve_skill
 
   my $file = $sk->resolve_skill( 'perl-moo', scope => 'all' );
 
-The absolute path of the skill's C<SKILL.md> in its source tree, or undef.
-Throws L<Skilletor::Error::Unsupported> for a templated skill.
+The absolute path of the skill's C<SKILL.md> in its source tree, or undef;
+with both scopes declaring the skill, the user's. Throws
+L<Skilletor::Error::Unsupported> for a templated skill.
 
 =method resolve_agent
 
-The agent's C<< <name>.md >>, as L</resolve_skill>.
+The agent's C<< <name>.md >>, as L</resolve_skill>; with both scopes declaring
+the agent, the project's.
 
 =method resolve_rule
 
-The rule's C<< <name>.md >>, as L</resolve_skill>. Claude Code reads the rules
-of both scopes; ask C<< scope => 'user' >> for the user's when the project
-declares one of the same name.
+The rule's C<< <name>.md >>, as L</resolve_skill> – when one scope declares
+it. With both, Claude Code loads both: this throws
+L<Skilletor::Error::Ambiguous>; ask L</resolve_rules>, or pass a C<scope>.
+
+=method resolve_rules
+
+  my @files = $sk->resolve_rules( 'style', scope => 'all' );
+
+The C<< <name>.md >> of every scope's rule of the name, the user's first; none
+when no scope declares it. Throws L<Skilletor::Error::Unsupported> when one of
+them is templated.
 
 =method items
 
   my $records = $sk->items( type => 'skill', scope => 'all' );
 
-Every item record (L</resolve_item>), one per type and name: the project's
-shadows the user's. C<type> and C<scope> are optional filters.
+Every item record (L</resolve_item>), skills first, then agents, then rules,
+each type in its order: one skill per name (the user's winning), one agent per
+name (the project's winning), and every rule of every scope. C<type> and
+C<scope> are optional filters.
+
+=method sync
+
+  my $report = $sk->sync( scope => 'all', force => 0 );
+
+Install what the config declares for Claude Code, as C<skilletor sync> does,
+and drop the resolution the lookups answer from. The reference's
+C<SyncReport> (L<Skilletor::Engine/sync>); a config error, no agent harness, a
+scope targeting another harness are its C<error>, with nothing touched. Throws
+when a write fails midway (the lock then owns what landed, marked
+C<partial>). L<Skilletor::Report> words it.
+
+=method check
+
+  my $check = $sk->check( scope => 'all' );
+  print "a sync is due\n" if $check->{changed};
+
+The reference's C<CheckReport> (L<Skilletor::Engine/check>): whether a sync
+is due, without one.
+
+=method status
+
+  my $status = $sk->status( scope => 'all' );
+
+The reference's C<StatusReport> (L<Skilletor::Engine/status>), offline.
 
 =method refresh
 

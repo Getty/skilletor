@@ -129,11 +129,16 @@ sub concrete {
   return $text;
 }
 
+# A path as a case stores it (README: escaped names): every name starting with `.git` gets the
+# prefix `dot`, since a `.gitignore` in a fixture would be live in the repository.
+sub escape_name   { join q{/}, map { /\A\.git/ ? "dot$_" : $_ } split m{/}, $_[0], -1 }
+sub unescape_name { join q{/}, map { /\Adot\.git/ ? substr( $_, 3 ) : $_ } split m{/}, $_[0], -1 }
+
 # Copy a case's input tree, placeholders substituted in every file (README: inputs).
 sub copy_input {
   my ( $from, $to, $r ) = @_;
   for my $rel ( walk($from) ) {
-    my $dest = path( $to, $rel );
+    my $dest = path( $to, unescape_name($rel) );
     $dest->parent->mkpath;
     $dest->spew_raw( encode_text( concrete( read_text("$from/$rel"), $r ) ) );
   }
@@ -143,7 +148,7 @@ sub copy_input {
 sub copy_tree {
   my ( $from, $to ) = @_;
   for my $rel ( walk($from) ) {
-    my $dest = path( $to, $rel );
+    my $dest = path( $to, unescape_name($rel) );
     $dest->parent->mkpath;
     path( $from, $rel )->copy($dest);
     chmod( ( stat "$from/$rel" )[2] & 07777, "$dest" );
@@ -181,9 +186,9 @@ sub build_git {
 sub snapshot {
   my ( $r ) = @_;
   my %out;
-  $out{"home/$_"} = abstract( read_text("$r->{home}/$_"), $r ) for walk( $r->{home}, [ '.claude/skilletor', '.claude.json' ] );
+  $out{ "home/".escape_name($_) } = abstract( read_text("$r->{home}/$_"), $r ) for walk( $r->{home}, [ '.claude/skilletor', '.claude.json' ] );
   if ( $r->{project} ) {
-    $out{"project/$_"} = abstract( read_text("$r->{project}/$_"), $r ) for walk( $r->{project} );
+    $out{ "project/".escape_name($_) } = abstract( read_text("$r->{project}/$_"), $r ) for walk( $r->{project} );
   }
   return \%out;
 }
@@ -192,6 +197,8 @@ sub run_case {
   my ( $name ) = @_;
   my $case_dir = "$ROOT/$name";
   my $c = js_parse( read_text("$case_dir/case.json") );
+  my @live = grep { grep { /\A\.git/ } split m{/} } walk($case_dir);
+  is_deeply( \@live, [], 'fixture names starting with .git are stored escaped (dot.gitignore)' );
   my $engine = ( $c->{engines} // {} )->{perl} // {};
   plan skip_all => $engine->{skip} if defined $engine->{skip};
   my $tempdir = tempdir( 'skilletor-conformance-XXXXXX', TMPDIR => 1 );    # removed with the case
@@ -245,7 +252,7 @@ sub run_case {
     is_deeply( [ sort keys %$have ], [ sort keys %want ], "step $id: the files in the tree" );
     is( $have->{$_}, $want{$_}, "step $id: $_" ) for sort keys %want;
     my @execs = grep {
-      my ( $where, $rel ) = m{\A(home|project)/(.*)\z}s;
+      my ( $where, $rel ) = unescape_name($_) =~ m{\A(home|project)/(.*)\z}s;
       ( ( stat( $r->{$where}.'/'.$rel ) )[2] // 0 ) & 0100;
     } sort keys %$have;
     my $want_execs = -f "$expected.executables.json" ? js_parse( read_text("$expected.executables.json") ) : [];

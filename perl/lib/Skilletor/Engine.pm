@@ -906,3 +906,151 @@ sub status {
 }
 
 1;
+
+=synopsis
+
+  use Skilletor::Engine;
+
+  my $engine = Skilletor::Engine->new( home => $ENV{HOME}, project_dir => $project );
+
+  my $report = $engine->sync( scope => 'all', force => 0 );   # what `skilletor sync --json` prints
+  my $check  = $engine->check( scope => 'all' );              # `skilletor check --json`
+  my $status = $engine->status( scope => 'all' );             # `skilletor status --json`
+
+=description
+
+The reference's engine (C<engine.ts>) after the resolve: C<sync>, C<check>
+and C<status> for Claude Code. It extends L<Skilletor::Resolver> – a sync runs
+the very resolve that class reports, then builds every declared item in memory,
+applies it (L<Skilletor::Apply>), writes the managed blocks
+(L<Skilletor::Gitignore>) and the project's plugin requirement
+(L<Skilletor::ClaudeSettings>), runs the briefing check
+(L<Skilletor::Briefing>) and keeps the records C<check> compares with
+(L<Skilletor::State>). Most callers want L<Skilletor/sync>.
+
+What it writes is the reference's, byte for byte – installed files with their
+executable bits, the lock, the C<.gitignore> blocks, C<.worktreeinclude>,
+C<.claude/settings.json> – and the reports are the reference's C<SyncReport>,
+C<CheckReport> and C<StatusReport>, field for field, booleans as
+L<JSON::MaybeXS> booleans. The state records (C<render-inputs.json> with the
+same C<RENDER_FORMAT>, C<sources-read.json>, C<unreached.json>) are the same
+bytes too, so a C<check> of either implementation accepts what the other
+synced: the shared conformance cases and F<t/52-parity-sync.t> hold both to
+that. Like the reference, a sync holds the sync lock (L<Skilletor::State/with_lock>);
+C<check> and C<status> read without it.
+
+=head2 Claude Code only
+
+The port installs for Claude Code alone. A scope whose targets name another
+harness – C<"targets"> with C<codex> or C<hermes>, or Codex detected on the
+machine without C<"targets"> – is refused whole: C<sync>, C<check> and
+C<status> return the report with an C<error> and touch nothing. A project
+narrowed to no harness in use is no error (the reference's warning). A C<sync>
+is also refused, before anything is written, when a scope holds state of
+another harness the reference would change: lock entries of Codex or Hermes
+(the reference removes them from their roots), C<block> entries (sections of
+the Codex rules file) or a Codex rules file (C<skilletor-rules.md>). Lock
+entries of a harness neither knows are kept untouched, as the reference keeps
+them. Run the skilletor CLI once on such a machine.
+
+=head2 Templates
+
+The port renders no Nunjucks. A declared item with a C<.njk> file is never
+installed unrendered: the sync warns
+(C<< skill greet@shared is a Nunjucks template (skills/greet/SKILL.md.njk) the
+Perl port of skilletor does not render; an installed copy stays >>) and leaves
+the item exactly as it is installed – files and lock entry, never deleted –
+as for an item whose source cannot be reached. For the records the item's
+source then counts as not reached: drift it keeps is not recorded as
+unreached, its C<sources-read.json> entry stays what an earlier sync read, and
+the scope's render inputs are not recorded. So C<check> – the port's and the
+reference's – keeps asking for a sync, and the reference's next sync renders
+the item. A C<renders-empty> skip can only come from a render; such lock
+entries the reference left are kept like any other.
+
+=head2 Errors
+
+A config error, or no agent harness, is the report's C<error> (the reference's
+message); nothing is touched. Like the reference, a sync that fails while it
+writes (L<Skilletor::Error::Apply>, a file system error) throws: what landed is
+owned by the lock, its entries marked C<partial>, and the scope's records are
+cleared so C<check> asks for the retry. An unreadable lock throws
+L<Skilletor::Error::Lock>, a sync lock held too long
+L<Skilletor::Error::LockTimeout>.
+
+=attr is_git_work_tree
+
+  is_git_work_tree => sub { my ( $dir ) = @_; ... }
+
+Does a user-scope root lie inside a git work tree (spec §6.4)? Default: ask
+git (L<Skilletor::Gitignore/is_git_work_tree>). A user root gets a
+C<.gitignore> block only inside one.
+
+=attr git_tracked
+
+  git_tracked => sub { my ( $dir, $paths ) = @_; return [ ...tracked... ] }
+
+Which of the written paths does git track? Default: one C<git ls-files>
+(L<Skilletor::Gitignore/git_tracked>). Each tracked item is a warning with the
+command that untracks it.
+
+=attr git_remote
+
+  git_remote => sub { my ( $project_dir ) = @_; return $url }
+
+The project's C<origin>, a render input of the project scope. Default: ask git.
+
+=attr plugin_root
+
+C<CLAUDE_PLUGIN_ROOT> by default: the running plugin's install, which names
+skilletor's marketplace for the settings requirement. Unset outside a plugin.
+
+=method sync
+
+  my $report = $engine->sync( scope => 'user' | 'project' | 'all', force => 0 );
+
+  {
+    scopes => [ {
+      scope => 'user',
+      added => [ { key, type, name, source } ], updated => [...], removed => [...],
+      unchanged => [...], skipped => [...],
+      conflicts => [ { path, replace?, notFile? } ], overwritten => [ { path } ],
+      warnings => [...], trustRequests => [ { name, kind, url } ],
+      briefingMissing?  => [ { key, harness, missing => [...] } ],
+      gitignoreUpdated? => [ '.claude/.gitignore', '.worktreeinclude' ],
+      settingsUpdated?  => { path, enabled => [...], declared => [...] },
+      settingsSkipped?  => [...],
+    } ],
+    error? => $message,
+  }
+
+C<force> adopts a file in an item's way, deletes one at a claimed path or
+replaces a link (spec §6.3). L<Skilletor::Report/report_text> words the
+report as the CLI does. The sync honours L<Skilletor::Resolver/fetch>:
+C<never> syncs from the cache alone.
+
+=method check
+
+  my $check = $engine->check( scope => 'all' );
+  # { changed, sources => [ { name, scope, changed } ], warnings,
+  #   targetsChanged?, layoutChanged?, declaredChanged?, varsChanged?, trustRequests?, error? }
+
+Whether a sync is due, without one: source versions (C<git ls-remote>, an
+HTTP C<HEAD>; a C<local> source always counts as changed), the drift of the
+lock against the config and the layout, the render inputs. It reads no
+installed file – an edited file is a sync's to overwrite, not drift.
+
+=method status
+
+  my $status = $engine->status( scope => 'all' );
+  # { scopes => [ { scope, targets, declared => [ { key, source, installed, via?, skipped?,
+  #   partial?, briefingMissing? } ], orphans, wildcards, bundles, trustRequests,
+  #   sourceVersions } ], projectIsHome?, error? }
+
+Offline and read-only: the lock and the config.
+
+=method RENDER_FORMAT
+
+The render format hashed into the render inputs (the reference's, 2).
+
+=cut

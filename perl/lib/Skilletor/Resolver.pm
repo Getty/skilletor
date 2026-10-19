@@ -576,6 +576,9 @@ built: nothing is rendered, nothing written to a target, the lock or the
 state's records. Like the reference it holds the sync lock
 (L<Skilletor::State/with_lock>) while it runs and sweeps what a killed run left
 in the cache first. Most callers want the item lookups of L<Skilletor>.
+L<Skilletor::Engine> extends this class: a sync runs the very same scope
+resolution, as the reference's C<syncScopeRun> serves both, and builds what it
+finds.
 
 The report is the reference's C<ResolveReport>, field for field, so the two
 compare directly (the shared conformance cases do): per scope its C<items>,

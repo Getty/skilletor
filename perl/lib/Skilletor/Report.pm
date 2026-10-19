@@ -158,8 +158,6 @@ sub exit_code {
 
 1;
 
-=encoding UTF-8
-
 =synopsis
 
   use Skilletor::Report qw( report_text exit_code );
