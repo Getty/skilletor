@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-10-19T11:42:32Z
+claimed_by: claude
+class: standard
+created: 2026-10-19T11:18:56Z
+id: 145
+priority: medium
+started: 2026-10-19T11:19:54Z
+status: review
+tags:
+- ts
+- perl
+title: 'More Claude config-dir and robustness fixes: user scope root under CLAUDE_CONFIG_DIR,
+  vars arrays, lock via matching, truncated tarballs'
+updated: 2026-10-19T11:42:32Z
+---
+
+Aus den Notizen zu #144/#142 (2026-10-19): (1) weitere hartverdrahtete ~/.claude-Stellen: User-Scope-Root/Config/Lock/State, Detection in targets.ts, briefing.ts — wie Claude Code CLAUDE_CONFIG_DIR beachten; (2) Quellen-vars als Array wird akzeptiert (ablehnen); (3) handeditierter Lock-via matcht per Substring (exakt); (4) abgeschnittene Tarballs werden still gelesen (Fehler). TS + Perl + Konformitätsfälle.
+
+2026-10-19 11:42 Done on worktree-k145 (WIP commits, no merge). Decisions: (1) CLAUDE_CONFIG_DIR is the user scope's .claude: config, lock, roots, state dir <dir>/skilletor, briefing skills and plugin cache, CLAUDE.md, markers <dir>/.claude.json|settings.json|projects when explicitly set; empty is unset; project scope untouched; helper claudeConfigDirOf in fsutil.ts. The .claude.json-inside-config-dir marker is from my knowledge of Claude Code, not re-verified in docs. (2) Source vars = vars in a source's skilletor.json: any non-object is a CatalogError. (3) via: validated in readLock (array of strings, else invalid lock), Perl _via_has exact. (4) tar: data or padding past EOF, or no end-of-archive zero block, is a plain corrupt tar error (cache fallback as k143). Open: no conformance case for lock via (runner cannot express a throwing resolve); covered by test/k145.test.ts and perl/t/64-strictness.t. Perl oracle fixtures regenerated. Verified: typecheck, npm test 1086 pass 1 skipped, build+check-dist, prove 24 files PASS incl. parity 50-52 with node_modules temporarily symlinked. Proposed subject: CLAUDE_CONFIG_DIR is the user scope; refuse array vars, string via, truncated tarballs (k145)
+
+2026-10-19 11:42 Ready for review, see notes
