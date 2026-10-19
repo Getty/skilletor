@@ -149,6 +149,25 @@ sub resolve {
   Skilletor::Error::Source->throw( 'git source '.$self->url.' failed: '.$err );
 }
 
+# The cache as it is, without the network: what resolve serves when a fetch fails, without the
+# warning – the checkout brought back to its HEAD, a pin checked against it.
+sub cached {
+  my ( $self ) = @_;
+  my $dir = $self->cache_dir;
+  Skilletor::Error::Source->throw( 'git source '.$self->url.' is not in the cache (no fetch)' ) unless $self->_is_repo($dir);
+  my $served = eval {
+    my $version = $self->_version($dir);
+    $self->_restore($dir);
+    +{ dir => $dir, version => $version };
+  };
+  return $served if $served;
+  my $err = $@;
+  if ( blessed $err && $err->isa('Skilletor::Error::CacheRejected') ) {
+    Skilletor::Error::Source->throw( 'git source '.$self->url.': cache rejected ('.$err->message.')' );
+  }
+  Skilletor::Error::Source->throw( 'git source '.$self->url.' is not in the cache (no fetch; '._msg($err).')' );
+}
+
 # Make a cache a killed run left half-made fit to fetch into, keeping what it holds.
 sub _repair {
   my ( $self, $dir ) = @_;
@@ -338,6 +357,14 @@ This source's cache directory (L<Skilletor::Cache/git_cache_dir>).
 =method resolve
 
 C<< { dir, version => 'git:<short sha>', warning? } >>.
+
+=method cached
+
+C<< { dir, version } >> of the cache without touching the network – what
+L</resolve> serves when its fetch fails, minus the warning (a Perl addition for
+offline callers; the reference has no such call). Throws
+L<Skilletor::Error::Source> when there is no cache or it does not hold the
+pinned commit.
 
 =method check
 

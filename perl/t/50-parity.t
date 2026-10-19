@@ -207,7 +207,9 @@ subtest 'url: the same tree, version and messages' => sub {
   is_deeply( \%h_pl, \%h_ts, 'the same request headers' );
 
   for my $fail ( [ 500 => { status => 500 } ], [ 'not gzip' => { body => 'plain', headers => { ETag => '"bad"' } } ],
-    [ 'truncated' => { body => substr( gzip_bytes( $archives[0][1] ), 0, 40 ), headers => { ETag => '"tr"' } } ] ) {
+    [ 'truncated' => { body => substr( gzip_bytes( $archives[0][1] ), 0, 40 ), headers => { ETag => '"tr"' } } ],
+    ( map { [ 'size '.$_ => { body => gzip_bytes( make_tar( { name => 'bad', size => $_, data => '' }, { name => 'x', data => 'x' } ) ), headers => { ETag => '"sz"' } } ] }
+      '-0000001000', '-1', 'zz' ) ) {
     $srv->route( '/shared.tgz', $fail->[1] );
     is_deeply( $perl->resolve, ts_ok( { op => 'url', action => 'resolve', opts => { url => $srv->url('/shared.tgz'), cacheRoot => $root } } ),
       'fallback on '.$fail->[0].': the same warning' );
@@ -215,6 +217,10 @@ subtest 'url: the same tree, version and messages' => sub {
   $srv->route( '/unsafe.tgz', { body => gzip_bytes( make_tar( { name => 'a/../../x', data => 'x' } ) ) } );
   is( error_of( sub { Skilletor::Source::Url->new( url => $srv->url('/unsafe.tgz'), cache_root => $root, allow_http => 1 )->resolve } ),
     ts_err( { op => 'url', action => 'resolve', opts => { url => $srv->url('/unsafe.tgz'), cacheRoot => $root } } ), 'unsafe archive: the same error' );
+  $srv->route( '/corrupt.tgz', { body => gzip_bytes( make_tar( { name => 'bad', size => '-1', data => '' } ) ) } );
+  my $fresh = $tmp->child('fresh')->stringify;
+  is( error_of( sub { Skilletor::Source::Url->new( url => $srv->url('/corrupt.tgz'), cache_root => $fresh, allow_http => 1 )->resolve } ),
+    ts_err( { op => 'url', action => 'resolve', opts => { url => $srv->url('/corrupt.tgz'), cacheRoot => $fresh } } ), 'corrupt size, no cache: the same error' );
   my $dead = 'http://127.0.0.1:1/x.tgz';
   is( error_of( sub { Skilletor::Source::Url->new( url => $dead, cache_root => $root, allow_http => 1 )->resolve } ),
     ts_err( { op => 'url', action => 'resolve', opts => { url => $dead, cacheRoot => $root } } ), 'refused connection: the same error' );

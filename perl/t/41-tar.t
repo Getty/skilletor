@@ -54,11 +54,16 @@ subtest 'unsafe entries' => sub {
   ok( $err, 'a symlink is refused even without a target' );
 };
 
-subtest 'sizes the reference reads with parseInt' => sub {
-  my $e = parse_tar( make_tar( { name => 'nan', size => 'zz', data => '' }, { name => 'after', data => 'x' } ) );
-  is_deeply( names($e), ['file:nan'], 'a NaN size reads nothing and ends the walk' );
-  my $n = parse_tar( make_tar( { name => 'neg', size => '-1000', data => '' }, { name => 'next', data => 'y' } ) );
-  is_deeply( names($n), [ 'file:neg', 'file:next' ], 'a negative size reads as none (the reference loops)' );
+subtest 'a size that is no non-negative number is a corrupt archive' => sub {
+  for my $case ( [ 'non-octal', 'zz' ], [ 'negative', '-0000001000' ], [ 'small negative', '-1' ] ) {
+    my ( $what, $size ) = @$case;
+    my $err;
+    eval { parse_tar( make_tar( { name => 'bad', size => $size, data => '' }, { name => 'after', data => 'x' } ) ); 1 } or $err = $@;
+    is( ( ref $err ? $err->message : $err ), 'corrupt tar entry (size): bad', $what.': its raw name' );
+    ok( ref $err && !$err->isa('Skilletor::Error::Tar'), $what.': no unsafe-entry error (a cache serves)' );
+  }
+  my $e = parse_tar( make_tar( { name => 'empty', size => '', data => '' }, { name => 'next', data => 'y' } ) );
+  is_deeply( names($e), [ 'file:empty', 'file:next' ], 'an empty size field is 0' );
 };
 
 subtest 'strip_top_level' => sub {

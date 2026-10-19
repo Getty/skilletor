@@ -9,7 +9,7 @@ writes, the lock bytes and what `check` and `status` say afterwards.
 Runners:
 
 - TypeScript: `test/conformance.test.ts` (part of `npm test`).
-- Perl: `perl/t/` (to come).
+- Perl: `perl/t/60-conformance.t` (`resolve` steps so far; `sync`, `check` and `status` skip until the port has them).
 
 The format is plain JSON and plain file trees, nothing language-specific: a runner needs a
 JSON parser, a directory copy, `git` and its engine.

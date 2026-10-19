@@ -24,6 +24,31 @@ Revision history for Skilletor
     writes like JSON.stringify(value, null, 2), byte for byte;
     Skilletor::URL, ::Gzip, ::Tar, ::JSString and ::FSUtil carry the Node
     behaviour that reaches a name, a byte or a message.
+  - Skilletor resolves skills, agents and rules as a sync would install
+    them, without installing: resolve_skill, resolve_agent, resolve_rule
+    give the main file in the source tree or the shared cache,
+    resolve_item and items the whole record; a project item shadows a
+    user item of the same type and name. fetch => always, missing or never
+    picks the network use; no agent harness is needed (require_harness
+    restores the reference's check). An item with a .njk file is flagged
+    templated and refused as an include (Skilletor::Error::Unsupported):
+    the port renders no templates.
+  - Skilletor::Resolver ports the reference's resolveItems: trust, sources
+    into the cache, catalogs, wildcards, bundles with their vars and
+    entries of other sources, the overlap rules and the lock's kept
+    offers, with the reference's warnings and report, under its sync lock.
+  - Skilletor::Catalog scans a source tree (layout, plugin.json, the
+    Claude project layout, a source's path, item errors),
+    Skilletor::Bundles parses and expands bundle files, and
+    Skilletor::Frontmatter reads the reference's YAML subset, with its
+    error messages. Skilletor::Lock reads lock files.
+  - Skilletor::State takes the sync lock (sync.lock/) as the reference
+    does, so the two exclude each other; the git, url and local sources
+    gain cached, their cache without the network.
+  - Skilletor::Tar refuses a header whose size field is no non-negative
+    number as a corrupt archive ("corrupt tar entry (size): <name>"), as
+    the reference now does: a url source falls back to its cache.
+  - t/60-conformance.t runs the shared conformance cases (resolve steps).
   - Tests replay oracles recorded from the reference (t/data) and, in a
     checkout with node, drive the reference and the port against the same
     remotes and cache (t/50-parity.t).

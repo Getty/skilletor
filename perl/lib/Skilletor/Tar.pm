@@ -5,6 +5,7 @@ use strict;
 use warnings;
 
 use Exporter qw( import );
+use Skilletor::Error;
 use Skilletor::Error::Tar;
 use Skilletor::FSUtil qw( decode_utf8_lossy is_executable );
 use Skilletor::JSString qw( js_trim );
@@ -58,7 +59,7 @@ sub parse_tar {
   my $len    = length $buf;
   my $offset = 0;
   my ( $long_name, $pax_path );
-  while ( defined $offset && $offset + 512 <= $len ) {
+  while ( $offset + 512 <= $len ) {
     my $block = substr $buf, $offset, 512;
     last if $block !~ /[^\0]/;    # end of archive
 
@@ -67,15 +68,13 @@ sub parse_tar {
     my $prefix   = _read_string( $block, 345, 155 );
     my $size     = _read_octal( $block, 124, 12 );
     my $typeflag = substr $block, 156, 1;
+    # A size that parses negative would step back over this header for ever, a non-octal one
+    # (NaN) would end the walk quietly: corrupt like a failed gunzip, not unsafe – a plain error, so
+    # a url source falls back to its cache.
+    Skilletor::Error->throw( 'corrupt tar entry (size): '.$raw_name ) unless defined $size && $size >= 0;
     $offset += 512;
-    # buf.subarray(offset, offset + size); a NaN size reads nothing and ends the walk
-    my $data = '';
-    if ( defined $size && $size > 0 && $offset < $len ) {
-      $data = substr $buf, $offset, $size;
-    }
-    # A negative size (parseInt reads a sign) would step back over the header – the reference
-    # loops there for ever; here it reads as no data.
-    $offset = defined $size ? $offset + _ceil_blocks( $size < 0 ? 0 : $size ) : undef;
+    my $data = $size > 0 && $offset < $len ? substr( $buf, $offset, $size ) : '';
+    $offset += _ceil_blocks($size);
 
     if ( $typeflag eq 'L' ) {
       ( $long_name = _read_string( $data, 0, length $data ) ) =~ s/\0+\z//;
@@ -156,7 +155,10 @@ not with C<tar>; reading archives the same way is what makes both
 implementations' cache trees the same. Plain files and directories are kept;
 GNU long names and pax C<path> records are honoured; devices and other types
 are skipped; symlinks, hardlinks, absolute paths and C<..> are refused with a
-L<Skilletor::Error::Tar>. Of an entry's mode only the owner's executable bit is
+L<Skilletor::Error::Tar>. A header whose size field is no non-negative octal
+number is a corrupt archive – a plain L<Skilletor::Error>
+C<corrupt tar entry (size): E<lt>nameE<gt>>, so a url source falls back to its
+cache as for a failed download. Of an entry's mode only the owner's executable bit is
 kept. Names are decoded as UTF-8 the way Node decodes them.
 
 =func parse_tar

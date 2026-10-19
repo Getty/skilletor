@@ -45,6 +45,9 @@ sub resolve {
   return { dir => $self->dir, version => 'local' };
 }
 
+# No network to avoid: the directory itself.
+sub cached { $_[0]->resolve }
+
 # Local sources are always re-rendered.
 sub check { 1 }
 
@@ -88,6 +91,11 @@ True when L</dir> is a directory.
 =method resolve
 
 C<< { dir, version => 'local' } >>; throws L<Skilletor::Error::Source> for a missing directory.
+
+=method cached
+
+L</resolve>: a local source needs no network (the offline call the git and url
+backends have too).
 
 =method check
 

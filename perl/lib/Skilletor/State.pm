@@ -1,8 +1,14 @@
 package Skilletor::State;
-# ABSTRACT: Instance state under ~/.claude/skilletor – trust so far
+# ABSTRACT: Instance state under ~/.claude/skilletor – trust and the sync lock so far
 
 use Moo;
+use Errno ();
+use Fcntl ();
+use POSIX ();
 use Path::Tiny qw( path );
+use Sys::Hostname ();
+use Time::HiRes ();
+use Skilletor::Error::LockTimeout;
 use Skilletor::FSUtil qw( read_text write_text path_join );
 use Skilletor::JSON qw( js_parse js_stringify js_ordered js_type );
 use namespace::clean;
@@ -70,6 +76,181 @@ sub is_trusted {
       && js_type( $entry->{address} ) eq 'string' && $entry->{address} eq $backend->{address} ) ? 1 : 0;
 }
 
+#### The sync lock (spec §6.5) #########################################
+
+use constant LOCK_NAME => 'sync.lock';
+
+# What a lock leaves beside it: a broken lock's tombstone, a released lock on its way out.
+use constant LEFTOVER => LOCK_NAME.'.';
+
+sub _now_ms { int( Time::HiRes::time() * 1000 ) }
+
+# Run $code holding `sync.lock/`, the one mutex over the locks, the target dirs and the source
+# cache – shared with the reference, which takes the same directory the same way: mkdir, then
+# `owner.json` created exclusively; a holder refreshes the record's mtime; a record not
+# refreshed for the stale age – or for two refreshes when its pid on this host is gone – is a
+# dead run's, an owner-less dir older than the grace time one that died before writing it.
+sub with_lock {
+  my ( $self, $code, %opts ) = @_;
+  my $timeout_ms = $opts{timeout_ms} // 5_000;
+  my $stale_ms   = $opts{stale_ms}   // 300_000;
+  my $refresh_ms = $opts{refresh_ms} // ( $stale_ms / 3 < 10_000 ? int( $stale_ms / 3 ) : 10_000 );
+  $refresh_ms = 1 if $refresh_ms < 1;
+  my $grace_ms = $opts{grace_ms} // 2_000;
+  my $poll_ms  = $opts{poll_ms}  // 25;
+  my $lock_dir = $self->_file(LOCK_NAME);
+  my $owner    = path_join( $lock_dir, 'owner.json' );
+  my $token    = join '', map { sprintf '%02x', int rand 256 } 1 .. 8;
+  my $deadline = _now_ms() + $timeout_ms;
+
+  for ( ;; ) {
+    last if $self->_acquire( $lock_dir, $owner, $token, $refresh_ms );
+    if ( my $stale = $self->_judge( $lock_dir, $owner, $stale_ms, $grace_ms ) ) {
+      next if $self->_break_lock( $lock_dir, $owner, $stale );
+    }
+    Skilletor::Error::LockTimeout->throw( 'timed out acquiring sync lock at '.$lock_dir ) if _now_ms() >= $deadline;
+    Time::HiRes::sleep( $poll_ms / 1000 );
+  }
+
+  my $heartbeat = $self->_heartbeat( $owner, $refresh_ms );
+  my $want = wantarray;
+  my @result;
+  my $ok = eval {
+    $self->_sweep_leftovers($stale_ms);
+    if    ($want)         { @result = $code->() }
+    elsif ( defined $want ) { $result[0] = $code->() }
+    else                  { $code->() }
+    1;
+  };
+  my $err = $@;
+  $self->_stop_heartbeat($heartbeat);
+  $self->_release( $lock_dir, $owner, $token );
+  die $err unless $ok;
+  return $want ? @result : $result[0];
+}
+
+sub _acquire {
+  my ( $self, $lock_dir, $owner, $token, $refresh_ms ) = @_;
+  unless ( mkdir $lock_dir ) {
+    return 0 if $!{EEXIST};
+    die 'mkdir '.$lock_dir.': '.$!."\n";
+  }
+  my $record = js_ordered( pid => 0 + $$, host => Sys::Hostname::hostname(), token => $token, at => _now_ms(), refreshMs => 0 + $refresh_ms );
+  my $fh;
+  unless ( sysopen $fh, $owner, Fcntl::O_WRONLY() | Fcntl::O_CREAT() | Fcntl::O_EXCL() ) {
+    return 0 if $!{EEXIST} || $!{ENOENT};
+    my $why = "$!";
+    unlink $owner;
+    rmdir $lock_dir;
+    die 'open '.$owner.': '.$why."\n";
+  }
+  binmode $fh;
+  print {$fh} Skilletor::FSUtil::encode_text( js_stringify($record) );
+  close $fh;
+  _touch($owner);
+  return 1;
+}
+
+# Is the lock stale? What the waiter saw of it when it is, else undef.
+sub _judge {
+  my ( $self, $lock_dir, $owner, $stale_ms, $grace_ms ) = @_;
+  my @st = Time::HiRes::stat($owner);
+  unless (@st) {
+    my @dir = Time::HiRes::stat($lock_dir) or return undef;    # released meanwhile
+    return undef if _now_ms() - $dir[9] * 1000 <= $grace_ms;
+    return { ownerless => 1, ino => $dir[1], mtime_ms => $dir[9] * 1000 };
+  }
+  my $age = _now_ms() - $st[9] * 1000;
+  return undef if $age <= $stale_ms && !$self->_dead_owner( $owner, $age );
+  return { ownerless => 0, ino => $st[1], mtime_ms => $st[9] * 1000 };
+}
+
+# Did the lock's owner die? Only for a record of this host whose pid is gone and that missed two
+# of its own refreshes.
+sub _dead_owner {
+  my ( $self, $owner, $age ) = @_;
+  my $record = eval { js_parse( read_text($owner) ) };
+  return 0 unless defined $record && js_type($record) eq 'object';
+  my ( $pid, $host, $refresh ) = @{$record}{qw( pid host refreshMs )};
+  return 0 unless js_type($host) eq 'string' && $host eq Sys::Hostname::hostname();
+  return 0 unless js_type($pid) eq 'number' && $pid == int($pid) && $pid > 0;
+  return 0 unless js_type($refresh) eq 'number' && $refresh > 0 && $age > 2 * $refresh;
+  return 0 if kill 0, $pid;
+  return $!{ESRCH} ? 1 : 0;    # EPERM: alive, another user's
+}
+
+# Break a lock judged stale; true when it is gone, so taking it is worth a try at once.
+sub _break_lock {
+  my ( $self, $lock_dir, $owner, $stale ) = @_;
+  if ( $stale->{ownerless} ) {
+    return 1 if rmdir $lock_dir;
+    return 1 if $!{ENOENT};
+    return 0 if -e $owner;    # its run wrote the record meanwhile: live
+  }
+  my $tomb = $self->_file( LEFTOVER.'broken-'.$stale->{ino}.'-'.int( $stale->{mtime_ms} ) );
+  _touch($lock_dir);
+  return 1 if rename $lock_dir, $tomb;
+  return 1 if $!{ENOENT};
+  return 0 if $!{ENOTEMPTY} || $!{EEXIST};    # another waiter broke it
+  return 0 if $^O eq 'MSWin32' && $!{EACCES};
+  die 'rename '.$lock_dir.': '.$!."\n";
+}
+
+# Give the lock up – only this run's own; renamed away first, so no waiter sees it half removed.
+sub _release {
+  my ( $self, $lock_dir, $owner, $token ) = @_;
+  my $record = eval { js_parse( read_text($owner) ) };
+  return unless defined $record && js_type($record) eq 'object' && ( $record->{token} // '' ) eq $token;
+  my $gone = $self->_file( LEFTOVER.'released-'.$token );
+  rename $lock_dir, $gone or return;
+  eval { path($gone)->remove_tree( { safe => 0 } ) };
+}
+
+# Remove what earlier locks left beside `sync.lock/` once older than the stale age.
+sub _sweep_leftovers {
+  my ( $self, $stale_ms ) = @_;
+  opendir( my $dh, $self->root ) or return;
+  my @names = grep { index( $_, LEFTOVER ) == 0 } readdir $dh;
+  closedir $dh;
+  for my $name (@names) {
+    my $p = $self->_file($name);
+    my @st = Time::HiRes::lstat($p) or next;
+    next unless _now_ms() - $st[9] * 1000 > $stale_ms;
+    if   ( -l $p || !-d $p ) { unlink $p }
+    else                     { eval { path($p)->remove_tree( { safe => 0 } ) } }
+  }
+}
+
+sub _touch {
+  my ( $path ) = @_;
+  my $now = Time::HiRes::time();
+  Time::HiRes::utime( $now, $now, $path );
+}
+
+# The refreshes: Perl runs a resolve synchronously, so a child process stamps the owner record
+# while the holder works, and stops when told or when the holder is gone. None on Windows.
+sub _heartbeat {
+  my ( $self, $owner, $refresh_ms ) = @_;
+  return undef if $^O eq 'MSWin32';
+  my $parent = $$;
+  my $pid = fork;
+  return undef unless defined $pid;
+  return $pid if $pid;
+  local $SIG{TERM} = sub { POSIX::_exit(0) };
+  while ( getppid() == $parent && -e $owner ) {
+    Time::HiRes::sleep( $refresh_ms / 1000 );
+    _touch($owner);
+  }
+  POSIX::_exit(0);
+}
+
+sub _stop_heartbeat {
+  my ( $self, $pid ) = @_;
+  return unless $pid;
+  kill 'TERM', $pid;
+  waitpid $pid, 0;
+}
+
 1;
 
 =synopsis
@@ -83,15 +264,15 @@ sub is_trusted {
 
 =description
 
-The reference's C<state.ts>, so far its trust part (spec §4.3): a source only a
-project config declares is not fetched until the user trusts it, and the
-confirmation – name, backend kind and address – lives in C<trust.json> under
-the state root. Both implementations read and write the same file, the same
-bytes: entries keep their order, a new name is appended, and an unreadable file
-counts as empty.
+The reference's C<state.ts>, so far its trust part (spec §4.3) and the sync
+lock (spec §6.5). A source only a project config declares is not fetched until
+the user trusts it, and the confirmation – name, backend kind and address –
+lives in C<trust.json> under the state root. Both implementations read and
+write the same file, the same bytes: entries keep their order, a new name is
+appended, and an unreadable file counts as empty.
 
-Last-check marks, pending reports, the sync lock and the other state files come
-with the sync phase.
+Last-check marks, pending reports and the other state files come with the sync
+phase.
 
 =attr root
 
@@ -114,5 +295,20 @@ Replaces an earlier entry of the name.
 =method is_trusted
 
   $state->is_trusted( $name, { kind => ..., address => ..., origin => 'user' | 'project' } );
+
+=method with_lock
+
+  my $result = $state->with_lock( sub { ... }, timeout_ms => 5000 );
+
+Runs the code holding C<< <root>/sync.lock/ >>, the mutex the reference takes
+around every resolve, sync and read of the source cache – the same directory,
+taken the same way, so the two implementations exclude each other. It waits
+for another holder up to C<timeout_ms> (default 5000), breaking a lock a dead
+run left (no refresh for C<stale_ms>, default 300000; an owner-less directory
+after C<grace_ms>, default 2000), then throws
+L<Skilletor::Error::LockTimeout>. While the code runs, a forked child refreshes
+the owner record every C<refresh_ms> (default 10000; none on Windows). The
+lock is released however the code ends; its result (in the caller's context)
+is returned and its exception rethrown.
 
 =cut

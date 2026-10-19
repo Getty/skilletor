@@ -105,6 +105,14 @@ subtest 'an unsafe or unreadable archive' => sub {
   is( path( $dir, 'skills/a/SKILL.md' )->slurp, "v1\n", 'the last good cache stays' );
   $srv->route( '/u.tgz', { headers => { ETag => '"u3"' }, body => 'not gzip at all' } );
   is( $src->resolve->{warning}, 'download failed for '.$srv->url('/u.tgz').', using cache (incorrect header check)', 'not gzip: zlib\'s word, fallback' );
+  for my $size ( '-0000001000', '-1', 'zz' ) {
+    $srv->route( '/u.tgz', { headers => { ETag => '"u4"' }, body => tgz( { name => 'bad', size => $size, data => '' }, { name => 'x', data => 'x' } ) } );
+    is( $src->resolve->{warning}, 'download failed for '.$srv->url('/u.tgz').', using cache (corrupt tar entry (size): bad)', 'size '.$size.': corrupt, fallback' );
+    is( path( $dir, 'skills/a/SKILL.md' )->slurp, "v1\n", 'size '.$size.': the cache is untouched' );
+  }
+  my $fresh = source( $tmp->child('fresh'), '/u.tgz' );
+  is( error_of( sub { $fresh->resolve } ), 'url source '.$srv->url('/u.tgz').' failed: corrupt tar entry (size): bad', 'corrupt without a cache: an error' );
+  ok( !-e $fresh->cache_dir, 'and no partial tree' );
 };
 
 subtest 'check: HEAD and the ETag' => sub {

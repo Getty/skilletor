@@ -8,6 +8,7 @@ use Carp qw( croak );
 use Cwd ();
 use Digest::SHA qw( sha256_hex );
 use Encode ();
+use Errno ();
 use Exporter qw( import );
 use Fcntl ();
 use Path::Tiny qw( path );
@@ -20,6 +21,7 @@ our @EXPORT_OK = qw(
   atomic_write write_text
   path_join path_normalize path_resolve is_absolute
   real_or_resolved same_path to_posix
+  node_fs_error
 );
 
 use constant WIN32 => $^O eq 'MSWin32';
@@ -171,6 +173,36 @@ sub same_path {
   return real_or_resolved($a) eq real_or_resolved($b) ? 1 : 0;
 }
 
+#### Errors ############################################################
+
+# libuv's words for the errors a file system call meets.
+my %UV_MESSAGE = (
+  ENOENT       => 'no such file or directory',
+  EACCES       => 'permission denied',
+  EPERM        => 'operation not permitted',
+  ENOTDIR      => 'not a directory',
+  EISDIR       => 'illegal operation on a directory',
+  ELOOP        => 'too many symbolic links encountered',
+  ENAMETOOLONG => 'name too long',
+  EMFILE       => 'too many open files',
+  ENFILE       => 'file table overflow',
+  EIO          => 'i/o error',
+  ENOMEM       => 'not enough memory',
+  EBUSY        => 'resource busy or locked',
+);
+
+# The message Node gives a failed fs call: "ENOENT: no such file or directory, lstat '/x'". A
+# read of a directory names no path ("EISDIR: illegal operation on a directory, read").
+sub node_fs_error {
+  my ( $errno, $syscall, $path ) = @_;
+  local $! = $errno;
+  my $where = ', '.$syscall.( defined $path ? " '".$path."'" : '' );
+  for my $code ( sort keys %UV_MESSAGE ) {
+    return $code.': '.$UV_MESSAGE{$code}.$where if $!{$code};
+  }
+  return "$!".$where;
+}
+
 #### Content ###########################################################
 
 sub hash_bytes {
@@ -297,6 +329,12 @@ True when two paths name the same location once symlinks are resolved.
 =func to_posix
 
 The path with C</> between its parts (a no-op off Windows).
+
+=func node_fs_error
+
+  node_fs_error( 0 + $!, 'scandir', $path );   # "ENOENT: no such file or directory, scandir '/x'"
+
+The message Node gives a failed C<node:fs> call, for an errno.
 
 =func hash_bytes
 

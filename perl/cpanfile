@@ -19,6 +19,7 @@ requires 'Net::SSLeay', '1.49';
 requires 'POSIX';
 requires 'Path::Tiny', '0.119';
 requires 'Scalar::Util';
+requires 'Sys::Hostname';
 requires 'Time::HiRes';
 requires 'Unicode::Normalize';
 requires 'namespace::clean';

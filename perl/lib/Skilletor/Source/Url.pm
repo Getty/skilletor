@@ -145,6 +145,16 @@ sub resolve {
   Skilletor::Error::Source->throw( 'url source '.$self->url.' failed: '._msg($err) );
 }
 
+# The cache as it is, without a request: what resolve serves when a download fails, without
+# the warning.
+sub cached {
+  my ( $self ) = @_;
+  $self->_assert_scheme;
+  my $dir = $self->cache_dir;
+  Skilletor::Error::Source->throw( 'url source '.$self->url.' is not in the cache (no fetch)' ) unless -e $dir;
+  return { dir => $dir, version => $self->cache_version($dir) // 'unknown' };
+}
+
 sub check {
   my ( $self, $cached_version ) = @_;
   $self->_assert_scheme;
@@ -323,6 +333,13 @@ This source's cache directory (L<Skilletor::Cache/url_cache_dir>).
 =method resolve
 
 C<< { dir, version, warning? } >>; see L</DESCRIPTION>.
+
+=method cached
+
+C<< { dir, version } >> of the cache without a request – what L</resolve>
+serves when its download fails (C<unknown> without a version file), minus the
+warning (a Perl addition for offline callers). Throws
+L<Skilletor::Error::Source> when there is no cache.
 
 =method check
 
