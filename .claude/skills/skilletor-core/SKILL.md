@@ -7,7 +7,9 @@ description: "Use when changing skilletor's own code, tests, build or plugin wir
 
 skilletor is a Claude Code, Codex and Hermes plugin plus a standalone CLI that installs
 **skills, agents and rules** from remote sources for each targeted harness, in
-user scope (`~`) and project scope (the project root), re-rendering every sync. Design spec:
+user scope (`~`) and project scope (the project root), re-rendering every sync. Its payload is
+other people's skills, so two kinds of work meet here: TypeScript on the engine, and
+authoring/assessing the skill-shaped files it ships and syncs. Design spec:
 `docs/superpowers/specs/2026-09-22-skilletor-design.md`. User-facing CLI and
 config reference: `skills/skilletor/SKILL.md` (the skill the plugin ships) —
 read it instead of re-deriving the config format.
@@ -157,3 +159,10 @@ npm run build && npm run check-dist  # dist/skilletor.js is committed; CI diffs 
 CLI reference and must match `src/cli.ts` usage text. Steps and the marketplace
 entry: `docs/release.md`. Tagging, pushing and marketplace edits are the
 maintainer's, on explicit go-ahead only.
+
+## Hazards of this repo
+
+- **Agent files take `tools:`, not `allowed-tools`.** Claude Code ignores unknown agent fields
+  silently, so a misnamed key hands an auditor write access.
+- **Eval runs are billed** — `claude plugin eval` spawns full sessions. Start one only when the
+  ticket or the user asks.
