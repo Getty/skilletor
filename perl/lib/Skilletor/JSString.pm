@@ -6,7 +6,7 @@ use warnings;
 
 use Exporter qw( import );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( js_lc js_trim js_ws_re js_blank );
 

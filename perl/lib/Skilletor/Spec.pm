@@ -12,7 +12,7 @@ use Skilletor::JSON qw( js_stringify );
 use Skilletor::JSString qw( js_lc js_trim js_blank js_ws_re );
 use Skilletor::URL qw( parse_url );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( resolve_spec decode_uri_component normalize_name );
 

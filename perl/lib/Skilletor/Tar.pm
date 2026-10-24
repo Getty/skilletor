@@ -10,7 +10,7 @@ use Skilletor::Error::Tar;
 use Skilletor::FSUtil qw( decode_utf8_lossy is_executable );
 use Skilletor::JSString qw( js_trim );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( parse_tar strip_top_level is_reserved VERSION_FILE );
 

@@ -15,7 +15,7 @@ use Skilletor::FSUtil qw( read_text inner_segments path_join write_text );
 use Skilletor::JSON qw( js_parse js_stringify js_ordered js_type );
 use namespace::clean;
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 my @ALLOWED_KEYS = qw( sources install vars gitignore claudeSettings checkInterval targets );
 my %ALLOWED_KEY  = map { $_ => 1 } @ALLOWED_KEYS;

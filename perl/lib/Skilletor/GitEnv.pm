@@ -6,7 +6,7 @@ use warnings;
 
 use Exporter qw( import );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( git_env REPO_LOCAL_VARS );
 

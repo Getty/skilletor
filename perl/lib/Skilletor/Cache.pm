@@ -9,7 +9,7 @@ use Exporter qw( import );
 use Skilletor::FSUtil qw( encode_text path_join );
 use Skilletor::JSON qw( js_stringify );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( cache_root cache_name git_identity git_cache_dir url_cache_dir CACHE_NAME_RE );
 

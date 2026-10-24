@@ -12,7 +12,7 @@ use Scalar::Util qw( blessed reftype );
 use Skilletor::Error::JSON;
 use Skilletor::JSON::OrderedHash;
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( js_parse js_stringify js_ordered js_sort_keys js_number js_type );
 

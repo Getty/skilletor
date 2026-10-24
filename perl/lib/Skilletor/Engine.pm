@@ -36,7 +36,7 @@ use namespace::clean;
 
 extends 'Skilletor::Resolver';
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 # What a sync makes of unchanged sources and inputs (the reference's RENDER_FORMAT, k107): part
 # of the render-inputs hash, so both implementations record and compare the same one.

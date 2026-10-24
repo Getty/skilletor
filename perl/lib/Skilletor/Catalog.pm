@@ -13,7 +13,7 @@ use Skilletor::FSUtil qw( decode_utf8_lossy encode_text inner_segments node_fs_e
 use Skilletor::JSON qw( js_parse js_sort_keys js_stringify js_type );
 use Skilletor::JSString qw( js_trim js_ws_re );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 # The `.gitignore` skilletor writes into every skill it installs (spec §6.4): a skill directory
 # holding exactly this is one of its installed copies.

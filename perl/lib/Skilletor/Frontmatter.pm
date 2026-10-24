@@ -12,7 +12,7 @@ use Skilletor::Error::Frontmatter;
 use Skilletor::JSON qw( js_ordered );
 use Skilletor::JSString qw( js_trim js_ws_re );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( split_frontmatter parse_yaml_document is_yaml_float );
 

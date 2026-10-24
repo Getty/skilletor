@@ -9,7 +9,7 @@ use Exporter qw( import );
 use Path::Tiny qw( path );
 use Skilletor::FSUtil qw( encode_text is_executable path_join path_normalize );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( build executables install_path templates_of );
 

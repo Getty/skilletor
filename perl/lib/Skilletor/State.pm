@@ -13,7 +13,7 @@ use Skilletor::FSUtil qw( read_text write_text path_join );
 use Skilletor::JSON qw( js_parse js_stringify js_ordered js_sort_keys js_type );
 use namespace::clean;
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 has root => (
   is       => 'ro',

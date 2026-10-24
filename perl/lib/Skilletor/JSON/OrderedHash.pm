@@ -4,7 +4,7 @@ package Skilletor::JSON::OrderedHash;
 use strict;
 use warnings;
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 # A key is an array index – and so ordered before every other key, ascending by value –
 # when it is the canonical decimal form of an integer 0 .. 2**32 - 2 (ECMA-262 §6.1.7).

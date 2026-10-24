@@ -8,7 +8,7 @@ use utf8;
 use Exporter qw( import );
 use Skilletor::Lock qw( parse_lock_key );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw(
   ACTIVATION empty_scope_report display_safe backend_label conflict_hint has_changes has_notable

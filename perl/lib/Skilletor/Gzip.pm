@@ -8,7 +8,7 @@ use Compress::Raw::Zlib ();
 use Exporter qw( import );
 use Skilletor::Error::Source;
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( gunzip_sync inflate_sync );
 

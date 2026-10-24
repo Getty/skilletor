@@ -8,7 +8,7 @@ use Exporter qw( import );
 use Skilletor::Error::Config;
 use Skilletor::JSString qw( js_lc );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw(
   ITEM_TYPES HARNESSES WILDCARD SOURCE_NAME_RULE INSTALL_KEYS INSTALL_KEY_OF BUNDLES_KEY

@@ -18,7 +18,7 @@ use namespace::clean;
 
 with 'Skilletor::Role::Source';
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 # The first line of a version file: the format of its tree. 2: an entry's owner executable bit
 # is kept.

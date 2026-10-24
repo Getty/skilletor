@@ -14,7 +14,7 @@ use Skilletor::FSUtil qw( atomic_write encode_text hash_bytes is_executable path
 use Skilletor::JSON qw( js_ordered );
 use Skilletor::Lock qw( read_lock serialize_lock write_lock );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( apply is_valid_item_name );
 

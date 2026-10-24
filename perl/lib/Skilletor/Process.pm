@@ -11,7 +11,7 @@ use IO::Select;
 use POSIX ();
 use Time::HiRes ();
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( run_command );
 

@@ -12,7 +12,7 @@ use Scalar::Util qw( blessed );
 use Skilletor::FSUtil qw( encode_text node_fs_error path_join read_text same_path );
 use Skilletor::JSON qw( js_ordered js_parse js_sort_keys js_stringify js_type );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( plan_claude_settings skilletor_marketplace not_declarable OFFICIAL_MARKETPLACE );
 

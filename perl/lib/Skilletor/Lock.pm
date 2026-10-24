@@ -12,7 +12,7 @@ use JSON::MaybeXS ();
 use Skilletor::FSUtil qw( decode_utf8_lossy encode_text node_fs_error write_text );
 use Skilletor::JSON qw( js_parse js_ordered js_sort_keys js_stringify js_type );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( read_lock serialize_lock write_lock parse_lock_key key_to_type_name );
 

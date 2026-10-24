@@ -11,7 +11,7 @@ use Skilletor::FSUtil qw( path_join );
 use Skilletor::JSString qw( js_trim );
 use Skilletor::Lock qw( parse_lock_key );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw(
   DETECTED default_markers detect_harnesses select_targets default_hermes_home

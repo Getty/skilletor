@@ -14,7 +14,7 @@ use Skilletor::JSON qw( js_ordered js_stringify js_type );
 use Skilletor::JSString qw( js_lc js_trim );
 use Skilletor::Spec qw( resolve_spec );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw(
   PATTERN_CHAR is_pattern matches_pattern same_identity match_entry

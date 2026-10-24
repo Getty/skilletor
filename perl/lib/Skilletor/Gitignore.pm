@@ -12,7 +12,7 @@ use Skilletor::JSON qw( js_sort_keys );
 use Skilletor::JSString qw( js_blank );
 use Skilletor::Process qw( run_command );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw(
   SKILL_GITIGNORE PROJECT_CLAUDE_ENTRIES LOCAL_ENTRIES CODEX_ENTRIES WORKTREE_INCLUDE

@@ -16,7 +16,7 @@ use namespace::clean;
 
 with 'Skilletor::Role::Source';
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 # Git for Windows checks out with core.autocrlf=true; the cache holds the repository's bytes
 # there as everywhere, and longpaths lifts the 260-character limit.

@@ -10,7 +10,7 @@ use Skilletor::Error::Unsupported;
 use Skilletor::FSUtil qw( path_join );
 use namespace::clean;
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 has home => (
   is       => 'ro',

@@ -13,7 +13,7 @@ use Exporter qw( import );
 use Fcntl ();
 use Path::Tiny qw( path );
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 our @EXPORT_OK = qw(
   read_text decode_utf8_lossy encode_text
