@@ -15,8 +15,9 @@ hand-review them) and the Perl port together, or notes the divergence on the car
 ## Delegation
 
 The main agent delegates behavior-relevant code and skill text to the right agent instead of
-touching it itself (the `skilletor-*` agents work their own lane) — principle and
-lane are in `.claude/rules/skilletor-rules.md`.
+touching it itself (the `skilletor-*` agents work their own lane) — the principle is a
+shared house rule (skilletor bundle `getty-house@getty`); lanes and hazards are in
+`.claude/rules/skilletor-rules.md`.
 
 | Task | Agent |
 |---|---|
