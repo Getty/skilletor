@@ -1,5 +1,5 @@
-// Plugin manifests (spec §10, §14.5): one name and one version across
-// package.json, the Claude manifest and the Codex manifest; referenced paths exist.
+// Plugin manifests (spec §10, §14.5): one name across the manifests, one version across
+// package.json and the Codex manifest, none in the Claude manifest (Claude Code takes it from the commit); referenced paths exist.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -13,10 +13,10 @@ const pkg = json("package.json");
 const claude = json(".claude-plugin/plugin.json");
 const codex = json(".codex-plugin/plugin.json");
 
-test("package.json and both plugin manifests carry the same name and version", () => {
+test("package.json and the Codex manifest carry one version, the Claude manifest none; names agree", () => {
   assert.equal(claude.name, "skilletor");
   assert.equal(codex.name, "skilletor"); // must equal the marketplace entry name
-  assert.equal(claude.version, pkg.version);
+  assert.equal("version" in claude, false);
   assert.equal(codex.version, pkg.version);
 });
 

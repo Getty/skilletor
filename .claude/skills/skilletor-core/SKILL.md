@@ -153,9 +153,9 @@ npm run build && npm run check-dist  # dist/skilletor.js is committed; CI diffs 
 
 ## Release surface (audit, never perform)
 
-`package.json`, `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` and
-`hermes/skilletor/plugin.yaml` carry the same version (tests enforce it); a tag
-`vX.Y.Z` matches them; `README.md` and `skills/skilletor/SKILL.md` restate the
+`package.json`, `.codex-plugin/plugin.json` and `hermes/skilletor/plugin.yaml` carry the
+same version (tests enforce it); `.claude-plugin/plugin.json` carries none, Claude Code
+takes the plugin version from the commit; a tag `vX.Y.Z` matches the three; `README.md` and `skills/skilletor/SKILL.md` restate the
 CLI reference and must match `src/cli.ts` usage text. Steps and the marketplace
 entry: `docs/release.md`. Tagging, pushing and marketplace edits are the
 maintainer's, on explicit go-ahead only.
