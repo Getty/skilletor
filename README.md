@@ -74,38 +74,47 @@ there runs `bin\skilletor.exe` (see [Requirements](#requirements)); `git pull` u
 | Claude Code | `~/.claude/{skills,agents,rules}` | `<project>/.claude/{skills,agents,rules}` |
 | Codex | `~/.agents/skills`, `$CODEX_HOME/{agents,skilletor-rules.md}` | `<project>/.agents/skills`, `<project>/.codex/{agents,skilletor-rules.md}` |
 
-Four hooks drive it:
+Hooks run it, in every harness the plugin supports:
 
-- **SessionStart** — check every source (5s timeout each) and compare the config with what
+| | session start | each prompt | the session moves into another checkout |
+|---|---|---|---|
+| Claude Code | `SessionStart` | `UserPromptSubmit` | after a Bash `cd`: `PostToolUse`, awaited; any other move: `CwdChanged`, not awaited |
+| Codex | `SessionStart`, also after `/cd` (a new session) | `UserPromptSubmit` | the next `UserPromptSubmit`, awaited |
+| Hermes | `on_session_start` | `pre_llm_call` | the next `pre_llm_call`, awaited |
+
+So a worktree made with plain `git worktree add`, which has the committed config but none of
+the gitignored items, completes itself: the `cd` into it (Claude Code), or the next turn there
+(Codex, Hermes), syncs that checkout. Worktrees Claude Code creates itself get the items
+copied through [`.worktreeinclude`](#git--your-own-skills).
+
+- **Session start** — check every source (5s timeout each) and compare the config with what
   is installed; on a change, sync and report. An untrusted project source is named every
   session until you trust it.
-- **UserPromptSubmit** — when the throttle is due, kick off a detached background sync (no
+- **Each prompt** — when the throttle is due, kick off a detached background sync (no
   console window on Windows) and deliver its result on a later prompt; otherwise return
-  instantly and silent. Under Codex and Hermes it first notices a move: a session whose
-  working directory is now another checkout of a skilletor project gets that checkout synced
-  before the prompt goes on, as CwdChanged does below, and the model is told in the prompt's
-  context.
-- **CwdChanged** (Claude Code only) — when the session `cd`s into another checkout of a
-  skilletor project (a worktree made with plain `git worktree add` has the config but none of
-  the installed items), compare that checkout's lock with its config, without asking any
-  source; on a difference, sync its project scope as SessionStart does and say so in one line:
-  `skilletor: 17 item(s) updated in <dir>`. If it cannot (an untrusted source, a config error),
-  the line names what to run there: `skilletor trust <name>` or `skilletor sync`. A move within
-  the same checkout, or into a directory without `.claude/skilletor.json`, does nothing.
-  Claude Code does not wait for this hook; for a Bash `cd` the next one does.
-- **PostToolUse** (Claude Code only, on a Bash call with a `cd`) — the same for the directory
-  the command left the session in, and Claude Code waits for it: from the model's next message
-  on, every tool call (an agent spawn too) finds the checkout's items there, and the model is
-  told what landed. A spawn sent in the same message as the `cd` starts in the old directory. It compares
-  with where the session last was, so a `cd` within one checkout does nothing. A move without a
-  Bash `cd` (`EnterWorktree` into an existing worktree, `pushd`) has CwdChanged alone, which
-  an agent spawned right after it can outrun. Codex and Hermes have no CwdChanged, and a shell
-  `cd` there moves no session; a session there moves only between turns, so their prompt hook
-  notices it, and waits for the sync (above). "Works in" means the harness' session directory, not the directory of each command
-  a session runs.
+  instantly and silent.
+- **A move into another checkout of a skilletor project** — compare that checkout's lock
+  with its config, without asking any source; on a difference, sync its project scope as at
+  session start, say so in one line (`skilletor: 17 item(s) updated in <dir>`) and tell the
+  model what landed. If it cannot (an untrusted source, a config error), the line names what
+  to run there: `skilletor trust <name>` or `skilletor sync`. A move within the same
+  checkout, or into a directory without `.claude/skilletor.json`, does nothing. A move is a
+  change of the session's directory, not of the directory each command runs in.
+  - Claude Code waits for the sync after a Bash `cd`: from the model's next message on,
+    every tool call (an agent spawn too) finds the items there; a spawn sent in the same
+    message as the `cd` starts in the old directory. A move without a Bash `cd`
+    (`EnterWorktree` into an existing worktree, `pushd`) has `CwdChanged` alone, which an
+    agent spawned right after it can outrun.
+  - Codex and Hermes: a shell `cd` moves no session. A session moves only between turns
+    (Codex: an app-server turn with a new `cwd`; Hermes: `/worktree new`, a gateway's
+    re-anchor), and the next prompt waits for the sync. Under Hermes the line also names
+    `hermes skills trust <dir>` when skills landed, since Hermes hides a project's skills
+    until it trusts that directory.
 
 Skills become usable immediately; agents and rules activate after `/reload-plugins` or a
-restart — the report says so per item.
+restart — the report says so per item. When an update changes the hooks, Codex runs them
+only after you trust them again in `/hooks`. The Hermes plugin is updated on its own, with
+`hermes plugins update skilletor`.
 
 ## Sources
 
@@ -951,9 +960,10 @@ plugins:
 `hermes plugins list` shows it; `hermes skilletor status` (any CLI command after
 `hermes skilletor`) runs the CLI with that Hermes' home as `HERMES_HOME`.
 
-The plugin never holds a session up for long and never fails one: it gives the sync 20 s
-and the per-turn check 5 s, and without a CLI, on an error or at the limit the turn simply
-runs without a message. A delegated subagent triggers nothing.
+The plugin never holds a session up for long and never fails one: it gives the sync at a
+session start 20 s and each turn's hook 25 s (room for a move's sync; otherwise the hook
+returns at once), and without a CLI, on an error or at the limit the turn simply runs
+without a message. A delegated subagent triggers nothing.
 
 ### What is missing
 

@@ -32,24 +32,48 @@ A sync that stopped midway (a write error) keeps what it wrote; `status` marks t
 longer matches the lock, vars changed, the last sync stopped midway. What the last sync
 could not install although its source was there counts once.
 
-`checkInterval` (user file only, seconds, default 1800) throttles the in-session check;
-`≤ 0` = sync only at session start. In a project file it is a config error (nothing syncs).
+## What syncs on its own — the hooks
 
-A session that moves into another checkout of a skilletor project (a plain `git worktree add`
-copies the config, not the installed items) gets that checkout's project scope synced when its
-lock does not match its config: `skilletor: N item(s) updated in <dir>`, or the line names the
-`skilletor trust <name>` / `skilletor sync` to run there.
+- **Claude Code:** `SessionStart` (startup, resume). `UserPromptSubmit`, the throttled check: a
+  due one starts a background sync, which covers only the project the session started in, and
+  its report comes with a later prompt. A move into another checkout (below): `PostToolUse`
+  after a Bash `cd`, awaited; `CwdChanged` after any other move (`EnterWorktree` into an
+  existing worktree, `pushd`), not awaited.
+- **Codex:** `SessionStart` (startup, resume, clear), also after `/cd`, which starts a new
+  session. `UserPromptSubmit`: first a move (an app-server turn with a new `cwd`), awaited,
+  then the throttled check.
+- **Hermes plugin:** `on_session_start`. `pre_llm_call`: first a move (`/worktree new`, the TUI
+  gateway moving the session into a worktree), awaited, then the throttled check.
+- A shell `cd` moves no Codex or Hermes session and syncs nothing.
 
-- Claude Code: after a Bash `cd`, awaited (PostToolUse) — from the model's next message on,
-  every tool call, an agent spawn too, finds the items there, and the model's context names the
-  checkout; a spawn sent in the same message as the `cd` starts in the old cwd. A `cd` within
-  one checkout does nothing. A move without a Bash `cd` (`EnterWorktree` into an existing
-  worktree, `pushd`) syncs too (CwdChanged), not awaited — an agent spawned right after it can
-  start before the items are there. The throttled check keeps covering only the project the
-  session started in.
-- Codex, Hermes: a session moves only between turns (a Codex app-server turn with a new `cwd`,
-  Hermes' `/worktree new`); the next prompt waits for the sync, and that turn's context names
-  the checkout. A shell `cd` there moves no session and syncs nothing.
+`checkInterval` (user file only, seconds, default 1800) throttles the check; `≤ 0` turns it
+off, while session start and moves still sync. In a project file it is a config error
+(nothing syncs).
+
+### A move into another checkout
+
+That checkout's project scope syncs when its lock does not match its config, so a worktree
+made with plain `git worktree add` (committed config, none of the gitignored items) completes
+itself. A move within one checkout does nothing; a worktree Claude Code created starts with the
+items and the lock of the checkout it came from (`.worktreeinclude`, below). One line reports
+the sync, `skilletor: N item(s) updated in <dir>`, naming the `skilletor trust <name>` /
+`skilletor sync` to run there when something is left; the model's context, first line
+`skilletor: in <dir>:`, lists the items, when each is active, and what is left.
+
+- Claude Code, after a Bash `cd`: from the model's next message on, every tool call, an agent
+  spawn too, finds the items there; a spawn sent in the same message as the `cd` starts in the
+  old cwd. After `CwdChanged` an agent spawned right away can start before the items are
+  there, and the model gets no context.
+- Codex, Hermes: the turn waits for the sync. Under Hermes, when it adds or updates a skill,
+  the context also names `hermes skills trust <dir>` for the user to run, even for a trusted
+  checkout: skilletor does not read Hermes' trust list.
+
+**Items missing in a checkout you moved into?** Look for skilletor's move context first. It
+says what landed and when each item is active — a hand `sync` changes nothing then — or names
+the command to run there. No such context (a `CwdChanged` move, a move that could not sync, no
+hook ran: the CLI outside a session, Codex hooks not trusted in `/hooks`): run
+`skilletor sync` in that checkout. It waits up to 5 s for a sync still running (a `CwdChanged`
+one, say); on `timed out acquiring sync lock`, run it again.
 
 ## Sharing a project — `.claude/settings.json`
 
@@ -80,8 +104,9 @@ commit it` when a block is created or changed.
 
 A project's `.worktreeinclude` gets a fixed block naming every harness's installed paths, the
 lock and `skilletor.local.json`: Claude Code copies the gitignored files it matches into each
-worktree it creates, so agent worktrees have the installed items. Commit it as well; lines
-outside the block are the user's.
+worktree it creates, so agent worktrees have the installed items. A plain `git worktree add`
+copies none of them; the move into it syncs it (above). Commit it as well; lines outside the
+block are the user's.
 
 - Ignoring never untracks: when sync writes or adopts a file git already tracks (committed
   by hand or while `false`), a warning per item gives the `git rm --cached` that untracks it.

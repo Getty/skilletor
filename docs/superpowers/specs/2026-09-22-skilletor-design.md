@@ -1188,7 +1188,8 @@ cannot sync (a config error, a timed-out sync lock) says `skilletor: cannot sync
 run there: skilletor sync`. `hooks/hooks.json` gives the hook 30 s, as `SessionStart` (and
 `PostToolUse`, below), and Claude Code kills it then although it does not wait for it; so the
 move's sync has a deadline of 20 s: a scope whose sources are not resolved by then is not
-written at all – what follows is local – and the line says so. The core (`syncMovedCheckout`, `hooks.ts`) takes the new cwd, the old one
+written at all – what follows is local – and the line says so. The core (`syncMovedCheckout`,
+`hooks.ts`) takes the new cwd, the old one
 when known and the event to answer, so other harnesses' hooks can call it.
 
 Measured on Claude Code 2.1.322 (k147): `CwdChanged` fires on any Bash `cd`, a compound one
@@ -1206,7 +1207,8 @@ a Bash call without a `cd`: `cd sub`, `cd ..` and `echo start && cd x` fired it,
 same cwd again asks nothing, not even git – a model's `cd <dir> && …` inside one checkout stays
 free, and a line awaiting trust there comes once, not with every command; another cwd goes to
 the same core, with the `systemMessage` line and an `additionalContext` whose first line names
-the checkout, so the model learns what landed. Claude Code's `SessionStart` writes the record, as Codex's and
+the checkout, so the model learns what landed. Claude Code's `SessionStart` writes the record,
+as Codex's and
 Hermes' do; `CwdChanged` never does, or `PostToolUse` of the same `cd` would take the move for
 done before its sync is. An agent spawned after a Bash `cd` thus finds the checkout's items on
 disk – measured end to end: after `cd` into a worktree without a lock, the next tool call's
@@ -1223,7 +1225,8 @@ which count as a difference), so a matching lock means the items are there, whic
 synced. When `CwdChanged` synced, the model learns nothing of the move – `PostToolUse` found
 nothing to do – but the user has `CwdChanged`'s line, and `PostToolUse`, which starts first
 (2–36 ms) and does the same work, usually takes the lock first (in the end-to-end run it
-started 29 ms ahead and synced; `CwdChanged` waited, then said nothing). What is left to do without a
+started 29 ms ahead and synced; `CwdChanged` waited, then said nothing). What is left to do
+without a
 sync – a source awaiting trust, a config error – both answer, a line each. The in-session
 interval check of `UserPromptSubmit` keys on `CLAUDE_PROJECT_DIR`, so it does not cover a
 checkout the session moved into.

@@ -83,7 +83,8 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
 
 **A project using skilletor** gets the plugin required in its committed `.claude/settings.json`
 by the next sync (`… updated — commit it`): tell the user to commit it with `skilletor.json`,
-or a fresh checkout lacks the (gitignored) items. Details: [references/sync.md](references/sync.md).
+or a fresh checkout lacks the (gitignored) items. A worktree the session moves into syncs
+itself; before a hand `sync` there, and for details: [references/sync.md](references/sync.md).
 
 ```json
 {

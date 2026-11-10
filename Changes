@@ -45,28 +45,19 @@ Revision history for skilletor
     Code, or with `--no-plugin`, it clones the repository and links
     `bin/skilletor`. `--bin-dir` picks the directory. The README has it under
     "From the command line"; the Hermes docs name the command `SKILLETOR_BIN`.
-  - A Claude Code session that `cd`s into another checkout of a skilletor
-    project (e.g. a plain `git worktree add`) now gets that checkout's project
-    scope synced, with one line naming the directory. A Bash `cd` is awaited by
-    a `PostToolUse` hook: the next tool call finds the items and the model is
-    told. A `CwdChanged` hook covers moves without a Bash `cd`; it is not
-    awaited.
-  - A Codex or Hermes session that moves into another checkout of a skilletor
-    project between turns now gets that checkout synced by the prompt hook
-    (`user-prompt-submit --harness codex|hermes`), with one line naming the
-    directory, joined with any pending report. The hook compares the prompt's
-    cwd with the session's last one (`session-cwd.json` in the state dir,
-    written at SessionStart) and only a change runs the sync. The Codex
-    UserPromptSubmit timeout is 30 s and the Hermes plugin's prompt timeout
-    25 s, for the 20 s write deadline. The Perl port has no hooks and does not
-    take part.
-  - Under Hermes, a move into another checkout whose sync installs or updates
-    a skill Hermes loads now names the trust step: the line ends with
-    `— if Hermes does not trust this project yet: hermes skills trust <dir>`,
-    and the context tells the model the user can run it. A new worktree is
-    untrusted to Hermes, which hides every project skill until then. skilletor
-    still never reads or writes Hermes trust; Claude Code and Codex output is
-    unchanged.
+  - A session that moves into another checkout of a skilletor project (a
+    plain `git worktree add`, say) gets that checkout's project scope synced,
+    so the worktree completes itself: one line names the directory, and the
+    model is told what landed. In Claude Code a Bash `cd` is awaited (a
+    `PostToolUse` hook), so the next tool call finds the items; other moves
+    are seen by `CwdChanged`, which is not awaited. A Codex or Hermes session
+    moves only between turns, and the next prompt waits for the sync; the
+    Codex `UserPromptSubmit` timeout is 30 s, the Hermes plugin's per-turn
+    limit 25 s. Under Hermes, when skills landed, the line names
+    `hermes skills trust <dir>`; skilletor never reads or writes Hermes trust.
+    After updating, trust the changed hooks again in Codex `/hooks` and run
+    `hermes plugins update skilletor` for the Hermes plugin. The Perl port has
+    no hooks.
 
 0.7.0     2026-10-16 20:00:22Z
   - The plugin, package and README descriptions name Hermes Agent as the third

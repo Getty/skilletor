@@ -349,7 +349,8 @@ changed then, items 2–9 confirmed as written.
    cuts at 4,000 characters.
 6. **The per-turn hook is a process per turn** (about 0.1 s here), as under Claude Code. A
    busy gateway might want the plugin to space these calls itself.
-7. **Limits of 20 s and 5 s** (Claude Code's hook file: 30 s and 10 s).
+7. **Limits of 20 s and 25 s** (Claude Code's hook file: 30 s and 10 s); the per-turn 25 s is
+   room for a move's sync, which writes nothing after 20 s (spec §8).
 8. **A `systemMessage` without context goes to the model** (§16.4), for want of a channel to
    the user.
 9. **Notes, not warnings**, for what Hermes gets no copy of (§16.3): `skilletor sync` says
