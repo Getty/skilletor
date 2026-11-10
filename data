@@ -1,0 +1,100 @@
+---
+class: standard
+completed: 2026-11-10T19:00:28Z
+created: 2026-11-10T17:12:44Z
+depends_on:
+- 147
+id: 149
+priority: high
+started: 2026-11-10T19:00:28Z
+status: done
+tags:
+- hooks
+- worktree
+- codex
+- hermes
+title: 'Codex and Hermes: sync the checkout a session works in, like k147'
+updated: 2026-11-10T19:00:42Z
+---
+
+The guarantee of k147 for the other two harnesses: wherever a Codex or Hermes session works in a skilletor project, that checkout has its declared items, with no `skilletor sync` by hand. Neither has a `CwdChanged` event, so each needs its own place to notice the move.
+
+## Codex (codex-cli 0.153.4 on reuben)
+
+Hook events in the binary: SessionStart, SessionEnd, UserPromptSubmit, PreToolUse, PostToolUse, PermissionRequest, PreCompact, PostCompact, SubagentStart, SubagentStop, TurnStart, Stop. skilletor's `hooks/codex-hooks.json` uses SessionStart and UserPromptSubmit.
+
+Establish first, by measurement: can a Codex session or one of its subagents end up working in another checkout than the one SessionStart synced? Candidates: the exec tools' per-call `workdir` (the session cwd itself seems fixed), a persistent shell (`write_stdin`) after `cd`, SubagentStart's input `cwd`, briefing's Codex resolution (`codex_layers(cwd)` in `briefing-preload`). If yes: hook the event that sees it (SubagentStart, PreToolUse/PostToolUse, TurnStart) and bring that checkout up to date as k147 does. If no: the docs say why Codex needs nothing beyond SessionStart, with the measurement on this card.
+
+## Hermes Agent
+
+Hermes keeps a working directory per session (`tools/terminal_tool.py`: `record_session_cwd` / `get_session_cwd`), so a `cd` moves the session like in Claude Code. Plugin hooks include `pre_tool_call`, `post_tool_call`, `pre_llm_call`, `subagent_start`, `on_session_start` (`hermes_cli/plugins.py` `VALID_HOOKS`). The adapter `hermes/skilletor/__init__.py` registers `on_session_start` and `pre_llm_call` and takes the project from `agent.runtime_cwd.resolve_agent_cwd()`.
+
+Establish whether that cwd follows a `cd` in the terminal tool and when Hermes resolves project skills (`.hermes/skills/`). Then: on a move into another checkout of a skilletor project (noticed in `post_tool_call` of the terminal tool, or at the latest in the next `pre_llm_call`), bring it up to date and report the line as k147 does. Test Hermes: `~/dev/hermes-citiai/.dev/` (venv, hermes-agent checkout from 2026-10-03 — compare with current upstream before relying on an API). Always set `HERMES_HOME` to a temp dir; enable plugins via `plugins.enabled` in its `config.yaml`, never `hermes plugins enable` in a throwaway home (pulls 500 MB into `$HERMES_HOME/cache/uv`).
+
+## Done when
+
+- Both harnesses keep the guarantee, or the docs say with evidence why one needs nothing.
+- Tests for each new hook path, same cases as k147 (moved into a checkout without lock → synced; same checkout → no sync; no project → no-op; untrusted → warning).
+- Spec sections (Codex §14, Hermes §16), `README.md` and `skills/skilletor` references (`codex.md`, `hermes.md`) updated; Perl port changed or divergence noted here.
+- `npm run typecheck && npm test && npm run build && npm run check-dist` green, `dist/` rebuilt in the same commit.
+
+Measured 2026-11-10 (skilletor-worker, read-only). Stub model servers only, no credentials, temp HOME/CODEX_HOME/HERMES_HOME. Codex 0.153.4; Hermes test checkout ea81748 (the APIs used here diffed against upstream 3d4dd108: unchanged).
+
+Card drift:
+- Codex 0.153.4 has no TurnStart hook; its 12 events include `Interrupt` instead.
+- Every Codex hook is awaited and every hook input carries `cwd`.
+- "a cd moves the session like in Claude Code" is false for Codex and for the Hermes CLI (below).
+
+**Codex**
+- C1 (`codex exec`): neither a per-call `workdir` nor a `cd` in a persistent shell (`write_stdin`, no hook fires) moves the hook `cwd`.
+  - A subagent inherits the parent cwd: `spawn_agent` has no cwd parameter.
+  - SubagentStart is awaited before the child's first request; two SubagentStart hooks run in parallel.
+  - A subagent turn fires its own UserPromptSubmit with the parent session id.
+- C2 (app-server `turn/start` with a new `cwd`): no SessionStart fires; UserPromptSubmit is the first hook carrying the new cwd.
+  - It is awaited: the model request came 136 ms after it ended, before any tool call or spawn. The session id is unchanged.
+  - A skill written during that hook is on disk in time for SubagentStart, where briefing reads it.
+  - Codex itself lists that skill only from the next session (spec §14.4 already says so; C4 measured it).
+- C3 (TUI `/cd`): forks a new session, and SessionStart (`source: startup`) fires with the new cwd before the next UserPromptSubmit. The existing Codex SessionStart hook already covers `/cd`.
+- So a Codex session moves only between turns.
+  - Hook path: UserPromptSubmit (`--harness codex`) calls `syncMovedCheckout` with the input cwd.
+  - Timeout gap: `hooks/codex-hooks.json` gives that hook 10 s; the core needs 30 s for its 20 s deadline, as at SessionStart.
+
+**Hermes**
+- H1 (CLI, terminal `cd`): moves only the terminal.
+  - `resolve_agent_cwd()` and the skill lookup stay in main; `post_tool_call` sees no move.
+- H2 (move between turns, as `/worktree new` does): the next `pre_llm_call` sees the new cwd (`resolve_agent_cwd` = wt) before the model call, and it is awaited.
+  - An untrusted worktree hides all project skills, main's included. Trust takes effect live.
+  - The system-prompt skill index stays as it was at session start.
+- H3 (tui_gateway): at turn end the gateway re-anchors the session into the sibling worktree.
+  - The next `pre_llm_call` is the first hook to see it: `resolve_agent_cwd` = wt, while the process cwd and TERMINAL_CWD are unchanged.
+- Hook path: `pre_llm_call`, which the adapter already maps to `user-prompt-submit --harness hermes` with `resolve_agent_cwd()`.
+  - Timeout gap: its `PROMPT_S = 5` (`hermes/skilletor/__init__.py:54`) is below the core's 20 s deadline, and Hermes abandons a hook at 30 s (`hook_callback_timeout`).
+
+Settled by the card or spec:
+- Timeout budget: "as k147 does", up to 30 s. A move into an out-of-date checkout holds that prompt the way a session start does.
+- "Works in": the harness' session cwd, where its skill lookup and briefing resolve, not each command's directory.
+
+Maintainer-only, filed separately (they do not block this card):
+- k152: Hermes trust hint.
+- k153: Hermes `.worktreeinclude` reader.
+
+Perl: no hooks, so the divergence stays as noted on k147.
+
+Next: skilletor-worker implements both paths on branch worktree-k146-k147-cwd-changed, on top of 44a9a49 (the shared core).
+
+2026-11-10 18:32 Choice (skilletor-worker, mine, not the maintainer's): option (b), the last cwd per session id in state, written at SessionStart and passed to the core as oldCwd. Measured in-process (node 24, temp HOME/CODEX_HOME, Codex-only markers, a checkout with 10 synced local skills, n=50 after 5 warm-ups; host load ~5.9 on 8 cores, so minimums count): today's user-prompt-submit --harness codex, not due: min 10.5 / median 16.8 ms (almost all its one git rev-parse: min 11.0 / median 16.1 ms). (a) syncMovedCheckout without oldCwd, lock matches: min 31.4 / median 46.5 / p90 69.5 ms added to every prompt (its own rev-parse + check(local): config load, scopeDrift, the project's git remote for the render inputs). (b) one state JSON read: min 0.10 / median 0.13 ms. Why (b), beyond the ~3x: (a) is not cheap in every same-checkout case. A checkout whose drift a sync cannot close (a source offline: engine.ts check counts drift as unreached only when its sources were at hand) stays changed, so (a) would sync, and wait on the fetch, on every prompt, up to 5 s per source. A source awaiting trust would repeat its warning on every prompt. (b) looks only when the session's cwd differs from its last one. Without a record (a session from before this build, a lost record), the first prompt runs the core without oldCwd once: the local check, ~31 ms.
+
+2026-11-10 18:42 Progress (skilletor-worker): implemented, uncommitted. src/hooks.ts: user-prompt-submit under --harness codex|hermes first calls the move core, awaited (promptMove), before the interval logic. State session-cwd.json {sessionId: {cwd, at}}, newest 256 kept: SessionStart (codex/hermes) records input.cwd. A prompt with the same cwd asks nothing. Another cwd goes to the core with oldCwd = the record (the core tells a move within a checkout apart), then the record follows. syncMovedCheckout now wraps moveCheckout, which also returns the checkout when the move answered for it (synced, or trust/warning/error to report). That checkout is marked checked, so the interval check spawns no second sync beside the move. A lock that already matches marks nothing (background as before). A sync-lock timeout marks nothing (k89). A pending report and the move's answer join: both lines; both in the context, a line standing in for a missing context. Claude Code's prompt hook is unchanged (no record, no move; tested as a control). hooks/codex-hooks.json UserPromptSubmit 10 -> 30 s, and test/manifest.test.ts names that difference from hooks.json. Hermes adapter: PROMPT_S 5 -> 25 (the core writes nothing after 20 s; Hermes abandons at 30 s and suppresses for 60 s), and the docstring updated. No other fast-return assumption: _lock is never held across the child; one pre_llm_call runs either session-start or user-prompt-submit, never both; on_session_start fires in the first turn's prompt build (agent/conversation_loop.py:862), so the fresh path cannot miss a move. Tests: test/prompt-move.test.ts (5 cases x codex/hermes + record pruning), a CLI case in test/cli.test.ts (codex), test/hermes-plugin.test.ts (a cwd moved between turns; PROMPT_S above MOVE_DEADLINE_MS), test/hermes-real.test.ts (real Hermes: TERMINAL_CWD moved as cli.py /worktree new does -> the next pre_llm_call syncs the worktree). Mutation-checked: dropping the move path, the check mark, the oldCwd, the merge or the SessionStart record each fails its test (the real-Hermes case too, with the move path dropped).
+
+Open items for the dispatcher (k149 worker):
+1. DRIFT, skilletor board: test/hermes-real.test.ts env() passes every variable except HERMES_/CLAUDE_/CLAUDECODE/CODEX_/SKILLETOR_/AI_AGENT into the Hermes processes it spawns, so developer API keys (OPENAI_API_KEY, HF_TOKEN, ...) reach them. npm test runs it whenever the default HERMES_PYTHON exists. Suggest an allowlist. I ran npm test with those keys unset (env -u ...), HOME untouched.
+2. DRIFT, skilletor board: after a Codex move, the moved-into checkout's project rules file (.codex/skilletor-rules.md) is not injected. Only SessionStart injects rules; the prompt-move context names the checkout but carries no rules.
+3. Minor, by design: markChecked(root) after a project-only move sync also resets that key's interval, so its next user-scope interval check comes one interval later.
+4. GUARD REFUSAL: the worktree guard refused a hermes-real run that set HOME (env -i PATH=... HOME=/home/getty ...): 'this command sets HOME, injecting git configuration whose effect on where git writes can't be verified. Refusing to run it'. Not retried; used the env -u form instead.
+5. k152 hook point (not built): movedOutput's fixes line needs the harness passed in to name 'hermes skills trust <dir>'; moveCheckout has ctx.harness.
+6. LANE, skill-author: review my factual edits to skills/skilletor/references/{sync,codex,hermes}.md. Optional: .claude/skills/skilletor-core/references/hand-tests.md has no drive line for the Codex/Hermes prompt move (UserPromptSubmit with session_id and cwd, --harness codex).
+7. Perl: path not ported, listed under Known gaps in docs/perl.md; perl/ and conformance/ untouched, Perl suite not run.
+
+Ready for review (uncommitted in worktree k146-k147-cwd-changed). Choice (b): a per-session cwd record session-cwd.json, written at SessionStart and on each move; user-prompt-submit under --harness codex|hermes compares it with the prompt's cwd (0.13 ms median) and only on a change runs the k147 core awaited (20 s write deadline), joining its line/context with any pending report. Codex UserPromptSubmit timeout 10 -> 30 s; Hermes plugin PROMPT_S 25 s. Claude Code's user-prompt-submit unchanged. Verified: npm run typecheck exit 0; npm test (credentials unset) tests 1110, pass 1109, fail 0, skipped 1 (hermes-real 'hermes plugins install' case, gated on SKILLETOR_HERMES_INSTALL=1); new k149 cases incl. real-Hermes /worktree-new move pass; npm run build + check-dist up to date. No ~/.hermes, no .tmp-hermes left. Mutation checks (move path, markChecked, oldCwd, merge, SessionStart record) each turn a test red. Perl suite not run (perl/, conformance/ untouched). Open items in the previous note.
+
+Committed as 1521f76 on branch worktree-k146-k147-cwd-changed.
