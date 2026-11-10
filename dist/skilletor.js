@@ -11680,7 +11680,9 @@ async function moveCheckout(move, ctx) {
     }
     const report = await sync(moved, { scope: "project", ifChanged: true });
     if (!report.error && report.scopes.length === 0) return { out: {} };
-    return answered(report.error ? cannotSync(root, report.error) : movedOutput(report, root, move.eventName));
+    if (report.error) return answered(cannotSync(root, report.error));
+    const out = movedOutput(report, root, move.eventName);
+    return answered(ctx.harness === "hermes" && report.scopes.some(addsHermesSkill) ? withHermesTrust(out, root) : out);
   } catch (err) {
     const out = cannotSync(root, err.message);
     return err instanceof SyncLockTimeoutError ? { out } : answered(out);
@@ -11702,6 +11704,26 @@ function movedOutput(report, dir, eventName) {
   const context = out.hookSpecificOutput?.additionalContext;
   if (context) result.hookSpecificOutput = { hookEventName: eventName, additionalContext: `${displaySafe(`skilletor: in ${dir}:`)}
 ${context}` };
+  return result;
+}
+function addsHermesSkill(s) {
+  return [...s.added, ...s.updated].some((it) => {
+    const { harness, type } = parseLockKey(it.key);
+    return type === "skill" && (harness === "hermes" || harness === "codex");
+  });
+}
+function withHermesTrust(out, dir) {
+  const command = `hermes skills trust ${dir}`;
+  const result = {
+    ...out,
+    systemMessage: displaySafe(`${out.systemMessage} \u2014 if Hermes does not trust this project yet: ${command}`)
+  };
+  const context = out.hookSpecificOutput?.additionalContext;
+  if (context) {
+    const line = `- Hermes loads project skills only from a project it trusts; if this one is not yet, the user can run: ${command}`;
+    result.hookSpecificOutput = { ...out.hookSpecificOutput, additionalContext: `${context}
+${displaySafe(line)}` };
+  }
   return result;
 }
 var text = (v) => typeof v === "string" && v !== "" ? v : void 0;

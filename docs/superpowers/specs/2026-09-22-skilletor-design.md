@@ -1250,7 +1250,14 @@ wait for that source on every prompt. A move that answered for its checkout – 
 what is left to do there – marks it checked (§6.5), so the interval check starts no second sync of
 it beside this one; one whose lock already matches leaves the interval check as it was. The move's
 answer and a pending report come as one: both lines, and both in the context – Codex and the
-Hermes plugin hand the model the context, its first line naming the checkout. The hook's limit is
+Hermes plugin hand the model the context, its first line naming the checkout. Under Hermes
+(k152) a move that added or updated a skill Hermes loads – its own copy, or the Codex copy in
+`.agents/skills` – ends its line with `— if Hermes does not trust this project yet: hermes
+skills trust <dir>` and its context with that command as the user's to run: Hermes loads
+project skills only from a root `hermes skills trust` named exactly, so a new worktree starts
+untrusted and hides every project skill, the first checkout's too. skilletor does not read the
+trust list (§16.5), so the hint is an "if"; no other answer carries it – a trust request, an
+error and a removal put nothing there for Hermes to hide. The hook's limit is
 30 s, as at `SessionStart`: `hooks/codex-hooks.json` gives `UserPromptSubmit` 30 s, the Hermes
 plugin 25 s (Hermes abandons a callback at 30 s), so the 20 s deadline keeps every kill out of a
 write. Claude Code's `UserPromptSubmit` notices no move: `CwdChanged` and `PostToolUse` do.

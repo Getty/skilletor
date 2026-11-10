@@ -278,8 +278,8 @@ out["listing"] = listing()
 // TERMINAL_CWD (cli.py), which resolve_agent_cwd reads. Asserts: in one Hermes process, a session
 // started in the project, then moved that way into a plain `git worktree add` of it (the config,
 // no lock), gets the worktree's project skill installed by the next turn's pre_llm_call, before
-// it returns – whose context, what Hermes appends to the user message, names the worktree – and
-// the turn after that says nothing.
+// it returns – whose context, what Hermes appends to the user message, names the worktree and
+// ends with the `hermes skills trust` it may need (k152) – and the turn after that says nothing.
 test("a move between turns, the way `/worktree new` makes one: the next turn syncs the worktree first", { skip }, () => {
   const m = machine();
   m.installPlugin("link");
@@ -305,6 +305,7 @@ out["again"] = turn(first=False)
   assert.equal(out.moved.length, 1);
   assert.match(out.moved[0].context,
     new RegExp(`^skilletor: in ${wt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\nskilletor synced items:\n- skill sk-proj@mine \\(hermes\\): active from the next Hermes session(\n|$)`));
+  assert.ok(out.moved[0].context.endsWith(`\n- Hermes loads project skills only from a project it trusts; if this one is not yet, the user can run: hermes skills trust ${wt}`));
   assert.deepEqual(out.again, []);
   assert.equal(readFileSync(at, "utf8"), SKILL("sk-proj"));
 });

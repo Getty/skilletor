@@ -21,6 +21,15 @@ const SKILL = (name: string) => `---\nname: ${name}\ndescription: ${name}\n---\n
 const HARNESSES = ["codex", "hermes"] as const;
 type Harness = (typeof HARNESSES)[number];
 const ACTIVE = { codex: "active from the next Codex session", hermes: "active from the next Hermes session" };
+/** k152: what a Hermes move that put a skill into a checkout adds – to its line, and as the
+ *  context's last line; nothing under Codex. */
+const trustLine = (harness: Harness, dir: string) =>
+  harness === "hermes" ? ` — if Hermes does not trust this project yet: hermes skills trust ${dir}` : "";
+const trustContext = (harness: Harness, dir: string) =>
+  harness === "hermes"
+    ? [`- Hermes loads project skills only from a project it trusts; if this one is not yet, the user can run: hermes skills trust ${dir}`]
+    : [];
+const escaped = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 function env(harness: Harness) {
   const tmp = makeTmpDir();
@@ -90,7 +99,8 @@ for (const harness of HARNESSES) {
   // Asserts: SessionStart records where the session's hook looked; a prompt whose cwd is a
   // worktree with the config but no lock syncs it before it returns – the item lands there,
   // with its own lock – and answers with the one line naming the worktree and a context for
-  // the model whose first line names it too. The session's first checkout is left as it was.
+  // the model whose first line names it too – under Hermes both also name the `hermes skills
+  // trust` that may be needed there (k152). The session's first checkout is left as it was.
   // A session without a record (one from before this build) looks once: the lock matches now.
   // Control: Claude Code's prompt hook is unchanged – it notices no move (CwdChanged does).
   test(`k149 ${harness}: a prompt in a worktree without a lock syncs it first; line and context name it`, async () => {
@@ -105,10 +115,13 @@ for (const harness of HARNESSES) {
 
       const out = await e.prompt(wt);
       assert.deepEqual(out, {
-        systemMessage: `skilletor: 1 item(s) updated in ${wt}`,
+        systemMessage: `skilletor: 1 item(s) updated in ${wt}${trustLine(harness, wt)}`,
         hookSpecificOutput: {
           hookEventName: "UserPromptSubmit",
-          additionalContext: `skilletor: in ${wt}:\nskilletor synced items:\n- skill foo@mine (${harness}): ${ACTIVE[harness]}`,
+          additionalContext: [
+            `skilletor: in ${wt}:`, "skilletor synced items:", `- skill foo@mine (${harness}): ${ACTIVE[harness]}`,
+            ...trustContext(harness, wt),
+          ].join("\n"),
         },
       });
       assert.equal(readFileSync(e.skillAt(wt, "foo"), "utf8"), SKILL("foo"));
@@ -174,8 +187,9 @@ for (const harness of HARNESSES) {
 
   // Asserts: a checkout whose project config declares its own source – untrusted – gets the one
   // line naming the checkout and the `skilletor trust` to run there, and the context; nothing is
-  // fetched (no cache dir) or installed; the next prompt there does not say it again, and no
-  // background sync starts to say it either. Once trusted, the next move into it installs.
+  // fetched (no cache dir) or installed – so no Hermes trust hint either (k152); the next prompt
+  // there does not say it again, and no background sync starts to say it either. Once trusted,
+  // the next move into it installs.
   test(`k149 ${harness}: a prompt in a checkout with an untrusted source warns once, fetches nothing`, async () => {
     const e = env(harness);
     try {
@@ -209,7 +223,7 @@ for (const harness of HARNESSES) {
       new State(e.ctx.stateRoot).trust("team", { kind: "git", address: url });
       assert.deepEqual(await e.prompt(e.main), {});
       const trusted = await e.prompt(other);
-      assert.match(trusted.systemMessage ?? "", new RegExp(`^skilletor: 1 item\\(s\\) updated, .* in ${other.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+      assert.match(trusted.systemMessage ?? "", new RegExp(`^skilletor: 1 item\\(s\\) updated, .* in ${escaped(other + trustLine(harness, other))}$`));
       assert.equal(readFileSync(e.skillAt(other, "foo"), "utf8"), SKILL("foo"));
     } finally {
       e.cleanup();
@@ -233,12 +247,13 @@ for (const harness of HARNESSES) {
       const out = await e.prompt(wt);
       assert.deepEqual(e.background, []);
       assert.equal(state.isDue(wt, 600), false);
-      assert.equal(out.systemMessage, `skilletor: cannot reach source x; skilletor: 1 item(s) updated in ${wt}`);
+      assert.equal(out.systemMessage, `skilletor: cannot reach source x; skilletor: 1 item(s) updated in ${wt}${trustLine(harness, wt)}`);
       assert.deepEqual(out.hookSpecificOutput?.additionalContext?.split("\n"), [
         "skilletor: cannot reach source x",
         `skilletor: in ${wt}:`,
         "skilletor synced items:",
         `- skill foo@mine (${harness}): ${ACTIVE[harness]}`,
+        ...trustContext(harness, wt),
       ]);
       assert.equal(state.takePendingReport(wt), undefined);
 
@@ -253,6 +268,92 @@ for (const harness of HARNESSES) {
     }
   });
 }
+
+// Asserts (k152): under Hermes the trust hint comes with a move that added or updated a skill
+// Hermes loads from that checkout – its own copy, or the Codex copy in `.agents/skills` it reads
+// instead while `codex` is a target too – and with nothing else: a move that installed only a
+// Claude Code agent (Hermes gets none) or only removed a skill syncs and says so, without it.
+test("k152 hermes: the trust hint comes with a skill Hermes loads, not with an agent or a removal", async () => {
+  const e = env("hermes");
+  try {
+    const src = join(e.dir, "src");
+    mkdirSync(join(src, "skills", "foo"), { recursive: true });
+    mkdirSync(join(src, "agents"), { recursive: true });
+    writeFileSync(join(src, "skills", "foo", "SKILL.md"), SKILL("foo"));
+    writeFileSync(join(src, "agents", "bar.md"), "---\ndescription: bar\n---\nBODY\n");
+    const sources = { mine: { local: src } };
+    const checkout = (name: string, install: Record<string, string[]>) => {
+      const dir = join(e.dir, name);
+      e.writeJson(join(dir, ".claude", "skilletor.json"), { install });
+      git(dir, "init", "-q", "-b", "main");
+      return dir;
+    };
+    new State(e.ctx.stateRoot).putSessionCwd("s1", e.main);
+
+    e.userCfg({ targets: ["codex", "hermes"], sources });
+    const viaCodex = checkout("via-codex", { skills: ["foo@mine"] });
+    const codexCopy = await e.prompt(viaCodex);
+    assert.equal(existsSync(join(viaCodex, ".agents", "skills", "foo", "SKILL.md")), true);
+    assert.equal(existsSync(join(viaCodex, ".hermes")), false);
+    assert.equal(
+      codexCopy.systemMessage,
+      `skilletor: 1 item(s) updated, .claude/.gitignore, .worktreeinclude updated — commit them in ${viaCodex}${trustLine("hermes", viaCodex)}`,
+    );
+    assert.deepEqual(codexCopy.hookSpecificOutput?.additionalContext?.split("\n"), [
+      `skilletor: in ${viaCodex}:`,
+      "skilletor synced items:",
+      `- skill foo@mine (codex): ${ACTIVE.codex}`,
+      "- .claude/.gitignore updated — commit it",
+      "- .worktreeinclude updated — commit it",
+      ...trustContext("hermes", viaCodex),
+    ]);
+
+    e.userCfg({ targets: ["claude", "hermes"], sources });
+    const agentOnly = checkout("agent-only", { agents: ["bar@mine"] });
+    const agent = await e.prompt(agentOnly);
+    assert.equal(existsSync(join(agentOnly, ".claude", "agents", ".local.bar.md")), true);
+    assert.match(agent.systemMessage ?? "", /^skilletor: 1 item\(s\) updated\b/);
+    assert.doesNotMatch(JSON.stringify(agent), /hermes skills trust/);
+
+    e.userCfg({ targets: ["hermes"], sources });
+    const removal = checkout("removal", { skills: ["foo@mine"] });
+    assert.match((await e.prompt(removal)).systemMessage ?? "", /hermes skills trust/);
+    e.writeJson(join(removal, ".claude", "skilletor.json"), { install: {} });
+    assert.deepEqual(await e.prompt(e.main), {});
+    assert.deepEqual(await e.prompt(removal), { systemMessage: `skilletor: 1 removed in ${removal}` });
+    assert.equal(existsSync(e.skillAt(removal, "foo")), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+// Asserts (k152): the hint follows the harness whose hook runs, not the targets – with `hermes`
+// the only target, Claude Code's move hooks sync the Hermes copy into a worktree and answer as
+// before, without it: PostToolUse with line and context, CwdChanged with the line alone.
+test("k152: Claude Code's move hooks name no Hermes trust, even with Hermes a target", async () => {
+  const e = env("hermes");
+  try {
+    const wt = await mainWithWorktree(e);
+    const claude: HookContext = { ...e.ctx, harness: undefined };
+    const bash = { cwd: wt, session_id: "s1", hook_event_name: "PostToolUse", tool_name: "Bash" };
+    assert.deepEqual(await runHook("post-tool-use", bash, claude), {
+      systemMessage: `skilletor: 1 item(s) updated in ${wt}`,
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        additionalContext: `skilletor: in ${wt}:\nskilletor synced items:\n- skill foo@mine (hermes): ${ACTIVE.hermes}`,
+      },
+    });
+    assert.equal(readFileSync(e.skillAt(wt, "foo"), "utf8"), SKILL("foo"));
+
+    const wt2 = join(e.main, ".claude", "worktrees", "second");
+    git(e.main, "worktree", "add", "-q", "-b", "second", wt2);
+    const moved = { cwd: wt, old_cwd: wt, new_cwd: wt2, hook_event_name: "CwdChanged" };
+    assert.deepEqual(await runHook("cwd-changed", moved, claude), { systemMessage: `skilletor: 1 item(s) updated in ${wt2}` });
+    assert.equal(readFileSync(e.skillAt(wt2, "foo"), "utf8"), SKILL("foo"));
+  } finally {
+    e.cleanup();
+  }
+});
 
 // Asserts: the record keeps the 256 sessions written last – the one just written always among
 // them – and is not rewritten for a cwd it already holds.

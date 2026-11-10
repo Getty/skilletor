@@ -31,7 +31,9 @@ with that Hermes' home as `HERMES_HOME`.
   worktree; not a terminal `cd`) has that checkout synced on its next turn, before the model
   is called. `skills_list` finds the new skills at once, the system prompt's skill index
   only from the next session — and an untrusted worktree hides every project skill, the
-  first checkout's too, until `hermes skills trust <dir>` (takes effect at once).
+  first checkout's too, until `hermes skills trust <dir>` (takes effect at once). When the
+  sync adds or updates a skill, that turn's context names this command for the user to run,
+  even when the checkout is trusted already: skilletor does not read Hermes' trust list.
 
 ## The Hermes home
 

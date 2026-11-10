@@ -30,7 +30,8 @@ import { samePath } from "./fsutil.ts";
 import {
   check, codexRulesFiles, hermesOptInHint, projectDirOf, sync, type CheckReport, type EngineContext,
 } from "./engine.ts";
-import { displaySafe, emptyScopeReport, reportHook, type SyncReport } from "./report.ts";
+import { displaySafe, emptyScopeReport, reportHook, type ScopeReport, type SyncReport } from "./report.ts";
+import { parseLockKey } from "./targets.ts";
 
 export interface HookInput {
   cwd?: string;
@@ -254,7 +255,8 @@ export interface CheckoutMove {
  * no network). Otherwise its project scope syncs as at SessionStart – 5 s per source, the same
  * trust rules, nothing written once `MOVE_DEADLINE_MS` has passed – unless, once the sync lock is
  * held, its lock matches after all: another run synced it meanwhile. One line names the
- * checkout and, when something is left to do, the command to run there. Never throws.
+ * checkout and, when something is left to do, the command to run there – under Hermes, once
+ * skills landed, also `hermes skills trust` as one that may be needed (k152). Never throws.
  */
 export async function syncMovedCheckout(move: CheckoutMove, ctx: HookContext): Promise<HookOutput> {
   return (await moveCheckout(move, ctx)).out;
@@ -292,7 +294,9 @@ async function moveCheckout(move: CheckoutMove, ctx: HookContext): Promise<MoveR
     // same `cd`, say – synced the checkout meanwhile, and its answer was that run's to give.
     const report = await sync(moved, { scope: "project", ifChanged: true });
     if (!report.error && report.scopes.length === 0) return { out: {} };
-    return answered(report.error ? cannotSync(root, report.error) : movedOutput(report, root, move.eventName));
+    if (report.error) return answered(cannotSync(root, report.error));
+    const out = movedOutput(report, root, move.eventName);
+    return answered(ctx.harness === "hermes" && report.scopes.some(addsHermesSkill) ? withHermesTrust(out, root) : out);
   } catch (err) {
     // Timed out on the sync lock: another run holds it – a background sync of this very
     // checkout, maybe – and synced nothing here, so the interval check is left to retry (k89).
@@ -320,6 +324,33 @@ function movedOutput(report: SyncReport, dir: string, eventName: string): HookOu
   };
   const context = out.hookSpecificOutput?.additionalContext;
   if (context) result.hookSpecificOutput = { hookEventName: eventName, additionalContext: `${displaySafe(`skilletor: in ${dir}:`)}\n${context}` };
+  return result;
+}
+
+/** Did a scope's sync add or update a skill Hermes loads from the project – its own copy, or the
+ *  Codex copy in `.agents/skills` it reads instead (spec §16.2)? */
+function addsHermesSkill(s: ScopeReport): boolean {
+  return [...s.added, ...s.updated].some((it) => {
+    const { harness, type } = parseLockKey(it.key);
+    return type === "skill" && (harness === "hermes" || harness === "codex");
+  });
+}
+
+/** A Hermes move that put skills into a checkout (k152): Hermes loads a project's skills only once
+ *  `hermes skills trust` named its root, and skilletor does not read that list (spec §16.5) – so
+ *  the line and the context name the command as one that may be needed, the context as the
+ *  user's to run. */
+function withHermesTrust(out: HookOutput, dir: string): HookOutput {
+  const command = `hermes skills trust ${dir}`;
+  const result: HookOutput = {
+    ...out,
+    systemMessage: displaySafe(`${out.systemMessage} — if Hermes does not trust this project yet: ${command}`),
+  };
+  const context = out.hookSpecificOutput?.additionalContext;
+  if (context) {
+    const line = `- Hermes loads project skills only from a project it trusts; if this one is not yet, the user can run: ${command}`;
+    result.hookSpecificOutput = { ...out.hookSpecificOutput!, additionalContext: `${context}\n${displaySafe(line)}` };
+  }
   return result;
 }
 

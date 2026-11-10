@@ -60,6 +60,13 @@ Revision history for skilletor
     UserPromptSubmit timeout is 30 s and the Hermes plugin's prompt timeout
     25 s, for the 20 s write deadline. The Perl port has no hooks and does not
     take part.
+  - Under Hermes, a move into another checkout whose sync installs or updates
+    a skill Hermes loads now names the trust step: the line ends with
+    `— if Hermes does not trust this project yet: hermes skills trust <dir>`,
+    and the context tells the model the user can run it. A new worktree is
+    untrusted to Hermes, which hides every project skill until then. skilletor
+    still never reads or writes Hermes trust; Claude Code and Codex output is
+    unchanged.
 
 0.7.0     2026-10-16 20:00:22Z
   - The plugin, package and README descriptions name Hermes Agent as the third

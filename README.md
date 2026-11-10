@@ -900,7 +900,9 @@ hooks as under Claude Code — a sync when a session starts, the throttled check
 later turn — and gives the report to the model with the turn (Hermes appends it to the
 user message). Hermes has no `CwdChanged`; a terminal `cd` does not move the session, but
 `/worktree new` and a gateway's re-anchor do, between turns, and the next turn syncs the
-checkout the session moved into before the model is called. Install it with Hermes:
+checkout the session moved into before the model is called. A new worktree is a project Hermes
+does not trust yet, so when skills landed there the report names `hermes skills trust <dir>` as
+possibly needed. Install it with Hermes:
 
 ```bash
 hermes plugins install Getty/skilletor/hermes/skilletor --enable

@@ -178,7 +178,9 @@ directory, and it is awaited before the model call. The plugin sends each turn's
 turn as a session start holds the first, and its answer – its first line naming the checkout –
 is the turn's context. Hermes resolves project skills live, so the next skill lookup finds them;
 the system prompt's skill index stays as it was at session start. An untrusted worktree hides
-every project skill, the session's first checkout's too; trust takes effect live.
+every project skill, the session's first checkout's too; trust takes effect live. A move that
+put skills there names `hermes skills trust <dir>` in its answer, as what may be needed (spec
+§8, k152).
 
 **Which CLI.** In order: `$SKILLETOR_BIN`; `bin/skilletor` of the checkout the plugin
 directory is a symlink into; `skilletor` on `PATH`. None found: the plugin does nothing.
