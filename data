@@ -1,0 +1,44 @@
+---
+class: standard
+completed: 2026-11-10T17:08:33Z
+created: 2026-11-10T03:00:47Z
+id: 146
+priority: high
+started: 2026-11-10T17:08:33Z
+status: done
+tags:
+- ci
+title: 'CI red on main: dist/skilletor.js is out of date'
+updated: 2026-11-10T17:08:55Z
+---
+
+The `CI` workflow on `main` is red at 09b6642 (2026-11-03) on ubuntu and macOS, step `npm run check-dist`. Run: `gh run view 41722526613 -R Getty/skilletor --log-failed`.
+
+    check-dist: dist/skilletor.js is out of date. Run `npm run build` and commit the result.
+
+The unit tests themselves pass; the committed bundle does not match the sources.
+
+## Steps
+
+1. `npm ci && npm run build`, then `npm run check-dist` and `npm test`.
+2. Commit the rebuilt `dist/skilletor.js`.
+
+## Proof
+
+`npm run check-dist` passes locally and the next `CI` run on `main` is green.
+
+Worked on branch worktree-k146-k147-cwd-changed (worktree .claude/worktrees/k146-k147-cwd-changed, based on local main 09b6642). Delegated to skilletor-worker.
+
+Root cause: not 09b6642 (it touches no src/ and nothing it changed is bundled) and not a tool version (esbuild 0.28.2 everywhere). The committed bundle is byte-identical to a fresh build except for the 24 module path comments and the 24 matching __commonJS keys: committed `../../../node_modules/nunjucks/...` (and asap, a-sync-waterfall), fresh `node_modules/...`. The deep prefix first shows up in f9f2139 (k144) and carried on through 73f0f26 (k142) and 7e71bb1 (k145). d8e970b and older are clean. Those three were built in a .claude/worktrees/<name> checkout without its own npm ci. Node resolution walked up to the main checkout's node_modules, and esbuild writes module paths relative to the cwd. In that same worktree check-dist resolves the same way, so it passed locally. I reproduced that: with node_modules moved aside, check-dist on the HEAD bundle printed 'up to date'. CI builds at the repo root with its own node_modules and gets the plain paths, so check-dist fails there.
+
+Changed: dist/skilletor.js only, rebuilt after npm ci in this worktree (48+/48-, all path-prefix lines). After normalising the prefix, sed s#../../../node_modules/#node_modules/# on HEAD's bundle is cmp-identical to the rebuild.
+
+Verified in the worktree after npm ci: npm run typecheck exit 0. npm test exit 0: 1087 tests, 1086 pass, 0 fail, 1 skipped (hermes plugins install <git URL>, gated by SKILLETOR_HERMES_INSTALL=1). npm run build exit 0. npm run check-dist exit 0 'up to date'.
+
+k147 and any later worktree: run npm ci in the worktree before npm run build, or the same path drift comes back and local check-dist will not catch it.
+
+Drift for the dispatcher to file on the skilletor board, out of k146 scope: scripts/esbuild.config.mjs could refuse to build when nunjucks/esbuild resolve outside the repo's own node_modules, with an error like 'run npm ci in this checkout'. That would make build and check-dist fail locally, the same way CI does, instead of passing silently.
+
+Commit-ready: only dist/skilletor.js changed, rebuilt from this worktree's own node_modules. Cause: k144/k142/k145 were built in a worktree with no npm ci, which baked ../../../node_modules/ module paths into the bundle (details in the note above). typecheck, test (1086/1087, 1 skipped by env), build and check-dist are all green. Proposed subject: 'dist: rebuild from the checkout's own node_modules (k146)'.
+
+Committed as 4d4f619 on branch worktree-k146-k147-cwd-changed.
