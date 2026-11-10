@@ -1,0 +1,18 @@
+---
+class: standard
+created: 2026-11-10T18:59:23Z
+id: 156
+priority: low
+status: backlog
+tags:
+- skill
+- worktree
+title: 'Bundled skilletor skill: trigger for a worktree missing its installed items'
+updated: 2026-11-10T18:59:23Z
+---
+
+From the k149 skill review (skilletor-skill-author). The description of `skills/skilletor/SKILL.md` has no trigger for "a worktree / another checkout lacks its installed items" or "an agent spawn was denied for unknown skills after a cd". So a model in that situation may never open the move passages in `references/sync.md`, `codex.md` or `hermes.md` (k147/k149).
+
+## Done when
+
+The description triggers on that situation, which is a user-facing change to the bundled skill; skill-author lane. A fresh-agent check shows the skill fires for the p5-mcp-hub case from k147, where briefing denied a spawn in a plain `git worktree add` checkout. The description stays within the house budget.
