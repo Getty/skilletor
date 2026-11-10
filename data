@@ -1,0 +1,169 @@
+---
+class: standard
+completed: 2026-11-10T19:55:22Z
+created: 2026-11-10T16:56:44Z
+id: 147
+priority: high
+started: 2026-11-10T19:55:22Z
+status: done
+tags:
+- hooks
+- worktree
+title: Sync the checkout a session moves into (CwdChanged hook)
+updated: 2026-11-10T19:56:05Z
+---
+
+A project declares its items in `.claude/skilletor.json`; skilletor installs them wherever a session works in that project, with no `skilletor sync` by hand.
+
+## What happens today
+
+skilletor's hooks look at the session's project dir only (`CLAUDE_PROJECT_DIR`): SessionStart syncs it at start, UserPromptSubmit on its interval. A session that moves mid-session into another checkout of a skilletor project works there without that checkout's installed items (`.claude/skills/<installed>`, `.claude/rules/.local.*`, `.claude/agents/.local.*`, the lock). The usual case is a worktree made with plain `git worktree add`: git copies tracked files only, and `.worktreeinclude` applies only to worktrees Claude Code creates itself.
+
+Seen 2026-11-10 in p5-mcp-hub: the session ran `git worktree add .claude/worktrees/backlog`, then `cd` into it, and briefing denied every agent spawned there:
+
+    briefing: agent 'mcp-hub-worker' references unknown skill(s): getty-perl-core, perl-mojo, perl-mcp, docker, kanban-issues-karr-ticket, getty-perl-pod
+
+A session *started* in such a worktree is fine: its SessionStart check sees the missing lock and syncs (verified: 2 skills before, 14 skills and the lock after `skilletor hook session-start`).
+
+## The hook
+
+Claude Code 2.1.322 has the hook event `CwdChanged` ("After the working directory changes"). Its input carries `old_cwd` and `new_cwd`; its output takes `systemMessage` and `hookSpecificOutput: {hookEventName: "CwdChanged", watchPaths?}`. It fires on a plain Bash `cd` (verified with a project hook in a `claude -p` run: `cd sub` delivered `{"hook_event_name":"CwdChanged","old_cwd":"…/cwdtest","new_cwd":"…/cwdtest/sub", …}`).
+
+## Done when
+
+- `hooks/hooks.json` registers `CwdChanged` → `skilletor hook cwd-changed`.
+- On a move into a checkout (git top level of `new_cwd`) that has its own `.claude/skilletor.json`, skilletor brings that checkout's project scope up to date the way SessionStart does (same timeout, same trust rules: a move never trusts a backend) and says so in one line naming the directory, e.g. `skilletor: 17 item(s) updated in <dir>`.
+- A move within the same checkout, or into a directory without a skilletor project, stays cheap: no source round trip per `cd`. A checkout whose lock already matches its config is left alone (remote changes keep coming through the existing interval check).
+- When it cannot sync (untrusted source, offline, config error), the line says so and names the fix for that directory (`skilletor trust <name>` / `skilletor sync` in `<dir>`), like the SessionStart warning.
+- Measured and noted on this card: does Claude Code wait for the CwdChanged hook before the next tool call runs (a `cd`, then an Agent spawn in the next call)? If not, what the window is and how the design covers it.
+- Tests in `test/` for: worktree without lock → synced; same checkout → no sync; directory without skilletor project → no-op; untrusted source → warning, nothing fetched.
+- Spec (hooks section) and the user docs (`README.md`, `skills/skilletor` references) describe the event. Codex and Hermes have no such event — say so; the Perl port gets the same change or the divergence is noted here.
+- `npm run typecheck && npm test && npm run build && npm run check-dist` green, `dist/skilletor.js` rebuilt in the same commit.
+
+Worked on branch worktree-k146-k147-cwd-changed (worktree .claude/worktrees/k146-k147-cwd-changed, based on local main 09b6642), after k146. Step 1: measure whether Claude Code 2.1.322 waits for the CwdChanged hook (skilletor-worker, read-only, temp dir). Step 2: implement (skilletor-worker).
+
+Measured 2026-11-10 on Claude Code 2.1.322: 3 `claude -p --model claude-haiku-5-5 --no-session-persistence --setting-sources project --output-format stream-json --verbose --include-hook-events` runs in a temp git dir, project hooks only (CwdChanged script sleeps 8 s and logs start/end in ms; PreToolUse/PostToolUse/SubagentStart log tool, command, cwd).
+
+Result: **CwdChanged is not awaited.**
+- It fires 2–36 ms after PostToolUse:Bash, also for a compound `cd sub && pwd`, and runs in the background.
+- Run 1, sequential (`cd sub`, then an Agent call in the next message): the Agent PreToolUse came 2.4 s after the hook started, 5.6 s before it ended. SubagentStart ran in `sub`. Window = sync time minus one model turn; with Haiku that turn is about 2.4 s, and nothing bounds it from below.
+- Run 2, parallel (`cd` and the Agent call in the same message): the Agent PreToolUse/SubagentStart ran in the **old** cwd before the `cd` finished, so briefing checks the old checkout and the agent works there. No race in this case.
+- Run 3: the hook `timeout` is enforced although the hook does not block. Timeout 3 s, script sleeps 8 s → killed, no output. `hook cwd-changed` needs its own deadline below the hooks.json timeout, or a sync can be killed halfway.
+- The hook `systemMessage` reached neither the model (asked afterwards: "NONE") nor stream-json. `--include-hook-events` lists no hook_started/hook_response for CwdChanged. Not checked in the interactive TUI.
+- PreToolUse hooks block the spawn (a 3 s PreToolUse:Agent delayed SubagentStart until 93 ms after it ended), but two PreToolUse hooks on Agent start 5 ms apart, in parallel. A skilletor PreToolUse:Agent sync would race briefing's deny (briefing 0.5.3 denies at PreToolUse:Agent) instead of running before it.
+
+So a CwdChanged sync alone does not guarantee the items are there before the next spawn. How the design covers the window: open, next step.
+
+2026-11-10 17:32 Progress (skilletor-worker): implemented, uncommitted in the worktree. Core: syncMovedCheckout(move: {cwd, oldCwd?, eventName}, ctx: HookContext): Promise<HookOutput> in src/hooks.ts (harness-agnostic; k149 calls it). Root = projectRootOf(new cwd); {} when same root as old cwd, home dir, or no .claude/skilletor.json. Then check(ctx, {scope: project, local: true}) — new CheckOptions.local in engine.ts skips makeBackend().check() (trust requests still collected; render inputs still read the project's git remote, local git only). Lock matches -> {}. Else sync({scope: project}) with 5 s per source and a new EngineContext.deadline (now + 20 s): a scope not resolved by then throws before its first write (check right after the resolveItems stop point; everything after it is synchronous/local), so the 30 s hooks.json kill can never stop a write midway. Line: 'skilletor: N item(s) updated in <dir>', fixes appended as ' — run there: skilletor trust <name>' / 'skilletor sync'; failures 'skilletor: cannot sync <dir>: <why> — run there: skilletor sync'. CwdChanged output = systemMessage only: Claude Code 2.1.322's CwdChanged hookSpecificOutput schema is {hookEventName, watchPaths?} (binary), no additionalContext. hooks.json: CwdChanged -> hook cwd-changed, timeout 30. Tests: test/cwd-changed.test.ts (8) + one CLI test (CLAUDE_PROJECT_DIR set, new checkout wins); mutation-checked (drop local / root compare / deadline -> its test fails).
+
+2026-11-10 17:46 Evidence for the open design question (skilletor-worker; gathered only, nothing decided). Host was loaded during (a): load avg ~5.2 on 8 cores (other builds), so take the minimums.
+
+(a) Wall time, real binary (bin/skilletor, dist rebuilt from this tree), temp HOME/CODEX_HOME, CLAUDE_PROJECT_DIR=main, a local source with 10 skills (SKILL.md + a 5 KB reference each, `skill:*@mine`), main synced by its SessionStart, worktrees made with plain `git worktree add` under main/.claude/worktrees. n=10 each, interleaved:
+- `node -e 0`: min 62, median 84 ms
+- `skilletor --version`: min 206, median 240 ms (bundle load; dist/skilletor.js is 449 KB incl. Nunjucks)
+- `hook cwd-changed`, lock-less worktree → sync of 10 skills: min 338, median 387, max 775 ms
+- lock matches (local check, no sync): min 260, median 282 ms
+- same checkout (wt1 → wt1/sub), no-op: min 230, median 364 ms
+- no project (plain dir), no-op: min 242, median 411 ms
+Raw, first round: `node-e-0 70` / `skilletor--version 238` / `sync-lockless 371 {"systemMessage":"skilletor: 10 item(s) updated in /tmp/k147-a-XDZ4V1/main/.claude/worktrees/wt1"}` / `lock-matches 260 <silent>` / `same-checkout 243 <silent>` / `no-project 309 <silent>`.
+So any gate costs ~230–260 ms per call unloaded. Almost all of it is node plus the bundle load (206 ms); `git rev-parse` adds 1–2 runs. A sync of 10 local skills adds ~100 ms. A git or url source adds its network fetch on top (5 s timeout per source).
+
+(b) 2 `claude -p --model claude-haiku-5-5 --no-session-persistence --setting-sources project --output-format stream-json --verbose --include-hook-events` runs, temp git dir, project hooks only: PreToolUse Bash (log); PostToolUse Bash (sleep 5 s, log start/end and stdin); PostToolUse Bash with `if: "Bash(cd *)"` (log); in run 2 also `if: "Bash(*cd *)"`; CwdChanged (log).
+Run 1, sequential `cd sub`, `pwd`, `mkdir x && cd x`:
+  1794332158264 PreToolUse "cd sub" cwd=…/proj
+  1794332159789 PostToolUse(sleep5) start "cd sub" cwd=…/proj/sub
+  1794332159789 PostToolUse(if cd) start "cd sub" cwd=…/proj/sub
+  1794332159790 CwdChanged start old=…/proj new=…/proj/sub
+  1794332164802 PostToolUse(sleep5) end
+  1794332166563 PreToolUse "pwd" cwd=…/proj/sub   (1.76 s after that PostToolUse ended)
+  1794332166725 PostToolUse(sleep5) start "pwd" — 1794332171735 end
+  1794332173203 PreToolUse "mkdir x && cd x"   (1.47 s after the end)
+Run 2, `echo start && cd x`, `pwd`, `cd ..`:
+  1794332247013 PostToolUse(sleep5) start "echo start && cd x" cwd=…/proj/x — 1794332252077 end
+  1794332254785 PreToolUse "pwd"   (2.71 s after the end)
+  1794332255017 PostToolUse(sleep5) start "pwd" — 1794332260052 end
+  1794332261725 PreToolUse "cd .."   (1.67 s after the end)
+→ PostToolUse IS awaited: in all 4 sequential pairs the next PreToolUse came 1.5–2.7 s after the 5 s PostToolUse ended, never during it.
+→ PostToolUse's input `cwd` is the new cwd: …/proj/sub after `cd sub`, …/proj/x after `echo start && cd x`, …/proj after `cd ..`. It carries no old_cwd.
+→ CwdChanged starts in parallel with that call's PostToolUse (0–144 ms apart).
+→ CLAUDE_PROJECT_DIR in every hook's env stayed …/proj after every move. The moves stayed inside one repo. The binary sets the hook env's CLAUDE_PROJECT_DIR to the launch option projectConfigRoot, else the session's projectRoot, never the cwd.
+
+(c) `if` exists in 2.1.322. The binary's schema describes it as "Permission rule syntax to filter when this hook runs (e.g., "Bash(git *)"). Only runs if the tool call matches the pattern. Avoids spawning hooks for non-matching commands."
+Measured: `if: "Bash(cd *)"` fired for the compound `echo start && cd x` (cd second after &&), and for `cd sub` and `cd ..`. It did not fire for `pwd` (both runs). `Bash(*cd *)` behaved the same.
+`mkdir x && cd x` itself was not measured. The temp workspace is untrusted, so Claude Code ignored permissions.allow, and it asks approval for a compound that changes the directory and writes; in -p that is a denial before PostToolUse, so no hook ran. I did not set hasTrustDialogAccepted in the real ~/.claude.json.
+Also not measured: whether a compound without any cd (`echo a && echo b`) fires the hook too, i.e. whether compounds fail open.
+
+Options, with costs:
+(1) An awaited PostToolUse gate: hooks.json PostToolUse, matcher Bash, `if: "Bash(cd *)"` → a new `hook post-tool-use` that calls syncMovedCheckout({cwd: input.cwd, eventName: "PostToolUse"}).
+  - Cost: ~230–260 ms per matching Bash call, only for calls with a cd. The same-checkout no-op costs the same, since PostToolUse has no old_cwd. A sync delays that tool's result for its duration: ~0.1–0.4 s for local skills, a fetch up to 5 s per source, never past the 20 s deadline.
+  - Gain: PostToolUse takes additionalContext, so the model learns what landed. CwdChanged takes none.
+  - Not covered: `git -C`/`pushd`/`exec`-style moves; the EnterWorktree tool would need its own matcher (worktrees Claude Code creates get the .worktreeinclude copies anyway).
+  - With CwdChanged kept as well, both fire in parallel for one cd. The second waits on sync.lock (≤5 s), then finds the lock matching. That is harmless but doubles the cost; dropping CwdChanged avoids it.
+  - Possible later trim: the sh launcher could skip node when no .claude/skilletor.json exists at the cwd's top level.
+(2) CwdChanged only (as built), with a fast sync. The residual race: the window is the sync time minus one model turn.
+  - Measured: a sync of 10 local skills takes ~0.34–0.39 s, against Haiku turns of 1.5–2.7 s (above) and 2.4 s (the earlier run). Local or warm-cache sources usually win; a network fetch (up to 5 s) can lose.
+  - Nothing bounds the model turn from below, and a parallel cd + Agent call in one message checks the old checkout anyway (earlier run 2).
+  - Narrowing further: sync from cache only on a move, no fetch. That departs from "the way SessionStart does".
+(3) Cooperation from briefing: briefing's PreToolUse:Agent deny waits or rechecks while skilletor marks a sync of that checkout in progress. That is a ticket on briefing's board, not an edit there.
+  - skilletor side (small): a per-checkout marker, e.g. <state>/moving/<hash(root)>, written before the move's sync and removed after. sync.lock/ is global and names no project.
+  - briefing side: knowledge of that marker path, and a bounded wait in its deny path.
+  - Cost: it couples briefing to skilletor's state layout and adds latency to every spawn that overlaps a sync.
+
+2026-11-10 17:46 Findings outside the card's scope (skilletor-worker; for the dispatcher to file — nothing fixed):
+
+1. The card's assumption "remote changes keep coming through the existing interval check" is FALSE for a checkout the session moved into (separate ticket, skilletor board). Under Claude Code, runHookCommand sets ctx.projectDir = SKILLETOR_PROJECT_DIR || CLAUDE_PROJECT_DIR. userPromptSubmit keys last-check and pending reports on projectKeyOf(ctx) = ctx.projectDir, and input.cwd is ignored whenever that is set. defaultBackground spawns `hook __sync-background` with SKILLETOR_PROJECT_DIR = ctx.projectDir. CLAUDE_PROJECT_DIR stays the session's project after a cd: measured in both -p runs, and in the binary as projectConfigRoot ?? projectRoot. Probe through runHook, ctx.projectDir=main with input {cwd: wt}: "background sync started for: [\"/tmp/k147-ups-FFSw7c/main\"]". So a moved-into checkout whose lock matches gets source updates only from a session started there or a manual `skilletor sync`; the move's local check deliberately ignores source versions. Under Codex, with no CLAUDE_PROJECT_DIR, the key is input.cwd's top level, so there it would follow the cwd (k149's concern).
+
+2. Perl port divergence (k143 list): perl/ has no hooks at all, so no cwd-changed. It also lacks the two engine options only the hook sets: CheckOptions.local and EngineContext.deadline. Noted in docs/perl.md "Known gaps". Default sync/check behaviour is unchanged, so no conformance case moved; the conformance suite passed as is.
+
+3. SessionStart has the kill exposure the move now avoids (skilletor board). Claude Code SIGKILLs a hook's process group at its timeout (binary: process.kill(-pid,"SIGKILL")). A SessionStart sync killed mid-apply writes no salvage lock (writeSalvageLock runs only on a thrown error), so the files that landed are not in the lock, and the next sync reports them as conflicts. The new EngineContext.deadline would close that too, if SessionStart set one.
+
+4. Lane items for the main agent:
+   - skills/skilletor/references/sync.md got one factual paragraph (the move, the not-awaited race, Codex/Hermes notice no move, the interval check covers only the session's project). It is skill text: have skilletor-skill-author review it.
+   - .claude/skills/skilletor-core/SKILL.md's module table still says `hooks.ts  SessionStart + UserPromptSubmit, black box`; it should name CwdChanged. Not touched: skill-author lane.
+
+2026-11-10 17:46 Verification (skilletor-worker, worktree tree uncommitted): npm run typecheck — clean. npm test — 1096 tests, 1095 pass, 0 fail, 1 skipped (hermes-real 'hermes plugins install …' case, gated on SKILLETOR_HERMES_INSTALL=1, network). npm run build + npm run check-dist — 'dist/skilletor.js is up to date'. Perl suite not run: perl/ untouched and default sync/check behaviour unchanged (divergence noted in docs/perl.md). Hand test: bin/skilletor hook cwd-changed with temp HOME/CODEX_HOME (measurement (a)). Card left in-progress for the dispatcher (review vs blocked). Proposed commit subject: 'Sync the checkout a session moves into (CwdChanged hook, k147)'; Changes entry: 'A Claude Code session that cd's into another checkout of a skilletor project (e.g. a plain git worktree add) now gets that checkout's project scope synced by a new CwdChanged hook, with one line naming the directory; Codex and Hermes have no such event (k149).'
+
+Decision for Getty (dispatcher): how to close the window between the CwdChanged sync and the next Agent spawn. Evidence and costs are in the notes above.
+
+**Recommendation: option (1)**, an awaited PostToolUse hook next to CwdChanged:
+- hooks.json PostToolUse, matcher `Bash`, `"if": "Bash(cd *)"`, calls `hook post-tool-use`, which calls the same core `syncMovedCheckout({cwd: input.cwd})`.
+- Measured: PostToolUse is awaited (the next PreToolUse always came after it ended), its `cwd` is the new directory, and its output carries `additionalContext`, so the model learns what landed. CwdChanged reaches neither.
+- Cost: ~230–260 ms, only on Bash calls that contain `cd`. Nothing on the rest.
+- Keep CwdChanged for moves without a Bash `cd` (e.g. EnterWorktree into an existing worktree). When both fire, the second waits on sync.lock and finds the lock matching.
+- Still to verify when built: the `if` match on `mkdir x && cd x`, and that a compound without `cd` does not fire.
+
+Why not (2): a fast sync usually wins (0.34–0.39 s vs. 1.5–2.7 s Haiku turns), but nothing guarantees it, and git/url sources can take up to 5 s.
+Why not (3): it couples briefing to skilletor's state layout and slows every spawn that overlaps a sync.
+
+Meanwhile the CwdChanged hook and the shared core are committed as they stand (hash in the next note), so k149 can build on the core. Once decided, the chosen coverage is a follow-up commit on this card.
+
+Filed from the findings: k150 (interval check follows the moved-into checkout), k151 (SessionStart deadline).
+
+Committed as 44a9a49 on branch worktree-k146-k147-cwd-changed: CwdChanged hook + shared core syncMovedCheckout. Card stays blocked: closing the CwdChanged→spawn window awaits Getty's decision (see the recommendation note).
+
+Side commit ea5de62 on branch worktree-k146-k147-cwd-changed (asked by the hub, no card of its own): dropped the stale hardlink wording from .claude/agents/skilletor-skill-author.md and .claude/skills/skill-assessment/SKILL.md — the fleet no longer hardlinks skills (only karr's share/ pairs remain).
+
+Decision (Getty, relayed by the hub, 2026-11-10): option (1) approved. Add an awaited PostToolUse hook, matcher Bash, "if": "Bash(cd *)", that calls the same core as CwdChanged. CwdChanged stays as the early trigger. To land as a follow-up commit on this card, after k149 is committed: both change src/hooks.ts and spec §8, so they run one after the other.
+
+2026-11-10 19:27 Follow-up (option 1) in progress (skilletor-worker), uncommitted in the worktree. Handler: hook post-tool-use = the k149 session-move path (generalized promptMove -> sessionMove(input, ctx, state, {eventName, lockUntilDeadline})), eventName PostToolUse. My choice: (b), the per-session record, not (a). Why: (a) would run the core on every Bash call with a cd inside a checkout, and in one with a source awaiting trust (or a check warning) it would repeat the trust line on every cd … && … - now also into the model's context, which nudges the model toward running skilletor trust itself. (b) asks nothing for the same cwd (not even git) and the core's old-cwd compare keeps a move within one checkout a no-op; cost is the same state read/write k149 already pays. To make the first cd of a Claude session quiet too, Claude Code's SessionStart now writes the record as Codex/Hermes do. CwdChanged never writes it (else PostToolUse of the same cd would take the move for done before CwdChanged's sync is) - pinned by a mutation-checked test. Race: engine sync() gets SyncOptions.ifChanged - under the sync lock it re-runs the local check and syncs nothing when the lock now matches (report with no scopes). Claude's two move hooks wait for the sync lock until their 20 s deadline, not the 5 s default (CheckoutMove.lockUntilDeadline), so a git fetch >5 s in the first hook cannot make the second return early. Lock-written-after-items verified in apply.ts: all item writes, then removals/prune, then writeLock last; a throw writes a salvage lock with partial:true entries, which check counts as drift. npm test (API-key/token vars unset, k154): 1116 tests, 1115 pass, 0 fail, 1 skipped (hermes-real install case, SKILLETOR_HERMES_INSTALL=1).
+
+2026-11-10 19:30 claude -p (1 of the 2 allowed; the 2nd not used): Claude Code 2.1.322, haiku-5-5, --no-session-persistence --setting-sources project, temp git dir /tmp/k147-e2e-CO9eoH, project hooks only. skilletor ran with HOME/CODEX_HOME/CLAUDE_CONFIG_DIR temp, set in the hook command strings of the temp project's .claude/settings.json (claude itself on the real HOME for auth); the real ~/.claude/skilletor state holds no k147-e2e key afterwards. Setup: proj (config sentinel@mine, local source, claudeSettings:false) + plain git worktree add proj/.claude/worktrees/wt (no lock). Hooks as the plugin's (SessionStart, CwdChanged, PostToolUse Bash if Bash(cd *) -> hook post-tool-use, 30 s) plus loggers: PreToolUse Bash (sentinel present in wt?), PostToolUse Bash if Bash(cd *) (IF-FIRED), PostToolUse Bash unfiltered (POST-ANY). Raw: 'PRE 1794338910258 SENTINEL-ABSENT  cd .claude/worktrees/wt' / 'POST-START 1794338912666' / 'CWD-START 1794338912695' / PostToolUse stdout {"systemMessage":"skilletor: 1 item(s) updated, .claude/.gitignore, .worktreeinclude updated — commit them in …/wt","hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"skilletor: in …/wt:\nskilletor synced items:\n- skill sentinel@mine: active now\n…"}} / 'POST-END 1794338913725' / 'CWD-END 1794338913773' (CwdChanged printed nothing) / 'PRE 1794338916106 SENTINEL-PRESENT  cat .claude/skills/sentinel/SKILL.md' / 'PRE 1794338918116 SENTINEL-PRESENT  echo a && echo b'. IF-FIRED only once (for the cd); POST-ANY three times (cd, cat, echo a && echo b). Model's answer quoted the PostToolUse context verbatim. So: item on disk before the next tool call; output schema accepted; a compound without cd does NOT fire the if-filtered hook.
+
+2026-11-10 19:31 Found outside the card (skilletor-worker; for the dispatcher, nothing changed for them): (1) Claude Code 2.1.322's SessionStart hookSpecificOutput takes reloadSkills: true - binary: 'Re-scan skill and command directories after SessionStart hooks complete, so skills installed by the hook are available in the same session'. Could touch skilletor's activation facts (spec §12, report.ts ACTIVATION) - a ticket on the skilletor board, if wanted. PostToolUse/CwdChanged have no such field. (2) The longer lock wait (until the 20 s deadline) is Claude-only; Codex/Hermes prompt moves keep the 5 s wait (Hermes' 25 s budget is tight), so there a background sync of the same checkout >5 s still yields 'cannot sync … timed out acquiring sync lock'; the ifChanged recheck applies to them too after a successful wait. (3) Known limit of the record path, as in k149: a PostToolUse whose move failed (e.g. lock timeout) still records the cwd, so a further cd within that checkout does not retry; its line says 'run there: skilletor sync'. (4) A no-sync answer (trust request, config error) comes from both CwdChanged and PostToolUse of one cd, a line each (documented in spec §8; not deduped - it would need shared per-move state).
+
+2026-11-10 19:36 Done (skilletor-worker): follow-up option (1), uncommitted, commit-ready in worktree-k146-k147-cwd-changed on 1521f76. hooks/hooks.json: PostToolUse, matcher Bash, if Bash(cd *), hook post-tool-use, timeout 30; codex-hooks.json unchanged. hook post-tool-use = the session-record move path (b) shared with k149 (sessionMove, eventName PostToolUse); Claude Code's SessionStart now writes session-cwd.json too; CwdChanged never writes it. Output = the core's systemMessage line + hookSpecificOutput {hookEventName: PostToolUse, additionalContext} (2.1.322 schema: additionalContext, classifierContext, updatedToolOutput, updatedMCPToolOutput). Race: SyncOptions.ifChanged (local re-check under the sync lock, no scopes when it now matches) + Claude's two move hooks wait for the lock until the 20 s deadline (CheckoutMove.lockUntilDeadline). Tests: 6 new in test/cwd-changed.test.ts (lock-less worktree synced with context; same checkout no sync; no project no-op; untrusted warns once and fetches nothing; CwdChanged+PostToolUse race in both orders; lock wait bounded by the deadline), manifest test extended; mutation-checked: no ifChanged, no deadline wait, zero wait, CwdChanged writing the record, (a) instead of (b) - each fails its test. Docs: spec §6.5, §8 (table rows, move paragraphs), §14.5; README hooks list and Codex section; skills/skilletor/references/sync.md Claude bullet (skill text: skill-author review); docs/perl.md known gaps (no hooks in perl/, divergence note stays accurate; no conformance case moved, default sync/check unchanged). Verification: npm run typecheck clean; npm test (API-key/token vars unset, k154) 1116 tests, 1115 pass, 0 fail, 1 skipped (hermes-real install case, SKILLETOR_HERMES_INSTALL=1); npm run build + check-dist 'dist/skilletor.js is up to date'. Perl suite not run (perl/ untouched). Proposed subject: 'Await the move's sync after a Bash cd (PostToolUse hook, k147)'.
+
+Committed 31f6cb0 on branch worktree-k146-k147-cwd-changed
+
+Closing note (dispatcher). Commits on branch `worktree-k146-k147-cwd-changed` (worktree /home/getty/dev/skilletor/.claude/worktrees/k146-k147-cwd-changed), based on local main 09b6642, not pushed:
+- 44a9a49 CwdChanged hook + shared move core (syncMovedCheckout)
+- 31f6cb0 Await the move's sync after a Bash cd (PostToolUse hook) — option (1), as Getty decided
+
+Measurement result (Claude Code 2.1.322, claude -p haiku-5-5, temp dirs, project hooks only):
+- CwdChanged is not awaited: it fires 2–36 ms after PostToolUse:Bash, and the next tool's PreToolUse came 2.4 s after the hook started; its timeout is still enforced. Its systemMessage reaches neither the model nor stream-json. An agent spawned in the same message as the `cd` runs in the old cwd.
+- PostToolUse is awaited, and its input `cwd` is the new directory. `"if": "Bash(cd *)"` fired for `cd sub`, `cd ..` and `echo start && cd x`, and did not fire for `echo a && echo b`.
+- End to end with the new hook: PRE before the cd: sentinel absent → PostToolUse synced the lock-less worktree (POST-START → POST-END ≈ 1.06 s, CwdChanged printed nothing) → PRE of the next tool call: sentinel present. The model quoted the PostToolUse context verbatim.
+- Cost: a no-op gate takes ~230–260 ms (node startup), only on Bash calls with a `cd`. A lock-less sync of 10 local skills takes ~340–390 ms.
+
+Verification on the 31f6cb0 tree (dispatcher): npm run typecheck clean; npm test (API-key and token env vars unset, k154) 1116 tests, 1115 pass, 0 fail, 1 skipped (hermes-real `hermes plugins install` case, gated on SKILLETOR_HERMES_INSTALL=1); npm run build + check-dist "dist/skilletor.js is up to date". Perl suite not run (perl/ untouched). The run on the branch's final tree (after k152 and the docs commit) follows on k152.
+Out of scope, filed: k150 (interval check follows the moved-into checkout), k151 (SessionStart deadline), k148 (build guard). Noted, not filed: SessionStart `reloadSkills: true` (worker note 19:31).
