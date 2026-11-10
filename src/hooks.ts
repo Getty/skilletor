@@ -13,12 +13,16 @@
 // the Codex rules files, ahead of its report (spec §14.8). The Hermes plugin runs the
 // same two events with `--harness hermes` and hands the output on (spec §16.4); while
 // `hermes` is no target, its SessionStart answer says how to opt in (spec §16.2).
+//
+// CwdChanged (Claude Code only): a session that moves into another checkout gets that
+// checkout's project scope brought up to date (`syncMovedCheckout`, spec §8).
 import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve as resolvePath } from "node:path";
 import { loadConfig, type Harness } from "./config.ts";
 import { State, SyncLockTimeoutError } from "./state.ts";
 import { gitEnv } from "./gitenv.ts";
+import { samePath } from "./fsutil.ts";
 import {
   check, codexRulesFiles, hermesOptInHint, projectDirOf, sync, type CheckReport, type EngineContext,
 } from "./engine.ts";
@@ -28,6 +32,9 @@ export interface HookInput {
   cwd?: string;
   source?: string;
   hook_event_name?: string;
+  /** CwdChanged: the directory the session left, and the one it moved into. */
+  old_cwd?: string;
+  new_cwd?: string;
   [key: string]: unknown;
 }
 
@@ -47,6 +54,9 @@ export interface HookContext extends EngineContext {
 
 const SESSION_START_TIMEOUT_MS = 5_000;
 const DEFAULT_INTERVAL = 600;
+/** A move's sync writes nothing once this has passed (spec §8): `hooks/hooks.json` kills the
+ *  hook at 30 s, which leaves the local rest of a sync 10 s. */
+const MOVE_DEADLINE_MS = 20_000;
 
 function projectKeyOf(ctx: HookContext, input: HookInput): string {
   return ctx.projectDir ?? input.cwd ?? "";
@@ -89,6 +99,8 @@ export function projectRootOf(cwd: string): string {
 /** Dispatch a hook event; never throws. */
 export async function runHook(event: string, input: HookInput, hookCtx: HookContext): Promise<HookOutput> {
   try {
+    // The checkout the session moved into is the project, never the session's own (spec §8).
+    if (event === "cwd-changed") return await cwdChanged(input, hookCtx);
     const ctx: HookContext = hookCtx.projectDir
       ? hookCtx
       : { ...hookCtx, projectDir: projectRootOf(input.cwd || process.cwd()) };
@@ -197,14 +209,95 @@ function dueAgain(state: State, key: string): void {
  *  the report a sync would give, trust requests and warnings alike (spec §4.3, §8). */
 function unchangedOutput(chk: CheckReport): HookOutput {
   if (!chk.trustRequests?.length) return chk.warnings.length ? warn(chk.warnings.join("; ")) : {};
+  return toOutput(trustReport(chk), "SessionStart");
+}
+
+/** The report a sync would give of a check whose sources await trust (at least one). */
+function trustReport(chk: CheckReport): SyncReport {
   const report: SyncReport = { scopes: [] };
-  for (const { scope, ...request } of chk.trustRequests) {
+  for (const { scope, ...request } of chk.trustRequests ?? []) {
     let rep = report.scopes.find((s) => s.scope === scope);
     if (!rep) report.scopes.push((rep = emptyScopeReport(scope)));
     rep.trustRequests.push(request);
   }
   report.scopes[0]!.warnings.push(...chk.warnings);
-  return toOutput(report, "SessionStart");
+  return report;
+}
+
+/** A move into another checkout (spec §8), as a harness's hook noticed it. */
+export interface CheckoutMove {
+  /** The directory the session works in now. */
+  cwd: string;
+  /** The one it worked in before, when the event names it. */
+  oldCwd?: string;
+  /** The event the output answers (`hookSpecificOutput.hookEventName`). */
+  eventName: string;
+}
+
+/**
+ * A session moved into `move.cwd` (spec §8): the one core every harness's move hook calls –
+ * Claude Code's CwdChanged; Codex's and Hermes' (k149). The checkout is the git top level of
+ * the new cwd, never `ctx.projectDir`, the session's own project. Nothing to do – no source
+ * asked, nothing written – when it is the old cwd's checkout, the home dir, has no
+ * `.claude/skilletor.json`, or its lock already matches its config (a local check: no fetch,
+ * no network). Otherwise its project scope syncs as at SessionStart – 5 s per source, the same
+ * trust rules, nothing written once `MOVE_DEADLINE_MS` has passed – and one line names the
+ * checkout and, when something is left to do, the command to run there. Never throws.
+ */
+export async function syncMovedCheckout(move: CheckoutMove, ctx: HookContext): Promise<HookOutput> {
+  const root = projectRootOf(move.cwd);
+  try {
+    if (samePath(root, ctx.home) || !existsSync(join(root, ".claude", "skilletor.json"))) return {};
+    if (move.oldCwd !== undefined && samePath(projectRootOf(move.oldCwd), root)) return {};
+    const moved: HookContext = {
+      ...ctx,
+      projectDir: root,
+      timeoutMs: ctx.timeoutMs ?? SESSION_START_TIMEOUT_MS,
+      deadline: ctx.deadline ?? Date.now() + MOVE_DEADLINE_MS,
+    };
+    const chk = await check(moved, { scope: "project", local: true });
+    if (chk.error) return cannotSync(root, chk.error);
+    if (!chk.changed) {
+      if (chk.trustRequests?.length) return movedOutput(trustReport(chk), root, move.eventName);
+      return chk.warnings.length ? cannotSync(root, chk.warnings.join("; ")) : {};
+    }
+    const report = await sync(moved, { scope: "project" });
+    return report.error ? cannotSync(root, report.error) : movedOutput(report, root, move.eventName);
+  } catch (err) {
+    return cannotSync(root, (err as Error).message);
+  }
+}
+
+/** The one line of a move that could not sync: the checkout, why, and what to run there. */
+function cannotSync(dir: string, message: string): HookOutput {
+  return warn(`cannot sync ${dir}: ${message} — run there: skilletor sync`);
+}
+
+/** A move's report: the line says where, and what to run there for what is left – trusting a
+ *  source, or a sync that shows each warning and conflict; the context says where first. */
+function movedOutput(report: SyncReport, dir: string, eventName: string): HookOutput {
+  const out = toOutput(report, eventName);
+  if (!out.systemMessage) return out;
+  const fixes = [
+    ...new Set(report.scopes.flatMap((s) => s.trustRequests.map((t) => `skilletor trust ${t.name}`))),
+    ...(report.scopes.some((s) => s.warnings.length > 0 || s.conflicts.length > 0) ? ["skilletor sync"] : []),
+  ];
+  const result: HookOutput = {
+    systemMessage: displaySafe(`${out.systemMessage} in ${dir}${fixes.length ? ` — run there: ${fixes.join("; ")}` : ""}`),
+  };
+  const context = out.hookSpecificOutput?.additionalContext;
+  if (context) result.hookSpecificOutput = { hookEventName: eventName, additionalContext: `${displaySafe(`skilletor: in ${dir}:`)}\n${context}` };
+  return result;
+}
+
+/** Claude Code's CwdChanged (spec §8): it is not awaited, and its output takes no context
+ *  (only `watchPaths`), so the line is all it gives – it reaches the user, not the model. */
+async function cwdChanged(input: HookInput, ctx: HookContext): Promise<HookOutput> {
+  const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined);
+  const cwd = text(input.new_cwd) ?? text(input.cwd);
+  if (cwd === undefined) return {};
+  const out = await syncMovedCheckout({ cwd, oldCwd: text(input.old_cwd), eventName: "CwdChanged" }, ctx);
+  return out.systemMessage ? { systemMessage: out.systemMessage } : {};
 }
 
 async function userPromptSubmit(input: HookInput, ctx: HookContext): Promise<HookOutput> {

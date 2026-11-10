@@ -116,7 +116,9 @@ It also requires each engine's `check` to accept the other engine's sync.
 
 ## Known gaps
 
-- Codex and Hermes targets are not ported, and neither are `hooks.ts` or pending reports.
+- Codex and Hermes targets are not ported, and neither are `hooks.ts` or pending reports –
+  so neither is the checkout-move hook (`hook cwd-changed`, k147), nor the two engine options
+  only it sets: `check`'s `local` (no source asked) and the sync's `deadline`.
 - Windows is untested.
 - There are no conformance cases for a `url` fetch (it needs TLS), for symlink
   conflicts, or for partial syncs. `perl/t/62-engine.t` covers partial syncs.

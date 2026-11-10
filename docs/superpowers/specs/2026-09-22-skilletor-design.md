@@ -1165,6 +1165,37 @@ message naming the option, nothing touched.
 |---|---|
 | `SessionStart` (`startup`, `resume`) | synchronous: `check` all sources in parallel (5 s network timeout per source) and the config against the lock (§14.3), `sync` on change; untrusted sources are named without a sync (§4.3) |
 | `UserPromptSubmit` | not due → return immediately. Due → start a detached background `sync` (`windowsHide`: no console window on Windows, k133), return at once. If a `pending-report.json` exists → emit it as `additionalContext` and delete it |
+| `CwdChanged` (Claude Code only) | the session moved into another checkout: compare that checkout's lock with its config, locally; on a difference, `sync` its project scope (below) |
+
+**A move into another checkout** (k147). Claude Code's hooks name the session's project in
+`CLAUDE_PROJECT_DIR`, which stays where the session started; a session that moves – a `cd` into
+a worktree made with plain `git worktree add`, which copies tracked files only – would work
+there without that checkout's installed items. `CwdChanged` (input `old_cwd`, `new_cwd`) runs
+`hook cwd-changed`, which takes the git top level of `new_cwd` as the project, never
+`CLAUDE_PROJECT_DIR`, and does nothing – no source asked, nothing written – when that is the
+top level of `old_cwd`, the home dir, or a directory without `.claude/skilletor.json`. Otherwise
+it compares that checkout's lock with its config the way `check` does (§14.3), without asking
+any source whether it moved (no fetch, no `ls-remote`; only the project's git remote is read,
+locally). A lock that matches is left alone. Else it syncs the project scope as `SessionStart`
+does – 5 s per source, the same trust rules, so a move never trusts a backend – and reports one
+`systemMessage` line that names the checkout: `skilletor: 17 item(s) updated in <dir>`. When
+something is left to do there, the line names the command: `— run there: skilletor trust
+<name>` for a source awaiting trust, `skilletor sync` for a warning or conflict, and a move that
+cannot sync (a config error, a timed-out sync lock) says `skilletor: cannot sync <dir>: <why> —
+run there: skilletor sync`. `hooks/hooks.json` gives the hook 30 s, as `SessionStart`, and Claude
+Code kills it then although it does not wait for it; so the move's sync has a deadline of 20 s:
+a scope whose sources are not resolved by then is not written at all – what follows is local –
+and the line says so. The core (`syncMovedCheckout`, `hooks.ts`) takes the new cwd, the old one
+when known and the event to answer, so other harnesses' hooks can call it.
+
+Measured on Claude Code 2.1.322 (k147): `CwdChanged` fires on any Bash `cd`, a compound one
+too, in parallel with that call's `PostToolUse`, and is **not awaited** – the next tool call can
+run before the move's sync is done (one model turn later, ~2.4 s with Haiku), so an agent
+spawned in the new checkout right after the `cd` can still miss its items. Its output takes no
+`additionalContext` (only `watchPaths`), and its `systemMessage` reached neither the model nor
+`stream-json` in `-p` mode. Codex and Hermes have no such event; noticing a move there is k149.
+The in-session interval check of `UserPromptSubmit` keys on `CLAUDE_PROJECT_DIR`, so it does not
+cover a checkout the session moved into.
 
 - With no change and no source awaiting trust, the plugin is silent.
 - With a change: one `systemMessage` line for the user, a terse `additionalContext` for
@@ -1480,8 +1511,9 @@ once per target and names the targets in the scope header when they are not just
   `.claude-plugin/plugin.json`, enforced by a test) points at `./skills/` and
   `./hooks/codex-hooks.json`. Codex has the same `SessionStart`/`UserPromptSubmit` events and
   hook JSON shape and sets `CLAUDE_PLUGIN_ROOT` for plugin hook commands; the Codex file
-  differs from `./hooks/hooks.json` only by `--harness codex` on each command and
-  `"additionalContextLimit": 0` on `SessionStart` (§14.8), a Codex-only key.
+  differs from `./hooks/hooks.json` only by `--harness codex` on each command,
+  `"additionalContextLimit": 0` on `SessionStart` (§14.8), a Codex-only key, and the missing
+  `CwdChanged`, an event Codex does not have (§8; noticing a move there is k149).
 - Codex does not set `CLAUDE_PROJECT_DIR`. The hook then takes the git top level of the
   hook input's `cwd` (else `cwd` itself) as the project root, so a session started in a
   subdirectory still finds `<repo>/.claude/skilletor.json`.

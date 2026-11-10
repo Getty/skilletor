@@ -24,6 +24,18 @@
           }
         ]
       }
+    ],
+    "CwdChanged": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor",
+            "args": ["hook", "cwd-changed"],
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

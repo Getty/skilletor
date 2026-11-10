@@ -35,6 +35,14 @@ could not install although its source was there counts once.
 `checkInterval` (user file only, seconds, default 1800) throttles the in-session check;
 `≤ 0` = sync only at session start. In a project file it is a config error (nothing syncs).
 
+A Claude Code session that `cd`s into another checkout of a skilletor project (a plain
+`git worktree add` copies the config, not the installed items) syncs that checkout's project
+scope when its lock does not match its config: `skilletor: N item(s) updated in <dir>`, or names
+the `skilletor trust <name>` / `skilletor sync` to run there. Claude Code does not wait for it — an
+agent spawned right after the `cd` can start before its items are there. The throttled check
+covers only the session's own project; Codex and Hermes notice no move: run `skilletor sync`
+in the new checkout.
+
 ## Sharing a project — `.claude/settings.json`
 
 The installed items are gitignored build artifacts; a fresh checkout gets them only from a

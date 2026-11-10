@@ -74,11 +74,21 @@ export interface EngineContext {
   /** `CLAUDE_CONFIG_DIR` (k142): Claude Code's config dir, where its plugin state lives; default
    *  from the env, else `<home>/.claude`. Only that state is read from it (spec §6.8). */
   claudeConfigDir?: string;
+  /** Epoch ms (the checkout-move hook, spec §8): a scope whose sources are not resolved by then
+   *  is not written – the sync stops with an error before its first write there. What follows
+   *  that point is local, so a caller killed at a later timeout never stops it midway. */
+  deadline?: number;
 }
 
 export interface SyncOptions {
   scope?: "user" | "project" | "all";
   force?: boolean;
+}
+
+export interface CheckOptions extends SyncOptions {
+  /** Compare each scope's lock with its config only (the checkout-move hook, spec §8): no
+   *  source is asked whether it moved – no fetch, no `ls-remote`, no request. */
+  local?: boolean;
 }
 
 type ScopeName = "user" | "project";
@@ -977,6 +987,10 @@ async function syncScopeRun(
     collectSources(collect, ctx, sources, resolved, catalogs, rep);
     return rep;
   }
+  // Past its deadline (spec §8): nothing of the scope is written. From here on all is local.
+  if (ctx.deadline !== undefined && Date.now() > ctx.deadline) {
+    throw new Error("sync stopped before writing anything: its sources took too long");
+  }
 
   /** A path for the report: relative to the scope base when under it, else absolute. */
   const labelOf = (abs: string): string => {
@@ -1545,7 +1559,7 @@ export interface CheckReport {
 /** Which `CheckReport` field names the scopes with drift of a kind. */
 const DRIFT_FIELD = { targets: "targetsChanged", layout: "layoutChanged", declared: "declaredChanged" } as const;
 
-export async function check(given: EngineContext, opts: SyncOptions = {}): Promise<CheckReport> {
+export async function check(given: EngineContext, opts: CheckOptions = {}): Promise<CheckReport> {
   const ctx = scoped(given);
   const loaded = loadWithTargets(ctx);
   if ("error" in loaded) return { changed: false, sources: [], warnings: [], error: loaded.error };
@@ -1608,6 +1622,7 @@ export async function check(given: EngineContext, opts: SyncOptions = {}): Promi
           (out.trustRequests ??= []).push({ scope, ...trustRequestOf(name, backend) });
           continue;
         }
+        if (opts.local) continue;
         const version = checkedVersion(read[name], backend, oldLock, name);
         const changed = await makeBackend(backend, cacheRoot, ctx.timeoutMs).check(version);
         out.sources.push({ name, scope, changed });

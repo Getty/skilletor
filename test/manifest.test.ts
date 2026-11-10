@@ -34,7 +34,7 @@ test("hook commands go through the plugin root the harness sets (Codex sets CLAU
   // Claude Code's in exec form: on Windows it starts bin/skilletor.exe (winlaunch) for
   // bin/skilletor, without Git Bash; Linux and macOS start the sh launcher as before.
   const hooks = json("hooks/hooks.json").hooks as Record<string, { hooks: { command: string; args?: string[] }[] }[]>;
-  assert.deepEqual(Object.keys(hooks).sort(), ["SessionStart", "UserPromptSubmit"]);
+  assert.deepEqual(Object.keys(hooks).sort(), ["CwdChanged", "SessionStart", "UserPromptSubmit"]);
   for (const groups of Object.values(hooks)) {
     for (const g of groups) {
       for (const h of g.hooks) {
@@ -55,7 +55,8 @@ test("on Windows bin/skilletor.exe runs the bundle the sh launcher runs", () => 
 });
 
 // k50 (spec §14.5, §14.8): the Codex plugin has its own hooks file, the Claude one is untouched.
-test("codex-hooks.json = hooks.json with --harness codex, matcher startup|resume|clear, no context limit", () => {
+// k147 (spec §8): CwdChanged is Claude Code's alone – Codex has no such event (k149).
+test("codex-hooks.json = hooks.json without CwdChanged, with --harness codex, matcher startup|resume|clear, no context limit", () => {
   assert.equal(codex.hooks, "./hooks/codex-hooks.json");
   assert.equal(claude.hooks ?? "./hooks/hooks.json", "./hooks/hooks.json");
   type Groups = Record<string, { matcher?: string; hooks: Record<string, unknown>[] }[]>;
@@ -67,6 +68,8 @@ test("codex-hooks.json = hooks.json with --harness codex, matcher startup|resume
   // Derive the expected Codex file from the Claude one: Codex reads no args, so they go
   // back into the command text.
   const expected = JSON.parse(JSON.stringify(forClaude)) as Groups;
+  assert.equal(forClaude.CwdChanged?.[0]?.hooks[0]?.timeout, forClaude.SessionStart![0]!.hooks[0]!.timeout);
+  delete expected.CwdChanged;
   for (const groups of Object.values(expected)) {
     for (const g of groups) {
       for (const h of g.hooks) {

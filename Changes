@@ -45,6 +45,10 @@ Revision history for skilletor
     Code, or with `--no-plugin`, it clones the repository and links
     `bin/skilletor`. `--bin-dir` picks the directory. The README has it under
     "From the command line"; the Hermes docs name the command `SKILLETOR_BIN`.
+  - A Claude Code session that `cd`s into another checkout of a skilletor
+    project (e.g. a plain `git worktree add`) now gets that checkout's project
+    scope synced by a new `CwdChanged` hook, with one line naming the
+    directory; Codex and Hermes have no such event.
 
 0.7.0     2026-10-16 20:00:22Z
   - The plugin, package and README descriptions name Hermes Agent as the third

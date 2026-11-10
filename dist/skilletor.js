@@ -3965,7 +3965,7 @@ var require_filters = __commonJS({
       return r.copySafeness(str, res);
     }
     _exports.indent = indent;
-    function join18(arr, del, attr) {
+    function join19(arr, del, attr) {
       del = del || "";
       if (attr) {
         arr = lib.map(arr, function(v) {
@@ -3974,7 +3974,7 @@ var require_filters = __commonJS({
       }
       return arr.join(del);
     }
-    _exports.join = join18;
+    _exports.join = join19;
     function last(arr) {
       return arr[arr.length - 1];
     }
@@ -5741,7 +5741,7 @@ import { realpathSync as realpathSync3 } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { join as join17 } from "node:path";
+import { join as join18 } from "node:path";
 
 // src/fsutil.ts
 import { createHash } from "node:crypto";
@@ -10350,6 +10350,9 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
     collectSources(collect, ctx, sources, resolved, catalogs, rep);
     return rep;
   }
+  if (ctx.deadline !== void 0 && Date.now() > ctx.deadline) {
+    throw new Error("sync stopped before writing anything: its sources took too long");
+  }
   const labelOf = (abs) => {
     const rel = relative4(base, abs);
     return rel.startsWith("..") || isAbsolute2(rel) ? abs : toPosix(rel);
@@ -10732,6 +10735,7 @@ async function check(given, opts = {}) {
           (out.trustRequests ??= []).push({ scope, ...trustRequestOf(name, backend) });
           continue;
         }
+        if (opts.local) continue;
         const version = checkedVersion(read[name], backend, oldLock, name);
         const changed = await makeBackend(backend, cacheRoot, ctx.timeoutMs).check(version);
         out.sources.push({ name, scope, changed });
@@ -11486,10 +11490,11 @@ function installedSet(ctx, config) {
 
 // src/hooks.ts
 import { execFileSync as execFileSync4, spawn } from "node:child_process";
-import { readFileSync as readFileSync13 } from "node:fs";
-import { resolve as resolvePath6 } from "node:path";
+import { existsSync as existsSync12, readFileSync as readFileSync13 } from "node:fs";
+import { join as join17, resolve as resolvePath6 } from "node:path";
 var SESSION_START_TIMEOUT_MS = 5e3;
 var DEFAULT_INTERVAL = 600;
+var MOVE_DEADLINE_MS = 2e4;
 function projectKeyOf(ctx, input) {
   return ctx.projectDir ?? input.cwd ?? "";
 }
@@ -11519,6 +11524,7 @@ function projectRootOf(cwd) {
 }
 async function runHook(event, input, hookCtx) {
   try {
+    if (event === "cwd-changed") return await cwdChanged(input, hookCtx);
     const ctx = hookCtx.projectDir ? hookCtx : { ...hookCtx, projectDir: projectRootOf(input.cwd || process.cwd()) };
     switch (event) {
       case "session-start":
@@ -11604,14 +11610,65 @@ function dueAgain(state, key) {
 }
 function unchangedOutput(chk) {
   if (!chk.trustRequests?.length) return chk.warnings.length ? warn(chk.warnings.join("; ")) : {};
+  return toOutput(trustReport(chk), "SessionStart");
+}
+function trustReport(chk) {
   const report = { scopes: [] };
-  for (const { scope, ...request } of chk.trustRequests) {
+  for (const { scope, ...request } of chk.trustRequests ?? []) {
     let rep = report.scopes.find((s) => s.scope === scope);
     if (!rep) report.scopes.push(rep = emptyScopeReport(scope));
     rep.trustRequests.push(request);
   }
   report.scopes[0].warnings.push(...chk.warnings);
-  return toOutput(report, "SessionStart");
+  return report;
+}
+async function syncMovedCheckout(move, ctx) {
+  const root = projectRootOf(move.cwd);
+  try {
+    if (samePath(root, ctx.home) || !existsSync12(join17(root, ".claude", "skilletor.json"))) return {};
+    if (move.oldCwd !== void 0 && samePath(projectRootOf(move.oldCwd), root)) return {};
+    const moved = {
+      ...ctx,
+      projectDir: root,
+      timeoutMs: ctx.timeoutMs ?? SESSION_START_TIMEOUT_MS,
+      deadline: ctx.deadline ?? Date.now() + MOVE_DEADLINE_MS
+    };
+    const chk = await check(moved, { scope: "project", local: true });
+    if (chk.error) return cannotSync(root, chk.error);
+    if (!chk.changed) {
+      if (chk.trustRequests?.length) return movedOutput(trustReport(chk), root, move.eventName);
+      return chk.warnings.length ? cannotSync(root, chk.warnings.join("; ")) : {};
+    }
+    const report = await sync(moved, { scope: "project" });
+    return report.error ? cannotSync(root, report.error) : movedOutput(report, root, move.eventName);
+  } catch (err) {
+    return cannotSync(root, err.message);
+  }
+}
+function cannotSync(dir, message) {
+  return warn(`cannot sync ${dir}: ${message} \u2014 run there: skilletor sync`);
+}
+function movedOutput(report, dir, eventName) {
+  const out = toOutput(report, eventName);
+  if (!out.systemMessage) return out;
+  const fixes = [
+    ...new Set(report.scopes.flatMap((s) => s.trustRequests.map((t) => `skilletor trust ${t.name}`))),
+    ...report.scopes.some((s) => s.warnings.length > 0 || s.conflicts.length > 0) ? ["skilletor sync"] : []
+  ];
+  const result = {
+    systemMessage: displaySafe(`${out.systemMessage} in ${dir}${fixes.length ? ` \u2014 run there: ${fixes.join("; ")}` : ""}`)
+  };
+  const context = out.hookSpecificOutput?.additionalContext;
+  if (context) result.hookSpecificOutput = { hookEventName: eventName, additionalContext: `${displaySafe(`skilletor: in ${dir}:`)}
+${context}` };
+  return result;
+}
+async function cwdChanged(input, ctx) {
+  const text = (v) => typeof v === "string" && v !== "" ? v : void 0;
+  const cwd = text(input.new_cwd) ?? text(input.cwd);
+  if (cwd === void 0) return {};
+  const out = await syncMovedCheckout({ cwd, oldCwd: text(input.old_cwd), eventName: "CwdChanged" }, ctx);
+  return out.systemMessage ? { systemMessage: out.systemMessage } : {};
 }
 async function userPromptSubmit(input, ctx) {
   const state = new State(ctx.stateRoot);
@@ -11738,7 +11795,7 @@ function makeContext2(flags) {
     home,
     // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd.
     projectDir: flags.projectDir ?? projectRootOf(process.cwd()),
-    stateRoot: join17(claudeConfigDirOf(home), "skilletor")
+    stateRoot: join18(claudeConfigDirOf(home), "skilletor")
   };
 }
 function ttyPrompter() {
@@ -11970,7 +12027,7 @@ async function runHookCommand(args) {
   const ctx = {
     home,
     projectDir,
-    stateRoot: join17(claudeConfigDirOf(home), "skilletor"),
+    stateRoot: join18(claudeConfigDirOf(home), "skilletor"),
     binPath: fileURLToPath(import.meta.url)
   };
   if (harness === "codex" || harness === "hermes") ctx.harness = harness;

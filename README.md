@@ -74,7 +74,7 @@ there runs `bin\skilletor.exe` (see [Requirements](#requirements)); `git pull` u
 | Claude Code | `~/.claude/{skills,agents,rules}` | `<project>/.claude/{skills,agents,rules}` |
 | Codex | `~/.agents/skills`, `$CODEX_HOME/{agents,skilletor-rules.md}` | `<project>/.agents/skills`, `<project>/.codex/{agents,skilletor-rules.md}` |
 
-Two hooks drive it:
+Three hooks drive it:
 
 - **SessionStart** — check every source (5s timeout each) and compare the config with what
   is installed; on a change, sync and report. An untrusted project source is named every
@@ -82,6 +82,15 @@ Two hooks drive it:
 - **UserPromptSubmit** — when the throttle is due, kick off a detached background sync (no
   console window on Windows) and deliver its result on a later prompt; otherwise return
   instantly and silent.
+- **CwdChanged** (Claude Code only) — when the session `cd`s into another checkout of a
+  skilletor project (a worktree made with plain `git worktree add` has the config but none of
+  the installed items), compare that checkout's lock with its config, without asking any
+  source; on a difference, sync its project scope as SessionStart does and say so in one line:
+  `skilletor: 17 item(s) updated in <dir>`. If it cannot (an untrusted source, a config error),
+  the line names what to run there: `skilletor trust <name>` or `skilletor sync`. A move within
+  the same checkout, or into a directory without `.claude/skilletor.json`, does nothing.
+  Claude Code does not wait for this hook: an agent spawned right after the `cd` may start
+  before the items are there. Codex and Hermes have no such event.
 
 Skills become usable immediately; agents and rules activate after `/reload-plugins` or a
 restart — the report says so per item.
@@ -779,7 +788,7 @@ Use kubectl carefully.
 The repository ships a Codex plugin manifest (`.codex-plugin/plugin.json`) next to the
 Claude one; both ship the bundled skill. The Codex manifest points at its own
 `hooks/codex-hooks.json` — the same hooks as `hooks/hooks.json`, run with `--harness codex`,
-plus the rules delivery.
+plus the rules delivery; `CwdChanged` is not among them, Codex has no such event.
 
 - **Trust the hooks.** Codex runs a plugin's hooks only after you trust them — open
   `/hooks` in Codex and trust skilletor's `SessionStart` and `UserPromptSubmit` hooks.
@@ -872,7 +881,8 @@ the plugin move the user-scope skills back and forth; enable it in one.
 `hermes/skilletor/` in this repository is a native Hermes plugin. It runs the same two
 hooks as under Claude Code — a sync when a session starts, the throttled check on each
 later turn — and gives the report to the model with the turn (Hermes appends it to the
-user message). Install it with Hermes:
+user message); Hermes has no `CwdChanged`, so a `cd` into another checkout syncs nothing
+there. Install it with Hermes:
 
 ```bash
 hermes plugins install Getty/skilletor/hermes/skilletor --enable

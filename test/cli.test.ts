@@ -697,6 +697,41 @@ test("k85: a project ref starting with \"-\": sync fails naming it, the hook exi
   assert.equal(existsSync(join(tmp.dir, "dash-pwned")), false);
 });
 
+// k147 (spec §8): CLAUDE_PROJECT_DIR stays the session's project when the session moves.
+// Asserts: through the built bundle, `hook cwd-changed` with CLAUDE_PROJECT_DIR naming the
+// session's project and a new_cwd in another checkout syncs that checkout – its git top level,
+// not the subdirectory – and leaves the session's project as it was; it exits 0 with one JSON
+// line, a systemMessage naming the checkout and nothing else.
+test("k147: hook cwd-changed syncs the checkout moved into, not CLAUDE_PROJECT_DIR", () => {
+  const home = join(tmp.dir, "move-home");
+  const src = join(tmp.dir, "move-src");
+  const session = join(tmp.dir, "move-session");
+  const moved = join(tmp.dir, "move-checkout");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(src, "skills", "foo"), { recursive: true });
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), "---\nname: foo\ndescription: foo\n---\nFOO\n");
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } } }));
+  for (const dir of [session, moved]) {
+    mkdirSync(join(dir, ".claude"), { recursive: true });
+    mkdirSync(join(dir, "sub"));
+    writeFileSync(join(dir, ".claude", "skilletor.json"), JSON.stringify({ install: { skills: ["foo@s"] } }));
+    execFileSync("git", ["init", "-q", "-b", "main", dir]);
+  }
+  const root = realpathSync(moved);
+  const env = claudeOnlyEnv(home, { CLAUDE_PROJECT_DIR: session });
+  const input = { hook_event_name: "CwdChanged", old_cwd: session, new_cwd: join(moved, "sub"), cwd: join(moved, "sub") };
+
+  const hook = runCli(["hook", "cwd-changed"], env, JSON.stringify(input), session);
+  assert.equal(hook.status, 0, hook.stderr);
+  const out = JSON.parse(hook.stdout);
+  assert.deepEqual(Object.keys(out), ["systemMessage"]);
+  assert.match(out.systemMessage, /^skilletor: 1 item\(s\) updated, .* in (.*)$/);
+  assert.ok(out.systemMessage.endsWith(` in ${root}`), out.systemMessage);
+  assert.equal(readFileSync(join(moved, ".claude", "skills", "foo", "SKILL.md"), "utf8"), "---\nname: foo\ndescription: foo\n---\nFOO\n");
+  assert.equal(existsSync(join(moved, "sub", ".claude")), false);
+  assert.equal(existsSync(join(session, ".claude", "skilletor.lock.json")), false);
+});
+
 // ---- k87: strings from a config, a source or git are display-safe --------------------
 
 /** An ANSI color escape, a BEL, a right-to-left override and a newline. */
