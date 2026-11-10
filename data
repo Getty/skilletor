@@ -1,0 +1,29 @@
+---
+class: standard
+completed: 2026-11-10T18:42:00Z
+created: 2026-11-10T18:23:45Z
+id: 153
+priority: low
+started: 2026-11-10T18:42:00Z
+status: done
+tags:
+- hermes
+- worktree
+title: Hermes worktrees skip skilletor's .worktreeinclude block
+updated: 2026-11-10T18:42:00Z
+---
+
+From the k149 source pass (not measured live). Hermes reads `.worktreeinclude` as literal relative paths: `Path(repo_root) / entry` in `hermes_cli/worktree_ops.py:342`. skilletor's managed block uses anchored gitignore patterns and globs (`/.hermes/skills/`, `/.claude/rules/**/.local.*`). The anchored ones resolve outside the repo root and are skipped, and the globs are never expanded. So `hermes -w` and `/worktree new` get none of skilletor's installed items. Claude Code's own worktrees do get them.
+
+With k149, the next `pre_llm_call` after such a move syncs the worktree anyway, so this is about the first turn and about doing the copy cheaply. It is not about correctness.
+
+## Decision for Getty
+
+Options:
+- (a) Live with it, since the k149 move sync covers it.
+- (b) Have skilletor write Hermes-readable literal entries as well. That changes the fixed block, spec §6.4.
+- (c) Report it upstream to Hermes. That is a public tracker, under the publish gate, and only with your go.
+
+Recommendation (dispatcher): (a) now; decide on (c) yourself.
+
+Decision (Getty, relayed by the hub, 2026-11-10): close it, with no upstream report. With k149 a Hermes worktree gets the files on its first turn anyway. Nothing to change in skilletor.
