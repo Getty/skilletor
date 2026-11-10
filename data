@@ -1,0 +1,21 @@
+---
+class: standard
+created: 2026-11-10T18:50:48Z
+id: 155
+priority: medium
+status: backlog
+tags:
+- codex
+- hooks
+- worktree
+title: 'Codex: a move does not inject the new checkout''s rules file'
+updated: 2026-11-10T18:59:10Z
+---
+
+Found in k149. Under Codex only SessionStart (`--harness codex`) injects the rules files (`.codex/skilletor-rules.md`, spec §14.8). A session that moves into another checkout between turns (app-server `turn/start` with a new `cwd`) gets that checkout synced by the prompt hook (k149). Its project rules file is not injected, though: the model keeps the old checkout's rules. (`/cd` forks a new session whose SessionStart does inject.)
+
+## Done when
+
+After a move under Codex, the prompt hook's context carries the new checkout's rules file once, as SessionStart would; or spec §14.8 says why not. Test included.
+
+Note (k149 skill review): skills/skilletor/references/codex.md now says that after an app-server move the checkout's rules are not in the context, and to read .agents/skills/<name>/SKILL.md and .codex/skilletor-rules.md there. Done-when here includes rewriting that line once the rules are injected.
