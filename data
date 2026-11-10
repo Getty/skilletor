@@ -1,0 +1,20 @@
+---
+class: standard
+created: 2026-11-10T17:50:37Z
+id: 150
+priority: medium
+status: backlog
+tags:
+- hooks
+- worktree
+title: 'Interval check: follow a checkout the session moved into'
+updated: 2026-11-10T17:50:37Z
+---
+
+Found in k147. Under Claude Code, `runHookCommand` sets `ctx.projectDir` from `SKILLETOR_PROJECT_DIR || CLAUDE_PROJECT_DIR`, and `userPromptSubmit` keys last-check, pending report and the background sync on that. `CLAUDE_PROJECT_DIR` stays the session's project after a `cd` (measured in k147, and the binary sets it from `projectConfigRoot ?? projectRoot`, never the cwd). So a checkout the session moved into gets no remote updates from the in-session interval check: only its local lock-vs-config check at the move (k147), a session started there, or `skilletor sync` by hand. A probe through `runHook` with `ctx.projectDir=main`, `input.cwd=wt` started the background sync for `main`.
+
+Under Codex (no `CLAUDE_PROJECT_DIR`) the key is the top level of `input.cwd`, so it already follows the cwd there (see k149).
+
+## Done when
+
+The interval check under Claude Code also covers the checkout the session works in now (the top level of `input.cwd`), or the spec says why not. Tests for both keys; `dist/` rebuilt.
