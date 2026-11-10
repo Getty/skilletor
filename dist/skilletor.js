@@ -5842,16 +5842,16 @@ var BACKEND_KINDS = ["git", "url", "local"];
 var ALLOWED_KEYS = /* @__PURE__ */ new Set(["sources", "install", "vars", "gitignore", "claudeSettings", "checkInterval", "targets"]);
 var SOURCE_KEYS = /* @__PURE__ */ new Set(["git", "ref", "url", "local", "path"]);
 function readConfigFile(path) {
-  let text;
+  let text2;
   try {
-    text = readFileSync(path, "utf8");
+    text2 = readFileSync(path, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") return {};
     throw new ConfigError(`${path}: cannot read config (${err.message})`);
   }
   let value2;
   try {
-    value2 = JSON.parse(text);
+    value2 = JSON.parse(text2);
   } catch (err) {
     throw new ConfigError(`${path}: invalid JSON (${err.message})`);
   }
@@ -6380,18 +6380,18 @@ var YamlFloat = class {
 };
 var OPEN = /^---[ \t]*\r?\n/;
 var CLOSE = /^---[ \t]*(?:\r?\n|$)/gm;
-function splitFrontmatter(text) {
-  const open = OPEN.exec(text);
-  if (!open) return { data: {}, body: text };
+function splitFrontmatter(text2) {
+  const open = OPEN.exec(text2);
+  if (!open) return { data: {}, body: text2 };
   CLOSE.lastIndex = open[0].length;
-  const close = CLOSE.exec(text);
+  const close = CLOSE.exec(text2);
   if (!close) throw new FrontmatterError("frontmatter: no closing --- line");
-  const yaml = text.slice(open[0].length, close.index);
-  const body = text.slice(close.index + close[0].length).replace(/^(?:[ \t]*\r?\n)+/, "");
+  const yaml = text2.slice(open[0].length, close.index);
+  const body = text2.slice(close.index + close[0].length).replace(/^(?:[ \t]*\r?\n)+/, "");
   return { data: parseYaml(yaml, 2, "frontmatter line"), body };
 }
-function parseYamlDocument(text) {
-  return parseYaml(text, 1, "line");
+function parseYamlDocument(text2) {
+  return parseYaml(text2, 1, "line");
 }
 function fail(line, message) {
   throw new FrontmatterError(`${line?.label ?? "line"} ${line?.no ?? "?"}: ${message}`);
@@ -6405,8 +6405,8 @@ function skippable(line) {
   const t = line.raw.trim();
   return t === "" || t.startsWith("#");
 }
-function isSeqItem(text) {
-  return text === "-" || text.startsWith("- ");
+function isSeqItem(text2) {
+  return text2 === "-" || text2.startsWith("- ");
 }
 var KEY_RE = /^(?:"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'|([^\s"'#&*!|>[\]{},?:-][^:#]*?))[ \t]*:(?:[ \t]+(.*))?$/;
 function parseYaml(yaml, firstLine, label) {
@@ -6435,9 +6435,9 @@ var Parser = class {
       const ind = indentOf(line);
       if (ind < indent) break;
       if (ind > indent) fail(line, "unexpected indentation");
-      const text = line.raw.slice(ind);
-      if (isSeqItem(text)) fail(line, "unexpected sequence item");
-      const m = KEY_RE.exec(text);
+      const text2 = line.raw.slice(ind);
+      if (isSeqItem(text2)) fail(line, "unexpected sequence item");
+      const m = KEY_RE.exec(text2);
       if (!m) fail(line, "expected `key: value`");
       const key = m[1] !== void 0 ? unescapeDouble(m[1], line) : m[2] !== void 0 ? m[2].replace(/''/g, "'") : m[3].trim();
       if (Object.prototype.hasOwnProperty.call(obj, key)) fail(line, `duplicate key "${key}"`);
@@ -6456,9 +6456,9 @@ var Parser = class {
       if (q >= this.lines.length) return [null, q];
       const next = this.lines[q];
       const ind = indentOf(next);
-      const text = next.raw.slice(ind);
-      if (ind > indent) return isSeqItem(text) ? this.sequence(q, ind) : this.mapping(q, ind);
-      if (ind === indent && isSeqItem(text)) return this.sequence(q, ind);
+      const text2 = next.raw.slice(ind);
+      if (ind > indent) return isSeqItem(text2) ? this.sequence(q, ind) : this.mapping(q, ind);
+      if (ind === indent && isSeqItem(text2)) return this.sequence(q, ind);
       return [null, q];
     }
     const parts = [r];
@@ -6484,9 +6484,9 @@ var Parser = class {
       const ind = indentOf(line);
       if (ind < indent) break;
       if (ind > indent) fail(line, "unexpected indentation in a sequence");
-      const text = line.raw.slice(ind);
-      if (!isSeqItem(text)) break;
-      const item = text.slice(1).trim();
+      const text2 = line.raw.slice(ind);
+      if (!isSeqItem(text2)) break;
+      const item = text2.slice(1).trim();
       if (item === "" || item.startsWith("#")) fail(line, "nested blocks inside sequences are not supported");
       if (KEY_RE.test(item)) fail(line, "mappings inside sequences are not supported");
       if (/^[[{]/.test(item)) fail(line, "nested collections are not supported");
@@ -7045,10 +7045,10 @@ function foreignEntry(type, entry, key) {
   }
   return { type, entry, name, spec, url, kind, derivedName };
 }
-function parseBundle(text) {
+function parseBundle(text2) {
   let data;
   try {
-    data = parseYamlDocument(text);
+    data = parseYamlDocument(text2);
   } catch (err) {
     if (err instanceof FrontmatterError) throw new BundleError(err.message);
     throw err;
@@ -7294,8 +7294,8 @@ var MARKER_LINE = /^<!-- skilletor:(begin|end|rules?)\b/;
 var BlockError = class extends Error {
   name = "BlockError";
 };
-function normalizeSection(text) {
-  return text.replace(/^(?:[ \t]*\r?\n)+/, "").replace(/\s+$/, "") + "\n";
+function normalizeSection(text2) {
+  return text2.replace(/^(?:[ \t]*\r?\n)+/, "").replace(/\s+$/, "") + "\n";
 }
 function parseSections(lines) {
   const sections = /* @__PURE__ */ new Map();
@@ -7323,8 +7323,8 @@ function rulesFileText(scope, sections) {
   }
   return out.join("\n").replace(/\n+$/, "") + "\n";
 }
-function parseRulesFile(text) {
-  return parseSections(text.split("\n"));
+function parseRulesFile(text2) {
+  return parseSections(text2.split("\n"));
 }
 function pointerLines(scope, file) {
   return [
@@ -7335,8 +7335,8 @@ function pointerLines(scope, file) {
     `\`${file}\` before you start a task, and follow it.`
   ];
 }
-function parseBlock(text) {
-  const lines = text.split("\n");
+function parseBlock(text2) {
+  const lines = text2.split("\n");
   const begins = [];
   const ends = [];
   lines.forEach((l, i) => {
@@ -7354,11 +7354,11 @@ function parseBlock(text) {
   if (end < begin) throw new BlockError(`"${END}" before "${BEGIN}"`);
   return { begin, end, sections: parseSections(lines.slice(begin + 1, end)) };
 }
-function withBlock(text, body) {
+function withBlock(text2, body) {
   const block = body ? [BEGIN, ...body, END] : null;
-  if (text === null) return block ? block.join("\n") + "\n" : null;
-  const parsed = parseBlock(text);
-  const lines = text.split("\n");
+  if (text2 === null) return block ? block.join("\n") + "\n" : null;
+  const parsed = parseBlock(text2);
+  const lines = text2.split("\n");
   let out;
   if (parsed) {
     const before = lines.slice(0, parsed.begin);
@@ -7366,8 +7366,8 @@ function withBlock(text, body) {
     out = [...before, ...block ?? [], ...after].join("\n");
     if (!block && after.every((l) => l.trim() === "")) out = out.replace(/\s*$/, "\n");
   } else {
-    if (!block) return text;
-    const base = text.replace(/\s*$/, "");
+    if (!block) return text2;
+    const base = text2.replace(/\s*$/, "");
     out = (base.length ? base + "\n\n" : "") + block.join("\n") + "\n";
   }
   return out.trim() === "" ? null : out;
@@ -7383,14 +7383,14 @@ function inspectAgentsMd(path) {
   if (st.isSymbolicLink()) return { ok: false, reason: "is a symlink (skilletor does not write through it)" };
   if (st.isDirectory()) return { ok: false, reason: "is a directory" };
   if (!st.isFile()) return { ok: false, reason: "is not a regular file" };
-  let text;
+  let text2;
   try {
-    text = readFileSync2(path, "utf8");
+    text2 = readFileSync2(path, "utf8");
   } catch (err) {
     return { ok: false, reason: `unreadable (${err.message})` };
   }
   try {
-    return { ok: true, text, parsed: parseBlock(text) };
+    return { ok: true, text: text2, parsed: parseBlock(text2) };
   } catch (err) {
     return { ok: false, reason: `malformed skilletor markers: ${err.message}` };
   }
@@ -7403,9 +7403,9 @@ function readConfigToml(codexHome) {
   }
 }
 function projectDocLimit(codexHome) {
-  const text = readConfigToml(codexHome);
-  if (text === void 0) return 32768;
-  for (const line of text.split("\n")) {
+  const text2 = readConfigToml(codexHome);
+  if (text2 === void 0) return 32768;
+  for (const line of text2.split("\n")) {
     if (/^\s*\[/.test(line)) break;
     const m = /^\s*project_doc_max_bytes\s*=\s*(\d+)\s*(?:#.*)?$/.exec(line);
     if (m) return Number(m[1]);
@@ -7416,10 +7416,10 @@ var isSessionStartKey = (key) => key.startsWith("skilletor@") && key.includes(":
 var QUOTED_KEY = /^\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)')/;
 var TRUSTED_HASH = /^\s*trusted_hash\s*=\s*["']/;
 function codexHookTrusted(codexHome) {
-  const text = readConfigToml(codexHome);
-  if (text === void 0) return false;
+  const text2 = readConfigToml(codexHome);
+  if (text2 === void 0) return false;
   let table = "other";
-  for (const line of text.split("\n")) {
+  for (const line of text2.split("\n")) {
     const header = /^\s*\[\s*([^\[\]]*?)\s*\]\s*(?:#.*)?$/.exec(line);
     if (header) {
       const name = header[1];
@@ -7507,8 +7507,8 @@ function scalar(v, where, multiline) {
   }
   if (v instanceof TomlFloat) {
     if (!Number.isFinite(v.value)) throw new TomlWriteError(`${where}: ${v.value} is not a finite float`);
-    const text = String(v.value);
-    return /[.eE]/.test(text) ? text : `${text}.0`;
+    const text2 = String(v.value);
+    return /[.eE]/.test(text2) ? text2 : `${text2}.0`;
   }
   throw new TomlWriteError(`${where}: unsupported value ${JSON.stringify(v)}`);
 }
@@ -7637,8 +7637,8 @@ function codexAgentToml(markdown, itemName2) {
   if (typeof instructions !== "string") throw new ConvertError("developer_instructions must be a string");
   if (instructions.trim() === "") return { warnings };
   const rest = { developer_instructions: instructions, ...tables };
-  const text = stringifyToml(top) + (briefing ?? "") + stringifyToml(rest, { multiline: ["developer_instructions"] });
-  return { toml: text, warnings };
+  const text2 = stringifyToml(top) + (briefing ?? "") + stringifyToml(rest, { multiline: ["developer_instructions"] });
+  return { toml: text2, warnings };
 }
 function codexRuleSection(markdown, itemName2) {
   let fm;
@@ -8346,13 +8346,13 @@ function walkFiles(dir, sourceDir) {
   return out.sort();
 }
 function frontmatter(raw) {
-  const text = (raw.startsWith("\uFEFF") ? raw.slice(1) : raw).replace(/\r\n/g, "\n");
-  if (!text.startsWith("---")) return {};
-  const firstNl = text.indexOf("\n");
+  const text2 = (raw.startsWith("\uFEFF") ? raw.slice(1) : raw).replace(/\r\n/g, "\n");
+  if (!text2.startsWith("---")) return {};
+  const firstNl = text2.indexOf("\n");
   if (firstNl === -1) return {};
-  const close = text.indexOf("\n---", firstNl);
+  const close = text2.indexOf("\n---", firstNl);
   if (close === -1) return {};
-  const block = text.slice(firstNl + 1, close);
+  const block = text2.slice(firstNl + 1, close);
   const out = {};
   for (const line of block.split("\n")) {
     const m = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
@@ -8721,9 +8721,9 @@ var FRONTMATTER = /^\s*---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
 function rendersEmpty(item, output) {
   const src = item.type === "skill" ? posix3.join(item.dir ?? posix3.join("skills", item.name), "SKILL.md") : posix3.join(item.dir ?? `${item.type}s`, `${item.name}.md`);
   if (!item.files.includes(`${src}.njk`) || item.files.includes(src)) return false;
-  const text = output.get(installPath(item, src))?.toString("utf8");
-  if (text === void 0) return false;
-  return text.replace(FRONTMATTER, "").trim() === "";
+  const text2 = output.get(installPath(item, src))?.toString("utf8");
+  if (text2 === void 0) return false;
+  return text2.replace(FRONTMATTER, "").trim() === "";
 }
 
 // src/apply.ts
@@ -8736,15 +8736,15 @@ var LockError = class extends Error {
   name = "LockError";
 };
 function readLock(path) {
-  let text;
+  let text2;
   try {
-    text = readFileSync7(path, "utf8");
+    text2 = readFileSync7(path, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") return {};
     throw new LockError(`${path}: cannot read lock (${err.message})`);
   }
   try {
-    const value2 = JSON.parse(text);
+    const value2 = JSON.parse(text2);
     if (value2 === null || typeof value2 !== "object" || Array.isArray(value2)) {
       throw new Error("expected an object");
     }
@@ -9086,6 +9086,7 @@ var SyncLockTimeoutError = class extends Error {
 };
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
 var errCode = (err) => err.code;
+var SESSION_CWDS = 256;
 var LOCK = "sync.lock";
 var LEFTOVER2 = `${LOCK}.`;
 var State = class {
@@ -9236,6 +9237,29 @@ var State = class {
     delete pending[projectKey];
     this.writeJson("pending-report.json", pending);
     return report;
+  }
+  // ---- session cwd ----------------------------------------------------------
+  /** Where a Codex or Hermes session's hook last looked (spec §8, k149): the cwd of its last
+   *  SessionStart or prompt. A malformed entry counts as none. */
+  sessionCwd(sessionId) {
+    const entry = this.readJson("session-cwd.json")[sessionId];
+    const cwd = entry !== null && typeof entry === "object" ? entry.cwd : void 0;
+    return typeof cwd === "string" ? cwd : void 0;
+  }
+  /** Record a session's cwd; the file is written only when it changes, and keeps the
+   *  `SESSION_CWDS` sessions recorded last – one that lost its entry is looked at once more. */
+  putSessionCwd(sessionId, cwd) {
+    if (this.sessionCwd(sessionId) === cwd) return;
+    const all = this.readJson("session-cwd.json");
+    const at = (id) => {
+      const entry = all[id];
+      const t = entry !== null && typeof entry === "object" ? entry.at : void 0;
+      return typeof t === "number" ? t : 0;
+    };
+    const others = Object.keys(all).filter((id) => id !== sessionId).sort((a, b) => at(b) - at(a));
+    for (const id of others.slice(SESSION_CWDS - 1)) delete all[id];
+    all[sessionId] = { cwd, at: Date.now() };
+    this.writeJson("session-cwd.json", all);
   }
   // ---- mutex ----------------------------------------------------------------
   /**
@@ -9414,9 +9438,9 @@ function touch(path) {
 import { existsSync as existsSync10, readdirSync as readdirSync6, readFileSync as readFileSync10 } from "node:fs";
 import { join as join13 } from "node:path";
 var COMMENT = /^[ \t]*#[ \t]*briefing:[ \t]*skills[ \t]*=[ \t]*\[([^\]\r\n]*)\]/;
-function declaredSkills(harness, text) {
+function declaredSkills(harness, text2) {
   if (harness === "codex") {
-    for (const line of text.split("\n")) {
+    for (const line of text2.split("\n")) {
       if (/^developer_instructions[ \t]*=/.test(line)) break;
       const m = COMMENT.exec(line);
       if (m) return [...m[1].matchAll(/"([^"]*)"|'([^']*)'/g)].map((x) => x[1] ?? x[2]);
@@ -9425,7 +9449,7 @@ function declaredSkills(harness, text) {
   }
   let data;
   try {
-    data = splitFrontmatter(text).data;
+    data = splitFrontmatter(text2).data;
   } catch {
     return void 0;
   }
@@ -9462,13 +9486,13 @@ function subdirs(dir) {
   }
 }
 function missingSkills(harness, file, roots) {
-  let text;
+  let text2;
   try {
-    text = readFileSync10(file, "utf8");
+    text2 = readFileSync10(file, "utf8");
   } catch {
     return void 0;
   }
-  const declared = declaredSkills(harness, text);
+  const declared = declaredSkills(harness, text2);
   if (declared === void 0) return void 0;
   const missing = [];
   for (const name of declared) {
@@ -9542,10 +9566,10 @@ function notDeclarable(source) {
   if (kind === "git") return "a git source on a local path";
   return `a ${kind} source`;
 }
-function layoutOf(text) {
-  const m = /^([ \t]+)"/m.exec(text);
+function layoutOf(text2) {
+  const m = /^([ \t]+)"/m.exec(text2);
   const indent = m && m[1].length <= 10 ? m[1] : "  ";
-  return { indent, eol: text.includes("\r\n") ? "\r\n" : "\n", final: /\n$/.test(text) };
+  return { indent, eol: text2.includes("\r\n") ? "\r\n" : "\n", final: /\n$/.test(text2) };
 }
 function planClaudeSettings(a) {
   const plan = { enabled: [], declared: [], warnings: [] };
@@ -9553,20 +9577,20 @@ function planClaudeSettings(a) {
     plan.warnings.push(`${a.label} ${why}; plugin requirement not written`);
     return plan;
   };
-  let text;
+  let text2;
   try {
     const st = lstatSync8(a.file);
     if (st.isSymbolicLink()) return leave("is a symbolic link");
     if (!st.isFile()) return leave("is not a file");
-    text = readFileSync11(a.file, "utf8");
+    text2 = readFileSync11(a.file, "utf8");
   } catch (err) {
     if (err.code !== "ENOENT") return leave(`cannot be read (${err.message})`);
   }
   let settings = {};
-  if (text !== void 0) {
+  if (text2 !== void 0) {
     let parsed;
     try {
-      parsed = JSON.parse(text);
+      parsed = JSON.parse(text2);
     } catch (err) {
       return leave(`is not valid JSON (${err.message})`);
     }
@@ -9616,7 +9640,7 @@ function planClaudeSettings(a) {
   const next = { ...settings };
   if (plan.enabled.length) next.enabledPlugins = { ...enabled, ...Object.fromEntries(plan.enabled.map((k) => [k, true])) };
   if (additions.length) next.extraKnownMarketplaces = { ...declared, ...Object.fromEntries(additions) };
-  const { indent, eol, final } = text === void 0 ? { indent: "  ", eol: "\n", final: true } : layoutOf(text);
+  const { indent, eol, final } = text2 === void 0 ? { indent: "  ", eol: "\n", final: true } : layoutOf(text2);
   const body = JSON.stringify(next, null, indent);
   plan.next = (eol === "\n" ? body : body.split("\n").join(eol)) + (final ? eol : "");
   return plan;
@@ -10589,12 +10613,12 @@ function syncCodexRules(a) {
       entry.files = { [RULES_FILE]: entry.files[LEGACY] };
       lockMigrated = true;
     }
-    const text = planned.get(key) ?? onDisk?.text;
-    if (text === void 0) continue;
+    const text2 = planned.get(key) ?? onDisk?.text;
+    if (text2 === void 0) continue;
     if (prevHash !== void 0 && (!onDisk || hashBuffer(Buffer.from(onDisk.text, "utf8")) !== prevHash)) {
       overwritten.push(`${rulesLabel}#rules/${name}`);
     }
-    sections.push({ name, source: entry.source, text });
+    sections.push({ name, source: entry.source, text: text2 });
   }
   if (lockMigrated) writeLock(a.lockPath, newLock);
   sections.sort((x, y) => x.name < y.name ? -1 : x.name > y.name ? 1 : 0);
@@ -11347,22 +11371,22 @@ async function cmdUninstall(ctx, args) {
     }
     const label = p.type ? `${p.type}:${p.name}@${p.source}` : `${p.name}@${p.source}`;
     const cover = p.name.includes(WILDCARD) ? { source: p.source, wilds: [], bundles: [], confirmed: false } : covering(path, lock, bundlesHere, p.name, p.source, p.type, explicit.map((e) => e.type));
-    const text = coverText(cover);
+    const text2 = coverText(cover);
     if (explicit.length === 0) {
-      if (text && cover.confirmed) {
+      if (text2 && cover.confirmed) {
         errors.push(
-          `${label} is not declared explicitly; it is installed by the ${text} in ${where}. To drop it, ` + wayOut(cover, project)
+          `${label} is not declared explicitly; it is installed by the ${text2} in ${where}. To drop it, ` + wayOut(cover, project)
         );
-      } else if (text) {
+      } else if (text2) {
         errors.push(
-          `${label} is not declared in ${where} (${path}); the ${text} there installs every matching item of its type from ${p.source}, so if ${p.source} offers it: ${wayOut(cover, project)}`
+          `${label} is not declared in ${where} (${path}); the ${text2} there installs every matching item of its type from ${p.source}, so if ${p.source} offers it: ${wayOut(cover, project)}`
         );
       } else {
         errors.push(`${label} is not declared in ${where} (${path})${declaredElsewhere(ctx, path, p, project)}`);
       }
-    } else if (text) {
+    } else if (text2) {
       hints.push(
-        `${label} removed, but the ${text} in ${where} still installs it on the next sync. To drop it, ` + wayOut(cover, project)
+        `${label} removed, but the ${text2} in ${where} still installs it on the next sync. To drop it, ` + wayOut(cover, project)
       );
     }
   }
@@ -11548,6 +11572,7 @@ async function sessionStart(input, ctx) {
   } catch (err) {
     out = warn(err.message);
   }
+  if (followsMoves(ctx)) recordSessionCwd(input, ctx);
   const source = input.source;
   if (ctx.harness === "codex" && (source === void 0 || source === null || source === "startup" || source === "clear")) {
     out = withCodexRules(out, ctx);
@@ -11623,10 +11648,14 @@ function trustReport(chk) {
   return report;
 }
 async function syncMovedCheckout(move, ctx) {
+  return (await moveCheckout(move, ctx)).out;
+}
+async function moveCheckout(move, ctx) {
   const root = projectRootOf(move.cwd);
+  const answered = (out) => ({ out, answered: root });
   try {
-    if (samePath(root, ctx.home) || !existsSync12(join17(root, ".claude", "skilletor.json"))) return {};
-    if (move.oldCwd !== void 0 && samePath(projectRootOf(move.oldCwd), root)) return {};
+    if (samePath(root, ctx.home) || !existsSync12(join17(root, ".claude", "skilletor.json"))) return { out: {} };
+    if (move.oldCwd !== void 0 && samePath(projectRootOf(move.oldCwd), root)) return { out: {} };
     const moved = {
       ...ctx,
       projectDir: root,
@@ -11634,15 +11663,16 @@ async function syncMovedCheckout(move, ctx) {
       deadline: ctx.deadline ?? Date.now() + MOVE_DEADLINE_MS
     };
     const chk = await check(moved, { scope: "project", local: true });
-    if (chk.error) return cannotSync(root, chk.error);
+    if (chk.error) return answered(cannotSync(root, chk.error));
     if (!chk.changed) {
-      if (chk.trustRequests?.length) return movedOutput(trustReport(chk), root, move.eventName);
-      return chk.warnings.length ? cannotSync(root, chk.warnings.join("; ")) : {};
+      if (chk.trustRequests?.length) return answered(movedOutput(trustReport(chk), root, move.eventName));
+      return chk.warnings.length ? answered(cannotSync(root, chk.warnings.join("; "))) : { out: {} };
     }
     const report = await sync(moved, { scope: "project" });
-    return report.error ? cannotSync(root, report.error) : movedOutput(report, root, move.eventName);
+    return answered(report.error ? cannotSync(root, report.error) : movedOutput(report, root, move.eventName));
   } catch (err) {
-    return cannotSync(root, err.message);
+    const out = cannotSync(root, err.message);
+    return err instanceof SyncLockTimeoutError ? { out } : answered(out);
   }
 }
 function cannotSync(dir, message) {
@@ -11663,16 +11693,55 @@ function movedOutput(report, dir, eventName) {
 ${context}` };
   return result;
 }
+var text = (v) => typeof v === "string" && v !== "" ? v : void 0;
 async function cwdChanged(input, ctx) {
-  const text = (v) => typeof v === "string" && v !== "" ? v : void 0;
   const cwd = text(input.new_cwd) ?? text(input.cwd);
   if (cwd === void 0) return {};
   const out = await syncMovedCheckout({ cwd, oldCwd: text(input.old_cwd), eventName: "CwdChanged" }, ctx);
   return out.systemMessage ? { systemMessage: out.systemMessage } : {};
 }
+var followsMoves = (ctx) => ctx.harness === "codex" || ctx.harness === "hermes";
+var sessionOf = (input) => typeof input.session_id === "string" ? input.session_id : "";
+function recordSessionCwd(input, ctx) {
+  const cwd = text(input.cwd);
+  if (cwd === void 0) return;
+  try {
+    new State(ctx.stateRoot).putSessionCwd(sessionOf(input), cwd);
+  } catch {
+  }
+}
+async function promptMove(input, ctx, state) {
+  const cwd = text(input.cwd);
+  if (cwd === void 0) return {};
+  const session = sessionOf(input);
+  const last = state.sessionCwd(session);
+  if (last !== void 0 && samePath(last, cwd)) return {};
+  const { out, answered } = await moveCheckout({ cwd, oldCwd: last, eventName: "UserPromptSubmit" }, ctx);
+  try {
+    if (answered !== void 0) state.markChecked(answered);
+    state.putSessionCwd(session, cwd);
+  } catch {
+  }
+  return out;
+}
+function joined(pending, moved) {
+  const says = (o) => Boolean(o?.systemMessage || o?.hookSpecificOutput?.additionalContext);
+  if (!says(moved)) return pending ?? {};
+  if (!says(pending)) return moved;
+  const parts = [pending, moved];
+  const out = {};
+  const lines = parts.map((p) => p.systemMessage).filter(Boolean);
+  if (lines.length) out.systemMessage = lines.join("; ");
+  if (parts.some((p) => p.hookSpecificOutput?.additionalContext)) {
+    const context = parts.map((p) => p.hookSpecificOutput?.additionalContext || p.systemMessage).filter(Boolean);
+    out.hookSpecificOutput = { hookEventName: "UserPromptSubmit", additionalContext: context.join("\n") };
+  }
+  return out;
+}
 async function userPromptSubmit(input, ctx) {
   const state = new State(ctx.stateRoot);
   const key = projectKeyOf(ctx, input);
+  const moved = followsMoves(ctx) ? await promptMove(input, ctx, state) : {};
   const pending = state.takePendingReport(key);
   let interval = DEFAULT_INTERVAL;
   try {
@@ -11683,7 +11752,7 @@ async function userPromptSubmit(input, ctx) {
     state.markChecked(key);
     (ctx.background ?? defaultBackground)(ctx);
   }
-  return pending ?? {};
+  return joined(pending, moved);
 }
 async function syncBackground(input, ctx) {
   const key = projectKeyOf(ctx, input);
@@ -11837,15 +11906,15 @@ function statusText(report) {
 function printLines(stream, lines) {
   stream.write(lines.map(displaySafe).join("\n") + "\n");
 }
-function printText(stream, text) {
-  printLines(stream, text.split("\n"));
+function printText(stream, text2) {
+  printLines(stream, text2.split("\n"));
 }
 function syncText(r) {
-  const text = reportText(r);
+  const text2 = reportText(r);
   const runLevel = Boolean(r.warnings?.length || r.notes?.length);
   if (runLevel && !reportText({ ...r, warnings: void 0, notes: void 0 })) return `skilletor: up to date
-${text}`;
-  return text || "skilletor: up to date";
+${text2}`;
+  return text2 || "skilletor: up to date";
 }
 function syncFailed(r, opts = {}) {
   if (opts.saved === void 0) {

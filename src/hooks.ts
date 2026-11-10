@@ -15,7 +15,9 @@
 // `hermes` is no target, its SessionStart answer says how to opt in (spec §16.2).
 //
 // CwdChanged (Claude Code only): a session that moves into another checkout gets that
-// checkout's project scope brought up to date (`syncMovedCheckout`, spec §8).
+// checkout's project scope brought up to date (`syncMovedCheckout`, spec §8). Codex and Hermes
+// have no such event; there UserPromptSubmit (`--harness codex|hermes`) does the same first,
+// awaited, when the session's cwd is not the one its hook last looked at (k149).
 import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
@@ -54,9 +56,10 @@ export interface HookContext extends EngineContext {
 
 const SESSION_START_TIMEOUT_MS = 5_000;
 const DEFAULT_INTERVAL = 600;
-/** A move's sync writes nothing once this has passed (spec §8): `hooks/hooks.json` kills the
- *  hook at 30 s, which leaves the local rest of a sync 10 s. */
-const MOVE_DEADLINE_MS = 20_000;
+/** A move's sync writes nothing once this has passed (spec §8): `hooks/hooks.json` and
+ *  `hooks/codex-hooks.json` kill the hook at 30 s, which leaves the local rest of a sync 10 s;
+ *  the Hermes plugin at 25 s (`PROMPT_S`), below Hermes' own 30 s. */
+export const MOVE_DEADLINE_MS = 20_000;
 
 function projectKeyOf(ctx: HookContext, input: HookInput): string {
   return ctx.projectDir ?? input.cwd ?? "";
@@ -127,6 +130,7 @@ async function sessionStart(input: HookInput, ctx: HookContext): Promise<HookOut
   } catch (err) {
     out = warn((err as Error).message);
   }
+  if (followsMoves(ctx)) recordSessionCwd(input, ctx);
   // A resumed session still has the first copy in its history (spec §14.8).
   const source = input.source;
   if (ctx.harness === "codex" && (source === undefined || source === null || source === "startup" || source === "clear")) {
@@ -236,19 +240,31 @@ export interface CheckoutMove {
 
 /**
  * A session moved into `move.cwd` (spec §8): the one core every harness's move hook calls –
- * Claude Code's CwdChanged; Codex's and Hermes' (k149). The checkout is the git top level of
- * the new cwd, never `ctx.projectDir`, the session's own project. Nothing to do – no source
- * asked, nothing written – when it is the old cwd's checkout, the home dir, has no
+ * Claude Code's CwdChanged; Codex's and Hermes' prompt hook (k149). The checkout is the git top
+ * level of the new cwd, never `ctx.projectDir`, the session's own project. Nothing to do – no
+ * source asked, nothing written – when it is the old cwd's checkout, the home dir, has no
  * `.claude/skilletor.json`, or its lock already matches its config (a local check: no fetch,
  * no network). Otherwise its project scope syncs as at SessionStart – 5 s per source, the same
  * trust rules, nothing written once `MOVE_DEADLINE_MS` has passed – and one line names the
  * checkout and, when something is left to do, the command to run there. Never throws.
  */
 export async function syncMovedCheckout(move: CheckoutMove, ctx: HookContext): Promise<HookOutput> {
+  return (await moveCheckout(move, ctx)).out;
+}
+
+/** What a move did: its answer, and – when it answered for the checkout, with a sync or with
+ *  what is left to do there – that checkout, which a background sync would only say again. */
+interface MoveResult {
+  out: HookOutput;
+  answered?: string;
+}
+
+async function moveCheckout(move: CheckoutMove, ctx: HookContext): Promise<MoveResult> {
   const root = projectRootOf(move.cwd);
+  const answered = (out: HookOutput): MoveResult => ({ out, answered: root });
   try {
-    if (samePath(root, ctx.home) || !existsSync(join(root, ".claude", "skilletor.json"))) return {};
-    if (move.oldCwd !== undefined && samePath(projectRootOf(move.oldCwd), root)) return {};
+    if (samePath(root, ctx.home) || !existsSync(join(root, ".claude", "skilletor.json"))) return { out: {} };
+    if (move.oldCwd !== undefined && samePath(projectRootOf(move.oldCwd), root)) return { out: {} };
     const moved: HookContext = {
       ...ctx,
       projectDir: root,
@@ -256,15 +272,18 @@ export async function syncMovedCheckout(move: CheckoutMove, ctx: HookContext): P
       deadline: ctx.deadline ?? Date.now() + MOVE_DEADLINE_MS,
     };
     const chk = await check(moved, { scope: "project", local: true });
-    if (chk.error) return cannotSync(root, chk.error);
+    if (chk.error) return answered(cannotSync(root, chk.error));
     if (!chk.changed) {
-      if (chk.trustRequests?.length) return movedOutput(trustReport(chk), root, move.eventName);
-      return chk.warnings.length ? cannotSync(root, chk.warnings.join("; ")) : {};
+      if (chk.trustRequests?.length) return answered(movedOutput(trustReport(chk), root, move.eventName));
+      return chk.warnings.length ? answered(cannotSync(root, chk.warnings.join("; "))) : { out: {} };
     }
     const report = await sync(moved, { scope: "project" });
-    return report.error ? cannotSync(root, report.error) : movedOutput(report, root, move.eventName);
+    return answered(report.error ? cannotSync(root, report.error) : movedOutput(report, root, move.eventName));
   } catch (err) {
-    return cannotSync(root, (err as Error).message);
+    // Timed out on the sync lock: another run holds it – a background sync of this very
+    // checkout, maybe – and synced nothing here, so the interval check is left to retry (k89).
+    const out = cannotSync(root, (err as Error).message);
+    return err instanceof SyncLockTimeoutError ? { out } : answered(out);
   }
 }
 
@@ -290,19 +309,82 @@ function movedOutput(report: SyncReport, dir: string, eventName: string): HookOu
   return result;
 }
 
+/** A hook input's string field, when it is a non-empty one. */
+const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined);
+
 /** Claude Code's CwdChanged (spec §8): it is not awaited, and its output takes no context
  *  (only `watchPaths`), so the line is all it gives – it reaches the user, not the model. */
 async function cwdChanged(input: HookInput, ctx: HookContext): Promise<HookOutput> {
-  const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined);
   const cwd = text(input.new_cwd) ?? text(input.cwd);
   if (cwd === undefined) return {};
   const out = await syncMovedCheckout({ cwd, oldCwd: text(input.old_cwd), eventName: "CwdChanged" }, ctx);
   return out.systemMessage ? { systemMessage: out.systemMessage } : {};
 }
 
+/** Codex's and Hermes' hooks, which notice a move at the next prompt (k149). */
+const followsMoves = (ctx: HookContext) => ctx.harness === "codex" || ctx.harness === "hermes";
+
+/** The session a hook input belongs to; "" when it names none. */
+const sessionOf = (input: HookInput) => (typeof input.session_id === "string" ? input.session_id : "");
+
+/** Where a Codex or Hermes session's SessionStart looked, for its next prompt to compare
+ *  (k149). Best effort: without the record the first prompt looks once more. */
+function recordSessionCwd(input: HookInput, ctx: HookContext): void {
+  const cwd = text(input.cwd);
+  if (cwd === undefined) return;
+  try {
+    new State(ctx.stateRoot).putSessionCwd(sessionOf(input), cwd);
+  } catch {
+    // the state dir cannot be written
+  }
+}
+
+/**
+ * Codex and Hermes (spec §8, k149): a session there moves only between turns, and the prompt
+ * hook is the first to see the new cwd – awaited, before the model's request. The cwd the
+ * session's hook last looked at is kept per session id (written at SessionStart): the same cwd
+ * again asks nothing; another goes to the move core, which tells a move within one checkout
+ * from one into another. A move that answered for its checkout marks it checked, so the
+ * interval check starts no second sync of it beside this one.
+ */
+async function promptMove(input: HookInput, ctx: HookContext, state: State): Promise<HookOutput> {
+  const cwd = text(input.cwd);
+  if (cwd === undefined) return {};
+  const session = sessionOf(input);
+  const last = state.sessionCwd(session);
+  if (last !== undefined && samePath(last, cwd)) return {};
+  const { out, answered } = await moveCheckout({ cwd, oldCwd: last, eventName: "UserPromptSubmit" }, ctx);
+  try {
+    if (answered !== undefined) state.markChecked(answered);
+    state.putSessionCwd(session, cwd);
+  } catch {
+    // the state dir cannot be written: the next prompt looks again
+  }
+  return out;
+}
+
+/** A pending report and a move's answer as one (k149): both lines, and – when either has a
+ *  context – both in it, a line standing in for an answer without one, since the Hermes plugin
+ *  hands the model the context alone (spec §16.4). Without a move's answer, the report as is. */
+function joined(pending: HookOutput | undefined, moved: HookOutput): HookOutput {
+  const says = (o: HookOutput | undefined) => Boolean(o?.systemMessage || o?.hookSpecificOutput?.additionalContext);
+  if (!says(moved)) return pending ?? {};
+  if (!says(pending)) return moved;
+  const parts = [pending!, moved];
+  const out: HookOutput = {};
+  const lines = parts.map((p) => p.systemMessage).filter(Boolean);
+  if (lines.length) out.systemMessage = lines.join("; ");
+  if (parts.some((p) => p.hookSpecificOutput?.additionalContext)) {
+    const context = parts.map((p) => p.hookSpecificOutput?.additionalContext || p.systemMessage).filter(Boolean);
+    out.hookSpecificOutput = { hookEventName: "UserPromptSubmit", additionalContext: context.join("\n") };
+  }
+  return out;
+}
+
 async function userPromptSubmit(input: HookInput, ctx: HookContext): Promise<HookOutput> {
   const state = new State(ctx.stateRoot);
   const key = projectKeyOf(ctx, input);
+  const moved = followsMoves(ctx) ? await promptMove(input, ctx, state) : {};
   const pending = state.takePendingReport(key) as HookOutput | undefined;
 
   let interval = DEFAULT_INTERVAL;
@@ -318,7 +400,7 @@ async function userPromptSubmit(input: HookInput, ctx: HookContext): Promise<Hoo
     (ctx.background ?? defaultBackground)(ctx);
   }
 
-  return pending ?? {};
+  return joined(pending, moved);
 }
 
 /** Runs in a detached child: sync, then store the result as a pending report – its stdout

@@ -81,7 +81,10 @@ Three hooks drive it:
   session until you trust it.
 - **UserPromptSubmit** — when the throttle is due, kick off a detached background sync (no
   console window on Windows) and deliver its result on a later prompt; otherwise return
-  instantly and silent.
+  instantly and silent. Under Codex and Hermes it first notices a move: a session whose
+  working directory is now another checkout of a skilletor project gets that checkout synced
+  before the prompt goes on, as CwdChanged does below, and the model is told in the prompt's
+  context.
 - **CwdChanged** (Claude Code only) — when the session `cd`s into another checkout of a
   skilletor project (a worktree made with plain `git worktree add` has the config but none of
   the installed items), compare that checkout's lock with its config, without asking any
@@ -90,7 +93,9 @@ Three hooks drive it:
   the line names what to run there: `skilletor trust <name>` or `skilletor sync`. A move within
   the same checkout, or into a directory without `.claude/skilletor.json`, does nothing.
   Claude Code does not wait for this hook: an agent spawned right after the `cd` may start
-  before the items are there. Codex and Hermes have no such event.
+  before the items are there. Codex and Hermes have no such event; a session there moves only
+  between turns, so their prompt hook notices it, and waits for the sync (above). "Works in"
+  means the harness' session directory, not the directory of each command a session runs.
 
 Skills become usable immediately; agents and rules activate after `/reload-plugins` or a
 restart — the report says so per item.
@@ -788,7 +793,11 @@ Use kubectl carefully.
 The repository ships a Codex plugin manifest (`.codex-plugin/plugin.json`) next to the
 Claude one; both ship the bundled skill. The Codex manifest points at its own
 `hooks/codex-hooks.json` — the same hooks as `hooks/hooks.json`, run with `--harness codex`,
-plus the rules delivery; `CwdChanged` is not among them, Codex has no such event.
+plus the rules delivery; `CwdChanged` is not among them, Codex has no such event. A Codex
+session moves only between turns (an app-server turn with a new `cwd`; `/cd` starts a new
+session, which syncs at its start), so `UserPromptSubmit` syncs a checkout the session moved
+into before the turn goes on; Codex gives it 30 s, as `SessionStart`. A skill that sync writes
+is on disk at once but listed by Codex only from the next session.
 
 - **Trust the hooks.** Codex runs a plugin's hooks only after you trust them — open
   `/hooks` in Codex and trust skilletor's `SessionStart` and `UserPromptSubmit` hooks.
@@ -881,8 +890,9 @@ the plugin move the user-scope skills back and forth; enable it in one.
 `hermes/skilletor/` in this repository is a native Hermes plugin. It runs the same two
 hooks as under Claude Code — a sync when a session starts, the throttled check on each
 later turn — and gives the report to the model with the turn (Hermes appends it to the
-user message); Hermes has no `CwdChanged`, so a `cd` into another checkout syncs nothing
-there. Install it with Hermes:
+user message). Hermes has no `CwdChanged`; a terminal `cd` does not move the session, but
+`/worktree new` and a gateway's re-anchor do, between turns, and the next turn syncs the
+checkout the session moved into before the model is called. Install it with Hermes:
 
 ```bash
 hermes plugins install Getty/skilletor/hermes/skilletor --enable

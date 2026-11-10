@@ -9,6 +9,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSy
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
+import { MOVE_DEADLINE_MS } from "../src/hooks.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const PLUGIN = join(root, "hermes", "skilletor");
@@ -24,6 +25,7 @@ const STANDIN = [
   "#!/bin/sh",
   "printf '%s\\n' \"$*\" >> \"$0.argv\"",
   "cat > \"$0.stdin.$2\"",
+  "{ cat \"$0.stdin.$2\"; echo; } >> \"$0.stdins\"",
   "env > \"$0.env\"",
   "printf '%s' \"$$\" > \"$0.pid\"",
   "pwd > \"$0.pwd\"",
@@ -94,6 +96,9 @@ test("register: the two hooks the manifest declares, each taking **kwargs; a CLI
   assert.deepEqual(out.hooks_without_cli, ["on_session_start", "pre_llm_call"]);
   // Below Hermes' own limit for a hook callback (plugins.hook_callback_timeout, 30 s).
   assert.ok(out.limits.every((s) => s > 0 && s < 30), String(out.limits));
+  // k149: a prompt that moved into another checkout syncs it, awaited; past MOVE_DEADLINE_MS
+  // that sync writes nothing, so the plugin's own kill must come later, never during a write.
+  assert.ok(out.limits[1]! * 1000 > MOVE_DEADLINE_MS, String(out.limits));
 });
 
 test("the plugin carries the package's version", () => {
@@ -132,6 +137,32 @@ test("a session start runs session-start; its context goes to the model with the
     assert.match(f.read("env")!, /^HERMES_HOME=\/srv\/hermes-home$/m);
     assert.equal(realpathSync(f.read("pwd")!.trim()), realpathSync(f.cwd)); // the child runs where the session works
     assert.equal(out.kept, 0);
+  } finally {
+    f.cleanup();
+  }
+});
+
+// k149 (spec §16.4): Hermes moves a session only between turns (`/worktree new`, a gateway's
+// re-anchor), and the next pre_llm_call is the first hook to see it. Asserts: each turn's
+// user-prompt-submit is sent the cwd the session resolves at that turn – the child runs there –
+// and the move's answer from the CLI reaches the model as the turn's context.
+test("a session that moved between turns: the next turn's prompt hook is sent the new cwd, its answer reaches the model", { skip }, () => {
+  const f = fixture();
+  try {
+    const wt = join(f.tmp.dir, "worktree");
+    mkdirSync(wt);
+    const moved = `skilletor: in ${wt}:\nskilletor synced items:\n- skill foo@mine (hermes): active from the next Hermes session`;
+    f.says("user-prompt-submit", answer(moved, `skilletor: 1 item(s) updated in ${wt}`, "UserPromptSubmit"));
+    const out = drive({
+      mode: "adapter", environ: f.environ, cwd: f.cwd,
+      steps: [START(), TURN(), ["_cd", { cwd: wt }], TURN("s1", { is_first_turn: false })],
+    });
+    assert.deepEqual(out.results.map((r) => r.ret), [null, null, null, { context: moved }]);
+    assert.deepEqual(f.read("stdins")!.trim().split("\n").map((line) => JSON.parse(line)), [
+      { hook_event_name: "SessionStart", session_id: "s1", cwd: f.cwd, source: "startup" },
+      { hook_event_name: "UserPromptSubmit", session_id: "s1", cwd: wt },
+    ]);
+    assert.equal(realpathSync(f.read("pwd")!.trim()), realpathSync(wt));
   } finally {
     f.cleanup();
   }

@@ -58,6 +58,9 @@ export class SyncLockTimeoutError extends Error {
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errCode = (err: unknown) => (err as NodeJS.ErrnoException).code;
 
+/** Sessions `session-cwd.json` keeps (a Hermes gateway runs for days). */
+const SESSION_CWDS = 256;
+
 const LOCK = "sync.lock";
 /** What a lock leaves beside it: a broken lock's tombstone, a released lock on its way out. */
 const LEFTOVER = `${LOCK}.`;
@@ -246,6 +249,32 @@ export class State {
     delete pending[projectKey];
     this.writeJson("pending-report.json", pending);
     return report;
+  }
+
+  // ---- session cwd ----------------------------------------------------------
+
+  /** Where a Codex or Hermes session's hook last looked (spec §8, k149): the cwd of its last
+   *  SessionStart or prompt. A malformed entry counts as none. */
+  sessionCwd(sessionId: string): string | undefined {
+    const entry = this.readJson("session-cwd.json")[sessionId];
+    const cwd = entry !== null && typeof entry === "object" ? (entry as Record<string, unknown>).cwd : undefined;
+    return typeof cwd === "string" ? cwd : undefined;
+  }
+
+  /** Record a session's cwd; the file is written only when it changes, and keeps the
+   *  `SESSION_CWDS` sessions recorded last – one that lost its entry is looked at once more. */
+  putSessionCwd(sessionId: string, cwd: string): void {
+    if (this.sessionCwd(sessionId) === cwd) return;
+    const all = this.readJson("session-cwd.json");
+    const at = (id: string) => {
+      const entry = all[id];
+      const t = entry !== null && typeof entry === "object" ? (entry as Record<string, unknown>).at : undefined;
+      return typeof t === "number" ? t : 0;
+    };
+    const others = Object.keys(all).filter((id) => id !== sessionId).sort((a, b) => at(b) - at(a));
+    for (const id of others.slice(SESSION_CWDS - 1)) delete all[id];
+    all[sessionId] = { cwd, at: Date.now() };
+    this.writeJson("session-cwd.json", all);
   }
 
   // ---- mutex ----------------------------------------------------------------

@@ -118,10 +118,10 @@ claudesettings.ts  plan the project settings.json plugin requirement (§6.8); en
 
 Claude Code: skills written mid-session are usable at once; agents and rules are
 read at session start or `/reload-plugins` and take effect from the **next**
-prompt. Codex (unmeasured) and Hermes (skill index built before the sync) report
-every item "active from the next … session". `report.ts` `ACTIVATION` /
-`HARNESS_ACTIVATION` state this — keep the wording honest when adding item types,
-harnesses or changing the report.
+prompt. Codex (lists a skill written mid-session from the next session) and Hermes
+(skill index built before the sync) report every item "active from the next … session".
+`report.ts` `ACTIVATION` / `HARNESS_ACTIVATION` state this — keep the wording honest
+when adding item types, harnesses or changing the report.
 
 ## Code conventions
 

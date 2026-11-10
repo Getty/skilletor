@@ -48,7 +48,16 @@ Revision history for skilletor
   - A Claude Code session that `cd`s into another checkout of a skilletor
     project (e.g. a plain `git worktree add`) now gets that checkout's project
     scope synced by a new `CwdChanged` hook, with one line naming the
-    directory; Codex and Hermes have no such event.
+    directory.
+  - A Codex or Hermes session that moves into another checkout of a skilletor
+    project between turns now gets that checkout synced by the prompt hook
+    (`user-prompt-submit --harness codex|hermes`), with one line naming the
+    directory, joined with any pending report. The hook compares the prompt's
+    cwd with the session's last one (`session-cwd.json` in the state dir,
+    written at SessionStart) and only a change runs the sync. The Codex
+    UserPromptSubmit timeout is 30 s and the Hermes plugin's prompt timeout
+    25 s, for the 20 s write deadline. The Perl port has no hooks and does not
+    take part.
 
 0.7.0     2026-10-16 20:00:22Z
   - The plugin, package and README descriptions name Hermes Agent as the third

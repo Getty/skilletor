@@ -27,6 +27,11 @@ with that Hermes' home as `HERMES_HOME`.
 
 - Lock keys: `hermes:skills/<name>`; templates render with `harness` = `hermes`.
 - Project skills load only after `hermes skills trust` in the project.
+- A session moved into another checkout (`/worktree new`, the TUI gateway moving it into a
+  worktree; not a terminal `cd`) has that checkout synced on its next turn, before the model
+  is called. `skills_list` finds the new skills at once, the system prompt's skill index
+  only from the next session — and an untrusted worktree hides every project skill, the
+  first checkout's too, until `hermes skills trust <dir>` (takes effect at once).
 
 ## The Hermes home
 

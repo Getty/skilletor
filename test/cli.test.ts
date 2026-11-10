@@ -732,6 +732,51 @@ test("k147: hook cwd-changed syncs the checkout moved into, not CLAUDE_PROJECT_D
   assert.equal(existsSync(join(session, ".claude", "skilletor.lock.json")), false);
 });
 
+// k149 (spec §8, §14.5): Codex has no CwdChanged; its prompt hook notices the move. Asserts:
+// through the built bundle on a Codex-only machine, `hook session-start --harness codex` in
+// `main`, then `hook user-prompt-submit --harness codex` of the same session in a plain `git
+// worktree add` of it syncs the worktree before it exits 0 – one JSON line, the line and a
+// context naming the worktree – and the next prompt there prints nothing.
+test("k149: hook user-prompt-submit --harness codex syncs the worktree the session moved into", () => {
+  const home = join(tmp.dir, "codex-move-home");
+  const codexHome = join(home, ".codex");
+  const src = join(tmp.dir, "codex-move-src");
+  const main = join(tmp.dir, "codex-move-main");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(codexHome, { recursive: true });
+  writeFileSync(join(codexHome, "config.toml"), "");
+  mkdirSync(join(src, "skills", "foo"), { recursive: true });
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), "---\nname: foo\ndescription: foo\n---\nFOO\n");
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } } }));
+  mkdirSync(join(main, ".claude"), { recursive: true });
+  writeFileSync(join(main, ".claude", "skilletor.json"), JSON.stringify({ install: { skills: ["foo@s"] } }));
+  const git = (...args: string[]) => execFileSync("git", ["-C", main, "-c", "user.name=t", "-c", "user.email=t@e", ...args]);
+  git("init", "-q", "-b", "main");
+  const { HERMES_HOME: _h, ...rest } = process.env;
+  const env = { ...rest, ...homeEnv(home), CODEX_HOME: codexHome };
+  const hook = (event: string, cwd: string, more: Record<string, string> = {}) =>
+    runCli(["hook", event, "--harness", "codex"], env, JSON.stringify({ cwd, session_id: "c1", ...more }), cwd);
+
+  const started = hook("session-start", main, { hook_event_name: "SessionStart", source: "startup" });
+  assert.equal(started.status, 0, started.stderr);
+  assert.match(JSON.parse(started.stdout).systemMessage, /^skilletor: 1 item\(s\) updated/);
+  git("add", "-A");
+  git("commit", "-qm", "config and blocks");
+  const wt = join(realpathSync(main), ".claude", "worktrees", "backlog");
+  git("worktree", "add", "-q", "-b", "backlog", wt);
+
+  const prompt = hook("user-prompt-submit", wt, { hook_event_name: "UserPromptSubmit" });
+  assert.equal(prompt.status, 0, prompt.stderr);
+  assert.equal(prompt.stdout.trim().split("\n").length, 1);
+  const out = JSON.parse(prompt.stdout);
+  assert.equal(out.systemMessage, `skilletor: 1 item(s) updated in ${wt}`);
+  assert.equal(out.hookSpecificOutput.hookEventName, "UserPromptSubmit");
+  assert.match(out.hookSpecificOutput.additionalContext, new RegExp(`^skilletor: in ${wt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\n`));
+  assert.equal(readFileSync(join(wt, ".agents", "skills", "foo", "SKILL.md"), "utf8"), "---\nname: foo\ndescription: foo\n---\nFOO\n");
+  const again = hook("user-prompt-submit", wt, { hook_event_name: "UserPromptSubmit" });
+  assert.deepEqual([again.status, again.stdout], [0, ""]);
+});
+
 // ---- k87: strings from a config, a source or git are display-safe --------------------
 
 /** An ANSI color escape, a BEL, a right-to-left override and a newline. */

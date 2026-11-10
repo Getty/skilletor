@@ -139,7 +139,7 @@ run, and hands their answer to Hermes. It decides nothing.
 | Hermes hook | Fires | skilletor call | Return |
 |---|---|---|---|
 | `on_session_start` | first turn of a new session, after the system prompt is built; return ignored (`agent/conversation_loop.py:862-869`; `website/docs/user-guide/features/hooks.md:902-924`) | `skilletor hook session-start --harness hermes`, input `{"hook_event_name":"SessionStart","source":"startup","cwd":…,"session_id":…}` | none; the answer is kept for the session |
-| `pre_llm_call` | once per user turn, after `on_session_start` on a first turn (`agent/turn_context.py:1159`, `:781-835`) | on the first turn the plugin sees of a session: nothing more if `on_session_start` ran, else (a resumed session fires none) `session-start` with `"source":"resume"`; on every later turn `skilletor hook user-prompt-submit --harness hermes` | `{"context": <text>}` or `None` |
+| `pre_llm_call` | once per user turn, after `on_session_start` on a first turn (`agent/turn_context.py:1159`, `:781-835`) | on the first turn the plugin sees of a session: nothing more if `on_session_start` ran, else (a resumed session fires none) `session-start` with `"source":"resume"`; on every later turn `skilletor hook user-prompt-submit --harness hermes`, input `{"hook_event_name":"UserPromptSubmit","cwd":…,"session_id":…}` with that turn's cwd | `{"context": <text>}` or `None` |
 
 A delegated child is no session of the user's: `delegate_task` builds it with
 `platform="subagent"` and a parent session (`tools/delegate_tool.py:270-280`), it fires both
@@ -167,6 +167,19 @@ skills, `agent/skill_utils.py:539-556`), else the process directory. `HERMES_HOM
 child's environment is `hermes_constants.get_hermes_home()` – the active profile, also on
 a gateway that serves several.
 
+**A session that moves** (k149). Hermes has no `CwdChanged`. Measured (Hermes test checkout
+`ea81748`, the APIs used diffed against upstream `3d4dd108`: unchanged): a terminal `cd` moves
+the terminal only – `resolve_agent_cwd()` and the skill lookup stay where they were, and
+`post_tool_call` sees no move. The session moves between turns: `/worktree new` sets
+`TERMINAL_CWD` (`cli.py:1653`), and the tui gateway re-anchors a session into a sibling worktree
+at turn end. The next `pre_llm_call` is the first hook whose `resolve_agent_cwd()` names the new
+directory, and it is awaited before the model call. The plugin sends each turn's cwd, so
+`user-prompt-submit` sees the move and syncs that checkout first, awaited (spec §8): it holds that
+turn as a session start holds the first, and its answer – its first line naming the checkout –
+is the turn's context. Hermes resolves project skills live, so the next skill lookup finds them;
+the system prompt's skill index stays as it was at session start. An untrusted worktree hides
+every project skill, the session's first checkout's too; trust takes effect live.
+
 **Which CLI.** In order: `$SKILLETOR_BIN`; `bin/skilletor` of the checkout the plugin
 directory is a symlink into; `skilletor` on `PATH`. None found: the plugin does nothing.
 Hermes loads `$HERMES_HOME/.env` into its environment at start
@@ -180,7 +193,8 @@ abandons a bounded hook callback after `plugins.hook_callback_timeout` (default 
 then skips it for 60 s; for `on_session_start` and `pre_llm_call` that is fail-open, only
 `pre_tool_call` fails closed (`hermes_cli/plugins_dispatch.py:26-53`, `:209-243`;
 `:153`). The plugin stays below that with limits of its own – 20 s
-for `session-start`, 5 s for `user-prompt-submit` – kills the child at the limit, and
+for `session-start`, 25 s for `user-prompt-submit`, above the 20 s after which a move's sync
+writes nothing (spec §8), so the kill never lands in a write – kills the child at the limit, and
 swallows every error: no CLI, a non-zero exit, no JSON, a timeout all mean the turn runs
 without a message. A killed sync is what a Claude Code hook timeout already leaves (§6.2,
 §6.5).
@@ -287,7 +301,8 @@ is what syncs on a machine, or in a session, where only Hermes runs.
   platform, the hook's opt-in line through `runHook` and the built CLI, layout in both scopes, the lock, removal, the Codex-serves-Hermes rule, notes, the home record and
   the move, `check` drift, status, report; Claude-only and Codex output unchanged.
 - The plugin against a stand-in CLI (a shell script), driven by the system `python3`:
-  payloads, returns, limits, every failure silent, nothing started by `register`.
+  payloads – each turn's cwd, also after a move – returns, limits, every failure silent,
+  nothing started by `register`.
 - **Real Hermes** (`$HERMES_PYTHON`, else `~/dev/hermes-citiai/.dev/venv/bin/python`;
   skipped without it), a fresh Hermes process per case and a throwaway `HERMES_HOME` on
   disk: the built CLI installs a skill from a local source for the target `hermes` (named in
@@ -295,7 +310,9 @@ is what syncs on a machine, or in a session, where only Hermes runs.
   Hermes' own `hermes skills list` and `skills_list` tool see it; the project rules above;
   the plugin loads through `plugins.enabled`, its hooks are registered, Hermes'
   `invoke_hook("on_session_start")` triggers the sync and `invoke_hook("pre_llm_call")`
-  returns the report as context; `hermes skilletor status` reaches the CLI;
+  returns the report as context; a session moved between turns the way `/worktree new`
+  moves it (`TERMINAL_CWD`) has the worktree's project skill installed by its next
+  `pre_llm_call`, whose context names the worktree (k149); `hermes skilletor status` reaches the CLI;
   `hermes plugins doctor hermes/skilletor --ci` passes; Hermes resolves the README's
   `hermes plugins install` identifier to this repository's `hermes/skilletor`, reads the
   name `skilletor` from it, and its install scan rates it `safe`. Opt-in

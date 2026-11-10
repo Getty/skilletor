@@ -17,6 +17,10 @@
   Its project is the checkout (git top level) of `new_cwd`, even with `$CLAUDE_PROJECT_DIR`
   set; it prints nothing unless that is another checkout than `old_cwd`'s, with its own
   `.claude/skilletor.json` and a lock that does not match it.
+  A Codex/Hermes move: `hook session-start --harness codex` with `"session_id":"s1"` in
+  `$T/proj`, then `printf '{"cwd":"%s","session_id":"s1","hook_event_name":"UserPromptSubmit"}' "$T/wt" | … bin/skilletor hook user-prompt-submit --harness codex`.
+  Without `--harness codex|hermes` the prompt hook notices no move. Each session's last cwd is
+  kept in `$HOME/.claude/skilletor/session-cwd.json`: the same prompt again prints nothing.
 - Live check against Claude Code: `claude --plugin-dir <checkout>` from a temp
   project dir in a throwaway `HOME`, with a sentinel skill in a local source;
   confirm the SessionStart report and that the sentinel resolves in the same session.

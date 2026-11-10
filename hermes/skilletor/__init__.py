@@ -10,7 +10,9 @@ hands their answer to Hermes:
   pre_llm_call      the kept answer; in a session this process did not start
                     (a resumed one fires no on_session_start) session-start,
                     now; on every later turn `skilletor hook
-                    user-prompt-submit --harness hermes`, which starts a
+                    user-prompt-submit --harness hermes`, which first syncs a
+                    checkout the session moved into since its last turn – it
+                    then holds the turn as a session start does – starts a
                     background sync when one is due and delivers the report
                     of an earlier one. The text goes to the model as
                     {"context": <text>} – Hermes appends it to the turn's user
@@ -51,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 HARNESS = "hermes"
 SESSION_START_S = 20    # hooks/hooks.json gives the same command 30 s
-PROMPT_S = 5            # … and this one 10 s
+PROMPT_S = 25           # a move's sync writes nothing after 20 s (spec §8); the rest is local
 REAP_S = 0.2            # a killed child gets this long to go
 MAX_SESSIONS = 256      # sessions remembered per registration (a gateway runs for days)
 SUBAGENT = "subagent"   # tools/delegate_tool.py: the platform of a delegated child

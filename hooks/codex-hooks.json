@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor hook user-prompt-submit --harness codex",
-            "timeout": 10
+            "timeout": 30
           }
         ]
       }

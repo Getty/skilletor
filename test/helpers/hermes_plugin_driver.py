@@ -7,7 +7,8 @@ stdin, one JSON object:
   environ   the Adapter's environment (adapter mode)
   home, cwd what the Adapter's home and cwd lookups answer (adapter mode)
   limits    {"session_start_s": …, "prompt_s": …} (adapter mode, optional)
-  steps     [[method, kwargs], …] (adapter mode)
+  steps     [[method, kwargs], …] (adapter mode); ["_cd", {"cwd": …}] changes what the
+            cwd lookup answers from then on – a session moved between turns
   windows   find_cli as on Windows (adapter mode, optional; only the reported "cli")
   no_killpg os.killpg removed before the steps run, as on Windows (adapter mode, optional)
 stdout: one JSON object with what happened.
@@ -64,9 +65,10 @@ def main():
         out["hooks_without_cli"] = sorted(old.hooks)
         out["limits"] = [plugin.SESSION_START_S, plugin.PROMPT_S]
     else:
+        where = {"cwd": job.get("cwd")}
         adapter = plugin.Adapter(
             job["plugin"], environ=job["environ"], home=lambda environ: job.get("home"),
-            cwd=lambda: job.get("cwd"), **job.get("limits", {}))
+            cwd=lambda: where["cwd"], **job.get("limits", {}))
         if "windows" in job:
             out["cli"] = plugin.find_cli(job["environ"], job["plugin"], windows=job["windows"])
         else:
@@ -75,6 +77,10 @@ def main():
             del os.killpg
         out["results"] = []
         for method, kwargs in job["steps"]:
+            if method == "_cd":
+                where["cwd"] = kwargs["cwd"]
+                out["results"].append({"ret": None, "took": 0})
+                continue
             started = time.monotonic()
             try:
                 ret = getattr(adapter, method)(**kwargs)

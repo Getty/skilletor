@@ -274,6 +274,41 @@ out["listing"] = listing()
   assert.equal(readFileSync(at, "utf8"), SKILL("sk-demo", "NEW"));
 });
 
+// k149 (spec §16.4): Hermes moves a session only between turns. Its CLI's `/worktree new` sets
+// TERMINAL_CWD (cli.py), which resolve_agent_cwd reads. Asserts: in one Hermes process, a session
+// started in the project, then moved that way into a plain `git worktree add` of it (the config,
+// no lock), gets the worktree's project skill installed by the next turn's pre_llm_call, before
+// it returns – whose context, what Hermes appends to the user message, names the worktree – and
+// the turn after that says nothing.
+test("a move between turns, the way `/worktree new` makes one: the next turn syncs the worktree first", { skip }, () => {
+  const m = machine();
+  m.installPlugin("link");
+  m.skill("sk-proj");
+  m.declare([], ["sk-proj"]);
+  const git = (...args: string[]) => execFileSync("git", ["-C", m.project, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { env: gitEnv() });
+  git("add", ".claude/skilletor.json");
+  git("commit", "-q", "-m", "config");
+  const wt = join(m.dir, "wt");
+  git("worktree", "add", "-q", "-b", "wt", wt);
+  const at = join(wt, ".hermes", "skills", "sk-proj", "SKILL.md");
+  const out = m.python(`
+out["start"] = session_start()
+out["first"] = turn()
+os.environ["TERMINAL_CWD"] = ${JSON.stringify(wt)}
+out["before"] = os.path.exists(${JSON.stringify(at)})
+out["moved"] = turn(first=False)
+out["after"] = os.path.exists(${JSON.stringify(at)})
+out["again"] = turn(first=False)
+`);
+  assert.equal(existsSync(join(m.project, ".hermes", "skills", "sk-proj", "SKILL.md")), true); // the session start's sync
+  assert.deepEqual([out.before, out.after], [false, true]);
+  assert.equal(out.moved.length, 1);
+  assert.match(out.moved[0].context,
+    new RegExp(`^skilletor: in ${wt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\nskilletor synced items:\n- skill sk-proj@mine \\(hermes\\): active from the next Hermes session(\n|$)`));
+  assert.deepEqual(out.again, []);
+  assert.equal(readFileSync(at, "utf8"), SKILL("sk-proj"));
+});
+
 test("placing the plugin is not enough: without plugins.enabled nothing is registered or synced", { skip }, () => {
   const m = machine({ enabled: [] });
   m.installPlugin("copy");

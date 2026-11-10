@@ -80,6 +80,16 @@ rule; a section edited or deleted by hand is restored and reported as overwritte
   sections in `AGENTS.md` are replaced by the pointer on the next sync (rules reported as
   updated, not overwritten).
 
+## A session that moves
+
+A Codex session moves only between turns: `/cd` starts a new session, whose `SessionStart`
+syncs; an app-server turn with a new `cwd` has `UserPromptSubmit` bring that checkout's
+project scope up to date first, and the turn waits for it (up to 30 s). A tool call's
+`workdir`, a shell `cd` or a subagent (it works in its parent's directory) moves nothing.
+After an app-server move the items are on disk, but Codex lists a new skill only from the
+next session and the checkout's rules are not in the context: read
+`.agents/skills/<name>/SKILL.md` and `.codex/skilletor-rules.md` there.
+
 ## Hook trust
 
 Codex runs plugin hooks only after the user trusts them in `/hooks`, and skips them

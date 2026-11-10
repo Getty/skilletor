@@ -55,8 +55,10 @@ test("on Windows bin/skilletor.exe runs the bundle the sh launcher runs", () => 
 });
 
 // k50 (spec §14.5, §14.8): the Codex plugin has its own hooks file, the Claude one is untouched.
-// k147 (spec §8): CwdChanged is Claude Code's alone – Codex has no such event (k149).
-test("codex-hooks.json = hooks.json without CwdChanged, with --harness codex, matcher startup|resume|clear, no context limit", () => {
+// k147 (spec §8): CwdChanged is Claude Code's alone – Codex has no such event.
+// k149 (spec §8, §14.5): under Codex the prompt hook syncs a checkout the session moved into,
+// awaited, so it gets the 30 s SessionStart and CwdChanged have; Claude Code's stays at 10 s.
+test("codex-hooks.json = hooks.json without CwdChanged, with --harness codex, matcher startup|resume|clear, no context limit, a prompt hook of 30 s", () => {
   assert.equal(codex.hooks, "./hooks/codex-hooks.json");
   assert.equal(claude.hooks ?? "./hooks/hooks.json", "./hooks/hooks.json");
   type Groups = Record<string, { matcher?: string; hooks: Record<string, unknown>[] }[]>;
@@ -80,5 +82,7 @@ test("codex-hooks.json = hooks.json without CwdChanged, with --harness codex, ma
   }
   expected.SessionStart![0]!.matcher = "startup|resume|clear";
   expected.SessionStart![0]!.hooks[0]!.additionalContextLimit = 0;
+  assert.equal(forClaude.UserPromptSubmit![0]!.hooks[0]!.timeout, 10);
+  expected.UserPromptSubmit![0]!.hooks[0]!.timeout = forClaude.SessionStart![0]!.hooks[0]!.timeout;
   assert.deepEqual(forCodex, expected);
 });

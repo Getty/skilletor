@@ -912,6 +912,8 @@ the block is deleted. Content outside the block is never touched.
 backend it read it through and the `path` it scanned it with, §14.3), `render-inputs.json` (per lock, a hash of the vars and
 project the last sync rendered the scope's items with, §14.3), `hermes-home.json` (the
 Hermes home the user scope's `hermes:` entries live under, when not `~/.hermes`, §16.2),
+`session-cwd.json` (per Codex or Hermes session id, the cwd its hook last looked at, the 256
+sessions written last, §8),
 `sync.lock/` (mkdir mutex against parallel sessions, refreshed while held; below).
 `CLAUDE_PLUGIN_DATA` is not used, so the CLI runs identically without Claude Code.
 
@@ -1164,7 +1166,7 @@ message naming the option, nothing touched.
 | Event | Behavior |
 |---|---|
 | `SessionStart` (`startup`, `resume`) | synchronous: `check` all sources in parallel (5 s network timeout per source) and the config against the lock (§14.3), `sync` on change; untrusted sources are named without a sync (§4.3) |
-| `UserPromptSubmit` | not due → return immediately. Due → start a detached background `sync` (`windowsHide`: no console window on Windows, k133), return at once. If a `pending-report.json` exists → emit it as `additionalContext` and delete it |
+| `UserPromptSubmit` | Codex and Hermes first: a session whose cwd is not the one its hook last looked at syncs the checkout it moved into, awaited (below). Then: not due → return immediately. Due → start a detached background `sync` (`windowsHide`: no console window on Windows, k133), return at once. If a `pending-report.json` exists → emit it as `additionalContext` and delete it |
 | `CwdChanged` (Claude Code only) | the session moved into another checkout: compare that checkout's lock with its config, locally; on a difference, `sync` its project scope (below) |
 
 **A move into another checkout** (k147). Claude Code's hooks name the session's project in
@@ -1193,9 +1195,38 @@ too, in parallel with that call's `PostToolUse`, and is **not awaited** – the 
 run before the move's sync is done (one model turn later, ~2.4 s with Haiku), so an agent
 spawned in the new checkout right after the `cd` can still miss its items. Its output takes no
 `additionalContext` (only `watchPaths`), and its `systemMessage` reached neither the model nor
-`stream-json` in `-p` mode. Codex and Hermes have no such event; noticing a move there is k149.
-The in-session interval check of `UserPromptSubmit` keys on `CLAUDE_PROJECT_DIR`, so it does not
-cover a checkout the session moved into.
+`stream-json` in `-p` mode. The in-session interval check of `UserPromptSubmit` keys on
+`CLAUDE_PROJECT_DIR`, so it does not cover a checkout the session moved into.
+
+**Codex and Hermes** (k149) have no `CwdChanged`, and need none: a session there moves only
+between turns, and their prompt hook is the first to see the new cwd. Measured on Codex 0.153.4:
+neither a tool call's `workdir` nor a `cd` in a persistent shell moves the hook `cwd`; a
+subagent works in its parent's cwd (`spawn_agent` takes none) and its turn fires its own
+`UserPromptSubmit` with the parent's session id and cwd; `/cd` in the TUI forks a new session,
+whose `SessionStart` syncs as any; the app-server's `turn/start` with a new `cwd` fires no
+`SessionStart`, and `UserPromptSubmit` is the first hook to carry that cwd – awaited, before the
+model's request and any tool call or spawn, under the same session id. On Hermes a terminal `cd`
+moves the terminal only; `/worktree new` and a gateway's re-anchor at turn end move the session,
+and the next `pre_llm_call`, awaited, is the first hook whose `resolve_agent_cwd()` names the new
+directory (§16.4). So under `--harness codex|hermes`, `user-prompt-submit` first calls the same
+core, awaited, with the input's `cwd`. The cwd a session's hook last looked at is kept per session
+id (`session-cwd.json` in the state dir, §6.5; the 256 sessions written last): `SessionStart`
+records it, and a prompt with the same cwd asks nothing – not even git. Another cwd goes to the
+core with the recorded one as the old cwd, so a move within one checkout stays a no-op; a session
+without a record (one from before this build) has its checkout's lock compared once. Measured
+in-process, the record costs ~0.1 ms per prompt; comparing the lock on every prompt instead costs
+31–47 ms, and in a checkout whose drift a sync cannot close – a source offline – would sync and
+wait for that source on every prompt. A move that answered for its checkout – synced it, or named
+what is left to do there – marks it checked (§6.5), so the interval check starts no second sync of
+it beside this one; one whose lock already matches leaves the interval check as it was. The move's
+answer and a pending report come as one: both lines, and both in the context – Codex and the
+Hermes plugin hand the model the context, its first line naming the checkout. The hook's limit is
+30 s, as at `SessionStart`: `hooks/codex-hooks.json` gives `UserPromptSubmit` 30 s, the Hermes
+plugin 25 s (Hermes abandons a callback at 30 s), so the 20 s deadline keeps every kill out of a
+write. Claude Code's `UserPromptSubmit` notices no move: `CwdChanged` does.
+
+Where a session "works" is the harness' session cwd – where its skill lookup and briefing
+resolve – not the directory of each command it runs.
 
 - With no change and no source awaiting trust, the plugin is silent.
 - With a change: one `systemMessage` line for the user, a terse `additionalContext` for
@@ -1500,8 +1531,10 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
 
 Claude-only output is unchanged. Codex items appear under their lock key (`codex:skills/foo`)
 in the text report, and the hook context marks them `(codex)` with the activation hint
-"active from the next Codex session" (not yet measured whether Codex picks up a skill
-written by its own SessionStart hook in the same session). `status` lists each declared item
+"active from the next Codex session". Measured on Codex 0.153.4 (k149): a skill written
+during a session – by a `UserPromptSubmit` that synced a checkout the session moved into – is
+on disk in time for that turn's `SubagentStart`, where briefing reads it, but Codex itself
+lists it only from the next session. `status` lists each declared item
 once per target and names the targets in the scope header when they are not just `claude`;
 `status --json` carries `targets` per scope.
 
@@ -1512,8 +1545,9 @@ once per target and names the targets in the scope header when they are not just
   `./hooks/codex-hooks.json`. Codex has the same `SessionStart`/`UserPromptSubmit` events and
   hook JSON shape and sets `CLAUDE_PLUGIN_ROOT` for plugin hook commands; the Codex file
   differs from `./hooks/hooks.json` only by `--harness codex` on each command,
-  `"additionalContextLimit": 0` on `SessionStart` (§14.8), a Codex-only key, and the missing
-  `CwdChanged`, an event Codex does not have (§8; noticing a move there is k149).
+  `"additionalContextLimit": 0` on `SessionStart` (§14.8), a Codex-only key, the missing
+  `CwdChanged`, an event Codex does not have, and 30 s instead of 10 s for
+  `UserPromptSubmit`, which under Codex syncs a checkout the session moved into, awaited (§8).
 - Codex does not set `CLAUDE_PROJECT_DIR`. The hook then takes the git top level of the
   hook input's `cwd` (else `cwd` itself) as the project root, so a session started in a
   subdirectory still finds `<repo>/.claude/skilletor.json`.
