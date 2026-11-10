@@ -1,0 +1,43 @@
+---
+class: standard
+completed: 2026-11-10T20:22:00Z
+created: 2026-11-10T18:23:28Z
+id: 152
+priority: medium
+started: 2026-11-10T18:41:44Z
+status: done
+tags:
+- hermes
+- worktree
+title: 'Hermes: name the trust step when a move lands in an untrusted worktree'
+updated: 2026-11-10T20:33:26Z
+---
+
+From the k149 measurement (H2/H3, Hermes test checkout ea81748). A Hermes session that moves into a worktree (`/worktree new`, the gateway turn-end re-anchor) finds the worktree untrusted: trust is an exact match on the root (`agent/skill_utils.py:584`), and nothing trusts a root by itself. Until `hermes skills trust <wt>` is run, Hermes hides **all** project skills, main's included. skilletor's move sync (k149) still writes the items, but Hermes does not load them. No banner appears mid-session.
+
+Spec §16.5: skilletor never edits Hermes trust, and does not read the trust list. That rules out auto-trust.
+
+## Decision for Getty
+
+Should the move line under Hermes name `hermes skills trust <dir>` when the root is untrusted? That means skilletor reads Hermes' trust list, which §16.5 currently says it does not.
+
+Recommendation (dispatcher): yes, read-only. Read `skills.trusted_project_dirs` and append `— run there: hermes skills trust <dir>` to the line. Never write trust. Otherwise the user sees "N item(s) updated" while every project skill has just vanished.
+
+Decision (Getty, relayed by the hub, 2026-11-10): yes, but without reading Hermes' trust list. Under Hermes the move line names `hermes skills trust <dir>` as a hint, and spec §16.5 stays as it is. Implement after k149 (same code path), as its own commit.
+
+Worker (k152) design: hint only in moveCheckout's sync branch, ctx.harness === "hermes" (only the Hermes prompt hook sets it; Claude's CwdChanged/PostToolUse and Codex unchanged byte-for-byte), and only when the move's sync added or updated a skill Hermes loads from that checkout: a hermes:skills/* copy or the codex:skills/* copy in .agents/skills that Hermes reads instead (addsHermesSkill). Line tail: ' — if Hermes does not trust this project yet: hermes skills trust <root>'. Context last line: '- Hermes loads project skills only from a project it trusts; if this one is not yet, the user can run: hermes skills trust <root>' (worded as the user's step so the model passes it on rather than trusting a repo's skills itself). <root> = the git top level the move synced, which is what Hermes trust matches exactly; 'hermes skills trust [path]' takes a project root (hermes_cli/subcommands/skills.py, Hermes ea81748). No hint, my call: no-change (silent, nothing to append to); trust request and config/cannot-sync error (nothing written, so nothing for Hermes to hide, and a second, different trust command beside 'skilletor trust' would confuse); removal only; a sync that changed only Claude items or agents. Under Hermes the user never sees systemMessage (plugin logs it, message_of); the context is what reaches the model, so that's the channel that counts. Trust list never read (§16.5 unchanged). Perl: no hooks, nothing to change.
+
+Found outside the card (not fixed): (1) SessionStart under Hermes has the same gap, read from source, not measured: the CLI prints the banner (cli.py:1781 show_banner, whose untrusted-project notice counts SKILL.md files on disk) before on_session_start, which runs at the first turn's system-prompt build (agent/conversation_loop.py:864). So a session started in a fresh, untrusted worktree gets skilletor's 'N item(s) updated' with no banner warning, since the skills weren't on disk when the banner counted. Also §16.5's 'Hermes itself tells the user in its banner' holds only for skills already on disk at start; for the docs pass. (2) The hint only rides on the move's own answer. A later sync that installs into the same checkout (the background interval sync's pending report, e.g. after 'skilletor trust <src>' following a trust-request move, or the CLI) says nothing about Hermes trust. (3) skills/skilletor/references/sync.md's Codex/Hermes move bullet doesn't mention the hint; left for the docs-wide pass to keep this change minimal.
+
+Done, commit-ready, uncommitted on 31f6cb0. Files: src/hooks.ts (moveCheckout: hint via addsHermesSkill + withHermesTrust, harness hermes only), dist/skilletor.js, test/prompt-move.test.ts (k149 Hermes expectations now carry the hint, which replaces that claim for Hermes; Codex expectations unchanged and exact; new: 'k152 hermes: the trust hint comes with a skill Hermes loads, not with an agent or a removal', 'k152: Claude Code's move hooks name no Hermes trust, even with Hermes a target'), test/hermes-real.test.ts (real Hermes pre_llm_call context ends with the hint; bundle built from src), spec §8 Hermes move paragraph, hermes-target spec §16.4 move paragraph (§16.5 untouched), README 'The plugin under Hermes', skills/skilletor/references/hermes.md (skill text: route to skill-author review). Mutation-checked: no harness check (codex k149 x3 + Claude control fail), any item counts (agent case fails), removals count (removal case fails), hermes copy only (codex-copy case fails), no context line, no line tail. Verified: npm run typecheck clean; npm test with API-key/token vars unset (k154): 1118 tests, 1117 pass, 0 fail, 1 skipped (hermes-real install case, needs SKILLETOR_HERMES_INSTALL=1); npm run build + check-dist: up to date. Perl: no hooks, nothing changed, suite not run. Proposed subject: 'Name hermes skills trust when a Hermes move lands skills (k152)'. Changes: 'Under Hermes, a move into another checkout whose sync installs or updates a skill Hermes loads now names the trust step: the line ends with "— if Hermes does not trust this project yet: hermes skills trust <dir>", and the context tells the model the user can run it. A new worktree is untrusted to Hermes and hides every project skill until then. skilletor still never reads or writes Hermes trust; Claude Code and Codex output is unchanged.
+
+Committed 367eedd on branch worktree-k146-k147-cwd-changed
+
+Final verification (dispatcher), branch `worktree-k146-k147-cwd-changed` at 0df1000 (worktree /home/getty/dev/skilletor/.claude/worktrees/k146-k147-cwd-changed), tree clean, not pushed. `git merge-base HEAD main` = 09b6642 = local main's tip.
+Commits on the branch: 4d4f619 (k146), 44a9a49 (k147 CwdChanged), ea5de62 (hub side request), 1521f76 (k149), 31f6cb0 (k147 PostToolUse), 367eedd (k152), 0df1000 (docs pass: README per-harness table, bundled skill sync/hermes references, spec wrap + Hermes limits, Changes consolidated into one move entry).
+- npm run typecheck: exit 0.
+- npm test, API-key/token env vars unset (k154): 1118 tests, 1117 pass, 0 fail, 1 skipped — hermes-real `hermes plugins install … --enable` case, gated on SKILLETOR_HERMES_INSTALL=1 (network). The other hermes-real cases ran (local Hermes venv found).
+- npm run build: exit 0; npm run check-dist: "dist/skilletor.js is up to date."
+- Perl suite not run: perl/ untouched on the branch (no hooks there; divergence noted in docs/perl.md).
+Docs vs code checked: hooks.json SessionStart/CwdChanged/PostToolUse 30 s, UserPromptSubmit 10 s; codex-hooks.json UserPromptSubmit 30 s; Hermes SESSION_START_S 20, PROMPT_S 25; MOVE_DEADLINE_MS 20 s — README, skill and specs name the same.
+Filed on the way: k157 (spec §14.5 stale plugin-version claim, low).
