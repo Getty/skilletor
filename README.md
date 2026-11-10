@@ -74,7 +74,7 @@ there runs `bin\skilletor.exe` (see [Requirements](#requirements)); `git pull` u
 | Claude Code | `~/.claude/{skills,agents,rules}` | `<project>/.claude/{skills,agents,rules}` |
 | Codex | `~/.agents/skills`, `$CODEX_HOME/{agents,skilletor-rules.md}` | `<project>/.agents/skills`, `<project>/.codex/{agents,skilletor-rules.md}` |
 
-Three hooks drive it:
+Four hooks drive it:
 
 - **SessionStart** — check every source (5s timeout each) and compare the config with what
   is installed; on a change, sync and report. An untrusted project source is named every
@@ -92,10 +92,17 @@ Three hooks drive it:
   `skilletor: 17 item(s) updated in <dir>`. If it cannot (an untrusted source, a config error),
   the line names what to run there: `skilletor trust <name>` or `skilletor sync`. A move within
   the same checkout, or into a directory without `.claude/skilletor.json`, does nothing.
-  Claude Code does not wait for this hook: an agent spawned right after the `cd` may start
-  before the items are there. Codex and Hermes have no such event; a session there moves only
-  between turns, so their prompt hook notices it, and waits for the sync (above). "Works in"
-  means the harness' session directory, not the directory of each command a session runs.
+  Claude Code does not wait for this hook; for a Bash `cd` the next one does.
+- **PostToolUse** (Claude Code only, on a Bash call with a `cd`) — the same for the directory
+  the command left the session in, and Claude Code waits for it: from the model's next message
+  on, every tool call (an agent spawn too) finds the checkout's items there, and the model is
+  told what landed. A spawn sent in the same message as the `cd` starts in the old directory. It compares
+  with where the session last was, so a `cd` within one checkout does nothing. A move without a
+  Bash `cd` (`EnterWorktree` into an existing worktree, `pushd`) has CwdChanged alone, which
+  an agent spawned right after it can outrun. Codex and Hermes have no CwdChanged, and a shell
+  `cd` there moves no session; a session there moves only between turns, so their prompt hook
+  notices it, and waits for the sync (above). "Works in" means the harness' session directory, not the directory of each command
+  a session runs.
 
 Skills become usable immediately; agents and rules activate after `/reload-plugins` or a
 restart — the report says so per item.
@@ -793,7 +800,8 @@ Use kubectl carefully.
 The repository ships a Codex plugin manifest (`.codex-plugin/plugin.json`) next to the
 Claude one; both ship the bundled skill. The Codex manifest points at its own
 `hooks/codex-hooks.json` — the same hooks as `hooks/hooks.json`, run with `--harness codex`,
-plus the rules delivery; `CwdChanged` is not among them, Codex has no such event. A Codex
+plus the rules delivery; `CwdChanged` is not among them, Codex has no such event, nor is
+`PostToolUse`: a Codex shell `cd` moves no session. A Codex
 session moves only between turns (an app-server turn with a new `cwd`; `/cd` starts a new
 session, which syncs at its start), so `UserPromptSubmit` syncs a checkout the session moved
 into before the turn goes on; Codex gives it 30 s, as `SessionStart`. A skill that sync writes

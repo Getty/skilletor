@@ -83,6 +83,11 @@ export interface EngineContext {
 export interface SyncOptions {
   scope?: "user" | "project" | "all";
   force?: boolean;
+  /** Sync only when a local check (`check`'s `local`), made once the sync lock is held, still
+   *  finds a difference; else nothing runs and the report has no scopes. The checkout-move hook
+   *  (spec §8): Claude Code fires two for one `cd`, and the one that waited out the other's
+   *  sync finds nothing left to do. */
+  ifChanged?: boolean;
 }
 
 export interface CheckOptions extends SyncOptions {
@@ -511,7 +516,13 @@ export function withSyncLock<T>(ctx: EngineContext, fn: (state: State) => Promis
 }
 
 export async function sync(ctx: EngineContext, opts: SyncOptions = {}): Promise<SyncReport> {
-  return withSyncLock(ctx, (state) => syncInner(scoped(ctx), opts, state));
+  return withSyncLock(ctx, async (state) => {
+    if (opts.ifChanged) {
+      const chk = await check(ctx, { scope: opts.scope, local: true });
+      if (!chk.changed && !chk.error) return { scopes: [] }; // a config error: the sync reports it
+    }
+    return syncInner(scoped(ctx), opts, state);
+  });
 }
 
 async function syncInner(ctx: EngineContext, opts: SyncOptions, state: State): Promise<SyncReport> {

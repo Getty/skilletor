@@ -36,6 +36,20 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(cd *)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor",
+            "args": ["hook", "post-tool-use"],
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

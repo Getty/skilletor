@@ -912,8 +912,8 @@ the block is deleted. Content outside the block is never touched.
 backend it read it through and the `path` it scanned it with, §14.3), `render-inputs.json` (per lock, a hash of the vars and
 project the last sync rendered the scope's items with, §14.3), `hermes-home.json` (the
 Hermes home the user scope's `hermes:` entries live under, when not `~/.hermes`, §16.2),
-`session-cwd.json` (per Codex or Hermes session id, the cwd its hook last looked at, the 256
-sessions written last, §8),
+`session-cwd.json` (per session id, the cwd its hook last looked at – Codex's and Hermes'
+prompt hook, Claude Code's `PostToolUse` – the 256 sessions written last, §8),
 `sync.lock/` (mkdir mutex against parallel sessions, refreshed while held; below).
 `CLAUDE_PLUGIN_DATA` is not used, so the CLI runs identically without Claude Code.
 
@@ -1167,7 +1167,8 @@ message naming the option, nothing touched.
 |---|---|
 | `SessionStart` (`startup`, `resume`) | synchronous: `check` all sources in parallel (5 s network timeout per source) and the config against the lock (§14.3), `sync` on change; untrusted sources are named without a sync (§4.3) |
 | `UserPromptSubmit` | Codex and Hermes first: a session whose cwd is not the one its hook last looked at syncs the checkout it moved into, awaited (below). Then: not due → return immediately. Due → start a detached background `sync` (`windowsHide`: no console window on Windows, k133), return at once. If a `pending-report.json` exists → emit it as `additionalContext` and delete it |
-| `CwdChanged` (Claude Code only) | the session moved into another checkout: compare that checkout's lock with its config, locally; on a difference, `sync` its project scope (below) |
+| `CwdChanged` (Claude Code only) | not awaited: the session moved into another checkout: compare that checkout's lock with its config, locally; on a difference, `sync` its project scope (below) |
+| `PostToolUse` (Claude Code only; matcher `Bash`, `"if": "Bash(cd *)"`) | awaited, after a Bash call with a `cd`: the same for the checkout of the cwd the call left, when the session's record names another cwd (below) |
 
 **A move into another checkout** (k147). Claude Code's hooks name the session's project in
 `CLAUDE_PROJECT_DIR`, which stays where the session started; a session that moves – a `cd` into
@@ -1184,19 +1185,48 @@ does – 5 s per source, the same trust rules, so a move never trusts a backend 
 something is left to do there, the line names the command: `— run there: skilletor trust
 <name>` for a source awaiting trust, `skilletor sync` for a warning or conflict, and a move that
 cannot sync (a config error, a timed-out sync lock) says `skilletor: cannot sync <dir>: <why> —
-run there: skilletor sync`. `hooks/hooks.json` gives the hook 30 s, as `SessionStart`, and Claude
-Code kills it then although it does not wait for it; so the move's sync has a deadline of 20 s:
-a scope whose sources are not resolved by then is not written at all – what follows is local –
-and the line says so. The core (`syncMovedCheckout`, `hooks.ts`) takes the new cwd, the old one
+run there: skilletor sync`. `hooks/hooks.json` gives the hook 30 s, as `SessionStart` (and
+`PostToolUse`, below), and Claude Code kills it then although it does not wait for it; so the
+move's sync has a deadline of 20 s: a scope whose sources are not resolved by then is not
+written at all – what follows is local – and the line says so. The core (`syncMovedCheckout`, `hooks.ts`) takes the new cwd, the old one
 when known and the event to answer, so other harnesses' hooks can call it.
 
 Measured on Claude Code 2.1.322 (k147): `CwdChanged` fires on any Bash `cd`, a compound one
 too, in parallel with that call's `PostToolUse`, and is **not awaited** – the next tool call can
-run before the move's sync is done (one model turn later, ~2.4 s with Haiku), so an agent
-spawned in the new checkout right after the `cd` can still miss its items. Its output takes no
-`additionalContext` (only `watchPaths`), and its `systemMessage` reached neither the model nor
-`stream-json` in `-p` mode. The in-session interval check of `UserPromptSubmit` keys on
-`CLAUDE_PROJECT_DIR`, so it does not cover a checkout the session moved into.
+run before the move's sync is done (one model turn later, ~2.4 s with Haiku). Its output takes no
+`additionalContext` (only `watchPaths`), and its `systemMessage` goes to Claude Code's notifier
+for the user (per the binary; the TUI not checked) – in `-p` mode it reached neither the model
+nor `stream-json`. `PostToolUse` **is**
+awaited (the next tool call started 1.5–2.7 s after a 5 s `PostToolUse` hook had ended, never
+during it), its input's `cwd` is the cwd after the command, and it names no old one. So
+`hooks/hooks.json` runs `hook post-tool-use` on `PostToolUse` too, matcher `Bash`, with
+`"if": "Bash(cd *)"` – a filter in permission-rule syntax, so Claude Code starts no process for
+a Bash call without a `cd`: `cd sub`, `cd ..` and `echo start && cd x` fired it, `pwd` and
+`echo a && echo b` did not. Its old cwd is the session's record (`session-cwd.json`, below): the
+same cwd again asks nothing, not even git – a model's `cd <dir> && …` inside one checkout stays
+free, and a line awaiting trust there comes once, not with every command; another cwd goes to
+the same core, with the `systemMessage` line and an `additionalContext` whose first line names
+the checkout, so the model learns what landed. Claude Code's `SessionStart` writes the record, as Codex's and
+Hermes' do; `CwdChanged` never does, or `PostToolUse` of the same `cd` would take the move for
+done before its sync is. An agent spawned after a Bash `cd` thus finds the checkout's items on
+disk – measured end to end: after `cd` into a worktree without a lock, the next tool call's
+`PreToolUse` (2.4 s after the hook ended) found the skill there, and the model quoted the
+context. A move without one – `EnterWorktree` into an existing worktree, `pushd` – has
+`CwdChanged` alone, with the window above.
+
+Both hooks of one `cd` find the lock differing and go for the sync lock. The second waits out
+the first's sync – up to its deadline, not the usual 5 s, as nothing is written past it – then,
+holding the lock, compares the lock with the config once more (`sync`'s `ifChanged`): it
+matches, so the second syncs nothing and says nothing; the update line comes once. A lock is
+written after all the items it lists (§6.2; a sync that stops midway leaves partial entries,
+which count as a difference), so a matching lock means the items are there, whichever hook
+synced. When `CwdChanged` synced, the model learns nothing of the move – `PostToolUse` found
+nothing to do – but the user has `CwdChanged`'s line, and `PostToolUse`, which starts first
+(2–36 ms) and does the same work, usually takes the lock first (in the end-to-end run it
+started 29 ms ahead and synced; `CwdChanged` waited, then said nothing). What is left to do without a
+sync – a source awaiting trust, a config error – both answer, a line each. The in-session
+interval check of `UserPromptSubmit` keys on `CLAUDE_PROJECT_DIR`, so it does not cover a
+checkout the session moved into.
 
 **Codex and Hermes** (k149) have no `CwdChanged`, and need none: a session there moves only
 between turns, and their prompt hook is the first to see the new cwd. Measured on Codex 0.153.4:
@@ -1223,7 +1253,7 @@ answer and a pending report come as one: both lines, and both in the context –
 Hermes plugin hand the model the context, its first line naming the checkout. The hook's limit is
 30 s, as at `SessionStart`: `hooks/codex-hooks.json` gives `UserPromptSubmit` 30 s, the Hermes
 plugin 25 s (Hermes abandons a callback at 30 s), so the 20 s deadline keeps every kill out of a
-write. Claude Code's `UserPromptSubmit` notices no move: `CwdChanged` does.
+write. Claude Code's `UserPromptSubmit` notices no move: `CwdChanged` and `PostToolUse` do.
 
 Where a session "works" is the harness' session cwd – where its skill lookup and briefing
 resolve – not the directory of each command it runs.
@@ -1546,7 +1576,8 @@ once per target and names the targets in the scope header when they are not just
   hook JSON shape and sets `CLAUDE_PLUGIN_ROOT` for plugin hook commands; the Codex file
   differs from `./hooks/hooks.json` only by `--harness codex` on each command,
   `"additionalContextLimit": 0` on `SessionStart` (§14.8), a Codex-only key, the missing
-  `CwdChanged`, an event Codex does not have, and 30 s instead of 10 s for
+  `CwdChanged`, an event Codex does not have, the missing `PostToolUse` – Codex's Bash `cd` never
+  moves the hook `cwd` (§8) – and 30 s instead of 10 s for
   `UserPromptSubmit`, which under Codex syncs a checkout the session moved into, awaited (§8).
 - Codex does not set `CLAUDE_PROJECT_DIR`. The hook then takes the git top level of the
   hook input's `cwd` (else `cwd` itself) as the project root, so a session started in a

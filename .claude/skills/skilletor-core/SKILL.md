@@ -24,7 +24,7 @@ catalog.ts    scan a source dir → items (plugin.json) bundles.ts   bundle file
 render.ts     build one item in memory (Nunjucks)     apply.ts     diff → atomic write → clean
 gitignore.ts  .gitignore/.worktreeinclude blocks §6.4 briefing.ts  installed agent's briefing skills present? (§6.7)
 lock.ts       lock read/write                         state.ts     trust, last-check, pending-report, mutex
-engine.ts     sync / check / status pipeline          hooks.ts     SessionStart, UserPromptSubmit, CwdChanged; black box
+engine.ts     sync / check / status pipeline          hooks.ts     SessionStart, UserPromptSubmit, CwdChanged, PostToolUse; black box
 report.ts     text / json / hook output               targets.ts   harness detection, LAYOUTS, lock keys
 convert.ts    agent Markdown → Codex TOML             agentsmd.ts  Codex rules file, AGENTS.md pointer, hook trust
 frontmatter.ts  YAML subset reader                    toml.ts      TOML writer (no dependency)

@@ -47,8 +47,10 @@ Revision history for skilletor
     "From the command line"; the Hermes docs name the command `SKILLETOR_BIN`.
   - A Claude Code session that `cd`s into another checkout of a skilletor
     project (e.g. a plain `git worktree add`) now gets that checkout's project
-    scope synced by a new `CwdChanged` hook, with one line naming the
-    directory.
+    scope synced, with one line naming the directory. A Bash `cd` is awaited by
+    a `PostToolUse` hook: the next tool call finds the items and the model is
+    told. A `CwdChanged` hook covers moves without a Bash `cd`; it is not
+    awaited.
   - A Codex or Hermes session that moves into another checkout of a skilletor
     project between turns now gets that checkout synced by the prompt hook
     (`user-prompt-submit --harness codex|hermes`), with one line naming the

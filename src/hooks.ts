@@ -14,10 +14,12 @@
 // same two events with `--harness hermes` and hands the output on (spec §16.4); while
 // `hermes` is no target, its SessionStart answer says how to opt in (spec §16.2).
 //
-// CwdChanged (Claude Code only): a session that moves into another checkout gets that
-// checkout's project scope brought up to date (`syncMovedCheckout`, spec §8). Codex and Hermes
-// have no such event; there UserPromptSubmit (`--harness codex|hermes`) does the same first,
-// awaited, when the session's cwd is not the one its hook last looked at (k149).
+// CwdChanged and PostToolUse (Claude Code only): a session that moves into another checkout gets
+// that checkout's project scope brought up to date (`syncMovedCheckout`, spec §8). CwdChanged
+// sees every move but is not awaited; PostToolUse, run on a Bash call with a `cd` only, is – the
+// next tool call finds the items there. Codex and Hermes have no such events; there
+// UserPromptSubmit (`--harness codex|hermes`) does the same first, awaited, when the session's
+// cwd is not the one its hook last looked at (k149).
 import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
@@ -58,7 +60,8 @@ const SESSION_START_TIMEOUT_MS = 5_000;
 const DEFAULT_INTERVAL = 600;
 /** A move's sync writes nothing once this has passed (spec §8): `hooks/hooks.json` and
  *  `hooks/codex-hooks.json` kill the hook at 30 s, which leaves the local rest of a sync 10 s;
- *  the Hermes plugin at 25 s (`PROMPT_S`), below Hermes' own 30 s. */
+ *  the Hermes plugin at 25 s (`PROMPT_S`), below Hermes' own 30 s. Claude Code's two move hooks
+ *  wait for the sync lock up to it as well. */
 export const MOVE_DEADLINE_MS = 20_000;
 
 function projectKeyOf(ctx: HookContext, input: HookInput): string {
@@ -104,6 +107,7 @@ export async function runHook(event: string, input: HookInput, hookCtx: HookCont
   try {
     // The checkout the session moved into is the project, never the session's own (spec §8).
     if (event === "cwd-changed") return await cwdChanged(input, hookCtx);
+    if (event === "post-tool-use") return await postToolUse(input, hookCtx);
     const ctx: HookContext = hookCtx.projectDir
       ? hookCtx
       : { ...hookCtx, projectDir: projectRootOf(input.cwd || process.cwd()) };
@@ -130,7 +134,7 @@ async function sessionStart(input: HookInput, ctx: HookContext): Promise<HookOut
   } catch (err) {
     out = warn((err as Error).message);
   }
-  if (followsMoves(ctx)) recordSessionCwd(input, ctx);
+  recordSessionCwd(input, ctx);
   // A resumed session still has the first copy in its history (spec §14.8).
   const source = input.source;
   if (ctx.harness === "codex" && (source === undefined || source === null || source === "startup" || source === "clear")) {
@@ -236,16 +240,20 @@ export interface CheckoutMove {
   oldCwd?: string;
   /** The event the output answers (`hookSpecificOutput.hookEventName`). */
   eventName: string;
+  /** Wait for the sync lock until the deadline, not the usual 5 s: Claude Code fires two move
+   *  hooks for one `cd`, and the one that comes second waits out the other's sync. */
+  lockUntilDeadline?: boolean;
 }
 
 /**
  * A session moved into `move.cwd` (spec §8): the one core every harness's move hook calls –
- * Claude Code's CwdChanged; Codex's and Hermes' prompt hook (k149). The checkout is the git top
- * level of the new cwd, never `ctx.projectDir`, the session's own project. Nothing to do – no
- * source asked, nothing written – when it is the old cwd's checkout, the home dir, has no
- * `.claude/skilletor.json`, or its lock already matches its config (a local check: no fetch,
+ * Claude Code's CwdChanged and PostToolUse; Codex's and Hermes' prompt hook (k149). The checkout
+ * is the git top level of the new cwd, never `ctx.projectDir`, the session's own project. Nothing
+ * to do – no source asked, nothing written – when it is the old cwd's checkout, the home dir, has
+ * no `.claude/skilletor.json`, or its lock already matches its config (a local check: no fetch,
  * no network). Otherwise its project scope syncs as at SessionStart – 5 s per source, the same
- * trust rules, nothing written once `MOVE_DEADLINE_MS` has passed – and one line names the
+ * trust rules, nothing written once `MOVE_DEADLINE_MS` has passed – unless, once the sync lock is
+ * held, its lock matches after all: another run synced it meanwhile. One line names the
  * checkout and, when something is left to do, the command to run there. Never throws.
  */
 export async function syncMovedCheckout(move: CheckoutMove, ctx: HookContext): Promise<HookOutput> {
@@ -265,11 +273,14 @@ async function moveCheckout(move: CheckoutMove, ctx: HookContext): Promise<MoveR
   try {
     if (samePath(root, ctx.home) || !existsSync(join(root, ".claude", "skilletor.json"))) return { out: {} };
     if (move.oldCwd !== undefined && samePath(projectRootOf(move.oldCwd), root)) return { out: {} };
+    const deadline = ctx.deadline ?? Date.now() + MOVE_DEADLINE_MS;
     const moved: HookContext = {
       ...ctx,
       projectDir: root,
       timeoutMs: ctx.timeoutMs ?? SESSION_START_TIMEOUT_MS,
-      deadline: ctx.deadline ?? Date.now() + MOVE_DEADLINE_MS,
+      deadline,
+      // Past the deadline the sync writes nothing: a longer wait would be for nothing.
+      lockTimeoutMs: ctx.lockTimeoutMs ?? (move.lockUntilDeadline ? Math.max(0, deadline - Date.now()) : undefined),
     };
     const chk = await check(moved, { scope: "project", local: true });
     if (chk.error) return answered(cannotSync(root, chk.error));
@@ -277,7 +288,10 @@ async function moveCheckout(move: CheckoutMove, ctx: HookContext): Promise<MoveR
       if (chk.trustRequests?.length) return answered(movedOutput(trustReport(chk), root, move.eventName));
       return chk.warnings.length ? answered(cannotSync(root, chk.warnings.join("; "))) : { out: {} };
     }
-    const report = await sync(moved, { scope: "project" });
+    // No scopes: a run this one waited for on the sync lock – the other Claude Code hook of the
+    // same `cd`, say – synced the checkout meanwhile, and its answer was that run's to give.
+    const report = await sync(moved, { scope: "project", ifChanged: true });
+    if (!report.error && report.scopes.length === 0) return { out: {} };
     return answered(report.error ? cannotSync(root, report.error) : movedOutput(report, root, move.eventName));
   } catch (err) {
     // Timed out on the sync lock: another run holds it – a background sync of this very
@@ -313,12 +327,22 @@ function movedOutput(report: SyncReport, dir: string, eventName: string): HookOu
 const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined);
 
 /** Claude Code's CwdChanged (spec §8): it is not awaited, and its output takes no context
- *  (only `watchPaths`), so the line is all it gives – it reaches the user, not the model. */
+ *  (only `watchPaths`), so the line is all it gives – it reaches the user, not the model. It
+ *  never writes the session's cwd record: PostToolUse, fired for the same `cd`, would take it for
+ *  a move already done and answer before this hook's sync is. */
 async function cwdChanged(input: HookInput, ctx: HookContext): Promise<HookOutput> {
   const cwd = text(input.new_cwd) ?? text(input.cwd);
   if (cwd === undefined) return {};
-  const out = await syncMovedCheckout({ cwd, oldCwd: text(input.old_cwd), eventName: "CwdChanged" }, ctx);
+  const move = { cwd, oldCwd: text(input.old_cwd), eventName: "CwdChanged", lockUntilDeadline: true };
+  const out = await syncMovedCheckout(move, ctx);
   return out.systemMessage ? { systemMessage: out.systemMessage } : {};
+}
+
+/** Claude Code's PostToolUse, which `hooks/hooks.json` runs on a Bash call with a `cd` only
+ *  (spec §8): awaited – the next tool call waits for it – with the cwd after the command as
+ *  `cwd`, and no old one: the session's record stands in. Its context reaches the model. */
+async function postToolUse(input: HookInput, ctx: HookContext): Promise<HookOutput> {
+  return sessionMove(input, ctx, new State(ctx.stateRoot), { eventName: "PostToolUse", lockUntilDeadline: true });
 }
 
 /** Codex's and Hermes' hooks, which notice a move at the next prompt (k149). */
@@ -327,8 +351,8 @@ const followsMoves = (ctx: HookContext) => ctx.harness === "codex" || ctx.harnes
 /** The session a hook input belongs to; "" when it names none. */
 const sessionOf = (input: HookInput) => (typeof input.session_id === "string" ? input.session_id : "");
 
-/** Where a Codex or Hermes session's SessionStart looked, for its next prompt to compare
- *  (k149). Best effort: without the record the first prompt looks once more. */
+/** Where a session's SessionStart looked, for its next prompt (Codex, Hermes, k149) or Bash `cd`
+ *  (Claude Code) to compare. Best effort: without the record the first move looks once more. */
 function recordSessionCwd(input: HookInput, ctx: HookContext): void {
   const cwd = text(input.cwd);
   if (cwd === undefined) return;
@@ -340,20 +364,23 @@ function recordSessionCwd(input: HookInput, ctx: HookContext): void {
 }
 
 /**
- * Codex and Hermes (spec §8, k149): a session there moves only between turns, and the prompt
- * hook is the first to see the new cwd – awaited, before the model's request. The cwd the
- * session's hook last looked at is kept per session id (written at SessionStart): the same cwd
- * again asks nothing; another goes to the move core, which tells a move within one checkout
- * from one into another. A move that answered for its checkout marks it checked, so the
+ * A move a hook sees only as the session's cwd (spec §8): Codex's and Hermes' prompt hook – a
+ * session there moves only between turns, and that hook is the first to see the new cwd,
+ * awaited, before the model's request (k149) – and Claude Code's PostToolUse on a Bash `cd`. The
+ * cwd the session's hook last looked at is kept per session id (written at SessionStart): the
+ * same cwd again asks nothing; another goes to the move core, which tells a move within one
+ * checkout from one into another. A move that answered for its checkout marks it checked, so the
  * interval check starts no second sync of it beside this one.
  */
-async function promptMove(input: HookInput, ctx: HookContext, state: State): Promise<HookOutput> {
+async function sessionMove(
+  input: HookInput, ctx: HookContext, state: State, event: Pick<CheckoutMove, "eventName" | "lockUntilDeadline">,
+): Promise<HookOutput> {
   const cwd = text(input.cwd);
   if (cwd === undefined) return {};
   const session = sessionOf(input);
   const last = state.sessionCwd(session);
   if (last !== undefined && samePath(last, cwd)) return {};
-  const { out, answered } = await moveCheckout({ cwd, oldCwd: last, eventName: "UserPromptSubmit" }, ctx);
+  const { out, answered } = await moveCheckout({ cwd, oldCwd: last, ...event }, ctx);
   try {
     if (answered !== undefined) state.markChecked(answered);
     state.putSessionCwd(session, cwd);
@@ -384,7 +411,7 @@ function joined(pending: HookOutput | undefined, moved: HookOutput): HookOutput 
 async function userPromptSubmit(input: HookInput, ctx: HookContext): Promise<HookOutput> {
   const state = new State(ctx.stateRoot);
   const key = projectKeyOf(ctx, input);
-  const moved = followsMoves(ctx) ? await promptMove(input, ctx, state) : {};
+  const moved = followsMoves(ctx) ? await sessionMove(input, ctx, state, { eventName: "UserPromptSubmit" }) : {};
   const pending = state.takePendingReport(key) as HookOutput | undefined;
 
   let interval = DEFAULT_INTERVAL;

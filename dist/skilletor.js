@@ -10017,7 +10017,13 @@ function withSyncLock(ctx, fn) {
   }, { timeoutMs: ctx.lockTimeoutMs });
 }
 async function sync(ctx, opts = {}) {
-  return withSyncLock(ctx, (state) => syncInner(scoped(ctx), opts, state));
+  return withSyncLock(ctx, async (state) => {
+    if (opts.ifChanged) {
+      const chk = await check(ctx, { scope: opts.scope, local: true });
+      if (!chk.changed && !chk.error) return { scopes: [] };
+    }
+    return syncInner(scoped(ctx), opts, state);
+  });
 }
 async function syncInner(ctx, opts, state) {
   const loaded = loadWithTargets(ctx);
@@ -11549,6 +11555,7 @@ function projectRootOf(cwd) {
 async function runHook(event, input, hookCtx) {
   try {
     if (event === "cwd-changed") return await cwdChanged(input, hookCtx);
+    if (event === "post-tool-use") return await postToolUse(input, hookCtx);
     const ctx = hookCtx.projectDir ? hookCtx : { ...hookCtx, projectDir: projectRootOf(input.cwd || process.cwd()) };
     switch (event) {
       case "session-start":
@@ -11572,7 +11579,7 @@ async function sessionStart(input, ctx) {
   } catch (err) {
     out = warn(err.message);
   }
-  if (followsMoves(ctx)) recordSessionCwd(input, ctx);
+  recordSessionCwd(input, ctx);
   const source = input.source;
   if (ctx.harness === "codex" && (source === void 0 || source === null || source === "startup" || source === "clear")) {
     out = withCodexRules(out, ctx);
@@ -11656,11 +11663,14 @@ async function moveCheckout(move, ctx) {
   try {
     if (samePath(root, ctx.home) || !existsSync12(join17(root, ".claude", "skilletor.json"))) return { out: {} };
     if (move.oldCwd !== void 0 && samePath(projectRootOf(move.oldCwd), root)) return { out: {} };
+    const deadline = ctx.deadline ?? Date.now() + MOVE_DEADLINE_MS;
     const moved = {
       ...ctx,
       projectDir: root,
       timeoutMs: ctx.timeoutMs ?? SESSION_START_TIMEOUT_MS,
-      deadline: ctx.deadline ?? Date.now() + MOVE_DEADLINE_MS
+      deadline,
+      // Past the deadline the sync writes nothing: a longer wait would be for nothing.
+      lockTimeoutMs: ctx.lockTimeoutMs ?? (move.lockUntilDeadline ? Math.max(0, deadline - Date.now()) : void 0)
     };
     const chk = await check(moved, { scope: "project", local: true });
     if (chk.error) return answered(cannotSync(root, chk.error));
@@ -11668,7 +11678,8 @@ async function moveCheckout(move, ctx) {
       if (chk.trustRequests?.length) return answered(movedOutput(trustReport(chk), root, move.eventName));
       return chk.warnings.length ? answered(cannotSync(root, chk.warnings.join("; "))) : { out: {} };
     }
-    const report = await sync(moved, { scope: "project" });
+    const report = await sync(moved, { scope: "project", ifChanged: true });
+    if (!report.error && report.scopes.length === 0) return { out: {} };
     return answered(report.error ? cannotSync(root, report.error) : movedOutput(report, root, move.eventName));
   } catch (err) {
     const out = cannotSync(root, err.message);
@@ -11697,8 +11708,12 @@ var text = (v) => typeof v === "string" && v !== "" ? v : void 0;
 async function cwdChanged(input, ctx) {
   const cwd = text(input.new_cwd) ?? text(input.cwd);
   if (cwd === void 0) return {};
-  const out = await syncMovedCheckout({ cwd, oldCwd: text(input.old_cwd), eventName: "CwdChanged" }, ctx);
+  const move = { cwd, oldCwd: text(input.old_cwd), eventName: "CwdChanged", lockUntilDeadline: true };
+  const out = await syncMovedCheckout(move, ctx);
   return out.systemMessage ? { systemMessage: out.systemMessage } : {};
+}
+async function postToolUse(input, ctx) {
+  return sessionMove(input, ctx, new State(ctx.stateRoot), { eventName: "PostToolUse", lockUntilDeadline: true });
 }
 var followsMoves = (ctx) => ctx.harness === "codex" || ctx.harness === "hermes";
 var sessionOf = (input) => typeof input.session_id === "string" ? input.session_id : "";
@@ -11710,13 +11725,13 @@ function recordSessionCwd(input, ctx) {
   } catch {
   }
 }
-async function promptMove(input, ctx, state) {
+async function sessionMove(input, ctx, state, event) {
   const cwd = text(input.cwd);
   if (cwd === void 0) return {};
   const session = sessionOf(input);
   const last = state.sessionCwd(session);
   if (last !== void 0 && samePath(last, cwd)) return {};
-  const { out, answered } = await moveCheckout({ cwd, oldCwd: last, eventName: "UserPromptSubmit" }, ctx);
+  const { out, answered } = await moveCheckout({ cwd, oldCwd: last, ...event }, ctx);
   try {
     if (answered !== void 0) state.markChecked(answered);
     state.putSessionCwd(session, cwd);
@@ -11741,7 +11756,7 @@ function joined(pending, moved) {
 async function userPromptSubmit(input, ctx) {
   const state = new State(ctx.stateRoot);
   const key = projectKeyOf(ctx, input);
-  const moved = followsMoves(ctx) ? await promptMove(input, ctx, state) : {};
+  const moved = followsMoves(ctx) ? await sessionMove(input, ctx, state, { eventName: "UserPromptSubmit" }) : {};
   const pending = state.takePendingReport(key);
   let interval = DEFAULT_INTERVAL;
   try {

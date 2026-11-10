@@ -117,10 +117,10 @@ It also requires each engine's `check` to accept the other engine's sync.
 ## Known gaps
 
 - Codex and Hermes targets are not ported, and neither are `hooks.ts` or pending reports –
-  so neither is the checkout-move hook (`hook cwd-changed`, k147) nor its Codex and Hermes
-  path in `user-prompt-submit` with the per-session cwd record `session-cwd.json` (k149), nor
-  the two engine options only they set: `check`'s `local` (no source asked) and the sync's
-  `deadline`.
+  so neither are the checkout-move hooks (`hook cwd-changed` and `hook post-tool-use`, k147)
+  nor their Codex and Hermes path in `user-prompt-submit` with the per-session cwd record
+  `session-cwd.json` (k149), nor the engine options only they set: `check`'s `local` (no source
+  asked), the sync's `deadline`, and its `ifChanged` (compare once more under the sync lock).
 - Windows is untested.
 - There are no conformance cases for a `url` fetch (it needs TLS), for symlink
   conflicts, or for partial syncs. `perl/t/62-engine.t` covers partial syncs.

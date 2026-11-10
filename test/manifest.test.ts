@@ -34,7 +34,7 @@ test("hook commands go through the plugin root the harness sets (Codex sets CLAU
   // Claude Code's in exec form: on Windows it starts bin/skilletor.exe (winlaunch) for
   // bin/skilletor, without Git Bash; Linux and macOS start the sh launcher as before.
   const hooks = json("hooks/hooks.json").hooks as Record<string, { hooks: { command: string; args?: string[] }[] }[]>;
-  assert.deepEqual(Object.keys(hooks).sort(), ["CwdChanged", "SessionStart", "UserPromptSubmit"]);
+  assert.deepEqual(Object.keys(hooks).sort(), ["CwdChanged", "PostToolUse", "SessionStart", "UserPromptSubmit"]);
   for (const groups of Object.values(hooks)) {
     for (const g of groups) {
       for (const h of g.hooks) {
@@ -55,10 +55,12 @@ test("on Windows bin/skilletor.exe runs the bundle the sh launcher runs", () => 
 });
 
 // k50 (spec §14.5, §14.8): the Codex plugin has its own hooks file, the Claude one is untouched.
-// k147 (spec §8): CwdChanged is Claude Code's alone – Codex has no such event.
+// k147 (spec §8): CwdChanged and PostToolUse are Claude Code's alone – Codex has no CwdChanged,
+// and its Bash cwd never moves (k149). PostToolUse, the awaited move hook, runs on a Bash call
+// with a `cd` only, and gets the 30 s SessionStart and CwdChanged have.
 // k149 (spec §8, §14.5): under Codex the prompt hook syncs a checkout the session moved into,
 // awaited, so it gets the 30 s SessionStart and CwdChanged have; Claude Code's stays at 10 s.
-test("codex-hooks.json = hooks.json without CwdChanged, with --harness codex, matcher startup|resume|clear, no context limit, a prompt hook of 30 s", () => {
+test("codex-hooks.json = hooks.json without CwdChanged and PostToolUse, with --harness codex, matcher startup|resume|clear, no context limit, a prompt hook of 30 s", () => {
   assert.equal(codex.hooks, "./hooks/codex-hooks.json");
   assert.equal(claude.hooks ?? "./hooks/hooks.json", "./hooks/hooks.json");
   type Groups = Record<string, { matcher?: string; hooks: Record<string, unknown>[] }[]>;
@@ -71,7 +73,15 @@ test("codex-hooks.json = hooks.json without CwdChanged, with --harness codex, ma
   // back into the command text.
   const expected = JSON.parse(JSON.stringify(forClaude)) as Groups;
   assert.equal(forClaude.CwdChanged?.[0]?.hooks[0]?.timeout, forClaude.SessionStart![0]!.hooks[0]!.timeout);
+  assert.deepEqual(forClaude.PostToolUse, [{
+    matcher: "Bash",
+    hooks: [{
+      type: "command", if: "Bash(cd *)", command: "${CLAUDE_PLUGIN_ROOT}/bin/skilletor", args: ["hook", "post-tool-use"],
+      timeout: forClaude.SessionStart![0]!.hooks[0]!.timeout,
+    }],
+  }]);
   delete expected.CwdChanged;
+  delete expected.PostToolUse;
   for (const groups of Object.values(expected)) {
     for (const g of groups) {
       for (const h of g.hooks) {

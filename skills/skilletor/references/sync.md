@@ -40,8 +40,13 @@ copies the config, not the installed items) gets that checkout's project scope s
 lock does not match its config: `skilletor: N item(s) updated in <dir>`, or the line names the
 `skilletor trust <name>` / `skilletor sync` to run there.
 
-- Claude Code: on any Bash `cd`, not awaited — an agent spawned right after it can start
-  before the items are there. The throttled check keeps covering only the project the session started in.
+- Claude Code: after a Bash `cd`, awaited (PostToolUse) — from the model's next message on,
+  every tool call, an agent spawn too, finds the items there, and the model's context names the
+  checkout; a spawn sent in the same message as the `cd` starts in the old cwd. A `cd` within
+  one checkout does nothing. A move without a Bash `cd` (`EnterWorktree` into an existing
+  worktree, `pushd`) syncs too (CwdChanged), not awaited — an agent spawned right after it can
+  start before the items are there. The throttled check keeps covering only the project the
+  session started in.
 - Codex, Hermes: a session moves only between turns (a Codex app-server turn with a new `cwd`,
   Hermes' `/worktree new`); the next prompt waits for the sync, and that turn's context names
   the checkout. A shell `cd` there moves no session and syncs nothing.
