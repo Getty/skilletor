@@ -116,4 +116,5 @@ This measures the installed set on one machine, not the skill in general.
 - `skill-authoring` — description and body rules the rubric is built on.
 - `skill-compressor` — the route for "too long for its effect".
 - `skill-mining` — the route for "is this convention real".
-- `getty-skill-library` — where a skill lives and how a hardlinked one is edited.
+- `getty-skill-library` — where a skill lives and how an installed one is
+  edited in its source.

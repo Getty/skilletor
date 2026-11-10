@@ -36,5 +36,4 @@ Repo truths that live in no skill:
   `.claude/skilletor.json`: untracked, and the next sync reverts an edit.
   Edit them in their source checkout (`~/dev/skills`, `~/dev/karr`, declared
   `local` in the user config, so the next sync brings the change here — no
-  push). Those files, like `~/.claude/skills`, are hardlinked: edit them in
-  place with a truncating write, never with `Edit`/`Write`.
+  push).
