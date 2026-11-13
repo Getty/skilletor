@@ -1,0 +1,38 @@
+---
+class: standard
+completed: 2026-11-13T20:18:09Z
+created: 2026-11-13T19:33:32Z
+id: 158
+priority: high
+started: 2026-11-13T20:18:09Z
+status: done
+tags:
+- perl
+- render
+- conformance
+title: 'Perl port: render Nunjucks templates with Text::Nunjucks'
+updated: 2026-11-13T20:18:24Z
+---
+
+The Perl port refuses every item with a .njk file (perl/lib/Skilletor/Render.pm build croaks, "renders nothing"; Engine.pm holds such items back with a warning; Skilletor.pm resolve_* throw Skilletor::Error::Unsupported). The reference src/render.ts renders them with nunjucks: a loader confined to the item source root (an include leaving it is RenderError "template escapes source root: <name>"), autoescape false, throwOnUndefined true, env.render(file, context), errors wrapped as "<file>: <message>", a template passes its executable bit to what it renders.
+
+Engine: Text::Nunjucks, the 1:1 Perl port of Nunjucks 3.2.4 (local checkout /home/getty/dev/p5-text-nunjucks, https://github.com/Getty/p5-text-nunjucks, not on CPAN yet). The loader is a subclass of Text::Nunjucks::Loader (a bare get_source object is an open decision there, its k94). Nothing in p5-text-nunjucks is changed from here: deviations from what render.ts needs are reported (template, node output, Perl output), not worked around.
+
+Done:
+- perl/cpanfile requires Text::Nunjucks; the Perl test command (CLAUDE.md, perl/README.md) puts the checkout lib on PERL5LIB.
+- Render.pm renders .njk like render.ts; Engine.pm syncs templated items (renders-empty skip included) like the reference.
+- conformance/cases/09-templates meets the shared expected/; its expected.perl/ and engines.perl block go (it is the only case with one).
+- Parity tests (Perl vs node) cover a template with an include, an undefined variable and an escaping include.
+- Perl suite green; TypeScript suite untouched and green.
+- POD (Render.pm, Engine.pm, Skilletor.pm), perl/README.md, docs/perl.md, conformance/README.md say what is true now; perl/Changes entry.
+- Report: what CI (.github/workflows/perl.yml, cpanm --installdeps) needs until Text::Nunjucks is on CPAN.
+
+2026-11-13 19:40 Measured (node render.ts vs a Text::Nunjucks prototype): an escaping include does NOT surface unwrapped in the reference - nunjucks wraps the loader's throw, so the reference's message is '<file>: (<abs path>)\n  RenderError: template escapes source root: <name>' (an instanceof RenderError check in render.ts never fires for includes). Port matches that by throwing an object whose name is RenderError. Text::Nunjucks matches node on include, throwOnUndefined text, syntax errors, missing include, extends/macros, whitespace, UTF-16 length. Needs boundary marshalling of the port's JSON model (JSON::MaybeXS booleans, undef-in-object = JSON null, tied ordered hashes) to Text::Nunjucks' (builtin bools, None, Hash::Ordered); without it false is truthy. Text::Nunjucks requires perl 5.040 (cpanfile) - CI's 5.36/5.38 containers cannot install it.
+
+2026-11-13 19:52 Done so far: Render.pm renders .njk via Text::Nunjucks (new Skilletor::Render::Loader, a Text::Nunjucks::Loader subclass confined to the source root, is_relative 0 as the reference's loader has no isRelative; Skilletor::Error::Render with name RenderError); Engine.pm builds the reference's RenderContext (new host/user attrs), renders-empty skip, held-back logic gone; 09-templates expected.perl + engines block removed, t/60-conformance.t green on shared expected/ (runner passes host/user conformance like the TS runner). New t/53-parity-render.t: 28 cases identical to node (include, import, extends, throwOnUndefined, escaping include/import/absolute, UTF-8 + UTF-16 lengths, JSON null/bools/order, renders-empty incl. JS whitespace, executable .njk) + 1 TODO. Also found (TS side, this board): a template that includes a file with a syntax error crashes the reference process - nunjucks 3.2.4 renders that include asynchronously, env.render returns null, Buffer.from(null) throws TypeError (warned as template error), then node dies (exit 1) on the next tick with the uncaught Template render error; a hook/sync would die mid-run.
+
+2026-11-13 21:15 Finished. t/62-engine.t: the two hold-back subtests (template stays as installed / never installed unrendered) asserted the removed refusal; replaced by: render with the reference context + render-inputs/sources-read records + varsChanged after a var change; template error keeps copy + lock entry, reference's warning (also an escaping include); renders-empty removes an installed rule, lock skipped renders-empty; executable .njk. t/52-parity-sync.t gained templated items (whole context with default host/user, include, a for over vars, renders-empty rule, a failing template) - byte-identical with node; mutation of host.os default fails it. t/00-load.t lists Skilletor::Error::Render and Skilletor::Render::Loader; cpanfile requires Hash::Ordered and Text::Nunjucks 0.001 (perl 5.020 kept: Text::Nunjucks itself needs 5.040). Docs: CLAUDE.md test command, perl/README.md, docs/perl.md, conformance/README.md. perl/Changes NOT written (release-manager lane; proposed line in the report). Perl: 25 files, 2037 tests pass, 0 skips, 1 TODO (t/53 include of a file with a syntax error). TS: 1118 tests, 1117 pass, 0 fail, 1 skip (hermes-real network test, SKILLETOR_HERMES_INSTALL unset); build + check-dist clean; src/test/dist/hooks/bin diff empty. Drift for this board (dispatcher to file): (a) the TS include-syntax-error crash noted above; (b) TS makeContext calls os.userInfo() for every item, templated or not - on a host whose uid has no passwd entry every item fails as 'template error' (port mirrors, verified with unshare: same ENOENT text); (c) perl/lib/Skilletor.pm:192 Ambiguous message holds a raw en dash without use utf8 (byte string). Open: resolve_* serving a rendered templated item has no TS counterpart, so the refusal stays (message and POD now true). CI: perl.yml cannot install Text::Nunjucks (not on CPAN, needs 5.040; matrix has 5.36/5.38) - not edited, see report.
+
+2026-11-13 20:11 Ready for review: Perl renders .njk via Text::Nunjucks; 09-templates on shared expected/; Perl suite and TS suite green; tree commit-ready, nothing committed. CI (perl.yml) needs a decision before this lands - see the card notes.
+
+Committed as 78094ea
