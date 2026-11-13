@@ -666,35 +666,35 @@ async function syncScopeRun(
 
   // Resolve every needed source in parallel (skip untrusted, warn on failure). The trust
   // check and the fetch use the one resolved backend (spec §3, §4.3); names that share a
-  // backend share the run's one resolve of it (k83).
+  // backend share the run's one resolve of it (k83). What each name comes to – its warning, its
+  // trust request, its place in `resolved` – is taken in the order of `names`, the order one
+  // resolve after the other gives, never the order the resolves complete in (k165).
   const needed = scopeSources(scopeCfg);
   const sources = sourcesOf(config, scope);
   const resolved = new Map<string, { dir: string; version: string; backend: ResolvedBackend } | null>();
-  const resolveAll = (names: string[]) => Promise.all(
-    [...new Set(names)].filter((n) => !resolved.has(n)).map(async (name) => {
-      const src = sources.get(name);
-      if (!src) {
-        rep.warnings.push(`unknown source: ${name}`);
-        resolved.set(name, null);
-        return;
-      }
-      try {
-        const backend = resolveBackend(src, ctx.home);
-        if (!state.isTrusted(name, backend)) {
-          rep.trustRequests.push(trustRequestOf(name, backend));
-          resolved.set(name, null);
-          return;
+  const resolveAll = async (names: string[]) => {
+    const outcomes = await Promise.all(
+      [...new Set(names)].filter((n) => !resolved.has(n)).map(async (name) => {
+        const src = sources.get(name);
+        if (!src) return { name, value: null, warning: `unknown source: ${name}` };
+        try {
+          const backend = resolveBackend(src, ctx.home);
+          if (!state.isTrusted(name, backend)) return { name, value: null, trust: trustRequestOf(name, backend) };
+          const loc = await resolveSource(backend);
+          return { name, value: { dir: loc.dir, version: loc.version, backend }, warning: loc.warning };
+        } catch (err) {
+          return { name, value: null, warning: `source ${name}: ${(err as Error).message}` };
         }
-        const loc = await resolveSource(backend);
-        // A shared resolve's warning (a fetch that fell back to the cache) is named once.
-        if (loc.warning && !rep.warnings.includes(loc.warning)) rep.warnings.push(loc.warning);
-        resolved.set(name, { dir: loc.dir, version: loc.version, backend });
-      } catch (err) {
-        rep.warnings.push(`source ${name}: ${(err as Error).message}`);
-        resolved.set(name, null);
-      }
-    }),
-  );
+      }),
+    );
+    for (const o of outcomes) {
+      // A shared resolve's warning (a fetch that fell back to the cache) is named once; the
+      // others carry the source's name.
+      if (o.warning && !rep.warnings.includes(o.warning)) rep.warnings.push(o.warning);
+      if (o.trust) rep.trustRequests.push(o.trust);
+      resolved.set(o.name, o.value);
+    }
+  };
   await resolveAll(needed);
 
   // Build each declared item; keep (don't delete) items whose source is unavailable.

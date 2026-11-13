@@ -10103,30 +10103,27 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   const needed = scopeSources(scopeCfg);
   const sources = sourcesOf(config, scope);
   const resolved = /* @__PURE__ */ new Map();
-  const resolveAll = (names) => Promise.all(
-    [...new Set(names)].filter((n) => !resolved.has(n)).map(async (name) => {
-      const src = sources.get(name);
-      if (!src) {
-        rep.warnings.push(`unknown source: ${name}`);
-        resolved.set(name, null);
-        return;
-      }
-      try {
-        const backend = resolveBackend(src, ctx.home);
-        if (!state.isTrusted(name, backend)) {
-          rep.trustRequests.push(trustRequestOf(name, backend));
-          resolved.set(name, null);
-          return;
+  const resolveAll = async (names) => {
+    const outcomes = await Promise.all(
+      [...new Set(names)].filter((n) => !resolved.has(n)).map(async (name) => {
+        const src = sources.get(name);
+        if (!src) return { name, value: null, warning: `unknown source: ${name}` };
+        try {
+          const backend = resolveBackend(src, ctx.home);
+          if (!state.isTrusted(name, backend)) return { name, value: null, trust: trustRequestOf(name, backend) };
+          const loc = await resolveSource(backend);
+          return { name, value: { dir: loc.dir, version: loc.version, backend }, warning: loc.warning };
+        } catch (err) {
+          return { name, value: null, warning: `source ${name}: ${err.message}` };
         }
-        const loc = await resolveSource(backend);
-        if (loc.warning && !rep.warnings.includes(loc.warning)) rep.warnings.push(loc.warning);
-        resolved.set(name, { dir: loc.dir, version: loc.version, backend });
-      } catch (err) {
-        rep.warnings.push(`source ${name}: ${err.message}`);
-        resolved.set(name, null);
-      }
-    })
-  );
+      })
+    );
+    for (const o of outcomes) {
+      if (o.warning && !rep.warnings.includes(o.warning)) rep.warnings.push(o.warning);
+      if (o.trust) rep.trustRequests.push(o.trust);
+      resolved.set(o.name, o.value);
+    }
+  };
   await resolveAll(needed);
   const plan = [];
   const keep = Object.keys(oldLock).filter((key) => rootOfKey(rc, key) === void 0);
