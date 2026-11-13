@@ -1,0 +1,74 @@
+---
+class: standard
+completed: 2026-11-13T21:26:05Z
+created: 2026-11-13T20:42:35Z
+id: 172
+priority: high
+started: 2026-11-13T20:45:22Z
+status: done
+tags:
+- perl
+- cli
+- conformance
+title: 'Parity harness: cli op in conformance/ and the Perl CLI skeleton'
+updated: 2026-11-13T21:26:05Z
+---
+
+Part of the Perl CLI strand (see the strand card). This is the parity harness every later card adds cases to.
+
+Format (conformance/README.md): a new step op `cli`.
+- Inputs:
+  - `argv`; `cwd` (default ${PROJECT}, else an empty dir outside git);
+  - `env` (`null` unsets a variable);
+  - `stdin` (a string is passed raw, anything else as JSON; default empty; always a pipe, never a TTY).
+- Expectations:
+  - expected/<id>.json holds {"exit": N};
+  - expected/<id>.stdout and .stderr hold the raw bytes (a missing file means empty);
+  - a ${VERSION} placeholder applies only in steps that ask for it;
+  - `tree` compares as today, minus the CLI's own state root `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skilletor/`.
+- Child environment, built from nothing: PATH (plus PERL5LIB for Perl), HOME, CODEX_HOME, GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM=1, LC_ALL=C, then the case env, then the step env. Nothing else may leak in: no CLAUDE_PROJECT_DIR, SKILLETOR_PROJECT_DIR, CLAUDE_PLUGIN_ROOT, HERMES_HOME, GIT_DIR or SKILLETOR_BIN.
+- Which CLI runs: env SKILLETOR_CONFORMANCE_CLI, a JSON array that prefixes argv.
+  - TS default: node plus the bundle from buildToString (as in cli.test.ts:19-25).
+  - Perl default: [$^X, -I perl/lib, perl/bin/skilletor].
+  - Either runner can run any CLI, the packed binary later. Do not reuse SKILLETOR_BIN, which the Hermes adapter reads.
+  - Update mode refuses while the override is set.
+  - A hook step must expect exit 0.
+  - Every step gets a timeout; a signal counts as a failure.
+
+Runners: test/conformance.test.ts and perl/t/60-conformance.t both run `cli` steps. Perl's run_command forces stdin to /dev/null (Process.pm:30), so feed stdin there or use IPC::Open3 in the runner.
+
+Perl CLI skeleton:
+- perl/bin/skilletor (the dist convention: Author::GETTY packs bin/NAME) is a thin script over a new Skilletor::CLI.
+- Port from cli.ts:
+  - parseFlags, ACCEPTED and unknownOption;
+  - USAGE and the version (provisional: the package.json version through one constant pinned by a test, see the version decision card);
+  - unknown option, unknown command, invalid --scope and the missing-operand messages;
+  - the top-level error text (no Perl ` at FILE line N.`);
+  - UTF-8 stdout and displaySafe.
+- A command not ported yet fails loudly. No case pins it.
+
+Case 40-cli-args covers:
+- cli.test.ts :33, :39, :48 (usage bytes), :63, :69, :581, :597, :611, :631;
+- invalid --scope;
+- the missing operands (cli.ts:257, :281, :289, :310, :320, :332).
+
+Also correct in conformance/README.md:
+- :129-130: the CLI's state root under CLAUDE_CONFIG_DIR;
+- :200-205: the engine ops compare data, not `--json` bytes;
+- :319-320: both runners copy the checkout's file modes, against what the README says; make them follow `executable` only.
+
+Done:
+- Both runners are green on 40-cli-args with their own CLI and with the other one: the TS runner pointed at perl/bin/skilletor, the Perl runner at node dist/skilletor.js.
+- Both suites are green.
+
+Version decision: k167 (provisional constant until decided). TS quirks decision: k170 (cases pin TS as it is until then).
+
+2026-11-13 20:53 Plan: cli step op in both runners (spawn with an env built from nothing, stdin as a pipe through a new run_command stdin arg in Process.pm, timeout + signal = failure, ${VERSION} via a step key "version": true, tree skips the CLI state root); Skilletor::CLI + perl/bin/skilletor skeleton (hook dispatched before the option checks as k164 now does in src/cli.ts; unported commands exit 1 with a 'not ported' line); case 40-cli-args. Source copies in both runners stop copying checkout modes.
+
+2026-11-13 21:09 Progress: cli op in both runners + self-tests of the harness (env built from nothing, no CLAUDE_PROJECT_DIR leak, null unsets, stdin pipe raw/JSON, signal and timeout fail); Process.pm run_command takes stdin (pipe, non-blocking writes in the select loop, SIGPIPE ignored); Skilletor::CLI + perl/bin/skilletor; case 40-cli-args (52 steps) generated from the TS bundle and hand-checked against cli.ts. Green: TS runner (own bundle, and on perl/bin/skilletor), Perl runner (own CLI, and on node with HEAD's dist/skilletor.js and the working-tree one), full Perl suite. Pending: full npm test.
+
+2026-11-13 21:14 Notes for review: (1) 40-cli-args takes 6 of the 10 help-anywhere argvs of cli.test.ts:581 (one per position: after the command, -h, first, after a value option, beside an unknown option, in a sub-command; all hit the same argv.includes check). (2) :631 is pinned as acceptance: each command's documented options followed by --bogus, so the error names --bogus; its hook half is not (hook not ported). (3) TS quirks pinned as they are (k170): 'check --scope' says 'invalid --scope: undefined'; 'frobnicate --scope nope' reports the scope, not the command. (4) Open: invalid UTF-8 in argv is not pinned (Node's and Encode's U+FFFD substitution may differ); the runners and Process.pm's select loop are POSIX-only (Windows card); Perl CLI startup ~0.29 s, ~175 ms of it loading Skilletor::Report for display_safe. Also found, for other lanes: k171's perl/t/lib/SkilletorTest/Conformance.pm _copy_tree still copies the checkout's file modes (README now says runners follow 'executable' only; harmless today, all fixtures are 100644); docs/release.md should list perl/lib/Skilletor/CLI.pm CLI_VERSION as a version-bearing file while k167 is open - 60-conformance.t fails on a package.json bump without it.
+
+2026-11-13 21:14 Done: cli op in conformance/ (README: format, child env, which CLI, ${VERSION}, timeout/signal, hook exit 0; corrected state root under CLAUDE_CONFIG_DIR, engine ops compare data not --json bytes, both runners now follow 'executable' only for source modes). test/conformance.test.ts and perl/t/60-conformance.t run cli steps (+ harness self-tests); Process.pm run_command takes stdin via a pipe; Skilletor::CLI + perl/bin/skilletor (argument layer only; unported commands exit 1 loudly); CLI_VERSION 0.7.0 pinned to package.json in 60-conformance.t (provisional, k167); case 40-cli-args (52 steps) generated by the TS bundle, hand-checked against cli.ts and spec §7. Verified: npm run typecheck clean; npm test 1124 tests, 1123 pass, 0 fail, 1 skipped (hermes-real.test.ts:400, needs SKILLETOR_HERMES_INSTALL=1); Perl prove -lr -j4 t: 26 files, 2075 tests, PASS (skips: 16 cases in k171's 65-report-json.t, no engine step to compare; 1 TODO in 53-parity-render.t, pre-existing). Cross-runs green: TS runner on perl/bin/skilletor (34/34), Perl runner on node dist/skilletor.js at 161f605 (35/35). No commit.
+
+Committed as cdbb554
