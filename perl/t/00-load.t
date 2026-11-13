@@ -5,6 +5,7 @@ use Test::More;
 
 for (qw(
   Skilletor
+  Skilletor::AgentsMD
   Skilletor::Apply
   Skilletor::Backend
   Skilletor::Briefing
@@ -14,6 +15,7 @@ for (qw(
   Skilletor::Catalog
   Skilletor::ClaudeSettings
   Skilletor::Config
+  Skilletor::Convert
   Skilletor::Engine
   Skilletor::Entry
   Skilletor::Error
@@ -23,6 +25,7 @@ for (qw(
   Skilletor::Error::CacheRejected
   Skilletor::Error::Catalog
   Skilletor::Error::Config
+  Skilletor::Error::Convert
   Skilletor::Error::Frontmatter
   Skilletor::Error::JSON
   Skilletor::Error::Lock
@@ -30,6 +33,7 @@ for (qw(
   Skilletor::Error::Render
   Skilletor::Error::Source
   Skilletor::Error::Spec
+  Skilletor::Error::TOML
   Skilletor::Error::Tar
   Skilletor::Error::Target
   Skilletor::Error::Unsupported
@@ -53,6 +57,7 @@ for (qw(
   Skilletor::Source::Url
   Skilletor::Spec
   Skilletor::State
+  Skilletor::TOML
   Skilletor::Tar
   Skilletor::Targets
   Skilletor::URL

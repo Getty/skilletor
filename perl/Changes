@@ -22,6 +22,11 @@ Revision history for Skilletor
     Skilletor::Report's new report_hook words a sync report as the hooks do.
     report_text gives an item with an unknown harness prefix its type's
     activation hint.
+  - Skilletor::Convert and Skilletor::TOML port the reference's Codex
+    conversion: an agent as a Codex agent-role TOML file (the codex:
+    passthrough, its warnings, the # briefing: skills line), a rule as its
+    section of the Codex rules file, and the per-target mapping of an item's
+    output, byte for byte; not yet used by a sync.
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's
