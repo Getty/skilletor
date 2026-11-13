@@ -1,0 +1,65 @@
+---
+class: standard
+completed: 2026-11-13T23:43:18Z
+created: 2026-11-13T20:43:34Z
+depends_on:
+- 173
+- 180
+- 164
+id: 181
+priority: high
+started: 2026-11-13T22:34:44Z
+status: done
+tags:
+- perl
+- cli
+- hooks
+title: 'Perl CLI: hooks session-start, user-prompt-submit, __sync-background'
+updated: 2026-11-13T23:43:18Z
+---
+
+Part of the Perl CLI strand (see the strand card). Covers the Claude hooks.
+
+Port runHookCommand (cli.ts:368-399) and runHook (hooks.ts):
+- `--harness X` (codex and hermes are recognised; their behaviour comes with the Codex and Hermes cards).
+- stdin: empty on a TTY; malformed JSON is ignored.
+- projectDir from SKILLETOR_PROJECT_DIR, else CLAUDE_PROJECT_DIR.
+- A compact JSON line, printed only when it has a systemMessage or hookSpecificOutput.
+- Exit 0 on every failure, as fixed by k164.
+
+session-start:
+- check with a 5 s timeout, then markChecked, then a sync when the check says changed;
+- on a lock timeout, dueAgain;
+- recordSessionCwd.
+
+user-prompt-submit:
+- takePendingReport;
+- the interval: checkInterval, 600 when the config fails to load;
+- a detached background self-spawn of `hook __sync-background`:
+  - a PAR binary re-executes $^X; plain perl runs $^X with the script;
+  - setsid (so the Hermes killpg spares it); stdio ignored; SKILLETOR_PROJECT_DIR set.
+
+__sync-background: sync, then putPendingReport; on a lock timeout, dueAgain.
+
+Cases: hook `cli` steps for
+- cli.test.ts :674, :705;
+- hooks.test.ts :120, :130, :249, :382, :455, :485, :502, :667, :688, :929;
+- :213/:231 as an explicit `hook __sync-background` step, then user-prompt-submit with checkInterval 0.
+
+Timing stays per engine, tested with injected clocks: the <100 ms fast path and the lock timeouts.
+
+Done: both runners are green with both CLIs.
+
+2026-11-13 22:50 Progress (worker): Skilletor::Hooks (perl/lib/Skilletor/Hooks.pm, after hooks.ts) holds run_hook for session-start, user-prompt-submit, __sync-background and project_root_of (moved from CLI.pm, re-exported there); State/Config/Engine are required lazily, so a prompt with nothing due loads no engine. Skilletor::Process::spawn_detached: fork, setsid, second fork (no zombie), stdio /dev/null, exec. CLI.pm: hook dispatch (stdin JSON, project from SKILLETOR_PROJECT_DIR/CLAUDE_PROJECT_DIR, one compact JSON line, exit 0 always, SIGPIPE ignored), self_command/is_packed. Finding on the self-spawn: probed with pp (PAR::Packer 1.021) here - inside a packed binary $^X is the bare string 'perl' (it would run a system perl, absent on the target), $0 the name as called (relative: ./probe); the binary's full path is $ENV{PAR_PROGNAME} (PAR::Environment documents it as the fully-qualified path), and $INC{'PAR.pm'} is set. So the packed branch re-executes PAR_PROGNAME, not $^X as the card says. Re-exec with the PAR_* env inherited works, also for a -C (clean) build (the child gets its own temp dir) - so the child env is %ENV + SKILLETOR_PROJECT_DIR as in TS, nothing scrubbed. Plain perl: $^X, -I for every @INC dir, $0. Case lines: cli.test.ts :705 (k147, cwd-changed) is listed on k182 as well and is its scope; not mirrored here.
+
+Progress (worker): tests and cases done. perl/t/69-hooks.t (24 subtests) covers the in-session interval on an injected State clock (due at first, not 1 ms before 1800 s, due at 1800 s; the 600 s fallback on a config error; checkInterval 0 and -5 never spawn). It also covers lock timeouts with lock_timeout_ms 0 under a held sync lock: session-start's one line, no pending report from __sync-background, the project due again, and the next due prompt's sync installs. The fast-path claim runs in a fresh perl: a prompt with nothing due says nothing, starts nothing, loads none of Engine/Resolver/Render/Apply and runs no git. A mutation (an eager use Skilletor::Engine in Hooks.pm) turns it red. Further subtests: pending report once, background report under UserPromptSubmit, git top level / cwd as the project, the trust request, no harness, a write error (k89), the unknown event and not-ported lines, default_background with a fake spawn, and self_command/is_packed for the packed and the plain branch. The real spawn_detached test shows it returns while the child waits, and that the child has its own pgrp and session, stdio on /dev/null and the given env. Black box through bin/skilletor: a due prompt starts the real background (no PERL5LIB, -I only) and the next prompt shows its report; a removed cwd (k164) with and without the project known; a known project runs no git; a faulted _home gives one line, exit 0. Conformance: new cases 50-59 (hook cli steps for hooks.test.ts :120 :130 :213/:231 :249 :382 :455 :485 :502 :667 :688 :929 and cli.test.ts :674/k85). No prompt in them is due (checkInterval 0, a prior session-start, or a home/.claude/skilletor/last-check.json mark in the future), so no case starts a real background sync; conformance/README.md documents this and lists the cases. Regenerated with SKILLETOR_CONFORMANCE_UPDATE=1: no existing expectation changed (git status shows only the new case dirs). I hand-reviewed the new ones against hooks.ts/cli.ts and the k-tests.
+
+Timing (worker), hook user-prompt-submit with nothing due, CLAUDE_PROJECT_DIR set, wall time per run, host load avg 6-7 on 16 cores (other workers' builds). perl -I perl/lib perl/bin/skilletor: median 239 ms (min 214) in the quietest round, 350-554 ms in busier rounds. node dist/skilletor.js: median 292 ms (min 218), 181-468 ms across rounds. Floors on the same host: node dist/skilletor.js --version 239-426 ms, perl -e 1 9 ms, perl -e 'require Skilletor::CLI' 237-577 ms. So the Perl fast path costs what loading Skilletor::CLI costs; Hooks adds State+Config (about 45 ms) and never Engine. The load is mostly Skilletor::JSON -> Skilletor::Error::JSON (Moo, namespace::clean, B::Hooks::EndOfScope), Path::Tiny, Encode and JSON::MaybeXS. Packed binary (a throwaway pp build into /tmp with perl/scripts/build-binary.sh run unmodified, SKILLETOR_BIN_OUT): fast path median 1441-1498 ms (min 817). End to end, its due prompt re-executes the binary itself (PAR_PROGNAME, under env -i without PERL5LIB), and the next prompt hands out the background sync's report.
+
+Findings and drift for the dispatcher (none fixed here): (1) The packed binary's fast path is about 1.4 s per prompt against about 0.24 s for plain perl. That is PAR start-up, k188's board/topic. (2) The Perl CLI's own load (about 240 ms, Moo via Skilletor::Error::JSON and friends) bounds every hook. A leaner prompt path would need Skilletor::JSON/Error to load lazily; a ticket if wanted. (3) A TS edge, maybe a bug, src not touched: stdin JSON that is no object (e.g. null) reaches runHook as is, so session-start answers 'skilletor: Cannot read properties of null (reading 'cwd')'. Perl treats non-object JSON as no input. In the same vein, TS passes a non-string truthy input.cwd to projectRootOf, while Perl takes only a non-empty string. (4) Engine error wording differs (pre-existing, not the hook's): a write error where ~/.claude/rules is a file reads 'mkpath failed for <path>: File exists' in Perl (Path::Tiny), not Node's errno text. 69-hooks.t asserts one line only. (5) docs/perl.md 'Known gaps' still says the hooks are not ported. It is prose and has foreign uncommitted edits in the tree, so I left it. (6) On Windows spawn_detached dies (k186), so a due prompt there answers one warning line. What codex/hermes do in Perl after this card: --harness codex|hermes is parsed and passed on, but a hook answers exactly as Claude Code's. There is no Codex rules context (TS adds it only for codex-targeting scopes, which the Perl engine refuses anyway), no Hermes opt-in line and no prompt-hook move (k149); that is k184/k185. cwd-changed and post-tool-use answer 'skilletor: hook <event> is not ported to the Perl CLI yet' and exit 0 (k182). cli.test.ts :705 is k182's.
+
+Ready for review. Files: new perl/lib/Skilletor/Hooks.pm, perl/t/69-hooks.t, conformance/cases/50-hook-session-start .. 59-hook-unused-project (10 case dirs). Modified: perl/lib/Skilletor/CLI.pm, perl/lib/Skilletor/Process.pm (spawn_detached), perl/bin/skilletor (POD), conformance/README.md. src/, dist/ and the runners are untouched. Not mine in the tree: .claude/skilletor.json, perl/.gitignore, perl/dist.ini, perl/scripts/, docs/perl.md, bin/skilletor-start, test/starter.test.ts, nytprof.out. Results: npm run typecheck clean. npm test 1169 tests, 1168 pass, 0 fail, 1 skipped (the Hermes plugin install, needs SKILLETOR_HERMES_INSTALL=1). npm run check-dist: up to date. Perl prove -lr -j4 t: 33 files, 2273 tests, PASS; t/65-report-json.t skips 31 cli-only cases by design, 10 of them the new ones. t/69-hooks.t: 24 subtests. Conformance TS runner: 49/49. Perl runner: 50/50. Cross-runs: TS runner with the Perl CLI 49/49, Perl runner with node dist/skilletor.js 50/50. Open: the findings note (packed fast path ~1.4 s, k188; CLI load ~240 ms; TS null-stdin edge; docs/perl.md Known gaps stale; Windows k186). codex/hermes parity is k184/k185, the move hooks k182.
+
+Review (dispatcher), green: isolated worktree HEAD 2dff015 + the k181 files. npm run typecheck clean; npm test 1143 tests, 1142 pass, 0 fail, 1 skip (hermes-real); Perl prove -lr -j4 t: 33 files, 2273 tests, PASS; TS runner with perl/bin/skilletor 49/49; Perl t/60 with node dist/skilletor.js 50/50. docs/perl.md (dispatcher) updated for the hooks; it goes into this commit.
+
+Committed as bfc62f0
