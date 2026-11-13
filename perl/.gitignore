@@ -12,6 +12,9 @@ blib/
 *.tar.gz
 cover_db/
 
+# scripts/build-binary.sh output (SKILLETOR_BIN_OUT defaults to ./skilletor)
+/skilletor
+
 # Carton
 /local/
 /.carton/

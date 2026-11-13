@@ -14,7 +14,8 @@
       "skill-compressor@getty",
       "getty-skill-library@getty",
       "kanban-issues-karr-coordination@karr",
-      "kanban-issues-karr-ticket@karr"
+      "kanban-issues-karr-ticket@karr",
+      "perl-par-binary-release@getty"
     ],
     "bundles": [
       "getty-house@getty"

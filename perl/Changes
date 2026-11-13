@@ -11,8 +11,8 @@ Revision history for Skilletor
     skilletor sync|check|status --json prints them.
   - A command line, bin/skilletor over Skilletor::CLI: the reference's usage
     text, version (the plugin's, provisional), option checks, usage errors and
-    exit codes, byte for byte; no command runs yet - each says it is not
-    ported and exits 1. Skilletor::Process::run_command feeds stdin through a
+    exit codes, byte for byte; a command not ported yet says so and exits 1.
+    Skilletor::Process::run_command feeds stdin through a
     pipe when given one.
   - The engine options the hooks set, as the reference has them: check's local
     (no source asked), the sync's if_changed (a local check under the sync
@@ -32,6 +32,12 @@ Revision history for Skilletor
     --scope, --force and --project-dir; the project root is the git top level
     of the working directory (2 s, else the directory itself). The
     conformance runner's cli steps hold it to the reference's bytes.
+  - scripts/ builds bin/skilletor into one standalone executable with
+    PAR::Packer (build-binary.sh), proves it byte for byte against perl -Ilib
+    (verify-binary.sh), checks its shared libraries and glibc floor
+    (check-binary-libs.sh), and runs the shared conformance cases' cli steps
+    against it in a container with neither perl nor node (container-proof.sh);
+    scripts/ stays out of the CPAN tarball.
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's
