@@ -1,5 +1,5 @@
 {
-  "description": "A lock an earlier sync left: items no longer declared go (their files and the directories left empty, an agent's .local. file too), a declared skill whose installed SKILL.md was edited is overwritten and named, the user's own skill beside them stays; check then finds nothing.",
+  "description": "A lock an earlier sync left: items no longer declared go (their files and the directories left empty, an agent's .local. file too), a declared skill whose installed SKILL.md was edited is overwritten and named, the user's own skill beside them stays; check then finds nothing. Through the CLI: status afterwards lists the declared skill alone – the user's own skill, never in the lock, is no orphan.",
   "git": {
     "shared": {
       "url": "https://conformance.invalid/shared.git",
@@ -23,6 +23,13 @@
     {
       "id": "status",
       "op": "status"
+    },
+    {
+      "id": "cli-status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
     }
   ]
 }

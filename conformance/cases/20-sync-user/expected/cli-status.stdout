@@ -1,0 +1,5 @@
+user scope:
+  ✓ skills/perl-moo @shared
+  ✓ agents/reviewer @shared
+  ✓ rules/commit-style @shared
+project scope:

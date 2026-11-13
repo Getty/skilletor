@@ -1,0 +1,41 @@
+{
+  "description": "A project that drops skilletor keeps nothing behind (k65): with its skilletor.json gone, status names the lock's item as an orphan; the sync removes the item, deletes the lock without entries, the .gitignore block and .worktreeinclude – .claude is left empty – and names no file to commit; status --json then reads no lock.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "gitInit": [
+    "project"
+  ],
+  "steps": [
+    {
+      "id": "status-before",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
+    },
+    {
+      "id": "sync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "tree": true
+    },
+    {
+      "id": "status-json",
+      "op": "cli",
+      "argv": [
+        "status",
+        "--json"
+      ]
+    }
+  ]
+}

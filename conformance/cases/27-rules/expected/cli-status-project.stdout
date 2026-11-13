@@ -1,0 +1,4 @@
+project scope:
+  ✓ rules/commits @shared via *@shared
+  ✓ rules/style @shared via *@shared
+  * rules/* @shared (2 installed)

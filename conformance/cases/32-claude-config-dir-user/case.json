@@ -1,5 +1,5 @@
 {
-  "description": "CLAUDE_CONFIG_DIR (k145) is the user scope's .claude: the user config, the skill, its lock and the detection marker are read and written under ${HOME}/cfg; the decoy config under ${HOME}/.claude is ignored and stays untouched.",
+  "description": "CLAUDE_CONFIG_DIR (k145) is the user scope's .claude: the user config, the skill, its lock and the detection marker are read and written under ${HOME}/cfg; the decoy config under ${HOME}/.claude is ignored and stays untouched. The CLI keeps its own state in ${HOME}/cfg/skilletor: its check finds no record of the engine's sync there (varsChanged, exit 1) until its own sync writes one.",
   "env": {
     "CLAUDE_CONFIG_DIR": "${HOME}/cfg"
   },
@@ -26,6 +26,29 @@
     {
       "id": "status",
       "op": "status"
+    },
+    {
+      "id": "cli-check-json",
+      "op": "cli",
+      "argv": [
+        "check",
+        "--json"
+      ]
+    },
+    {
+      "id": "cli-sync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "tree": true
+    },
+    {
+      "id": "cli-check",
+      "op": "cli",
+      "argv": [
+        "check"
+      ]
     }
   ]
 }

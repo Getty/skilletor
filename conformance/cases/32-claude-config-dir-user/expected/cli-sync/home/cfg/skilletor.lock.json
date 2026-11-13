@@ -1,0 +1,10 @@
+{
+  "skills/perl-moo": {
+    "source": "shared",
+    "version": "git:9082428",
+    "files": {
+      "skills/perl-moo/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/perl-moo/SKILL.md": "sha256:fa1dd1f19e7ea41f1843d7c3b3aeeaa2203a70c604704704c4acc452d8919722"
+    }
+  }
+}

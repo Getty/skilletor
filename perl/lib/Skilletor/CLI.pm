@@ -5,14 +5,18 @@ use strict;
 use warnings;
 use utf8;
 
+use Cwd ();
 use Encode ();
 use Exporter qw( import );
 use Scalar::Util qw( blessed );
-use Skilletor::Report qw( display_safe );
+use Skilletor::FSUtil qw( decode_utf8_lossy encode_text path_resolve );
+use Skilletor::GitEnv qw( git_env );
+use Skilletor::Process qw( run_command );
+use Skilletor::Report qw( display_safe report_json report_text status_text );
 
 our $VERSION = '0.002';
 
-our @EXPORT_OK = qw( run parse_flags unknown_option CLI_VERSION USAGE );
+our @EXPORT_OK = qw( run parse_flags unknown_option project_root_of CLI_VERSION USAGE );
 
 # The version the CLI reports: the plugin's (package.json), which t/60-conformance.t pins.
 # Provisional until k167 decides between it and the dist's own $VERSION.
@@ -123,6 +127,97 @@ sub _print_text {
   _print_lines( $fh, @lines ? @lines : ('') );
 }
 
+# A string's truthiness in JavaScript: set and not empty.
+sub _truthy { defined $_[0] && length $_[0] }
+
+# The project root of a directory, as the hooks find it (spec §14.5): git's top level of $cwd,
+# else $cwd itself. The reference's projectRootOf: one git run, 2 s, git's environment.
+sub project_root_of {
+  my ( $cwd ) = @_;
+  my $r = eval {
+    run_command( cmd => [ 'git', '-C', encode_text($cwd), 'rev-parse', '--show-toplevel' ], env => git_env(), timeout_ms => 2_000 );
+  };
+  return $cwd unless $r && !$r->{spawn_error} && !$r->{timed_out} && defined $r->{code} && $r->{code} == 0;
+  ( my $top = decode_utf8_lossy( $r->{stdout} ) ) =~ s/\A\s+|\s+\z//g;
+  return length $top ? path_resolve($top) : $cwd;
+}
+
+# Node's os.homedir(): $HOME, else the user's passwd entry.
+sub _home {
+  return decode_utf8_lossy( $ENV{HOME} ) if defined $ENV{HOME};
+  my $dir = ( getpwuid $< )[7];
+  die "A system error occurred: uv_os_homedir returned ENOENT (no such file or directory)\n" unless defined $dir;
+  return decode_utf8_lossy($dir);
+}
+
+# The engine a command runs on, as the reference's makeContext builds it: the home, the project
+# from --project-dir or the git top level of cwd. The rest is the engine's own default, read from
+# this machine: the state root <CLAUDE_CONFIG_DIR or ~/.claude>/skilletor, host and user, the
+# harness markers, git's answers.
+sub _engine {
+  my ( $flags ) = @_;
+  require Skilletor::Engine;    # loaded for the commands that run it: --help and usage errors stay fast
+  my $home = _home();
+  my $cwd  = Cwd::getcwd();
+  die "ENOENT: process.cwd failed with error no such file or directory, uv_cwd\n" unless defined $cwd;
+  return Skilletor::Engine->new( home => $home, project_dir => $flags->{project_dir} // project_root_of( decode_utf8_lossy($cwd) ) );
+}
+
+# The sync report, or "up to date" when no scope has anything to say; run-level warnings and
+# notes come in addition, never instead (the reference's syncText).
+sub _sync_text {
+  my ( $r ) = @_;
+  my $text = report_text($r);
+  my $run_level = @{ $r->{warnings} // [] } || @{ $r->{notes} // [] };
+  if ($run_level) {
+    my %scopes_only = %$r;
+    delete @scopes_only{qw( warnings notes )};
+    return "skilletor: up to date\n$text" unless length report_text( \%scopes_only );
+  }
+  return length $text ? $text : 'skilletor: up to date';
+}
+
+# A sync that stopped at a config error (spec §7): its report on stderr, exit 2. With `saved`,
+# the config file the command's edit wrote before the sync: it stays, and the lines say so
+# (k103).
+sub _sync_failed {
+  my ( $r, %opts ) = @_;
+  if ( !defined $opts{saved} ) {
+    _print_text( \*STDERR, $opts{json} ? report_json($r) : report_text($r) );
+  }
+  else {
+    _print_lines( \*STDERR, 'skilletor: config error, nothing synced — '.$r->{error},
+      'skilletor: the config edit itself was saved in '.$opts{saved}.' (not rolled back); fix the error, then run skilletor sync' );
+  }
+  return 2;
+}
+
+sub _sync {
+  my ( $flags ) = @_;
+  my $r = _engine($flags)->sync( scope => $flags->{scope}, force => $flags->{force} );
+  return _sync_failed( $r, json => $flags->{json} ) if _truthy( $r->{error} );
+  _print_text( \*STDOUT, $flags->{json} ? report_json($r) : _sync_text($r) );
+  return 0;
+}
+
+sub _check {
+  my ( $flags ) = @_;
+  my $r = _engine($flags)->check( scope => $flags->{scope} );
+  if ( _truthy( $r->{error} ) ) {    # a line, never JSON – under --json too
+    _print_lines( \*STDERR, 'skilletor: '.$r->{error} );
+    return 2;
+  }
+  _print_text( \*STDOUT, $flags->{json} ? report_json($r) : $r->{changed} ? 'changed' : 'up to date' );
+  return $r->{changed} ? 1 : 0;
+}
+
+sub _status {
+  my ( $flags ) = @_;
+  my $r = _engine($flags)->status( scope => $flags->{scope} );
+  _print_text( \*STDOUT, $flags->{json} ? report_json($r) : status_text($r) );    # an error too: stdout, exit 2
+  return _truthy( $r->{error} ) ? 2 : 0;
+}
+
 # A usage error (spec §7): its line on stderr, exit 2.
 sub _usage_error {
   my ( $line ) = @_;
@@ -190,7 +285,10 @@ sub _dispatch {
   my ( $cmd, $flags ) = @_;
   my @rest = @{ $flags->{rest} };
   my $given = sub { defined $_[0] && length $_[0] };    # JavaScript's truthiness of a string
-  return _not_ported($cmd) if grep { $cmd eq $_ } qw( sync check status available );
+  return _sync($flags)   if $cmd eq 'sync';
+  return _check($flags)  if $cmd eq 'check';
+  return _status($flags) if $cmd eq 'status';
+  return _not_ported($cmd) if $cmd eq 'available';
   if ( $cmd eq 'add' ) {
     return _usage_error('skilletor: add needs a source spec') unless @rest;
     return _not_ported('add');
@@ -230,10 +328,36 @@ same usage text, version, options, error lines and exit codes, byte for byte –
 the shared conformance cases (F<../conformance>, op C<cli>) run either CLI
 against the same expectations.
 
-So far it is the argument layer alone: C<--help>, C<--version>, the options
-each command accepts, an unknown option or command, an invalid C<--scope> and
-a missing operand. A command whose engine side is not ported yet (every one,
-for now, and C<hook>) says so on stderr and exits 1.
+It runs C<sync>, C<check> and C<status> on L<Skilletor::Engine>, with
+C<--scope>, C<--force> and C<--json> as the reference reads them:
+
+=over 4
+
+=item * C<sync> prints its report, or C<skilletor: up to date> when no scope
+has anything to say; C<--json> prints the report as JSON. A config error puts
+the report (text, or JSON with C<--json>) on stderr and exits 2.
+
+=item * C<check> prints C<changed> and exits 1 when a sync is due, else
+C<up to date> and 0; C<--json> prints the report. An error is the one line
+C<skilletor: E<lt>errorE<gt>> on stderr, exit 2 – never JSON, with C<--json>
+too.
+
+=item * C<status> prints the declared items per scope, naming its targets unless
+they are Claude Code alone; C<--json> prints the report. An error goes to
+stdout as well, exit 2.
+
+=back
+
+The engine runs on this machine: the home from C<$HOME>, the project from
+C<--project-dir> or the git top level of the working directory
+(L</project_root_of>), state under C<$CLAUDE_CONFIG_DIR> or F<~/.claude>, in
+F<skilletor/>, and the real host and user for templates. The engine is loaded
+only for these commands, so C<--help> and a usage error stay quick.
+
+Every other command and C<hook> is not ported yet: it says so on stderr and
+exits 1. Beside them the CLI has the argument layer: C<--help>, C<--version>,
+the options each command accepts, an unknown option or command, an invalid
+C<--scope> and a missing operand.
 
 Output is UTF-8; every line a user's input reaches is escaped by
 L<Skilletor::Report/display_safe>.
@@ -255,6 +379,15 @@ project_dir, options, rest } >>. C<options> lists every option given, by name
 (C<--scope=user> is C<--scope>), in order; C<rest> holds the operands and every
 option the parser does not know. C<scope> is C<undef> when C<--scope> is the
 last argument.
+
+=func project_root_of
+
+  my $root = project_root_of($cwd);
+
+The project of a working directory as the reference's hooks and CLI find it:
+C<git -C $cwd rev-parse --show-toplevel> in git's environment
+(L<Skilletor::GitEnv>), given 2 seconds; when git fails, times out or prints
+nothing, C<$cwd> itself.
 
 =func unknown_option
 

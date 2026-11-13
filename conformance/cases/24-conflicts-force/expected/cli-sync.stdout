@@ -1,0 +1,3 @@
+skilletor: user scope
+  conflict: skills/lint/SKILL.md already exists (use --force to adopt)
+  conflict: agents/reviewer.md already exists (use --force to replace it)

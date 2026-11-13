@@ -1,0 +1,53 @@
+{
+  "description": "Without --project-dir the CLI's project is the git top level of its cwd (k43): from a subdirectory of a git project the sync installs at the top level, none in the subdirectory; from a subdirectory of a home that is itself a checkout (dotfiles) the project is the home, so there is no project scope. The home's checkout puts ~/.claude in a work tree: the user scope writes its .gitignore block.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "gitInit": [
+    "home",
+    "project"
+  ],
+  "steps": [
+    {
+      "id": "sync-subdir",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "cwd": "${PROJECT}/sub/deep",
+      "tree": true
+    },
+    {
+      "id": "status-subdir",
+      "op": "cli",
+      "argv": [
+        "status"
+      ],
+      "cwd": "${PROJECT}/sub"
+    },
+    {
+      "id": "status-home",
+      "op": "cli",
+      "argv": [
+        "status"
+      ],
+      "cwd": "${HOME}/notes"
+    },
+    {
+      "id": "sync-home",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "cwd": "${HOME}/notes",
+      "tree": true
+    }
+  ]
+}

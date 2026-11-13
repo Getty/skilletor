@@ -1,0 +1,30 @@
+{
+  "description": "status names a scope's targets unless they are Claude Code alone: a project narrowed to codex on a Claude-only machine has none – \"project scope (no targets):\", no rows – and its sync installs nothing for the project, says why, and still writes the project's blocks.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
+    },
+    {
+      "id": "sync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "tree": true
+    }
+  ]
+}

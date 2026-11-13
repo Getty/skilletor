@@ -1,5 +1,5 @@
 {
-  "description": "Project-scope sync: a bundle of a user source and a skill of a trusted project source; .claude/.gitignore block, .worktreeinclude, the plugin requirement in .claude/settings.json, the lock with via; check and status; a second sync changes nothing and names no file to commit.",
+  "description": "Project-scope sync: a bundle of a user source and a skill of a trusted project source; .claude/.gitignore block, .worktreeinclude, the plugin requirement in .claude/settings.json, the lock with via; check and status; a second sync changes nothing and names no file to commit. Through the CLI: status, sync and check --json with --scope project, and status with --project-dir from another cwd.",
   "git": {
     "shared": {
       "url": "https://conformance.invalid/shared.git",
@@ -39,6 +39,55 @@
     {
       "id": "recheck",
       "op": "check"
+    },
+    {
+      "id": "cli-status-project",
+      "op": "cli",
+      "argv": [
+        "status",
+        "--scope",
+        "project"
+      ]
+    },
+    {
+      "id": "cli-status-project-json",
+      "op": "cli",
+      "argv": [
+        "status",
+        "--json",
+        "--scope",
+        "project"
+      ]
+    },
+    {
+      "id": "cli-resync-project",
+      "op": "cli",
+      "argv": [
+        "sync",
+        "--scope",
+        "project"
+      ]
+    },
+    {
+      "id": "cli-check-project-json",
+      "op": "cli",
+      "argv": [
+        "check",
+        "--json",
+        "--scope",
+        "project"
+      ]
+    },
+    {
+      "id": "cli-status-project-dir",
+      "op": "cli",
+      "argv": [
+        "status",
+        "--project-dir",
+        "${PROJECT}"
+      ],
+      "cwd": "${TMP}/cwd",
+      "tree": true
     }
   ]
 }

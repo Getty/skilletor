@@ -1,5 +1,5 @@
 {
-  "description": "`.njk` items: resolve marks them `templated`; a sync renders them with the merged vars, and a rule gated off by the project's vars is skipped (renders-empty) while the user scope installs it.",
+  "description": "`.njk` items: resolve marks them `templated`; a sync renders them with the merged vars, and a rule gated off by the project's vars is skipped (renders-empty) while the user scope installs it. Through the CLI: status marks the skipped rule, a resync names the skip, check is up to date (exit 0).",
   "git": {
     "shared": {
       "url": "https://conformance.invalid/shared.git",
@@ -28,6 +28,27 @@
     {
       "id": "check",
       "op": "check"
+    },
+    {
+      "id": "cli-status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
+    },
+    {
+      "id": "cli-resync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ]
+    },
+    {
+      "id": "cli-check",
+      "op": "cli",
+      "argv": [
+        "check"
+      ]
     }
   ]
 }

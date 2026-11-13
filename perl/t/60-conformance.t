@@ -286,14 +286,17 @@ sub home_skip {
   return [ '.claude/skilletor', '.claude.json', index( $state, "$r->{home}/" ) == 0 ? substr( $state, length( $r->{home} ) + 1 ) : () ];
 }
 
-# The files a tree step compares (README: trees): HOME but the state dirs and the marker, all of PROJECT.
+# The files a tree step compares (README: trees): HOME but the state dirs and the marker, all of
+# PROJECT – each without the .git a gitInit made there – and all of ${TMP}/cwd.
 sub snapshot {
-  my ( $r, $skip ) = @_;
+  my ( $r, $skip, $git_init ) = @_;
+  my %init = map { ( $_ => 1 ) } @$git_init;
   my %out;
-  $out{ "home/".escape_name($_) } = abstract( read_text("$r->{home}/$_"), $r ) for walk( $r->{home}, $skip );
+  $out{ "home/".escape_name($_) } = abstract( read_text("$r->{home}/$_"), $r ) for walk( $r->{home}, [ @$skip, $init{home} ? '.git' : () ] );
   if ( $r->{project} ) {
-    $out{ "project/".escape_name($_) } = abstract( read_text("$r->{project}/$_"), $r ) for walk( $r->{project} );
+    $out{ "project/".escape_name($_) } = abstract( read_text("$r->{project}/$_"), $r ) for walk( $r->{project}, [ $init{project} ? '.git' : () ] );
   }
+  $out{ "cwd/".escape_name($_) } = abstract( read_text("$r->{cwd}/$_"), $r ) for walk( $r->{cwd} );
   return \%out;
 }
 
@@ -328,14 +331,21 @@ sub run_case {
     copy_input( "$case_dir/project", $r->{project}, $r );
   }
   path( $r->{cwd} )->mkpath;
+  my $git_init = $c->{gitInit} // [];
+  for my $where (@$git_init) {
+    my $dir = $where eq 'home' ? $r->{home} : $where eq 'project' ? $r->{project} : undef;
+    return fail("gitInit names $where, which this case does not have") unless defined $dir;
+    git_ok( $dir, 'init', '-q', '-b', 'main' );
+  }
   my $sk = Skilletor::Engine->new(
     home             => $r->{home},
     ( $r->{project} ? ( project_dir => $r->{project} ) : () ),
     state_root       => "$r->{home}/.claude/skilletor",
     codex_home       => "$r->{home}/.codex",
     require_harness  => 1,              # the reference's resolve: a machine without a harness is an error
-    is_git_work_tree => sub { 0 },      # neither dir lies in a work tree, git tracks none of their files
-    git_tracked      => sub { [] },
+    # Neither dir lies in a work tree, git tracks none of their files – unless gitInit made one:
+    # then git answers, as for the CLI.
+    ( @$git_init ? () : ( is_git_work_tree => sub { 0 }, git_tracked => sub { [] } ) ),
     host             => { name => 'conformance', os => 'linux' },    # for templates (README: environment)
     user             => { name => 'conformance', home => $r->{home} },
   );
@@ -378,12 +388,12 @@ sub run_case {
       is( js_stringify( $actual, 2 ), js_stringify( $want, 2 ), "step $id" );
     }
     next unless $step->{tree};
-    my $have  = snapshot( $r, home_skip( $r, $config_dir ) );
+    my $have  = snapshot( $r, home_skip( $r, $config_dir ), $git_init );
     my %want  = map { ( $_ => read_text("$expected/$_") ) } walk($expected);
     is_deeply( [ sort keys %$have ], [ sort keys %want ], "step $id: the files in the tree" );
     is( $have->{$_}, $want{$_}, "step $id: $_" ) for sort keys %want;
     my @execs = grep {
-      my ( $where, $rel ) = unescape_name($_) =~ m{\A(home|project)/(.*)\z}s;
+      my ( $where, $rel ) = unescape_name($_) =~ m{\A(home|project|cwd)/(.*)\z}s;
       ( ( stat( $r->{$where}.'/'.$rel ) )[2] // 0 ) & 0100;
     } sort keys %$have;
     my $want_execs = -f "$expected.executables.json" ? js_parse( read_text("$expected.executables.json") ) : [];

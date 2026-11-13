@@ -1,0 +1,44 @@
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "targets": [
+        "claude"
+      ],
+      "declared": [
+        {
+          "key": "skills/writing",
+          "source": "shared",
+          "installed": true
+        },
+        {
+          "key": "agents/planner",
+          "source": "shared",
+          "installed": true,
+          "briefingMissing": [
+            "testing"
+          ]
+        }
+      ],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {
+        "shared": "git:96ffd34"
+      }
+    },
+    {
+      "scope": "project",
+      "targets": [
+        "claude"
+      ],
+      "declared": [],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {}
+    }
+  ]
+}

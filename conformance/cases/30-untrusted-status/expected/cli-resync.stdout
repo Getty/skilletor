@@ -1,0 +1,2 @@
+skilletor: project scope
+  trust: source "team" (git https://conformance.invalid/team.git) — run: skilletor trust team

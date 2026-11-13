@@ -1,0 +1,28 @@
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "targets": [
+        "claude"
+      ],
+      "declared": [],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {}
+    },
+    {
+      "scope": "project",
+      "targets": [
+        "claude"
+      ],
+      "declared": [],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {}
+    }
+  ]
+}

@@ -12,6 +12,9 @@ __END__
 
 =head1 SYNOPSIS
 
+  skilletor sync [--scope user|project|all] [--force] [--json]
+  skilletor check [--scope user|project|all] [--json]
+  skilletor status [--scope user|project|all] [--json]
   skilletor --help
   skilletor --version
 
@@ -19,6 +22,7 @@ __END__
 
 The command line of L<Skilletor>, the Perl port of skilletor; see
 L<Skilletor::CLI>. It mirrors the reference CLI byte for byte, command by
-command as each is ported; a command not ported yet says so and exits 1.
+command as each is ported (C<sync>, C<check> and C<status> so far); a command
+not ported yet says so and exits 1.
 
 =cut

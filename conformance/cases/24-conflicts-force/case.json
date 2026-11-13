@@ -1,5 +1,5 @@
 {
-  "description": "Files the lock does not hold block their whole item: a hand-written skills/lint/SKILL.md (force adopts it, the source's bytes replace it) and a hand-written agent at the agent's plain path agents/reviewer.md (force deletes it and installs .local.reviewer.md); check does not count the lasting conflicts again; status before and after.",
+  "description": "Files the lock does not hold block their whole item: a hand-written skills/lint/SKILL.md (force adopts it, the source's bytes replace it) and a hand-written agent at the agent's plain path agents/reviewer.md (force deletes it and installs .local.reviewer.md); check does not count the lasting conflicts again; status before and after. Through the CLI: a sync without --force keeps the conflicts, names them and writes nothing.",
   "git": {
     "shared": {
       "url": "https://conformance.invalid/shared.git",
@@ -25,6 +25,14 @@
       "op": "status"
     },
     {
+      "id": "cli-sync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "tree": true
+    },
+    {
       "id": "force",
       "op": "sync",
       "force": true,
@@ -33,6 +41,13 @@
     {
       "id": "status-forced",
       "op": "status"
+    },
+    {
+      "id": "cli-status-forced",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
     }
   ]
 }

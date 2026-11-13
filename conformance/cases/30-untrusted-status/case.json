@@ -1,9 +1,24 @@
 {
-  "description": "A source only the project declares, never trusted: status names it in trustRequests before any sync; the sync fetches nothing and installs nothing but still writes the project's .gitignore block and .worktreeinclude (the project uses skilletor); check lists the trust request and asks for no sync.",
+  "description": "A source only the project declares, never trusted: status names it in trustRequests before any sync; the sync fetches nothing and installs nothing but still writes the project's .gitignore block and .worktreeinclude (the project uses skilletor); check lists the trust request and asks for no sync. Through the CLI: status as text and --json before the sync, a resync repeats the trust request, check exits 0.",
   "steps": [
     {
       "id": "status",
       "op": "status"
+    },
+    {
+      "id": "cli-status-before",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
+    },
+    {
+      "id": "cli-status-before-json",
+      "op": "cli",
+      "argv": [
+        "status",
+        "--json"
+      ]
     },
     {
       "id": "sync",
@@ -13,6 +28,28 @@
     {
       "id": "check",
       "op": "check"
+    },
+    {
+      "id": "cli-resync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ]
+    },
+    {
+      "id": "cli-check",
+      "op": "cli",
+      "argv": [
+        "check"
+      ]
+    },
+    {
+      "id": "cli-check-json",
+      "op": "cli",
+      "argv": [
+        "check",
+        "--json"
+      ]
     }
   ]
 }

@@ -1,0 +1,25 @@
+{
+  "agents/reviewer": {
+    "source": "shared",
+    "version": "git:f280510",
+    "files": {
+      "agents/.local.reviewer.md": "sha256:ef25a6d14b5dc22150d3908a305a436bdbf757157171c2c9bb59ad69f97f6244"
+    }
+  },
+  "rules/commit-style": {
+    "source": "shared",
+    "version": "git:f280510",
+    "files": {
+      "rules/.local.commit-style.md": "sha256:3c7d5fac9207f3f4db1e08f8eb76688fa7a383002543ede3ec5b8f2246a85ae3"
+    }
+  },
+  "skills/perl-moo": {
+    "source": "shared",
+    "version": "git:f280510",
+    "files": {
+      "skills/perl-moo/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/perl-moo/SKILL.md": "sha256:fa1dd1f19e7ea41f1843d7c3b3aeeaa2203a70c604704704c4acc452d8919722",
+      "skills/perl-moo/docs/reference.md": "sha256:cb1c5dc6c0bcd809e8e32d819e2bb30ecdbf771bf544fba5cd821631c1724d45"
+    }
+  }
+}

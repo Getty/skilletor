@@ -60,6 +60,8 @@ interface Case {
   description: string;
   git?: Record<string, { url: string; commits: { tree: string; tag?: string; branch?: string; executable?: string[] }[] }>;
   env?: Record<string, string>;
+  /** Directories made git work trees before the steps (README: case.json). */
+  gitInit?: ("home" | "project")[];
   steps: Step[];
   engines?: Record<string, { skip?: string; steps?: Record<string, { skip?: string; expected?: string }> }>;
 }
@@ -327,17 +329,19 @@ function homeSkip(r: Roots, configDir: string | undefined): string[] {
   return skip;
 }
 
-/** The files a tree step compares (README: trees): HOME but the state dirs and the marker, all of PROJECT. */
-function snapshot(r: Roots, skip: string[]): Map<string, string> {
+/** The files a tree step compares (README: trees): HOME but the state dirs and the marker, all of
+ *  PROJECT – each without the `.git` a `gitInit` made there – and all of `${TMP}/cwd`. */
+function snapshot(r: Roots, skip: string[], gitInit: string[]): Map<string, string> {
   const out = new Map<string, string>();
-  for (const rel of walk(r.home, skip)) {
+  for (const rel of walk(r.home, gitInit.includes("home") ? [...skip, ".git"] : skip)) {
     out.set(`home/${escapeName(rel)}`, abstract(readFileSync(join(r.home, rel), "utf8"), r));
   }
   if (r.project) {
-    for (const rel of walk(r.project)) {
+    for (const rel of walk(r.project, gitInit.includes("project") ? [".git"] : [])) {
       out.set(`project/${escapeName(rel)}`, abstract(readFileSync(join(r.project, rel), "utf8"), r));
     }
   }
+  for (const rel of walk(r.cwd)) out.set(`cwd/${escapeName(rel)}`, abstract(readFileSync(join(r.cwd, rel), "utf8"), r));
   return out;
 }
 
@@ -345,7 +349,8 @@ function snapshot(r: Roots, skip: string[]): Map<string, string> {
 function executablesOf(r: Roots, have: Map<string, string>): string[] {
   const abs = (key: string) => {
     const rel = unescapeName(key);
-    return rel.startsWith("home/") ? join(r.home, rel.slice(5)) : join(r.project!, rel.slice(8));
+    if (rel.startsWith("home/")) return join(r.home, rel.slice(5));
+    return rel.startsWith("cwd/") ? join(r.cwd, rel.slice(4)) : join(r.project!, rel.slice(8));
   };
   return [...have.keys()].filter((rel) => (statSync(abs(rel)).mode & 0o100) !== 0).sort();
 }
@@ -383,6 +388,12 @@ async function runCase(name: string): Promise<void> {
       copyInput(join(caseDir, "project"), r.project, r);
     }
     mkdirSync(r.cwd);
+    const gitInit = c.gitInit ?? [];
+    for (const where of gitInit) {
+      const dir = where === "home" ? r.home : where === "project" ? r.project : undefined;
+      assert.ok(dir, `${name}: gitInit names ${where}, which this case does not have`);
+      git(dir, process.env, "init", "-q", "-b", "main");
+    }
     const ctx: EngineContext = {
       home: r.home,
       projectDir: r.project,
@@ -391,8 +402,8 @@ async function runCase(name: string): Promise<void> {
       hermesHome: join(r.home, ".hermes"),
       host: { name: "conformance", os: "linux" },
       user: { name: "conformance", home: r.home },
-      isGitWorkTree: () => false,
-      gitTracked: () => [],
+      // Neither dir lies in a work tree – unless gitInit made one: then git answers, as for the CLI.
+      ...(gitInit.length > 0 ? {} : { isGitWorkTree: () => false, gitTracked: () => [] }),
     };
     for (const step of c.steps) {
       const file = join(caseDir, "expected", `${step.id}.json`);
@@ -427,7 +438,7 @@ async function runCase(name: string): Promise<void> {
       }
       if (!step.tree) continue;
       const treeDir = join(caseDir, "expected", step.id);
-      const have = snapshot(r, homeSkip(r, configDir));
+      const have = snapshot(r, homeSkip(r, configDir), gitInit);
       const execFile = join(caseDir, "expected", `${step.id}.executables.json`);
       const execs = executablesOf(r, have);
       if (UPDATE) {

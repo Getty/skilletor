@@ -1,0 +1,32 @@
+{
+  "description": "sync --force reaches the engine: a hand-written SKILL.md blocks its item in a plain sync (a conflict, exit 0, nothing written) and is adopted – the source's bytes replace it – by sync --force.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "tree": true
+    },
+    {
+      "id": "sync-force",
+      "op": "cli",
+      "argv": [
+        "sync",
+        "--force"
+      ],
+      "tree": true
+    }
+  ]
+}

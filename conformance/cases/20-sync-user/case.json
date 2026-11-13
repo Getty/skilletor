@@ -1,5 +1,5 @@
 {
-  "description": "User-scope sync of a skill, an agent and a rule from a git source: files, lock, ~/.claude/.gitignore stays out (no git work tree); check finds nothing to do; status; a second sync changes nothing.",
+  "description": "User-scope sync of a skill, an agent and a rule from a git source: files, lock, ~/.claude/.gitignore stays out (no git work tree); check finds nothing to do; status; a second sync changes nothing. Through the CLI: sync says up to date and prints the report with --json, check is up to date (exit 0), status as text and --json – its project, the empty cwd, declares nothing and gets no file.",
   "git": {
     "shared": {
       "url": "https://conformance.invalid/shared.git",
@@ -27,6 +27,54 @@
     {
       "id": "resync",
       "op": "sync"
+    },
+    {
+      "id": "cli-resync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ]
+    },
+    {
+      "id": "cli-resync-json",
+      "op": "cli",
+      "argv": [
+        "sync",
+        "--json",
+        "--scope",
+        "user"
+      ]
+    },
+    {
+      "id": "cli-check",
+      "op": "cli",
+      "argv": [
+        "check"
+      ]
+    },
+    {
+      "id": "cli-check-json",
+      "op": "cli",
+      "argv": [
+        "check",
+        "--json"
+      ]
+    },
+    {
+      "id": "cli-status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
+    },
+    {
+      "id": "cli-status-json",
+      "op": "cli",
+      "argv": [
+        "status",
+        "--json"
+      ],
+      "tree": true
     }
   ]
 }

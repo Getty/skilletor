@@ -32,6 +32,7 @@ conformance/cases/<NN-slug>/
   expected/<step>/     the expected files after step <step>, when the step has "tree": true
     home/…             relative to ${HOME}
     project/…          relative to ${PROJECT}
+    cwd/…              relative to ${TMP}/cwd
   expected/<step>.executables.json  the files of that tree that carry the executable bit, when any do
   expected.<engine>/…  an engine's own expectations, where it differs (below)
 ```
@@ -92,6 +93,7 @@ Cases run in name order, each in a fresh temp dir; none depends on another.
 | `git` | Optional. Git sources, by repository name (below). |
 | `git.<name>.commits[].executable` | Optional. Paths in the commit's tree made executable before it is committed (below). |
 | `env` | Optional. Environment variables set for the whole case – the engine ops' and every `cli` step's – `${HOME}`, `${PROJECT}` and `${TMP}` replaced; only `CLAUDE_CONFIG_DIR` so far. |
+| `gitInit` | Optional. `["home"]`, `["project"]` or both: those directories become git work trees – `git init -q -b main` in each, after its inputs are copied, nothing committed – so a `cli` step's CLI takes git's top level as its project and git answers for them (below). |
 | `steps` | Required, run in order on the same temp dirs: a step sees what the steps before it wrote. |
 | `steps[].id` | Names the expectation: `expected/<id>.json`, `expected/<id>/`. Unique in the case. |
 | `steps[].op` | `resolve`, `sync`, `check`, `status` or `cli` (below). |
@@ -128,7 +130,7 @@ resolved – macOS `/var` is `/private/var`):
 |---|---|
 | `${TMP}/home` = `${HOME}` | The home dir. The runner creates `${HOME}/.claude/` and writes `${HOME}/.claude.json` as `{}` + newline – the marker that Claude Code is in use (spec §14.1) – then, when the case sets `CLAUDE_CONFIG_DIR`, creates it with its own `.claude.json` (Claude Code keeps the marker there then), then copies `home/`. |
 | `${TMP}/project` = `${PROJECT}` | The project dir, when the case has `project/`: created, then `project/` copied. |
-| `${TMP}/cwd` | An empty directory, a `cli` step's cwd when the case has no project. |
+| `${TMP}/cwd` | An empty directory outside git, a `cli` step's cwd – and so its project – when the case has no project. |
 | `${TMP}/git/<name>` | The git sources (below). |
 | `${TMP}/gitconfig` | The git config every git run of the case uses (below). |
 
@@ -145,7 +147,9 @@ The engine ops run with:
 - `GIT_CONFIG_GLOBAL` = `${TMP}/gitconfig` and `GIT_CONFIG_NOSYSTEM=1`, for the engine's git
   runs and the runner's alike, so no user or system git config is read;
 - neither `${HOME}` nor `${PROJECT}` inside a git work tree, and git tracking none of their
-  files (the TS runner injects both answers; a temp dir outside any repository gives them);
+  files (the runners inject both answers; a temp dir outside any repository gives them) –
+  unless the case's `gitInit` makes one a work tree: then no answer is injected and git
+  itself answers, as for a `cli` step's CLI;
 - for templates, host name `conformance`, OS `linux`, user name `conformance`, user home
   `${HOME}` (no case's output depends on them yet).
 
@@ -253,7 +257,7 @@ step's. Nothing else of the runner's environment reaches it – no `CLAUDE_PROJE
 `SKILLETOR_BIN`. It runs with its own defaults: state root
 `${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/skilletor`, Hermes' default home under `${HOME}`, the
 project from `--project-dir` or the git top level of its cwd, and git itself answers whether
-a directory lies in a work tree (none under `${TMP}` does).
+a directory lies in a work tree (none under `${TMP}` does, but what `gitInit` made one).
 
 Which CLI runs: `SKILLETOR_CONFORMANCE_CLI`, a JSON array of strings, is put before `argv`.
 Unset, each runner runs its own:
@@ -374,7 +378,11 @@ With `"tree": true` the runner compares, after the step:
   files hold timestamps), the CLI's state root `${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/skilletor/`
   when it lies under `${HOME}` (the case's `CLAUDE_CONFIG_DIR`, or a `cli` step's own), and the
   marker `${HOME}/.claude.json`, with `expected/<id>/home/`;
-- every file under `${PROJECT}` with `expected/<id>/project/`.
+- every file under `${PROJECT}` with `expected/<id>/project/`;
+- every file under `${TMP}/cwd` with `expected/<id>/cwd/`: the project of a `cli` step in a
+  case without one, so a sync that writes there shows.
+
+The `.git` directory `gitInit` made in `${HOME}` or `${PROJECT}` is left out.
 
 The sets of relative paths (escaped, above) must be equal – a file the engine should not have written fails
 as surely as one it missed – and each file's bytes must be equal after the output
@@ -384,7 +392,7 @@ placeholders are applied. That includes the inputs the step left alone, the lock
 
 Of the file modes, only the owner's executable bit is compared: the tree's files that carry
 it, as a sorted JSON array of their paths as the expected tree names them (`home/…`,
-`project/…`, escaped), must equal
+`project/…`, `cwd/…`, escaped), must equal
 `expected/<id>.executables.json` – no such file means none may carry it. A source file gets
 the bit through its commit's `executable` list alone: both runners write each source file
 new, never copying the mode the case's own checkout gives it, so a checkout without file
@@ -430,29 +438,34 @@ show it, its `description` saying which.
 | `06-wildcards` | `perl-*`, `*`, `*-style` overlapping in one source; a bare `*` matching nothing is silent, a pattern matching nothing warns |
 | `07-bundles` | `name@source` and `bundle:` entries, nested bundle vars, an entry of another source served under another name, a missing source and name |
 | `08-overlap` | explicit over a same-source bundle (no bundle vars, `via`) and over another source's wildcard; two sources' wildcards skip a name; a bundle var conflict |
-| `09-templates` | `.njk` items marked `templated`; a sync renders them, a rule gated off by project vars is skipped; `check` then finds nothing |
-| `10-error-unknown-source` | an entry naming no source is a config error; a sync touches nothing |
+| `09-templates` | `.njk` items marked `templated`; a sync renders them, a rule gated off by project vars is skipped; `check` then finds nothing; the CLI's status and resync show the skip |
+| `10-error-unknown-source` | an entry naming no source is a config error; a sync touches nothing; the CLI exits 2: sync's report on stderr (text or `--json`), check's error one stderr line even with `--json` (k171), status's report on stdout |
 | `11-error-bad-entry` | an entry without `@source` in `skilletor.local.json` is a config error naming that file |
 | `12-missing-items` | an unknown item, an unknown bundle, an agent with `.md` and `.md.njk`: warnings, the rest resolves |
 | `13-error-proto-key` | an install key only `Object.prototype` knows (`constructor`) is no type: a config error (k144) |
 | `14-trust-once` | a project-only untrusted source serving two foreign entries of one bundle: one trust request (k144) |
 | `15-bundle-escape` | a `\U` escape above U+10FFFF in a bundle file is that bundle's warning; the scan goes on and another bundle resolves (k144) |
 | `16-frontmatter-crlf-bom` | a skill, agent and rule file with CRLF and/or a BOM keep their `description` (k144; `.gitattributes` keeps the bytes) |
-| `20-sync-user` | user-scope sync of a skill, an agent and a rule: files, lock; `check`, `status`; a second sync changes nothing |
-| `21-sync-project` | project-scope sync: a user source's bundle and a trusted project source; `.gitignore` block, `.worktreeinclude`, `settings.json`, lock `via`; `check`, `status`; a second sync changes nothing and names no file to commit |
-| `22-sync-from-lock` | a lock an earlier sync left: undeclared items removed (files, emptied dirs, an agent's `.local.` file), an edited managed file overwritten and named, the user's own skill untouched |
-| `23-check-drift` | `check` against a lock at an older commit: the source moved on, a declared rule missing from the lock, render inputs never recorded – an edited installed file is no drift; the sync overwrites it, `check` then finds nothing |
-| `24-conflicts-force` | foreign files block their item (a hand-written `SKILL.md`; an agent's plain path, `replace`); `check` does not count lasting conflicts again; `--force` adopts and replaces |
+| `20-sync-user` | user-scope sync of a skill, an agent and a rule: files, lock; `check`, `status`; a second sync changes nothing; the CLI's `skilletor: up to date`, `sync --json`, check exit 0 and `--json`, status text and `--json` |
+| `21-sync-project` | project-scope sync: a user source's bundle and a trusted project source; `.gitignore` block, `.worktreeinclude`, `settings.json`, lock `via`; `check`, `status`; a second sync changes nothing and names no file to commit; the CLI with `--scope project` and `--project-dir` |
+| `22-sync-from-lock` | a lock an earlier sync left: undeclared items removed (files, emptied dirs, an agent's `.local.` file), an edited managed file overwritten and named, the user's own skill untouched and, in the CLI's status, no orphan |
+| `23-check-drift` | `check` against a lock at an older commit: the source moved on, a declared rule missing from the lock, render inputs never recorded – an edited installed file is no drift; the sync overwrites it, `check` then finds nothing; the CLI's check exits 1 (`changed`, `--json`), then 0 |
+| `24-conflicts-force` | foreign files block their item (a hand-written `SKILL.md`; an agent's plain path, `replace`); `check` does not count lasting conflicts again; `--force` adopts and replaces; a CLI sync without it names the conflicts |
 | `25-gitignore-false` | `"gitignore": false`: no blocks, no `.worktreeinclude`, the source's own skill `.gitignore` installed as shipped, agents still `.local.` |
-| `26-agent-briefing` | an agent's briefing skills: one installed, one missing (warning, `briefingMissing` in sync and status), a `plugin:skill` name unchecked |
-| `27-rules` | rules of both scopes with one name each install their own `.local.` copy; a hand-written rule stays; a rules wildcard in status |
+| `26-agent-briefing` | an agent's briefing skills: one installed, one missing (warning, `briefingMissing` in sync and status), a `plugin:skill` name unchecked; the CLI's status and resync name it |
+| `27-rules` | rules of both scopes with one name each install their own `.local.` copy; a hand-written rule stays; a rules wildcard in status; the CLI with `--scope user` and `--scope project` |
 | `28-claude-settings` | the plugin requirement added to an existing tab-indented `settings.json`: order, indent, a `false` entry and other keys kept, git and github marketplaces declared, a directory one refused (`settingsSkipped`); a second sync adds nothing |
 | `29-executable` | a skill's executable script keeps its bit, other files and an executable agent source get none; a second sync finds the bits in place |
 | `31-claude-config-dir` | `CLAUDE_CONFIG_DIR` moves Claude Code's plugin state: the settings requirement reads the install and marketplaces there, a decoy under `~/.claude/plugins` is ignored (k142) |
-| `30-untrusted-status` | an untrusted project-only source: `status` names it before any sync, the sync installs nothing but writes the project's blocks, `check` lists the trust request and asks for no sync |
-| `32-claude-config-dir-user` | `CLAUDE_CONFIG_DIR` is the user scope's `.claude`: config, skill, lock and the detection marker (`<dir>/.claude.json`) live there, a decoy config under `~/.claude` is ignored (k145) |
+| `30-untrusted-status` | an untrusted project-only source: `status` names it before any sync, the sync installs nothing but writes the project's blocks, `check` lists the trust request and asks for no sync; the CLI's status, resync and check say so |
+| `32-claude-config-dir-user` | `CLAUDE_CONFIG_DIR` is the user scope's `.claude`: config, skill, lock and the detection marker (`<dir>/.claude.json`) live there, a decoy config under `~/.claude` is ignored (k145); the CLI's state root is `<dir>/skilletor` |
 | `33-error-source-vars` | a source's `skilletor.json` with an array as `vars` fails its scan (k145); a lock `via` that is no array of strings is refused by `readLock`, pinned by each engine's own tests (a throw is no resolve answer) |
 | `40-cli-args` | the CLI's argument layer, nothing run: `--version` only first, `--help` anywhere and alone (usage bytes), the options each command accepts and an unknown one, an unknown command, an invalid `--scope` (a missing value is the string `undefined`, k170), each missing operand (an empty source name for `trust` too), an unsafe command name escaped; the config stays untouched |
+| `41-cli-project-root` | no `--project-dir`: the git top level of the CLI's cwd is the project – a sync from a subdirectory installs at the top level; from a subdirectory of a home that is a checkout the project is the home, so no project scope; `~/.claude` in a work tree gets its `.gitignore` block (`gitInit`) |
+| `42-cli-unused-project` | a git checkout that never used skilletor: the user scope syncs, nothing is written in the checkout, no file is named to commit (k65) |
+| `43-cli-dropped-project` | a project whose `skilletor.json` is gone: status names the orphan, the sync removes it, the lock and both blocks, names nothing to commit; status `--json` reads no lock (k65) |
+| `44-cli-status-targets` | status names a scope's targets unless they are Claude Code alone: a project narrowed to `codex` on a Claude-only machine is `project scope (no targets):`; its sync installs nothing there and says why |
+| `45-cli-force` | `sync --force` through the CLI: a hand-written `SKILL.md` is a conflict without it, adopted and replaced with it |
 
 The state files two engines on one machine share – `render-inputs.json` with its hash,
 `sources-read.json`, `unreached.json` – are not compared here: their keys are absolute lock
@@ -460,7 +473,9 @@ paths and the hash covers the project dir, so they differ from one temp dir to t
 Perl port's `t/52-parity-sync.t` has both engines sync one machine and compares them byte for
 byte.
 
-Not covered yet: a CLI command past its arguments (the Perl CLI runs none yet), a `url`
+Not covered yet: the CLI's commands but `sync`, `check` and `status`, and its hooks (the Perl
+CLI runs no other yet); a sync's run-level warnings and notes (the untrusted Codex hook, what
+Hermes gets no copy of – Codex and Hermes targets only); a `url`
 source actually fetched (the engine takes `https://` only, so it needs a local TLS server), a
 source whose fetch fails (the warning quotes git's own message), symbolic links in a target, a
 sync that fails midway (`partial`), and Codex and Hermes targets (the Perl engine refuses a

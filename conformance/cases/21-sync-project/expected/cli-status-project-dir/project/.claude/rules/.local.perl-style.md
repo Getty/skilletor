@@ -1,0 +1,1 @@
+Use strict and warnings.

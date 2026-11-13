@@ -1,6 +1,12 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - A conformance step `cli` runs the CLI itself (`skilletor sync|check|status`
+    with its arguments, exit code and stdout/stderr compared), and the case
+    knob `gitInit` (`["project"]`, `["home"]`) makes those directories git
+    checkouts; the Perl port's CLI is held to the reference this way. Cases 41
+    to 45 cover the project root, an unused and a dropped project, the status
+    target naming and `--force`.
   - A sync resolves its sources in parallel, but now reports what became of
     each - a failure, a fall back to the cache, a trust request - in the order
     the sources are declared, the order the Perl port's sequential resolve

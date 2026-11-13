@@ -1,5 +1,5 @@
 {
-  "description": "check against a lock an earlier sync left at v1: the source moved on (main is v2), a declared rule has no lock entry, nothing recorded what the scope rendered with; an installed file edited by hand is no drift (check never reads installed files) – the sync overwrites and names it, and check afterwards finds nothing.",
+  "description": "check against a lock an earlier sync left at v1: the source moved on (main is v2), a declared rule has no lock entry, nothing recorded what the scope rendered with; an installed file edited by hand is no drift (check never reads installed files) – the sync overwrites and names it, and check afterwards finds nothing. Through the CLI: check exits 1 (changed; --json names the drift) before the sync, 0 after it.",
   "git": {
     "shared": {
       "url": "https://conformance.invalid/shared.git",
@@ -20,6 +20,21 @@
       "op": "check"
     },
     {
+      "id": "cli-check",
+      "op": "cli",
+      "argv": [
+        "check"
+      ]
+    },
+    {
+      "id": "cli-check-json",
+      "op": "cli",
+      "argv": [
+        "check",
+        "--json"
+      ]
+    },
+    {
       "id": "sync",
       "op": "sync",
       "tree": true
@@ -27,6 +42,22 @@
     {
       "id": "recheck",
       "op": "check"
+    },
+    {
+      "id": "cli-resync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ]
+    },
+    {
+      "id": "cli-recheck-user",
+      "op": "cli",
+      "argv": [
+        "check",
+        "--scope",
+        "user"
+      ]
     }
   ]
 }

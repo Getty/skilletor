@@ -1,0 +1,33 @@
+{
+  "description": "Every sync runs the project scope of the directory it starts in (k65): in a git checkout that never used skilletor the user scope installs and nothing is written in the checkout – no .claude, no .gitignore block, no .worktreeinclude – and no file is named to commit; status shows the empty project scope.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "gitInit": [
+    "project"
+  ],
+  "steps": [
+    {
+      "id": "sync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "tree": true
+    },
+    {
+      "id": "status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
+    }
+  ]
+}

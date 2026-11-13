@@ -1,0 +1,16 @@
+{
+  "changed": false,
+  "sources": [
+    {
+      "name": "crew",
+      "scope": "project",
+      "changed": false
+    },
+    {
+      "name": "shared",
+      "scope": "project",
+      "changed": false
+    }
+  ],
+  "warnings": []
+}

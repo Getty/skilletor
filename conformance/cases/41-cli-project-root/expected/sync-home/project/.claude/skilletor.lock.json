@@ -1,0 +1,10 @@
+{
+  "skills/bar": {
+    "source": "shared",
+    "version": "git:6044bd2",
+    "files": {
+      "skills/bar/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/bar/SKILL.md": "sha256:f1ae9259a13f9f6bd43eaffff8a22697f294a4f9e017afe6c0bae22a5ac25af7"
+    }
+  }
+}

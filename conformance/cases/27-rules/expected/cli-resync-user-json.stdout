@@ -1,0 +1,23 @@
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "added": [],
+      "updated": [],
+      "removed": [],
+      "unchanged": [
+        {
+          "key": "rules/style",
+          "type": "rule",
+          "name": "style",
+          "source": "shared"
+        }
+      ],
+      "skipped": [],
+      "conflicts": [],
+      "overwritten": [],
+      "warnings": [],
+      "trustRequests": []
+    }
+  ]
+}

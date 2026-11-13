@@ -1,5 +1,5 @@
 {
-  "description": "An install entry naming no configured source is a config error: nothing is resolved, a sync touches nothing.",
+  "description": "An install entry naming no configured source is a config error: nothing is resolved, a sync touches nothing. Through the CLI, exit 2 each: sync's report on stderr (text, or JSON with --json), check's error as one stderr line – with --json too – and status's report on stdout.",
   "steps": [
     {
       "id": "resolve",
@@ -8,6 +8,52 @@
     {
       "id": "sync",
       "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "cli-sync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ]
+    },
+    {
+      "id": "cli-sync-json",
+      "op": "cli",
+      "argv": [
+        "sync",
+        "--json"
+      ]
+    },
+    {
+      "id": "cli-check",
+      "op": "cli",
+      "argv": [
+        "check"
+      ]
+    },
+    {
+      "id": "cli-check-json",
+      "op": "cli",
+      "argv": [
+        "check",
+        "--json"
+      ]
+    },
+    {
+      "id": "cli-status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
+    },
+    {
+      "id": "cli-status-json",
+      "op": "cli",
+      "argv": [
+        "status",
+        "--json"
+      ],
       "tree": true
     }
   ]

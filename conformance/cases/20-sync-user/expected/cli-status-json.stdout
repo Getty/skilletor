@@ -1,0 +1,46 @@
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "targets": [
+        "claude"
+      ],
+      "declared": [
+        {
+          "key": "skills/perl-moo",
+          "source": "shared",
+          "installed": true
+        },
+        {
+          "key": "agents/reviewer",
+          "source": "shared",
+          "installed": true
+        },
+        {
+          "key": "rules/commit-style",
+          "source": "shared",
+          "installed": true
+        }
+      ],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {
+        "shared": "git:f280510"
+      }
+    },
+    {
+      "scope": "project",
+      "targets": [
+        "claude"
+      ],
+      "declared": [],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {}
+    }
+  ]
+}

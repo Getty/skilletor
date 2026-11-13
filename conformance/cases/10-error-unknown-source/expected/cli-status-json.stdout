@@ -1,0 +1,4 @@
+{
+  "scopes": [],
+  "error": "${HOME}/.claude/skilletor.json: user install \"perl-moo@nowhere\" references unknown source \"nowhere\""
+}

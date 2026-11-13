@@ -1,0 +1,7 @@
+user scope:
+project scope:
+  ✓ skills/lint @crew
+  ✓ agents/reviewer @shared via bundle:perl@shared
+  ✓ rules/perl-style @shared via bundle:perl@shared
+  ✓ skills/perl-moo @shared via bundle:perl@shared
+  * bundle:perl@shared (3 installed)

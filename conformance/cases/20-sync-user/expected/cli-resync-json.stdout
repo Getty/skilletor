@@ -1,0 +1,35 @@
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "added": [],
+      "updated": [],
+      "removed": [],
+      "unchanged": [
+        {
+          "key": "skills/perl-moo",
+          "type": "skill",
+          "name": "perl-moo",
+          "source": "shared"
+        },
+        {
+          "key": "agents/reviewer",
+          "type": "agent",
+          "name": "reviewer",
+          "source": "shared"
+        },
+        {
+          "key": "rules/commit-style",
+          "type": "rule",
+          "name": "commit-style",
+          "source": "shared"
+        }
+      ],
+      "skipped": [],
+      "conflicts": [],
+      "overwritten": [],
+      "warnings": [],
+      "trustRequests": []
+    }
+  ]
+}

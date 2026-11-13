@@ -1,5 +1,5 @@
 {
-  "description": "Rules in both scopes: the user's style rule and the project's rules wildcard, which yields a style rule of the same name – each scope installs its own .local. copy (Claude Code loads both); the project's hand-written rules/team.md stays untouched; status counts the wildcard's rules.",
+  "description": "Rules in both scopes: the user's style rule and the project's rules wildcard, which yields a style rule of the same name – each scope installs its own .local. copy (Claude Code loads both); the project's hand-written rules/team.md stays untouched; status counts the wildcard's rules. Through the CLI: status per scope, sync --scope user --json.",
   "git": {
     "shared": {
       "url": "https://conformance.invalid/shared.git",
@@ -19,6 +19,34 @@
     {
       "id": "status",
       "op": "status"
+    },
+    {
+      "id": "cli-status-user",
+      "op": "cli",
+      "argv": [
+        "status",
+        "--scope",
+        "user"
+      ]
+    },
+    {
+      "id": "cli-status-project",
+      "op": "cli",
+      "argv": [
+        "status",
+        "--scope",
+        "project"
+      ]
+    },
+    {
+      "id": "cli-resync-user-json",
+      "op": "cli",
+      "argv": [
+        "sync",
+        "--scope",
+        "user",
+        "--json"
+      ]
     }
   ]
 }

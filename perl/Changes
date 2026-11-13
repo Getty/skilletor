@@ -27,6 +27,11 @@ Revision history for Skilletor
     passthrough, its warnings, the # briefing: skills line), a rule as its
     section of the Codex rules file, and the per-target mapping of an item's
     output, byte for byte; not yet used by a sync.
+  - The CLI runs sync, check and status as the reference does: the report
+    text and --json, check's exit 0, 1 or 2, status with the target naming,
+    --scope, --force and --project-dir; the project root is the git top level
+    of the working directory (2 s, else the directory itself). The
+    conformance runner's cli steps hold it to the reference's bytes.
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's

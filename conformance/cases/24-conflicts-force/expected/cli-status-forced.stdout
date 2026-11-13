@@ -1,0 +1,4 @@
+user scope:
+  ✓ skills/lint @shared
+  ✓ agents/reviewer @shared
+project scope:

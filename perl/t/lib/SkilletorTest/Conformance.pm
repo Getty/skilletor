@@ -161,6 +161,11 @@ sub setup_case {
         path( $r->{project} )->mkpath;
         _copy_input( "$case_dir/project", $r->{project}, $r );
       }
+      for my $where ( @{ $c->{gitInit} // [] } ) {    # the work trees the case asks for
+        my $dir = ( $where eq 'home' || $where eq 'project' ? $r->{$where} : undef )
+          // die "$name: gitInit names $where, which this case does not have\n";
+        git_ok( $dir, 'init', '-q', '-b', 'main' );
+      }
     }
   );
   return $r;
