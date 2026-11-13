@@ -1,0 +1,102 @@
+---
+class: standard
+completed: 2026-11-13T23:29:30Z
+created: 2026-11-13T20:44:09Z
+depends_on:
+- 181
+id: 188
+priority: high
+started: 2026-11-13T21:56:38Z
+status: done
+tags:
+- perl
+- binary
+title: 'Linux binary: pack the Perl CLI with pp, prove it without perl and node'
+updated: 2026-11-13T23:29:30Z
+---
+
+Part of the Perl CLI strand (see the strand card). Step 3: prove a binary on Linux. No workflow and no release on this card.
+
+Pack: perl/bin/skilletor with PAR::Packer, the house way.
+- Skill perl-par-binary-release (getty source), installed here via skilletor:
+  - build-binary.sh and loaded-modules.pl: one computed module set for build and verify;
+  - PAR_VERBATIM=1;
+  - verify-binary.sh: a fresh PAR_GLOBAL_TEMP, env -i, the binary's output equal to perl -Ilib bin/skilletor on success and error paths;
+  - check-binary-libs.sh: RUNTIME_LIBS and the glibc floor.
+- Build with Perl 5.40 or newer, which Text::Nunjucks needs (k159).
+- Text::Nunjucks is not on CPAN: it comes from the local checkout or a git clone.
+- Modules loaded by name must be in the computed set: the Source backends, the Error classes, Text::Nunjucks internals.
+
+Prove: run the parity harness, every `cli` case, against the packed binary inside a container with neither perl nor node.
+- Image: debian:stable-slim plus git and ca-certificates, with perl-base removed. debian:stable-slim carries /usr/bin/perl through perl-base, which is Essential. The cell asserts that `command -v perl` and `command -v node` both fail.
+- The temp dirs are bind-mounted at the same paths.
+- SKILLETOR_CONFORMANCE_CLI points at a `docker exec` wrapper.
+
+Measure and report on this card, against node dist/skilletor.js on the same host:
+- the binary's size;
+- cold start (first run, empty PAR cache) and warm start;
+- three commands: `--version`, a no-op `hook session-start`, and `hook user-prompt-submit` (it runs at every prompt, 10 s timeout). `check` as a fourth.
+- what could lower the start time: the module set, lazy loading per command, pp -z, the PAR cache location, …
+
+Done: the scripts, the container run green, and the numbers on the card.
+
+Probe by the dispatcher, 2026-11-13 (k172 skeleton, host busy with 3 workers, so the numbers run high): PAR_VERBATIM=1 pp -I lib -M Skilletor:: -M Text::Nunjucks:: bin/skilletor gave 16.2 MB. In a debian:stable-slim container with git and without perl or node, --version takes 9.5-13 s cold (empty PAR_GLOBAL_TEMP; 41 MB / 1603 files extracted to inc/) and 0.5-1.3 s warm. node dist/skilletor.js --version takes 0.12-0.2 s. The extraction holds a lot the CLI never loads: lib/auto/CryptX 6.4 MB, Net (SSLeay) 2.7 MB, unicore 6.5 MB, lib/Perl 2.9 MB, Moose 1.9 MB plus auto/Moose, Test2, Math. Start from the computed module set (loaded-modules.pl) plus -X families, not namespace globs. A cold start above 10 s breaks UserPromptSubmit's 10 s timeout. Image recipe: docker build fails under rootless docker (crun cgroup permission), so build it with docker run + docker commit (apt-get install git ca-certificates; dpkg --purge --force-remove-essential --force-depends perl perl-base perl-modules-* libperl*; rm /usr/bin/perl*). The probe image is skilletor-noperl:probe; nothing was written to the repo.
+
+Started early, beside k173, by the dispatcher's choice: the k188 probe showed start times that can shape the CLI's loading (lazy loading per command), so the measurement should come before more commands are ported. The hook timings get re-measured once k181 lands; the dispatcher re-runs the harness against the final binary.
+
+2026-11-13 22:21 Progress (worker): scripts in perl/scripts/ (dist root, as the siblings): loaded-modules.pl (runs every command parsed from Skilletor::CLI::USAGE x 15 arg sets, every hook event, on a fixture with local+template, git via insteadOf and an https url source; prints 176 modules), left-out-modules.pl (the -X families, one list for build and verify), build-binary.sh, verify-binary.sh (binary vs perl -Ilib under env -i on fresh fixtures, stdout+stderr+exit+files, a real HTTPS round trip to a 127.0.0.1 server with a CA made in the script). First numbers: namespace globs (dispatcher probe shape) 16.2 MB / 1610 archive files / 34 MB unpacked; computed set + families 9.0 MB / 345 files / 11 MB. verify-binary.sh: OK on the trimmed build. Found: ~/perl5 holds an installed Skilletor 0.001, so no -M 'Skilletor::**' glob (it searches all of @INC). Next: lib check, container run, timings.
+
+Progress: perl/scripts/{build-binary.sh,verify-binary.sh,check-binary-libs.sh,loaded-modules.pl,left-out-modules.pl} written; dist.ini excludes ^scripts/, .gitignore /skilletor. Build (computed set + left-out families) 9.0 MB, verify-binary.sh green on it; negative runs fail as meant (output diff vs perl -Ilib, missing packed module, 1213 family members in the no -X build). check-binary-libs.sh: runtime libs libcrypt libssl libcrypto libz libzstd; glibc floor 2.38 on the Debian 13 host build (POSIX.so, MIME/Base64.so, libperl.so.5.40) fails the house 2.31 ceiling as expected -> k167 input. Next: container proof, measurements.
+
+k188 result: measurements and recommendation.
+
+Host: Debian 13, system perl 5.40.1 (shared libperl), PAR::Packer 1.064, node v24.19.0, 16 cores. Load average was 2.8 to 8.4 during the runs because other agents were busy. Harness: every command forked with an env built from nothing (PATH=/usr/bin:/bin, HOME, CODEX_HOME, LC_ALL=C), output to /dev/null, round robin over all variants each round (so load drift hits every variant), 2 warm-up runs. Cold = a fresh empty PAR_GLOBAL_TEMP per run; warm = one cache per binary. Three runs (21, 15, 25 rounds). Medians moved by up to 2x with load from one run to the next; minimums stayed within about 10%. So the cost is given as min (best of N, range over the runs), and the spread as median [p25-p75] from the quietest run (load 2.8-3.7). Fixture: user scope, one local source, 2 skills (one .njk), synced. On it check exits 1 "changed" for node and perl alike.
+
+Start time in ms, min / median [p25-p75]:
+- node dist/skilletor.js (454 KB + node 126 MB): --version 118-141 / 178 [137-219]; status 137-146 / 227 [154-260]; check 137-141 / 264 [158-331]
+- perl -Ilib bin/skilletor: --version 169-175 / 299 [201-330]; status 351-356 / 532 [463-737]; check 360-366 / 620 [435-780]
+- binary warm (9.0 MiB): --version 386-407 / 602 [408-673]; status 578-605 / 886 [617-980]; check 565-575 / 958 [807-1055]
+- binary cold: --version 772-821 / 1165 [849-1376]; status 959-968 / 1409 [1058-1546]; check 977-983 / 1372 [1049-1504]
+
+Variants, --version, min warm / min cold:
+- v0 namespace globs: 16.2 MB, 532 / 3236
+- v1 computed set without -X: 16.2 MB (1610 files, 34 MB unpacked), 518-540 / 3122-3221
+- v2 computed set + left-out families (what build-binary.sh makes): 9.0 MB (345 files, 11 MB unpacked), 386-407 / 772-821
+- -z 0: 15.8 MB, 384-409 / 707-733
+- -z 1: 9.8 MB, 413 / 802
+- -z 9: 9.4 MB, 374 / 770-792
+- -n noscan (computed set + Config_heavy.pl, Config_git.pl, cacert.pem via -a; passes verify-binary.sh): 8.7 MB (281 files), 374-445 / 731-837
+- lazyA (throwaway CLI.pm copy: FSUtil, GitEnv, Process, Report required after --version/--help): 292-301 / 701
+- lazyB (lazyA plus Encode deferred, --version answered before decoding argv): 266-277 / 715
+- floor tinyempty (script `exit 0`, 4 zip entries): 5.5 MB, 231-266 / 274-298
+- floor v2empty (script `exit 0`, v2's 345 entries): 9.0 MB, 277-336 / 706-751
+- status warm: v0 709, v1 742, v2 593-605, lazyA 590, lazyB 624 (lazy loading gives status nothing)
+
+Where warm --version time goes (v2, about 395 ms): PAR boot floor about 250 ms (63%: loader plus PAR, Archive::Zip and IO::Compress compiled on every start), the 345-entry archive about +45 ms, the CLI's modules about +110 ms (Report -> Frontmatter -> Error/Moo, Path::Tiny, Encode; ranked with a CORE::GLOBAL::require timer on the source tree). NYTProf cannot run inside the binary: the packed perl ignores PERL5OPT and PERL5LIB (@INC is the cache's inc/lib, inc and two PAR hooks). That is why the floor binaries exist. Side effect, a good one: an installed older Skilletor cannot leak into the binary.
+
+What lowers start time, ranked by measured effect:
+1. Leaving out the families (-X, in build-binary.sh): cold -2.35 s (3.2 s -> 0.8 s), warm --version -130 ms, warm status -140 ms, size -7.2 MB. Done.
+2. Lazy loading in Skilletor::CLI past --version/--help (CLI.pm is k173's, not done here): warm --version -100 to -120 ms (down to the archive floor), cold -70 to -100 ms; status and check do not change. lazyB is only 15-25 ms better than lazyA, within the noise. Recommendation for k173: lazyA's shape (require the four Skilletor helpers after the --help check).
+3. -z 0: cold -50 to -90 ms, warm unchanged, +6.4 MB. Not worth it.
+4. -n noscan: -0.75 MB, start within noise. It makes loaded-modules.pl the only defence against a missing module. Not recommended.
+5. -z 1 / -z 9: no measurable effect.
+Not reducible inside PAR::Packer: about 250 ms warm for a script that does nothing. Warm, the binary is about 3x node for --version and about 4x for status/check. The first start after install or reboot is cold, 0.8-1.0 s; Debian 13's /tmp is tmpfs, so the PAR cache is gone after every reboot.
+
+Container proof (scripts/container-proof.sh on a /tmp snapshot of the tree, binary built from that snapshot): skilletor-noperl:probe, `command -v perl` and `command -v node` exit 127 inside. t/60-conformance.t PASS (40 tests, 171 s), cli steps 106 passed / 0 failed / 0 skipped over 36 cases. Baseline with the Perl CLI from source on the same snapshot: PASS (93 s). Negative run: a /bin/sh stand-in that prints 0.7.0 gets 1 passed (the --version step), 105 failed, exit 1.
+
+For k173 (note only; nothing else needed in k173's files): the lazy-load result above.
+For k181:
+- Inside a pp binary $^X is the literal "perl" and $0 is the binary's absolute path, even when started through PATH. A background re-exec (the reference does process.execPath binPath hook __sync-background) must exec $0 alone when packed, never $^X $0.
+- Whether PAR_* env vars inherited by such a child change its start: untested.
+- Hook budget: floor about 250 ms warm, plus the engine path about +190 ms (status minus --version).
+- loaded-modules.pl already runs every hook event (plain, --harness codex, with CLAUDE_PROJECT_DIR), so k181's modules join the packed set without edits. Re-measure hooks after k181.
+For k167:
+- The Debian 13 host build has glibc floor 2.38 (POSIX.so, MIME/Base64.so, libperl.so.5.40). check-binary-libs.sh keeps the house ceiling of 2.31 and fails on that build, as it should.
+- A bullseye build (perl:5.40-bullseye is available locally) would link OpenSSL 1.1, which Debian 12+ and Ubuntu 22.04+ do not ship. An https url source needs libssl there, so bundling it (pp -l) or another build image may be needed. Untested.
+Drift (not in scope): perl/cpanfile says perl 5.020, but Text::Nunjucks needs 5.40 (k159). dzil build warns that MetaProvides lists Skilletor::Frontmatter::Float and Skilletor::TOML::Float without .pm files.
+
+Ready for review. New perl/scripts/: build-binary.sh, verify-binary.sh, check-binary-libs.sh (from locale-simple, adapted), loaded-modules.pl, left-out-modules.pl (one family list for build and verify), container-proof.sh, container-exec.pl. perl/dist.ini excludes ^scripts/ (dzil build checked in a /tmp copy), perl/.gitignore ignores /skilletor. Checks: verify-binary.sh OK on the built binary, its negatives fail; container proof 106/106 cli steps (0 failed, 0 skipped), negative run 105 failed. check-binary-libs.sh fails, as expected, on glibc floor 2.38 against the 2.31 ceiling (k167). shellcheck clean. Nothing committed. Only perl/scripts/, perl/dist.ini and perl/.gitignore are k188's; the other changes in the tree are other cards' work in progress (k173 CLI/conformance, Process.pm/Hooks.pm).
+
+Review (dispatcher), green: isolated worktree HEAD 2438530 + perl/scripts/*, perl/dist.ini, perl/.gitignore, .claude/skilletor.json. build-binary.sh: 9.0 MiB, 176 modules. verify-binary.sh: OK (all sections, output equals perl -Ilib, packed set, no left-out family). check-binary-libs.sh: runtime libs OK; glibc floor 2.38 > 2.31 (POSIX.so, MIME/Base64.so, libperl.so.5.40) - expected on this Debian 13 host, goes to the k167 build-platform decision. container-proof.sh: no perl, no node in skilletor-noperl:probe; t/60 PASS 40 tests; cli steps 106 passed, 0 failed, 0 skipped; 3m12s. TS and Perl suites: not affected by these files (no src/, lib/ or t/ change). Hook start times of the packed binary: re-measure after k181.
+
+Committed as 2dff015
