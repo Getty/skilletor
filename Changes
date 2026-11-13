@@ -1,6 +1,12 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - bin/skilletor-start, a plugin starter prepared for the Perl binaries and
+    not wired yet (hooks and the Hermes adapter still run bin/skilletor): it
+    runs the release binary cached under <claudeConfigDir>/skilletor/bin/,
+    else downloads it once and runs it only if its checksum matches the one
+    pinned in the plugin, else Node >= 18, else Perl >= 5.40; a `hook` call
+    exits 0 on every path. Without pinned checksums it downloads nothing.
   - A conformance step `cli` runs the CLI itself (`skilletor sync|check|status`
     with its arguments, exit code and stdout/stderr compared), and the case
     knob `gitInit` (`["project"]`, `["home"]`) makes those directories git

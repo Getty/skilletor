@@ -1,0 +1,323 @@
+#!/bin/sh
+# skilletor starter (k190): run skilletor with what this machine has, first match wins:
+#   1. the release binary of the plugin's version for this platform, cached under
+#      <claudeConfigDir>/skilletor/bin/<version>/;
+#   2. else that binary, downloaded once (curl, else wget), checked against the checksum
+#      pinned in the plugin (sha256sum, else `shasum -a 256`), then cached;
+#   3. else Node.js >= 18 with dist/skilletor.js, as bin/skilletor runs it;
+#   4. else Perl >= 5.40 with perl/lib, once its modules load;
+#   5. else one line saying why: on stderr with exit 1, as bin/skilletor's messages - for
+#      `hook ...` the hook's one warning line on stdout instead, with exit 0 (spec §8).
+# An engine it starts is exec'd with this process's arguments, stdin and stdout untouched; on
+# a `hook` call that engine keeps the hook contract itself, as the Node CLI does.
+#
+# Prepared, not wired: nothing starts this file yet. hooks/hooks.json, hooks/codex-hooks.json,
+# bin/skilletor.exe and the Hermes adapter run bin/skilletor. Not covered here:
+#   - Windows: bin/skilletor.exe (winlaunch) runs node directly; how it gets the binary is
+#     decision k169;
+#   - a platform with no pinned binary (macOS x86_64, FreeBSD, ...): straight to Node, Perl;
+#   - sweeping old versions out of the binary cache;
+#   - holding off after a download that failed: the next start tries again.
+# Without the pinned checksum file - the state of the repository until a release writes it -
+# there is no version to look for, so neither step 1 nor 2 runs: nothing is downloaded
+# before activation (k191).
+#
+# No `set -e`/`set -u`: each step falls through to the next, and a hook must exit 0 on every
+# path - an unset variable under -u exits 2, which a UserPromptSubmit hook reads as "block".
+
+# --- Provisional settings: the dispatcher's choice after the recommendations of k168 (cache
+# location b, trust anchor a) and k167 (asset names, platforms). They hold until the
+# maintainer decides k168 and k169; lower case, so none of them reaches a child's environment.
+
+# Trust anchor: the checksums pinned in the plugin, a file next to this starter that the
+# release writes - sha256sum lines "<sha256>  skilletor-<version>-<os>-<arch>", one per
+# platform asset (the release's skilletor-<version>-checksums.txt as is: other names are
+# ignored). The version comes from the asset names, so this file is the one place a release
+# names what the plugin runs.
+pinned_sums=skilletor-binaries.sha256
+# Where the assets of v<version> are: this prefix, then <version>/<asset>.
+# SKILLETOR_BINARY_BASE_URL replaces "<prefix><version>" (the tests serve a binary locally).
+# That is safe from any source: nothing is kept or run unless its checksum is the pinned one.
+release_url_prefix=https://github.com/Getty/skilletor/releases/download/v
+# The binary cache: <claudeConfigDir>/skilletor/bin/<version>/ - beside skilletor's state,
+# shared by every harness that starts this file.
+cache_subdir=skilletor/bin
+# A PAR binary unpacks its archive into $PAR_GLOBAL_TEMP on its first start (10+ s cold,
+# under /tmp by default, which a reboot empties - k188). Point it at a directory beside the
+# binary and warm that once, right after the download, so no hook pays for the unpacking.
+par_temp_var=PAR_GLOBAL_TEMP
+warm_args=--version
+download_connect_timeout=10
+download_max_time=60
+# --- end of the provisional settings.
+
+fail_status=1
+[ "${1-}" = hook ] && fail_status=0 # a hook never fails (spec §8)
+
+# Follow our own symlink chain to the real file, as bin/skilletor does: dist/, perl/ and the
+# pinned checksums sit next to the plugin's bin/, not the link's.
+self=$0
+while [ -L "$self" ]; do
+  target=$(readlink -- "$self")
+  case "$target" in
+    /*) self=$target ;;
+    *) self=$(dirname -- "$self")/$target ;;
+  esac
+done
+root=$(CDPATH='' cd -P -- "$(dirname -- "$self")/.." && pwd)
+
+why_binary=
+why_node=
+why_perl=
+tmp=
+
+# A version string as it may appear in a message (and in the hook's JSON line).
+shown() {
+  case $1 in
+    '' | *[!0-9A-Za-z.+-]*) printf '%s' '?' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# The SHA-256 of file $1, lower-case hex, with whichever tool is there.
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    set -- "$(sha256sum <"$1" 2>/dev/null)"
+  else
+    set -- "$(shasum -a 256 <"$1" 2>/dev/null)"
+  fi
+  printf '%s' "${1%% *}"
+}
+
+# Steps 1 and 2. Sets bin_file and par_dir and returns 0 when the binary is there to run;
+# else sets why_binary.
+find_binary() {
+  if [ ! -f "$root/bin/$pinned_sums" ]; then
+    why_binary="no binary checksums are pinned in the plugin"
+    return 1
+  fi
+  case $(uname -s 2>/dev/null) in
+    Linux) os=linux ;;
+    Darwin) os=macos ;;
+    *) os= ;;
+  esac
+  case $(uname -m 2>/dev/null) in
+    x86_64 | amd64) arch=x86_64 ;;
+    aarch64 | arm64) arch=arm64 ;;
+    *) arch= ;;
+  esac
+  if [ -z "$os" ] || [ -z "$arch" ]; then
+    why_binary="no binary is built for this platform"
+    return 1
+  fi
+  sum=
+  version=
+  while read -r line_sum line_name || [ -n "$line_sum" ]; do
+    line_name=${line_name#\*} # sha256sum's binary-mode marker
+    case $line_name in
+      skilletor-*-"$os-$arch") ;;
+      *) continue ;;
+    esac
+    version=${line_name#skilletor-}
+    version=${version%-"$os-$arch"}
+    sum=$line_sum
+    break
+  done <"$root/bin/$pinned_sums"
+  if [ -z "$sum" ]; then
+    why_binary="no binary checksum is pinned for $os-$arch"
+    return 1
+  fi
+  # 64 lower-case hex digits, as sha256sum writes them; a version that starts with a digit
+  # and names one path segment.
+  case $sum in *[!0-9a-f]*) sum= ;; esac
+  case $version in [0-9]*) ;; *) version= ;; esac
+  case $version in *[!0-9A-Za-z.+-]*) version= ;; esac
+  if [ "${#sum}" -ne 64 ] || [ -z "$version" ]; then
+    why_binary="the pinned binary checksum line for $os-$arch is malformed"
+    return 1
+  fi
+
+  config_dir=${CLAUDE_CONFIG_DIR:-}
+  if [ -z "$config_dir" ] && [ -n "${HOME:-}" ]; then config_dir=$HOME/.claude; fi
+  case $config_dir in
+    /*) ;;
+    *)
+      why_binary="no absolute CLAUDE_CONFIG_DIR or HOME to keep the binary in"
+      return 1
+      ;;
+  esac
+  asset=skilletor-$version-$os-$arch
+  cache_dir=$config_dir/$cache_subdir/$version
+  # The checksum is part of the name: a cached binary is always the one this plugin pins,
+  # even if a release were rebuilt under the same version. It is not hashed again on every
+  # start - the cache is the user's own directory, and only verified bytes are renamed into it.
+  bin_file=$cache_dir/$asset-$sum
+  par_dir=$bin_file.par
+  if [ -f "$bin_file" ] && [ -x "$bin_file" ]; then return 0; fi
+  fetch_binary
+}
+
+# Step 2: download, check, warm, then rename into place - two starts at once each use a temp
+# file of their own and rename the same bytes over each other. Every failure leaves nothing
+# of the download behind.
+fetch_binary() {
+  # Look for the checksum tool first: what cannot be checked is not fetched.
+  if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+    why_binary="neither sha256sum nor shasum is there to check a binary download"
+    return 1
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    fetcher=curl
+  elif command -v wget >/dev/null 2>&1; then
+    fetcher=wget
+  else
+    why_binary="neither curl nor wget is there to download $asset"
+    return 1
+  fi
+  if ! mkdir -p -- "$cache_dir" 2>/dev/null; then
+    why_binary="cannot create the binary cache"
+    return 1
+  fi
+  tmp=$cache_dir/.$asset.$$.tmp
+  trap 'rm -f -- "$tmp"' EXIT
+  trap 'rm -f -- "$tmp"; exit $fail_status' HUP INT TERM
+  if ! download "${SKILLETOR_BINARY_BASE_URL:-$release_url_prefix$version}/$asset" "$tmp" ||
+    [ ! -f "$tmp" ]; then
+    drop_download "the download of $asset failed"
+    return 1
+  fi
+  if [ "$(sha256_of "$tmp")" != "$sum" ]; then
+    drop_download "the downloaded $asset does not match its pinned checksum and was refused"
+    return 1
+  fi
+  # Warmed under its temp name, before the rename: only a binary that ran here is ever cached.
+  # PAR (pp 1.064, tried by hand) unpacks straight into $par_dir, whose parent must exist, and
+  # a later run under the final name adds only a copy of its small loader. The unpacked files
+  # stay even if this fails - a concurrent start may be running from them already, and they
+  # are of the pinned bytes. $warm_args is split into words on purpose.
+  if ! chmod 755 "$tmp" 2>/dev/null ||
+    ! env "$par_temp_var=$par_dir" "$tmp" $warm_args </dev/null >/dev/null 2>&1; then
+    drop_download "the downloaded $asset does not run here"
+    return 1
+  fi
+  if ! mv -f -- "$tmp" "$bin_file" 2>/dev/null; then
+    drop_download "cannot move $asset into the binary cache"
+    return 1
+  fi
+  tmp=
+  trap - EXIT HUP INT TERM
+  return 0
+}
+
+# Fetch URL $1 into file $2: quiet, bounded in time, never reading the hook's stdin.
+download() {
+  if [ "$fetcher" = curl ]; then
+    curl -fsSL --connect-timeout "$download_connect_timeout" --max-time "$download_max_time" \
+      -o "$2" "$1" </dev/null >/dev/null 2>&1
+  else
+    wget -q -T "$download_connect_timeout" -O "$2" "$1" </dev/null >/dev/null 2>&1
+  fi
+}
+
+drop_download() {
+  rm -f -- "$tmp"
+  tmp=
+  trap - EXIT HUP INT TERM
+  rmdir -- "$cache_dir" 2>/dev/null # only if this start left it empty
+  why_binary=$1
+}
+
+# Step 3, with bin/skilletor's checks and messages.
+find_node() {
+  if ! command -v node >/dev/null 2>&1; then
+    why_node="Node.js is required but was not found on PATH (need >= 18)"
+    return 1
+  fi
+  major=$(node -e 'process.stdout.write(String(process.versions.node.split(".")[0]))' </dev/null 2>/dev/null)
+  case "$major" in
+    '' | *[!0-9]*)
+      why_node="could not determine the Node.js version (need >= 18)"
+      return 1
+      ;;
+  esac
+  if [ "$major" -lt 18 ]; then
+    why_node="Node.js >= 18 is required, but found $(shown "$(node --version </dev/null 2>/dev/null)")"
+    return 1
+  fi
+  if [ ! -f "$root/dist/skilletor.js" ]; then
+    why_node="Node.js is there, but dist/skilletor.js is missing"
+    return 1
+  fi
+  return 0
+}
+
+# Step 4: perl >= 5.40, and skilletor's modules load with the dependencies they need
+# ($perl_check, below).
+find_perl() {
+  if ! command -v perl >/dev/null 2>&1; then
+    why_perl="perl was not found on PATH (need >= 5.40)"
+    return 1
+  fi
+  perl_version=$(perl -e 'printf "%d %vd", $] * 1000, $^V' </dev/null 2>/dev/null)
+  case "${perl_version%% *}" in
+    '' | *[!0-9]*)
+      why_perl="could not determine the Perl version (need >= 5.40)"
+      return 1
+      ;;
+  esac
+  if [ "${perl_version%% *}" -lt 5040 ]; then
+    why_perl="Perl >= 5.40 is required, but found $(shown "${perl_version#* }")"
+    return 1
+  fi
+  if [ ! -f "$root/perl/bin/skilletor" ]; then
+    why_perl="skilletor's Perl port cannot run: perl/bin/skilletor is missing"
+    return 1
+  fi
+  problem=$(perl -I"$root/perl/lib" -e "$perl_check" "$root/perl/cpanfile" </dev/null 2>/dev/null) && return 0
+  case $problem in
+    '' | *[!0-9A-Za-z_:./\ -]*) problem="a dependency does not load" ;;
+  esac
+  why_perl="skilletor's Perl port cannot run: $problem"
+  return 1
+}
+
+# What find_perl runs: every runtime requirement in perl/cpanfile, at its minimum version -
+# the port loads some of them only when a command needs them (Text::Nunjucks with the first
+# template, so loading the CLI proves nothing about it) - then the port's own CLI and engine,
+# which its commands load. Prints what is wrong, exits 1. Costs 0.6-1.3 s on a busy host, on
+# top of the run (measured on k190).
+# shellcheck disable=SC2016 # Perl, single-quoted on purpose
+perl_check='
+my $file = shift;
+my @need;
+sub requires { push @need, [@_] }
+sub on { $_[1]->() if $_[0] eq "runtime" }
+sub recommends {} sub suggests {} sub conflicts {} sub feature {}
+open my $fh, "<", $file or do { print "perl/cpanfile is missing"; exit 1 };
+eval join("", <$fh>) . "\n1" or do { print "perl/cpanfile does not read"; exit 1 };
+for (@need) {
+  my ($module, $min) = @$_;
+  next if $module eq "perl";
+  (my $path = "$module.pm") =~ s{::}{/}g;
+  eval { require $path; 1 } or do { print "$module is missing"; exit 1 };
+  !$min or eval { $module->VERSION($min); 1 } or do { print "$module is older than $min"; exit 1 };
+}
+for my $module ("Skilletor::CLI", "Skilletor::Engine") {
+  (my $path = "$module.pm") =~ s{::}{/}g;
+  eval { require $path; 1 } or do { print "$module does not load"; exit 1 };
+}
+'
+
+if find_binary; then exec env "$par_temp_var=$par_dir" "$bin_file" "$@"; fi
+if find_node; then exec node "$root/dist/skilletor.js" "$@"; fi
+if find_perl; then exec perl -I"$root/perl/lib" "$root/perl/bin/skilletor" "$@"; fi
+
+# Step 5. Every part of the line is fixed text, shown() or a checked $problem: nothing in it
+# needs JSON escaping.
+message="skilletor: $why_node; $why_perl; $why_binary."
+if [ "$fail_status" -eq 0 ]; then
+  printf '{"systemMessage":"%s"}\n' "$message"
+else
+  printf '%s\n' "$message" >&2
+fi
+exit "$fail_status"
