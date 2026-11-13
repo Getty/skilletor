@@ -33,6 +33,7 @@ use Skilletor::Targets qw(
   place_output receivers root_of root_of_key select_targets supports target_gaps
 );
 use Sys::Hostname ();
+use Time::HiRes ();
 use namespace::clean;
 
 extends 'Skilletor::Resolver';
@@ -109,6 +110,9 @@ sub _message {
   return $err->message if blessed $err && $err->can('message');
   return ( "$err" =~ s/ at \S+ line \d+\.?\n?\z//r =~ s/\n\z//r );
 }
+
+# The clock a sync's deadline is compared with: epoch ms, as Date.now().
+sub _now_ms { int( Time::HiRes::time() * 1000 ) }
 
 sub _true  { JSON::MaybeXS::true() }
 sub _false { JSON::MaybeXS::false() }
@@ -318,6 +322,11 @@ sub sync {
     sub {
       Skilletor::Source::Url->sweep_cache( $self->cache_root );
       Skilletor::Source::Git->sweep_cache( $self->cache_root );
+      # Once the lock is held: another run this one waited for may have left nothing to do.
+      if ( $opts{if_changed} ) {
+        my $chk = $self->check( scope => $sel, local => 1 );
+        return js_ordered( scopes => [] ) if !$chk->{changed} && !( defined $chk->{error} && length $chk->{error} );    # an error: the sync reports it
+      }
       my ( $config, $targets );
       return js_ordered( scopes => [], error => _message($@) ) unless eval { ( $config, $targets ) = $self->_load_strict; 1 };
       my @scopes = _scopes_of( $config, $sel );
@@ -336,7 +345,7 @@ sub sync {
       }
       return $out;
     },
-    timeout_ms => $self->lock_timeout_ms,
+    timeout_ms => $opts{lock_timeout_ms} // $self->lock_timeout_ms,
   );
   return $report;
 }
@@ -441,6 +450,8 @@ sub _sync_scope_run {
 
   my ( $rep, $info ) = $self->_resolve_scope( $config, $scope_cfg, $scope, $state, $run, $hooks );
   undef $hooks;
+  # Past its deadline (spec §8): nothing of the scope is written. From here on all is local.
+  die "sync stopped before writing anything: its sources took too long\n" if defined $opts->{deadline} && _now_ms() > $opts->{deadline};
   my $out = empty_scope_report($scope);
   $out->{warnings}      = $rep->{warnings};
   $out->{trustRequests} = $rep->{trustRequests};
@@ -858,6 +869,7 @@ sub check {
           push @{ $out->{trustRequests} }, js_ordered( scope => $scope, map { ( $_ => $t->{$_} ) } keys %$t );
           return 1;
         }
+        return 1 if $opts{local};    # the lock against the config only: no source asked
         my $version = _checked_version( $read->{$name}, $backend, $old_lock, $name );
         my $changed = Skilletor::Backend->make( $backend, $self->cache_root, $self->timeout_ms )->check($version) ? 1 : 0;
         push @{ $out->{sources} }, js_ordered( name => $name, scope => $scope, changed => $changed ? _true : _false );
@@ -1092,19 +1104,42 @@ reference's does.
 
 C<force> adopts a file in an item's way, deletes one at a claimed path or
 replaces a link (spec §6.3). L<Skilletor::Report/report_text> words the
-report as the CLI does. The sync honours L<Skilletor::Resolver/fetch>:
-C<never> syncs from the cache alone.
+report as the CLI does, L<Skilletor::Report/report_hook> as the hooks do. The
+sync honours L<Skilletor::Resolver/fetch>: C<never> syncs from the cache
+alone.
+
+The options the reference's hooks set (spec §8):
+
+=over 4
+
+=item * C<< if_changed => 1 >>: once the sync lock is held, a L</check> with
+C<local> decides – nothing changed (and no error): nothing runs and the report
+is C<< { scopes => [] } >>. A run that waited out another's sync of the same
+change finds nothing left.
+
+=item * C<< deadline => $epoch_ms >>: a scope whose sources are resolved only
+after it is not written; the sync dies with C<sync stopped before writing
+anything: its sources took too long>, and the scope's records are dropped as
+after any sync that stopped.
+
+=item * C<< lock_timeout_ms => $ms >>: how long this call waits for the sync
+lock, over L<Skilletor::Resolver/lock_timeout_ms>.
+
+=back
 
 =method check
 
-  my $check = $engine->check( scope => 'all' );
+  my $check = $engine->check( scope => 'all', local => 0 );
   # { changed, sources => [ { name, scope, changed } ], warnings,
   #   targetsChanged?, layoutChanged?, declaredChanged?, varsChanged?, trustRequests?, error? }
 
 Whether a sync is due, without one: source versions (C<git ls-remote>, an
 HTTP C<HEAD>; a C<local> source always counts as changed), the drift of the
 lock against the config and the layout, the render inputs. It reads no
-installed file – an edited file is a sync's to overwrite, not drift.
+installed file – an edited file is a sync's to overwrite, not drift. With
+C<local> no source is asked (no fetch, no C<ls-remote>, no request; C<sources>
+stays empty): the lock against the config, the layout and the render inputs
+alone. Untrusted sources are named either way.
 
 =method status
 

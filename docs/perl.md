@@ -117,11 +117,15 @@ It also requires each engine's `check` to accept the other engine's sync.
 
 ## Known gaps
 
-- Codex and Hermes targets are not ported, and neither are `hooks.ts` or pending reports –
-  so neither are the checkout-move hooks (`hook cwd-changed` and `hook post-tool-use`, k147)
-  nor their Codex and Hermes path in `user-prompt-submit` with the per-session cwd record
-  `session-cwd.json` (k149), nor the engine options only they set: `check`'s `local` (no source
-  asked), the sync's `deadline`, and its `ifChanged` (compare once more under the sync lock).
+- Codex and Hermes targets are not ported to sync, check and status yet (the Codex
+  conversion itself is: `Skilletor::Convert`, `Skilletor::TOML`, k183), and neither is
+  `hooks.ts` – so neither are the hook commands nor the checkout-move hooks (`hook
+  cwd-changed` and `hook post-tool-use`, k147). What the hooks build on is ported (k180): the
+  pending report and the per-session cwd record `session-cwd.json` in `Skilletor::State`,
+  `report_hook`, and the engine options only the hooks set – `check`'s `local` (no source
+  asked), the sync's `deadline`, its `if_changed` (compare once more under the sync lock) and a
+  per-call `lock_timeout_ms`. The Perl CLI (`bin/skilletor`) is being ported command by
+  command under k166.
 - Windows is untested.
 - There are no conformance cases for a `url` fetch (it needs TLS), for symlink
   conflicts, or for partial syncs. `perl/t/62-engine.t` covers partial syncs.

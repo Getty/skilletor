@@ -14,6 +14,14 @@ Revision history for Skilletor
     exit codes, byte for byte; no command runs yet - each says it is not
     ported and exits 1. Skilletor::Process::run_command feeds stdin through a
     pipe when given one.
+  - The engine options the hooks set, as the reference has them: check's local
+    (no source asked), the sync's if_changed (a local check under the sync
+    lock), deadline and a per-call lock_timeout_ms. Skilletor::State keeps
+    pending-report.json and session-cwd.json (the 256 sessions recorded last)
+    byte for byte as the reference does, and gains due_again;
+    Skilletor::Report's new report_hook words a sync report as the hooks do.
+    report_text gives an item with an unknown harness prefix its type's
+    activation hint.
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's

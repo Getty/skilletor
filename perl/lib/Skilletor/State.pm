@@ -102,6 +102,14 @@ sub clear_checked {
   $self->_write_json( 'last-check.json', $checks );
 }
 
+# A sync that timed out on the sync lock synced nothing: drop the key's mark, so the next prompt is
+# due and its background sync retries (k89). Best effort: never throws.
+sub due_again {
+  my ( $self, $key ) = @_;
+  eval { $self->clear_checked($key); 1 };
+  return;
+}
+
 #### Unreached drift (spec §14.3, k70) #################################
 
 # The drift ids the last sync of a scope (keyed by its lock path) left in place although every
@@ -185,6 +193,61 @@ sub put_render_inputs {
     delete $all->{$scope_key};
   }
   $self->_write_json( 'render-inputs.json', $all );
+}
+
+#### Pending report (spec §8) #########################################
+
+# A background sync's hook output for a project, for one of its next prompts to show.
+sub put_pending_report {
+  my ( $self, $project_key, $report ) = @_;
+  my $pending = $self->_read_json('pending-report.json');
+  $pending->{$project_key} = $report;
+  $self->_write_json( 'pending-report.json', $pending );
+}
+
+# A project's pending report, taken out (undef: none); the file is written only when it held one.
+sub take_pending_report {
+  my ( $self, $project_key ) = @_;
+  my $pending = $self->_read_json('pending-report.json');
+  return undef unless exists $pending->{$project_key};
+  my $report = delete $pending->{$project_key};
+  $self->_write_json( 'pending-report.json', $pending );
+  return $report;
+}
+
+#### Session cwd (spec §8, k149) #######################################
+
+# Sessions `session-cwd.json` keeps (a Hermes gateway runs for days).
+use constant SESSION_CWDS => 256;
+
+# A field of a session's entry; undef for an entry that is no object.
+sub _entry_field {
+  my ( $entry, $field ) = @_;
+  return js_type($entry) eq 'object' ? $entry->{$field} : undef;
+}
+
+# Where a session's hook last looked: the cwd of its last SessionStart or prompt. A malformed
+# entry counts as none.
+sub session_cwd {
+  my ( $self, $session_id ) = @_;
+  my $cwd = _entry_field( $self->_read_json('session-cwd.json')->{$session_id}, 'cwd' );
+  return js_type($cwd) eq 'string' ? $cwd : undef;
+}
+
+# Record a session's cwd; written only when it changes, keeping the SESSION_CWDS sessions recorded
+# last (by `at`, newest first; equal ones in the file's order) – one that lost its entry is looked
+# at once more.
+sub put_session_cwd {
+  my ( $self, $session_id, $cwd ) = @_;
+  my $have = $self->session_cwd($session_id);
+  return if defined $have && $have eq $cwd;
+  my $all = $self->_read_json('session-cwd.json');
+  my @others = grep { $_ ne $session_id } keys %$all;
+  my @at = map { my $t = _entry_field( $all->{$_}, 'at' ); js_type($t) eq 'number' ? $t : 0 } @others;
+  my @newest = map { $others[$_] } sort { $at[$b] <=> $at[$a] || $a <=> $b } 0 .. $#others;
+  delete $all->{$_} for @newest[ SESSION_CWDS - 1 .. $#newest ];
+  $all->{$session_id} = js_ordered( cwd => $cwd, at => _now_ms_number() );
+  $self->_write_json( 'session-cwd.json', $all );
 }
 
 #### Hermes home (spec §16.2) ##########################################
@@ -411,12 +474,16 @@ writes and reads them.
 
 =item * C<last-check.json>: when the in-session check last ran per key.
 
+=item * C<pending-report.json>: per project, the hook output a background sync
+left for one of its next prompts to show.
+
+=item * C<session-cwd.json>: per session id, the cwd its hook last looked at
+and when (C<{ cwd, at }>), for the 256 sessions recorded last.
+
 =item * C<hermes-home.json>: the Hermes home the user scope was synced under;
 the port, which never targets Hermes, only ever drops it as the reference does.
 
 =back
-
-Pending reports belong to the reference's hooks and are not ported.
 
 =attr root
 
@@ -474,6 +541,37 @@ True when no check was marked for the key, or the interval has passed.
 =method mark_checked
 
 =method clear_checked
+
+  $state->clear_checked($key);   # the next is_due is true; nothing written for a key not marked
+
+=method due_again
+
+  $state->due_again($key);
+
+L</clear_checked>, best effort: a sync that timed out on the sync lock synced
+nothing, so the next prompt is due and retries. Never throws.
+
+=method put_pending_report
+
+  $state->put_pending_report( $project_dir, { systemMessage => '…' } );
+
+=method take_pending_report
+
+  my $output = $state->take_pending_report($project_dir);   # undef: none
+
+Returns the project's pending report and removes it from the file.
+
+=method session_cwd
+
+  my $cwd = $state->session_cwd($session_id);   # undef: none recorded
+
+=method put_session_cwd
+
+  $state->put_session_cwd( $session_id, $cwd );
+
+Records the session's cwd with the time in ms; writes nothing when it is the
+recorded one. Keeps the 256 sessions recorded last: the others are dropped,
+oldest first.
 
 =method hermes_home
 

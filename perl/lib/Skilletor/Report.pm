@@ -6,6 +6,7 @@ use warnings;
 use utf8;
 
 use Exporter qw( import );
+use Skilletor::Briefing qw( briefing_warning );
 use Skilletor::JSON qw( js_ordered js_stringify );
 use Skilletor::Lock qw( parse_lock_key );
 
@@ -13,7 +14,7 @@ our $VERSION = '0.002';
 
 our @EXPORT_OK = qw(
   ACTIVATION empty_scope_report display_safe backend_label conflict_hint has_changes has_notable
-  report_json report_text status_text check_text exit_code
+  report_json report_text report_hook status_text check_text exit_code
 );
 
 # Per item type: when Claude Code sees an item a sync installed (spec §12).
@@ -28,8 +29,11 @@ my %HARNESS_ACTIVATION = ( codex => 'active from the next Codex session', hermes
 sub _activation_of {
   my ( $it ) = @_;
   my $harness = parse_lock_key( $it->{key} )->{harness};
-  return ( defined $harness && $HARNESS_ACTIVATION{$harness} ) // ACTIVATION->{ $it->{type} };
+  return ( defined $harness ? $HARNESS_ACTIVATION{$harness} : undef ) // ACTIVATION->{ $it->{type} };
 }
+
+# A string's truthiness in JavaScript: set and not empty ("0" counts).
+sub _truthy { defined $_[0] && length $_[0] }
 
 sub empty_scope_report {
   my ( $scope ) = @_;
@@ -77,8 +81,10 @@ sub _is_notable {
 
 sub has_notable {
   my ( $r ) = @_;
-  return ( defined $r->{error} || grep { _is_notable($_) } @{ $r->{scopes} } ) ? 1 : 0;
+  return ( _truthy( $r->{error} ) || grep { _is_notable($_) } @{ $r->{scopes} } ) ? 1 : 0;
 }
+
+sub _commit_hint { $_[0].' updated — commit it' }
 
 sub _settings_hint {
   my ( $u ) = @_;
@@ -113,13 +119,82 @@ sub report_text {
     push @lines, '  overwrote local change: '.$_->{path} for @{ $s->{overwritten} };
     push @lines, '  conflict: '.$_->{path}.' '.conflict_hint($_) for @{ $s->{conflicts} };
     push @lines, '  trust: source "'.$_->{name}.'" ('.backend_label($_).') — run: skilletor trust '.$_->{name} for @{ $s->{trustRequests} };
-    push @lines, '  '.$_.' updated — commit it' for @{ $s->{gitignoreUpdated} // [] };
+    push @lines, '  '._commit_hint($_) for @{ $s->{gitignoreUpdated} // [] };
     push @lines, '  '._settings_hint( $s->{settingsUpdated} ) if $s->{settingsUpdated};
     push @lines, '  warning: '.$_ for @{ $s->{warnings} };
   }
   push @lines, 'skilletor: warning: '.$_ for @{ $r->{warnings} // [] };
   push @lines, 'skilletor: note: '.$_    for @{ $r->{notes}    // [] };
   return join "\n", map { display_safe($_) } @lines;
+}
+
+# The report without its briefing warnings – and without the settings warnings of a scope whose
+# settings file this run left as it was: the hooks show them only in a run that changed something.
+sub _without_repeats {
+  my ( $r ) = @_;
+  my $out = js_ordered( map { ( $_ => $r->{$_} ) } keys %$r );
+  $out->{scopes} = [
+    map {
+      my $s = $_;
+      my @settings = $s->{settingsUpdated} ? () : @{ $s->{settingsSkipped} // [] };
+      my @briefing = @{ $s->{briefingMissing} // [] };
+      if ( !@briefing && !@settings ) { $s }
+      else {
+        my %lines = map { ( $_ => 1 ) } ( map { briefing_warning( parse_lock_key( $_->{key} )->{name}, $_->{harness}, $_->{missing} ) } @briefing ),
+          @settings;
+        my $rest = js_ordered( map { ( $_ => $s->{$_} ) } grep { $_ ne 'briefingMissing' } keys %$s );
+        $rest->{warnings} = [ grep { !$lines{$_} } @{ $s->{warnings} } ];
+        $rest;
+      }
+    } @{ $r->{scopes} }
+  ];
+  return $out;
+}
+
+# The hooks' output of a sync report: a one-line systemMessage and a terse additionalContext,
+# every line display-safe; a config error alone, as one line. Nothing to say: an empty hash.
+sub report_hook {
+  my ( $report ) = @_;
+  return js_ordered( systemMessage => display_safe( 'skilletor: '.$report->{error} ) ) if _truthy( $report->{error} );
+  my $r = has_changes($report) ? $report : _without_repeats($report);
+  return js_ordered() unless has_notable($r);
+  my ( @changed, @gitignores );
+  my ( $warnings, $removed ) = ( 0, 0 );
+  for my $s ( @{ $r->{scopes} } ) {
+    push @changed, @{ $s->{added} }, @{ $s->{updated} };
+    $warnings += @{ $s->{warnings} } + @{ $s->{conflicts} } + @{ $s->{trustRequests} } + @{ $s->{overwritten} };
+    $removed  += @{ $s->{removed} };
+    push @gitignores, @{ $s->{gitignoreUpdated} // [] }, ( $s->{settingsUpdated} ? $s->{settingsUpdated}{path} : () );
+  }
+
+  my @parts;
+  push @parts, scalar(@changed).' item(s) updated' if @changed;
+  push @parts, $removed.' removed'                 if $removed;
+  push @parts, $warnings.' warning(s)'             if $warnings;
+  push @parts, join( ', ', @gitignores ).' updated — commit '.( @gitignores > 1 ? 'them' : 'it' ) if @gitignores;
+  my $out = js_ordered( systemMessage => display_safe( 'skilletor: '.( @parts ? join( ', ', @parts ) : 'changes applied' ) ) );
+
+  my @ctx;
+  if (@changed) {
+    push @ctx, 'skilletor synced items:';
+    for my $it (@changed) {
+      # Claude Code's items are unmarked; another harness's are named.
+      my $harness = parse_lock_key( $it->{key} )->{harness};
+      my $mark = defined $harness && $harness ne 'claude' ? ' ('.$harness.')' : '';
+      push @ctx, '- '.$it->{type}.' '.$it->{name}.'@'.$it->{source}.$mark.': '._activation_of($it);
+    }
+  }
+  # One line per counted warning; the scope says which `.claude` a path is relative to.
+  for my $s ( @{ $r->{scopes} } ) {
+    push @ctx, '- overwrote local change in '.$s->{scope}.' scope: '.$_->{path} for @{ $s->{overwritten} };
+    push @ctx, '- conflict in '.$s->{scope}.' scope: '.$_->{path}.' '.conflict_hint($_) for @{ $s->{conflicts} };
+    push @ctx, '- untrusted source '.$_->{name}.' ('.backend_label($_).'); run: skilletor trust '.$_->{name} for @{ $s->{trustRequests} };
+    push @ctx, '- '._commit_hint($_) for @{ $s->{gitignoreUpdated} // [] };
+    push @ctx, '- '._settings_hint( $s->{settingsUpdated} ) if $s->{settingsUpdated};
+    push @ctx, '- warning: '.$_ for @{ $s->{warnings} };
+  }
+  $out->{additionalContext} = join "\n", map { display_safe($_) } @ctx if @ctx;
+  return $out;
 }
 
 # The status report as `skilletor status` prints it.
@@ -199,6 +274,21 @@ values.
 
 The sync report's text; empty when no scope has anything to say (the CLI then
 prints C<skilletor: up to date>).
+
+=func report_hook
+
+  my $h = report_hook( $sk->sync );   # { systemMessage => …, additionalContext => … }
+
+What the hooks make of a sync report (the reference's C<reportHook>): a
+one-line C<systemMessage> counting the items updated, removed, the warnings
+and the files to commit, and an C<additionalContext> with one line per synced
+item (its activation hint; an item of another harness than Claude Code names
+it) and per counted warning, each line through L</display_safe>. A report with
+an C<error> gives that line alone; one with nothing to say an empty hash. A run
+that added, updated or removed nothing leaves out what it would say in every
+session: an agent's missing briefing skills, and the settings warnings of a
+scope whose C<.claude/settings.json> it did not update. The report itself is
+not changed.
 
 =func status_text
 
