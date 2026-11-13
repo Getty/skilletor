@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-11-13T20:13:52Z
+id: 162
+priority: low
+status: backlog
+tags:
+- perl
+title: 'Perl lookups: serve templated items rendered'
+updated: 2026-11-13T20:13:52Z
+---
+
+Found on k158. Skilletor.pm resolve_skill/_agent/_rule/_rules return source file paths and refuse an item with a .njk file (Skilletor::Error::Unsupported); a sync renders it. The reference has no lookup API to match. Decide whether a lookup should render (with which context: scope, harness claude, target, host, user) and serve the rendered text, or stay as it is.
