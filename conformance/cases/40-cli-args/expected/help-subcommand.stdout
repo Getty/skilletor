@@ -1,0 +1,38 @@
+skilletor ${VERSION}
+Remote skills, agents and rules for Claude Code, Codex and Hermes Agent.
+
+Usage:
+  skilletor <command> [options]
+
+Commands:
+  sync                  Reconcile installed items with the config
+  check                 Report whether a sync is due (writes nothing)
+  status                Show declared vs. installed items
+  add [name] <spec>     Add and trust a source, then sync
+  source list           List declared sources
+  source remove <name>  Remove a source, then sync
+  available [source]    List items offered by trusted sources
+  install <item>...     Install items ([type:]name@source), then sync;
+                        type:*@source installs every item of that type,
+                        type:perl-*@source every one whose name matches;
+                        bundle:name@source installs a bundle (a bare
+                        name@source does too when no item has that name);
+                        sources a bundle needs are offered for adding
+                        (on a terminal; otherwise the add commands are shown)
+  uninstall <item>...   Remove entries ([type:]name@source, type:*@source,
+                        type:perl-*@source or bundle:name@source), then sync
+  trust <source>        Trust a project-declared source
+
+Options:
+  --scope <s>           user | project | all (default: all; sync, check, status)
+  --project             Edit the project config instead of the user config
+                        (add, install, uninstall, source remove)
+  --json                Machine-readable output
+                        (sync, check, status, source list, available)
+  --force               sync: adopt foreign files on conflict;
+                        source remove: remove even if items are installed
+  --project-dir <dir>   Project root (default: git top level of cwd, else cwd)
+  -h, --help            Show this help (anywhere; nothing else runs)
+  -v, --version         Show the version (first argument only)
+
+An option the command does not accept is an error (exit 2).

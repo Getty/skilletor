@@ -2,7 +2,9 @@
 # The Perl runner of the shared conformance cases (../conformance, k143): the format is
 # ../conformance/README.md, the reference runner ../test/conformance.test.ts. Every case runs in
 # a fresh temp dir – HOME, the project, the git sources and a git config of its own – exactly as
-# the reference runner sets it up, so both engines build the same commits and cache dir names.
+# the reference runner sets it up, so both engines build the same commits and cache dir names. A
+# `cli` step runs a CLI – bin/skilletor, or the one SKILLETOR_CONFORMANCE_CLI names (the
+# reference's bundle, say) – in an environment built from nothing.
 use strict;
 use warnings;
 use Test::More;
@@ -11,14 +13,39 @@ use lib "$FindBin::Bin/lib";
 use SkilletorTest qw( git_ok );
 
 use Cwd ();
+use Encode ();
+use File::Spec ();
 use JSON::MaybeXS ();
 use Path::Tiny qw( path tempdir );
+use Skilletor::CLI ();
 use Skilletor::FSUtil qw( encode_text read_text );
-use Skilletor::JSON qw( js_parse js_sort_keys js_stringify js_type );
+use Skilletor::JSON qw( js_ordered js_parse js_sort_keys js_stringify js_type );
 use Skilletor::Engine;
+use Skilletor::Process qw( run_command );
 
 my $ROOT = path( $FindBin::Bin, '..', '..', 'conformance', 'cases' );
 plan skip_all => 'needs the shared conformance cases (../conformance, a skilletor checkout)' unless $ROOT->is_dir;
+
+# The version a `cli` step that asks for it writes as ${VERSION} (README: placeholders): the
+# plugin's, which the Perl CLI reports as well – provisional, k167.
+my $VERSION = js_parse( read_text( path( $FindBin::Bin, '..', '..', 'package.json' ) ) )->{version};
+is( Skilletor::CLI::CLI_VERSION, $VERSION, "the Perl CLI reports the plugin's version (package.json)" );
+
+# The CLI of `cli` steps as an argv prefix (README: which CLI): SKILLETOR_CONFORMANCE_CLI, a JSON
+# array, else this perl running bin/skilletor from lib/.
+my @CLI = do {
+  my $override = $ENV{SKILLETOR_CONFORMANCE_CLI};
+  if ( defined $override ) {
+    my $prefix = js_parse( Encode::decode( 'UTF-8', $override ) );
+    BAIL_OUT("SKILLETOR_CONFORMANCE_CLI is no JSON array of strings: $override")
+      unless js_type($prefix) eq 'array' && @$prefix && !grep { js_type($_) ne 'string' } @$prefix;
+    map { encode_text($_) } @$prefix;
+  }
+  else {
+    ( $^X, '-I'.path( $FindBin::Bin, '..', 'lib' )->realpath, path( $FindBin::Bin, '..', 'bin', 'skilletor' )->realpath."" );
+  }
+};
+my $CLI_TIMEOUT_MS = 30_000;
 
 # The commit identity and date every source commit is made with (README: git sources).
 my %COMMIT_ENV = (
@@ -144,14 +171,14 @@ sub copy_input {
   }
 }
 
-# Copy a source tree byte for byte, modes kept (cpSync).
+# Copy a source tree byte for byte, in a new file's mode: the checkout's mode of the fixture
+# does not count (README: trees).
 sub copy_tree {
   my ( $from, $to ) = @_;
   for my $rel ( walk($from) ) {
     my $dest = path( $to, unescape_name($rel) );
     $dest->parent->mkpath;
-    path( $from, $rel )->copy($dest);
-    chmod( ( stat "$from/$rel" )[2] & 07777, "$dest" );
+    $dest->spew_raw( path( $from, $rel )->slurp_raw );
   }
 }
 
@@ -182,11 +209,88 @@ sub build_git {
   path( $r->{tmp}, 'gitconfig' )->spew_raw( encode_text( join( "\n", @config )."\n" ) );
 }
 
-# The files a tree step compares (README: trees): HOME but the state dir and the marker, all of PROJECT.
+# A `cli` step's environment, built from nothing (README: cli): the case's, then the step's
+# variables on top of the fixed ones; a step's null unsets one. Values are bytes.
+sub cli_env {
+  my ( $c, $step, $r ) = @_;
+  my %env = (
+    PATH                => $ENV{PATH} // '',
+    HOME                => $r->{home},
+    CODEX_HOME          => "$r->{home}/.codex",
+    GIT_CONFIG_GLOBAL   => "$r->{tmp}/gitconfig",
+    GIT_CONFIG_NOSYSTEM => '1',
+    LC_ALL              => 'C',
+  );
+  $env{PERL5LIB} = $ENV{PERL5LIB} if defined $ENV{PERL5LIB};    # a Perl CLI's modules
+  $env{$_} = encode_text( concrete( $c->{env}{$_}, $r ) ) for keys %{ $c->{env} // {} };
+  for my $k ( keys %{ $step->{env} // {} } ) {
+    my $v = $step->{env}{$k};
+    if   ( defined $v ) { $env{$k} = encode_text( concrete( $v, $r ) ) }
+    else                { delete $env{$k} }
+  }
+  return \%env;
+}
+
+# Input placeholders in every string of a JSON value, key order kept.
+sub concrete_deep {
+  my ( $v, $r ) = @_;
+  my $type = js_type($v);
+  return concrete( $v, $r ) if $type eq 'string';
+  return [ map { concrete_deep( $_, $r ) } @$v ] if $type eq 'array';
+  return js_ordered( map { ( $_ => concrete_deep( $v->{$_}, $r ) ) } keys %$v ) if $type eq 'object';
+  return $v;
+}
+
+# Run a `cli` step's CLI (README: cli): stdin a pipe with the step's bytes. Returns
+# { exit, stdout, stderr } (bytes), or { failed => why } for a CLI that does not start, outlives
+# its timeout or dies of a signal.
+sub run_cli {
+  my ( $prefix, $step, $r, $env, $timeout_ms ) = @_;
+  my $argv = $step->{argv};
+  return { failed => 'argv is no array of strings' }
+    unless js_type($argv) eq 'array' && !grep { js_type($_) ne 'string' } @$argv;
+  my $stdin =
+      !defined $step->{stdin}                ? ''
+    : js_type( $step->{stdin} ) eq 'string' ? concrete( $step->{stdin}, $r )
+    :                                         js_stringify( concrete_deep( $step->{stdin}, $r ) );
+  my $res = run_command(
+    cmd        => [ @$prefix, map { encode_text( concrete( $_, $r ) ) } @$argv ],
+    cwd        => encode_text( defined $step->{cwd} ? concrete( $step->{cwd}, $r ) : $r->{project} // $r->{cwd} ),
+    env        => $env,
+    stdin      => encode_text($stdin),
+    timeout_ms => $timeout_ms // $CLI_TIMEOUT_MS,
+  );
+  my $what = join ' ', @$prefix;
+  return { failed => "$what did not start: $res->{spawn_error}{message}" } if $res->{spawn_error};
+  return { failed => "$what outlived its timeout" }                         if $res->{timed_out};
+  return { failed => "$what was killed by signal $res->{signal}" }         if !defined $res->{code};
+  return { exit => $res->{code}, stdout => $res->{stdout}, stderr => $res->{stderr} };
+}
+
+# Output placeholders on raw bytes (README: placeholders), ${VERSION} only where asked.
+sub abstract_bytes {
+  my ( $bytes, $r, $version ) = @_;
+  $bytes =~ s/\Q@{[ encode_text( $_->[0] ) ]}\E/$_->[1]/g for placeholders($r);
+  $bytes =~ s/\Q$VERSION\E/\${VERSION}/g if $version;
+  return $bytes;
+}
+
+# An expected stream: no file means empty.
+sub read_stream { -f $_[0] ? path( $_[0] )->slurp_raw : '' }
+
+# The relative paths under HOME a tree leaves out (README: trees): the marker, skilletor's state
+# dir and the CLI's own, ${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/skilletor.
+sub home_skip {
+  my ( $r, $config_dir ) = @_;
+  my $state = ( defined $config_dir && length $config_dir ? $config_dir : "$r->{home}/.claude" ).'/skilletor';
+  return [ '.claude/skilletor', '.claude.json', index( $state, "$r->{home}/" ) == 0 ? substr( $state, length( $r->{home} ) + 1 ) : () ];
+}
+
+# The files a tree step compares (README: trees): HOME but the state dirs and the marker, all of PROJECT.
 sub snapshot {
-  my ( $r ) = @_;
+  my ( $r, $skip ) = @_;
   my %out;
-  $out{ "home/".escape_name($_) } = abstract( read_text("$r->{home}/$_"), $r ) for walk( $r->{home}, [ '.claude/skilletor', '.claude.json' ] );
+  $out{ "home/".escape_name($_) } = abstract( read_text("$r->{home}/$_"), $r ) for walk( $r->{home}, $skip );
   if ( $r->{project} ) {
     $out{ "project/".escape_name($_) } = abstract( read_text("$r->{project}/$_"), $r ) for walk( $r->{project} );
   }
@@ -203,7 +307,7 @@ sub run_case {
   plan skip_all => $engine->{skip} if defined $engine->{skip};
   my $tempdir = tempdir( 'skilletor-conformance-XXXXXX', TMPDIR => 1 );    # removed with the case
   my $tmp = Cwd::realpath("$tempdir");
-  my $r = { tmp => $tmp, home => "$tmp/home" };
+  my $r = { tmp => $tmp, home => "$tmp/home", cwd => "$tmp/cwd" };
   $r->{project} = "$tmp/project" if -d "$case_dir/project";
 
   local $ENV{GIT_CONFIG_GLOBAL}   = "$tmp/gitconfig";
@@ -223,6 +327,7 @@ sub run_case {
     path( $r->{project} )->mkpath;
     copy_input( "$case_dir/project", $r->{project}, $r );
   }
+  path( $r->{cwd} )->mkpath;
   my $sk = Skilletor::Engine->new(
     home             => $r->{home},
     ( $r->{project} ? ( project_dir => $r->{project} ) : () ),
@@ -243,18 +348,37 @@ sub run_case {
       next;
     }
     my $expected = defined $variant->{expected} ? "$case_dir/$variant->{expected}" : "$case_dir/expected/$id";
-    my %opts = ( scope => $step->{scope} // 'all' );
-    my $result =
-        $step->{op} eq 'resolve' ? resolve_view( $sk->resolve(%opts) )
-      : $step->{op} eq 'sync'    ? $sk->sync( %opts, force => $step->{force} ? 1 : 0 )
-      : $step->{op} eq 'check'   ? $sk->check(%opts)
-      : $step->{op} eq 'status'  ? $sk->status(%opts)
-      :                            die "unknown op $step->{op}";
-    my $actual = canonical( js_parse( abstract( js_stringify($result), $r ) ) );
-    my $want   = canonical( js_parse( read_text("$expected.json") ) );
-    is( js_stringify( $actual, 2 ), js_stringify( $want, 2 ), "step $id" );
+    my $config_dir = $ENV{CLAUDE_CONFIG_DIR};
+    if ( $step->{op} eq 'cli' ) {
+      my $env = cli_env( $c, $step, $r );
+      $config_dir = $env->{CLAUDE_CONFIG_DIR};
+      my $got = run_cli( \@CLI, $step, $r, $env );
+      if ( defined $got->{failed} ) {
+        fail("step $id: $got->{failed}");
+        next;
+      }
+      my $want = js_parse( read_text("$expected.json") );
+      ok( $want->{exit} == 0, "step $id: a hook step expects exit 0" ) if ( $step->{argv}[0] // '' ) eq 'hook';
+      is( js_stringify( canonical( { exit => $got->{exit} } ), 2 ), js_stringify( canonical($want), 2 ), "step $id: the exit code" )
+        or diag( "stderr: $got->{stderr}" );
+      for my $stream (qw( stdout stderr )) {
+        is( abstract_bytes( $got->{$stream}, $r, $step->{version} ), read_stream("$expected.$stream"), "step $id: $stream" );
+      }
+    }
+    else {
+      my %opts = ( scope => $step->{scope} // 'all' );
+      my $result =
+          $step->{op} eq 'resolve' ? resolve_view( $sk->resolve(%opts) )
+        : $step->{op} eq 'sync'    ? $sk->sync( %opts, force => $step->{force} ? 1 : 0 )
+        : $step->{op} eq 'check'   ? $sk->check(%opts)
+        : $step->{op} eq 'status'  ? $sk->status(%opts)
+        :                            die "unknown op $step->{op}";
+      my $actual = canonical( js_parse( abstract( js_stringify($result), $r ) ) );
+      my $want   = canonical( js_parse( read_text("$expected.json") ) );
+      is( js_stringify( $actual, 2 ), js_stringify( $want, 2 ), "step $id" );
+    }
     next unless $step->{tree};
-    my $have  = snapshot($r);
+    my $have  = snapshot( $r, home_skip( $r, $config_dir ) );
     my %want  = map { ( $_ => read_text("$expected/$_") ) } walk($expected);
     is_deeply( [ sort keys %$have ], [ sort keys %want ], "step $id: the files in the tree" );
     is( $have->{$_}, $want{$_}, "step $id: $_" ) for sort keys %want;
@@ -272,5 +396,43 @@ ok( scalar @cases, 'the cases directory holds cases' );
 for my $name (@cases) {
   subtest "conformance: $name" => sub { run_case($name) };
 }
+
+# The harness itself (README: cli), on a stand-in CLI that reports what it got. Asserts: the
+# child's environment is exactly the fixed variables, the case's and the step's (a variable of the
+# runner – CLAUDE_PROJECT_DIR here – never leaks in, null unsets); argv, cwd and stdin take the
+# input placeholders; stdin is a string's bytes or a value's JSON, through a pipe.
+subtest "a cli step's CLI gets the README's environment, argv, cwd and stdin – nothing else" => sub {
+  my $tempdir = tempdir( 'skilletor-conformance-XXXXXX', TMPDIR => 1 );
+  my $tmp = Cwd::realpath("$tempdir");
+  my $r = { tmp => $tmp, home => "$tmp/home", cwd => "$tmp/cwd" };
+  path($_)->mkpath for $r->{home}, $r->{cwd};
+  my @echo = ( $^X, '-MCwd', '-e', 'local $/; my $in = <STDIN>; print join "\0", Cwd::getcwd(), -p STDIN ? "pipe" : "no pipe", $in, @ARGV, map { "$_=$ENV{$_}" } sort keys %ENV' );
+  my $c = { env => { CLAUDE_CONFIG_DIR => '${HOME}/cfg', DROPPED => 'x' } };
+  my $step = { id => 'echo', op => 'cli', argv => [ 'status', '${HOME}' ], env => { DROPPED => undef, EXTRA => '${TMP}/e' }, stdin => js_ordered( cwd => '${HOME}', n => [1] ) };
+  local $ENV{CLAUDE_PROJECT_DIR} = $tmp;
+  my $got = run_cli( \@echo, $step, $r, cli_env( $c, $step, $r ) );
+  my %env = (
+    PATH => $ENV{PATH} // '', HOME => $r->{home}, CODEX_HOME => "$r->{home}/.codex", GIT_CONFIG_GLOBAL => "$tmp/gitconfig",
+    GIT_CONFIG_NOSYSTEM => '1', LC_ALL => 'C', CLAUDE_CONFIG_DIR => "$r->{home}/cfg", EXTRA => "$tmp/e",
+    ( defined $ENV{PERL5LIB} ? ( PERL5LIB => $ENV{PERL5LIB} ) : () ),
+  );
+  is_deeply(
+    [ split /\0/, $got->{stdout}, -1 ],
+    [ $r->{cwd}, 'pipe', '{"cwd":"'.$r->{home}.'","n":[1]}', 'status', $r->{home}, map { "$_=$env{$_}" } sort keys %env ],
+    'cwd, stdin as JSON through a pipe, argv, the environment'
+  );
+  my $raw = { %$step, stdin => 'not json ${TMP}', cwd => '${HOME}' };
+  my @got = split /\0/, run_cli( \@echo, $raw, $r, cli_env( $c, $raw, $r ) )->{stdout}, -1;
+  is_deeply( [ @got[ 0 .. 2 ] ], [ $r->{home}, 'pipe', "not json $tmp" ], 'a string is stdin as it is; a step cwd' );
+};
+
+subtest 'a cli step fails when its CLI dies of a signal or outlives its timeout' => sub {
+  my $dir = File::Spec->tmpdir;
+  my $r = { tmp => $dir, home => $dir, cwd => $dir };
+  my $step = { id => 'dies', op => 'cli', argv => [] };
+  my %env = ( PATH => $ENV{PATH} // '' );
+  like( run_cli( [ $^X, '-e', 'kill KILL => $$' ], $step, $r, \%env )->{failed}, qr/killed by signal 9/, 'a signal' );
+  like( run_cli( [ $^X, '-e', 'sleep 10' ], $step, $r, \%env, 300 )->{failed}, qr/outlived its timeout/, 'the timeout' );
+};
 
 done_testing;

@@ -1,0 +1,24 @@
+#!/usr/bin/env perl
+# PODNAME: skilletor
+# ABSTRACT: Install skills, agents and rules from remote sources – the Perl CLI
+use strict;
+use warnings;
+use Skilletor::CLI;
+
+binmode $_, ':raw' for \*STDOUT, \*STDERR;    # Skilletor::CLI writes UTF-8 bytes, newlines as they are
+exit Skilletor::CLI::run(@ARGV);
+
+__END__
+
+=head1 SYNOPSIS
+
+  skilletor --help
+  skilletor --version
+
+=head1 DESCRIPTION
+
+The command line of L<Skilletor>, the Perl port of skilletor; see
+L<Skilletor::CLI>. It mirrors the reference CLI byte for byte, command by
+command as each is ported; a command not ported yet says so and exits 1.
+
+=cut

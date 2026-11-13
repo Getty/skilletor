@@ -10,6 +10,7 @@ for (qw(
   Skilletor::Briefing
   Skilletor::Bundles
   Skilletor::Cache
+  Skilletor::CLI
   Skilletor::Catalog
   Skilletor::ClaudeSettings
   Skilletor::Config

@@ -20,6 +20,12 @@ sub run_command {
   my $cmd = $args{cmd} or croak __PACKAGE__.'->run_command needs cmd';
   my ( $file, @argv ) = @$cmd;
 
+  my ( $stdin, $in_r, $in_w ) = ( $args{stdin} );
+  if ( defined $stdin ) {
+    $stdin = "$stdin";
+    utf8::downgrade( $stdin, 1 ) or croak __PACKAGE__.'->run_command: stdin must be bytes';
+    pipe( $in_r, $in_w ) or croak 'pipe: '.$!;
+  }
   pipe( my $out_r, my $out_w ) or croak 'pipe: '.$!;
   pipe( my $err_r, my $err_w ) or croak 'pipe: '.$!;
   pipe( my $exec_r, my $exec_w ) or croak 'pipe: '.$!;    # the child's exec errno, if any
@@ -27,7 +33,13 @@ sub run_command {
   croak 'fork: '.$! unless defined $pid;
   if ( !$pid ) {
     close $_ for $out_r, $err_r, $exec_r;
-    open( STDIN, '<', '/dev/null' );
+    if ($in_r) {
+      close $in_w;
+      open( STDIN, '<&', $in_r ) or POSIX::_exit(127);
+    }
+    else {
+      open( STDIN, '<', '/dev/null' );
+    }
     open( STDOUT, '>&', $out_w ) or POSIX::_exit(127);
     open( STDERR, '>&', $err_w ) or POSIX::_exit(127);
     if ( defined $args{cwd} && length $args{cwd} ) {
@@ -43,6 +55,17 @@ sub run_command {
   }
   close $_ for $out_w, $err_w, $exec_w;
 
+  # stdin goes in as the child takes it, between the reads: a child that writes a full pipe
+  # before it reads stdin would otherwise wait on us while we wait on it.
+  local $SIG{PIPE} = 'IGNORE';    # a child that exits without reading all of stdin
+  my $pending = $stdin // '';
+  my $wsel = IO::Select->new;
+  if ($in_w) {
+    close $in_r;
+    if   ( length $pending ) { $in_w->blocking(0); $wsel->add($in_w) }
+    else                     { close $in_w }
+  }
+
   my %buf = ( out => '', err => '' );
   my $sel = IO::Select->new( $out_r, $err_r );
   my $deadline = defined $args{timeout_ms} ? Time::HiRes::time() + $args{timeout_ms} / 1000 : undef;
@@ -54,7 +77,17 @@ sub run_command {
       kill 'TERM', $pid;
       last;
     }
-    my @ready = $sel->can_read($wait);
+    my ( $readable, $writable ) = IO::Select->select( $sel, ( $wsel->count ? $wsel : undef ), undef, $wait );
+    for my $fh ( @{ $writable // [] } ) {
+      my $n = syswrite $fh, $pending, 65536;
+      next if !defined $n && ( $!{EINTR} || $!{EAGAIN} );
+      substr( $pending, 0, $n, '' ) if defined $n;
+      if ( !defined $n || !length $pending ) {    # all written, or the child closed its stdin
+        $wsel->remove($fh);
+        close $fh;
+      }
+    }
+    my @ready = @{ $readable // [] };
     for my $fh (@ready) {
       my $n = sysread $fh, my $chunk, 65536;
       if ( !defined $n ) {
@@ -80,7 +113,7 @@ sub run_command {
     }
     kill 'KILL', $pid if $sel->count;
   }
-  close $_ for $out_r, $err_r;
+  close $_ for $out_r, $err_r, $wsel->handles;
   waitpid $pid, 0;
   my $status = $?;
   my $spawn_error;
@@ -114,6 +147,7 @@ sub run_command {
     cwd        => $dir,
     env        => \%env,          # the whole environment of the child
     timeout_ms => 60_000,
+    stdin      => $bytes,         # optional; else stdin is /dev/null
   );
   print $r->{stdout} if defined $r->{code} && $r->{code} == 0;
 
@@ -122,11 +156,13 @@ sub run_command {
 What the reference gets from Node's C<execFile>: a program and its arguments
 as a list (never a shell), a working directory, a complete environment, a
 timeout after which the child gets C<SIGTERM>, and stdout and stderr captured
-as bytes. Nothing of the parent's state changes.
+as bytes. Nothing of the parent's state changes. Stdin is F</dev/null>, or a
+pipe that gets C<stdin>'s bytes and then end of file, as C<execFileSync>'s
+C<input> gives it.
 
 =func run_command
 
-  run_command( cmd => [...], cwd => $dir, env => \%env, timeout_ms => $ms );
+  run_command( cmd => [...], cwd => $dir, env => \%env, timeout_ms => $ms, stdin => $bytes );
 
 Returns C<< { code, signal, stdout, stderr, timed_out, spawn_error? } >>.
 C<code> is C<undef> when a signal ended the child. C<spawn_error>

@@ -7,20 +7,30 @@
 // Every case runs in a fresh temp dir: HOME, the project, the git sources and a git config of its
 // own; nothing reads or writes the real home. Git sources are real repositories built from plain
 // trees, reached through `url.<file>.insteadOf` – fetch, cache naming and `check`'s ls-remote run
-// as for a remote, offline.
-import { test } from "node:test";
+// as for a remote, offline. A `cli` step runs a CLI – this checkout's bundle, or the one
+// SKILLETOR_CONFORMANCE_CLI names (the Perl port's, say) – in an environment built from nothing.
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
-  chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildToString } from "../scripts/esbuild.config.mjs";
 import { check, resolveItems, status, sync, type EngineContext, type ResolveReport } from "../src/engine.ts";
 
 const ROOT = fileURLToPath(new URL("../conformance/cases", import.meta.url));
 const UPDATE = process.env.SKILLETOR_CONFORMANCE_UPDATE === "1";
+/** The version a `cli` step that asks for it writes as `${VERSION}` (README: placeholders). */
+const VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
+/** The CLI of `cli` steps as a JSON argv prefix; unset, this checkout's bundle (README: which CLI). */
+const CLI_OVERRIDE = process.env.SKILLETOR_CONFORMANCE_CLI;
+const CLI_TIMEOUT_MS = 30_000;
+if (UPDATE && CLI_OVERRIDE !== undefined) {
+  throw new Error("SKILLETOR_CONFORMANCE_UPDATE=1 refuses SKILLETOR_CONFORMANCE_CLI: the expectations are the reference CLI's");
+}
 
 /** The commit identity and date every source commit is made with (README: git sources). */
 const COMMIT_ENV = {
@@ -34,10 +44,16 @@ const COMMIT_ENV = {
 
 interface Step {
   id: string;
-  op: "resolve" | "sync" | "check" | "status";
+  op: "resolve" | "sync" | "check" | "status" | "cli";
   scope?: "user" | "project" | "all";
   force?: boolean;
   tree?: boolean;
+  /** `cli` only (README: cli). */
+  argv?: string[];
+  cwd?: string;
+  env?: Record<string, string | null>;
+  stdin?: unknown;
+  version?: boolean;
 }
 
 interface Case {
@@ -115,11 +131,12 @@ function git(cwd: string, env: NodeJS.ProcessEnv, ...args: string[]): void {
   execFileSync("git", args, { cwd, env, stdio: ["ignore", "ignore", "pipe"] });
 }
 
-/** Each case's temp roots and how outputs name them. */
+/** Each case's temp roots and how outputs name them; `cwd` is a `cli` step's cwd without a project. */
 interface Roots {
   tmp: string;
   home: string;
   project?: string;
+  cwd: string;
 }
 
 function placeholders(r: Roots): [string, string][] {
@@ -172,7 +189,8 @@ function buildGit(caseDir: string, c: Case, r: Roots, env: NodeJS.ProcessEnv): v
       for (const rel of walk(tree)) {
         const dest = join(repo, unescapeName(rel));
         mkdirSync(dirname(dest), { recursive: true });
-        copyFileSync(join(tree, rel), dest); // byte for byte
+        // Byte for byte, in a new file's mode: the checkout's mode of the fixture does not count.
+        writeFileSync(dest, readFileSync(join(tree, rel)));
       }
       for (const rel of commit.executable ?? []) chmodSync(join(repo, rel), 0o755);
       git(repo, env, "add", "-A");
@@ -196,13 +214,123 @@ async function runStep(step: Step, ctx: EngineContext): Promise<unknown> {
       return check(ctx, opts);
     case "status":
       return status(ctx, opts);
+    default:
+      throw new Error(`step ${step.id}: unknown op ${step.op}`);
   }
 }
 
-/** The files a tree step compares (README: trees): HOME but the state dir and the marker, all of PROJECT. */
-function snapshot(r: Roots): Map<string, string> {
+let bundleDir: string | undefined;
+let cliPrefix: Promise<string[]> | undefined;
+
+/** The argv prefix of every `cli` step: SKILLETOR_CONFORMANCE_CLI, else node and this checkout's
+ *  bundle, built once (as test/cli.test.ts builds it). */
+function cli(): Promise<string[]> {
+  cliPrefix ??= (async () => {
+    if (CLI_OVERRIDE !== undefined) {
+      const prefix: unknown = JSON.parse(CLI_OVERRIDE);
+      if (!Array.isArray(prefix) || prefix.length === 0 || !prefix.every((a) => typeof a === "string")) {
+        throw new Error(`SKILLETOR_CONFORMANCE_CLI is no JSON array of strings: ${CLI_OVERRIDE}`);
+      }
+      return prefix as string[];
+    }
+    bundleDir = mkdtempSync(join(tmpdir(), "skilletor-conformance-cli-"));
+    const bundle = join(bundleDir, "skilletor.mjs"); // .mjs: Node runs the ESM bundle as ESM
+    writeFileSync(bundle, await buildToString());
+    return [process.execPath, bundle];
+  })();
+  return cliPrefix;
+}
+
+after(() => {
+  if (bundleDir) rmSync(bundleDir, { recursive: true, force: true });
+});
+
+/** A `cli` step's environment, built from nothing (README: cli): the case's, then the step's
+ *  variables on top of the fixed ones; a step's `null` unsets one. */
+function cliEnv(c: Case, step: Step, r: Roots): Record<string, string> {
+  const env: Record<string, string> = {
+    PATH: process.env.PATH ?? "",
+    HOME: r.home,
+    CODEX_HOME: join(r.home, ".codex"),
+    GIT_CONFIG_GLOBAL: join(r.tmp, "gitconfig"),
+    GIT_CONFIG_NOSYSTEM: "1",
+    LC_ALL: "C",
+  };
+  if (process.env.PERL5LIB !== undefined) env.PERL5LIB = process.env.PERL5LIB; // a Perl CLI's modules
+  for (const [k, v] of Object.entries(c.env ?? {})) env[k] = concrete(v, r);
+  for (const [k, v] of Object.entries(step.env ?? {})) {
+    if (v === null) delete env[k];
+    else env[k] = concrete(v, r);
+  }
+  return env;
+}
+
+/** Input placeholders in every string of a JSON value. */
+function concreteDeep(v: unknown, r: Roots): unknown {
+  if (typeof v === "string") return concrete(v, r);
+  if (Array.isArray(v)) return v.map((x) => concreteDeep(x, r));
+  if (v !== null && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, concreteDeep(x, r)]));
+  return v;
+}
+
+interface CliResult {
+  exit: number;
+  stdout: Buffer;
+  stderr: Buffer;
+}
+
+/** Run a `cli` step's CLI (README: cli): stdin a pipe with the step's bytes. One that does not
+ *  start, outlives its timeout or dies of a signal fails the step. */
+function runCli(prefix: string[], step: Step, r: Roots, env: Record<string, string>, timeout = CLI_TIMEOUT_MS): CliResult {
+  const argv = step.argv;
+  assert.ok(Array.isArray(argv) && argv.every((a) => typeof a === "string"), `step ${step.id}: argv is no array of strings`);
+  const stdin = step.stdin === undefined ? "" : typeof step.stdin === "string" ? concrete(step.stdin, r) : JSON.stringify(concreteDeep(step.stdin, r));
+  const res = spawnSync(prefix[0]!, [...prefix.slice(1), ...argv.map((a) => concrete(a, r))], {
+    cwd: step.cwd !== undefined ? concrete(step.cwd, r) : r.project ?? r.cwd,
+    env,
+    input: Buffer.from(stdin),
+    timeout,
+  });
+  if (res.error) throw new Error(`step ${step.id}: ${prefix.join(" ")} did not run to its end: ${res.error.message}`);
+  if (res.status === null) throw new Error(`step ${step.id}: ${prefix.join(" ")} was killed by ${res.signal}`);
+  return { exit: res.status, stdout: res.stdout, stderr: res.stderr };
+}
+
+/** Output placeholders on raw bytes (README: placeholders), `${VERSION}` only where asked. */
+function abstractBytes(bytes: Buffer, r: Roots, version: boolean): Buffer {
+  let text = bytes.toString("latin1"); // one char per byte: nothing is decoded, nothing lost
+  for (const [path, name] of placeholders(r)) text = text.split(Buffer.from(path).toString("latin1")).join(name);
+  if (version) text = text.split(VERSION).join("${VERSION}");
+  return Buffer.from(text, "latin1");
+}
+
+/** An expected stream: no file means empty; update mode writes none for an empty one. */
+function readStream(file: string): Buffer {
+  return existsSync(file) ? readFileSync(file) : Buffer.alloc(0);
+}
+
+function writeStream(file: string, bytes: Buffer): void {
+  if (bytes.length === 0) {
+    rmSync(file, { force: true });
+    return;
+  }
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, bytes);
+}
+
+/** The relative paths under HOME a tree leaves out (README: trees): the marker, skilletor's state
+ *  dir and the CLI's own, `${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/skilletor`. */
+function homeSkip(r: Roots, configDir: string | undefined): string[] {
+  const skip = [".claude/skilletor", ".claude.json"];
+  const rel = relative(r.home, join(configDir || join(r.home, ".claude"), "skilletor"));
+  if (rel && !rel.startsWith("..") && !isAbsolute(rel)) skip.push(rel.split(sep).join("/"));
+  return skip;
+}
+
+/** The files a tree step compares (README: trees): HOME but the state dirs and the marker, all of PROJECT. */
+function snapshot(r: Roots, skip: string[]): Map<string, string> {
   const out = new Map<string, string>();
-  for (const rel of walk(r.home, [".claude/skilletor", ".claude.json"])) {
+  for (const rel of walk(r.home, skip)) {
     out.set(`home/${escapeName(rel)}`, abstract(readFileSync(join(r.home, rel), "utf8"), r));
   }
   if (r.project) {
@@ -233,7 +361,7 @@ async function runCase(name: string): Promise<void> {
   const live = walk(caseDir).filter((rel) => rel.split("/").some((s) => s.startsWith(".git")));
   assert.deepEqual(live, [], `${name}: fixture names starting with .git must be stored escaped (dot.gitignore)`);
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), "skilletor-conformance-")));
-  const r: Roots = { tmp, home: join(tmp, "home") };
+  const r: Roots = { tmp, home: join(tmp, "home"), cwd: join(tmp, "cwd") };
   if (existsSync(join(caseDir, "project"))) r.project = join(tmp, "project");
   const saved = { ...process.env };
   try {
@@ -254,6 +382,7 @@ async function runCase(name: string): Promise<void> {
       mkdirSync(r.project, { recursive: true });
       copyInput(join(caseDir, "project"), r.project, r);
     }
+    mkdirSync(r.cwd);
     const ctx: EngineContext = {
       home: r.home,
       projectDir: r.project,
@@ -266,13 +395,39 @@ async function runCase(name: string): Promise<void> {
       gitTracked: () => [],
     };
     for (const step of c.steps) {
-      const actual = canonical(JSON.parse(abstract(JSON.stringify(await runStep(step, ctx)), r)));
       const file = join(caseDir, "expected", `${step.id}.json`);
-      if (UPDATE) writeJson(file, actual);
-      else assert.deepEqual(actual, canonical(JSON.parse(readFileSync(file, "utf8"))), `${name}: step ${step.id}`);
+      let configDir = process.env.CLAUDE_CONFIG_DIR;
+      if (step.op === "cli") {
+        const env = cliEnv(c, step, r);
+        configDir = env.CLAUDE_CONFIG_DIR;
+        const got = runCli(await cli(), step, r, env);
+        const stdout = abstractBytes(got.stdout, r, step.version === true);
+        const stderr = abstractBytes(got.stderr, r, step.version === true);
+        const base = join(caseDir, "expected", step.id);
+        const hook = step.argv![0] === "hook";
+        if (UPDATE) {
+          assert.ok(!hook || got.exit === 0, `${name}: step ${step.id}: a hook exits 0, this one ${got.exit}`);
+          writeJson(file, { exit: got.exit });
+          writeStream(`${base}.stdout`, stdout);
+          writeStream(`${base}.stderr`, stderr);
+        } else {
+          const want = JSON.parse(readFileSync(file, "utf8")) as { exit: unknown };
+          assert.ok(!hook || want.exit === 0, `${name}: step ${step.id}: a hook step must expect exit 0`);
+          assert.deepEqual(canonical({ exit: got.exit }), canonical(want), `${name}: step ${step.id}: the exit code; stderr: ${stderr}`);
+          for (const [stream, bytes] of [["stdout", stdout], ["stderr", stderr]] as const) {
+            const wantBytes = readStream(`${base}.${stream}`);
+            assert.equal(bytes.toString("utf8"), wantBytes.toString("utf8"), `${name}: step ${step.id}: ${stream}`);
+            assert.ok(bytes.equals(wantBytes), `${name}: step ${step.id}: ${stream}, byte for byte`);
+          }
+        }
+      } else {
+        const actual = canonical(JSON.parse(abstract(JSON.stringify(await runStep(step, ctx)), r)));
+        if (UPDATE) writeJson(file, actual);
+        else assert.deepEqual(actual, canonical(JSON.parse(readFileSync(file, "utf8"))), `${name}: step ${step.id}`);
+      }
       if (!step.tree) continue;
       const treeDir = join(caseDir, "expected", step.id);
-      const have = snapshot(r);
+      const have = snapshot(r, homeSkip(r, configDir));
       const execFile = join(caseDir, "expected", `${step.id}.executables.json`);
       const execs = executablesOf(r, have);
       if (UPDATE) {
@@ -307,3 +462,47 @@ test("conformance: the cases directory holds cases", () => {
 for (const name of cases) {
   test(`conformance: ${name}`, () => runCase(name));
 }
+
+// The harness itself (README: cli), on a stand-in CLI that reports what it got. Asserts: the
+// child's environment is exactly the fixed variables, the case's and the step's (a variable of
+// the runner – CLAUDE_PROJECT_DIR here – never leaks in, `null` unsets); argv, cwd and stdin take
+// the input placeholders; stdin is a string's bytes or a value's JSON.
+test("conformance: a cli step's CLI gets the README's environment, argv, cwd and stdin – nothing else", () => {
+  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "skilletor-conformance-")));
+  const r: Roots = { tmp, home: join(tmp, "home"), cwd: join(tmp, "cwd") };
+  mkdirSync(r.cwd);
+  const echo = [process.execPath, "-e", "process.stdout.write(JSON.stringify({ argv: process.argv.slice(1), cwd: process.cwd(), env: process.env, stdin: require('node:fs').readFileSync(0, 'utf8') }))"];
+  const c: Case = { description: "", env: { CLAUDE_CONFIG_DIR: "${HOME}/cfg", DROPPED: "x" }, steps: [] };
+  const step: Step = { id: "echo", op: "cli", argv: ["status", "${HOME}"], env: { DROPPED: null, EXTRA: "${TMP}/e" }, stdin: { cwd: "${HOME}", n: [1] } };
+  const saved = process.env.CLAUDE_PROJECT_DIR;
+  process.env.CLAUDE_PROJECT_DIR = tmp;
+  try {
+    const got = JSON.parse(runCli(echo, step, r, cliEnv(c, step, r)).stdout.toString("utf8"));
+    assert.deepEqual(got.argv, ["status", r.home]);
+    assert.equal(got.cwd, r.cwd);
+    assert.equal(got.stdin, JSON.stringify({ cwd: r.home, n: [1] }));
+    const want: Record<string, string> = {
+      PATH: process.env.PATH ?? "", HOME: r.home, CODEX_HOME: join(r.home, ".codex"), GIT_CONFIG_GLOBAL: join(tmp, "gitconfig"),
+      GIT_CONFIG_NOSYSTEM: "1", LC_ALL: "C", CLAUDE_CONFIG_DIR: join(r.home, "cfg"), EXTRA: join(tmp, "e"),
+    };
+    if (process.env.PERL5LIB !== undefined) want.PERL5LIB = process.env.PERL5LIB;
+    assert.deepEqual(got.env, want);
+    const raw = { ...step, stdin: "not json ${TMP}", cwd: "${HOME}" };
+    mkdirSync(r.home);
+    const got2 = JSON.parse(runCli(echo, raw, r, cliEnv(c, raw, r)).stdout.toString("utf8"));
+    assert.equal(got2.stdin, `not json ${tmp}`);
+    assert.equal(got2.cwd, r.home);
+  } finally {
+    if (saved === undefined) delete process.env.CLAUDE_PROJECT_DIR;
+    else process.env.CLAUDE_PROJECT_DIR = saved;
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("conformance: a cli step fails when its CLI dies of a signal or outlives its timeout", () => {
+  const r: Roots = { tmp: tmpdir(), home: tmpdir(), cwd: tmpdir() };
+  const step: Step = { id: "dies", op: "cli", argv: [] };
+  const env = { PATH: process.env.PATH ?? "" };
+  assert.throws(() => runCli([process.execPath, "-e", "process.kill(process.pid, 'SIGKILL')"], step, r, env), /killed by SIGKILL/);
+  assert.throws(() => runCli([process.execPath, "-e", "setTimeout(() => {}, 10000)"], step, r, env, 300), /did not run to its end.*ETIMEDOUT/);
+});

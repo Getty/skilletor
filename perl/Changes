@@ -9,6 +9,11 @@ Revision history for Skilletor
   - The sync, check and status reports keep the reference's key order, and
     Skilletor::Report's new report_json writes them byte for byte as
     skilletor sync|check|status --json prints them.
+  - A command line, bin/skilletor over Skilletor::CLI: the reference's usage
+    text, version (the plugin's, provisional), option checks, usage errors and
+    exit codes, byte for byte; no command runs yet - each says it is not
+    ported and exits 1. Skilletor::Process::run_command feeds stdin through a
+    pipe when given one.
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's

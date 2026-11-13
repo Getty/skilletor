@@ -7,7 +7,9 @@ explicit go-ahead. Everything before step 4 is local and can run anytime.
 
 1. **Version** — bump `package.json`, `package-lock.json` (root and `packages[""]`),
    `.codex-plugin/plugin.json` and the Hermes plugin's
-   `hermes/skilletor/plugin.yaml` to the same version
+   `hermes/skilletor/plugin.yaml` to the same version, and `CLI_VERSION` in
+   `perl/lib/Skilletor/CLI.pm` (the Perl CLI reports the plugin's version, provisional until
+   k167; `perl/t/60-conformance.t` fails while it differs from `package.json`)
    (`.claude-plugin/plugin.json` carries no `version`: Claude Code takes it from the commit);
    `npm run build` (the CLI version is injected from `package.json` at build time).
    In `Changes`, turn the `{{$NEXT}}` line into the version line
