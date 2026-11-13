@@ -3,8 +3,8 @@
 # from the same pristine state, and must leave the same bytes – installed files, lock, .gitignore
 # blocks, .worktreeinclude, settings.json and the state records `check` reads (render-inputs.json
 # with its hash, sources-read.json, unreached.json), rendered templates with the default host and
-# user – and the same reports; each one's `check` must accept what the other synced. Needs node
-# and the TypeScript tree beside perl/.
+# user – and the same reports, down to the bytes `--json` prints (k171); each one's `check` must
+# accept what the other synced. Needs node and the TypeScript tree beside perl/.
 use strict;
 use warnings;
 use Test::More;
@@ -17,6 +17,7 @@ use Path::Tiny qw( path tempdir );
 use Skilletor::Engine;
 use Skilletor::FSUtil qw( decode_utf8_lossy encode_text );
 use Skilletor::JSON qw( js_parse js_sort_keys js_stringify js_type );
+use Skilletor::Report qw( report_json );
 
 my $runner = path( $FindBin::Bin, '..', 'maint', 'ts-run.mjs' );
 my $src_ts = path( $FindBin::Bin, '..', '..', 'src', 'engine.ts' );
@@ -52,9 +53,18 @@ sub canonical {
   return $v;
 }
 
-sub same_json {
+# The reference's report of a sync, check or status as `--json` prints it: { text, report }.
+sub ts_report {
+  my ( $op, $req ) = @_;
+  my $text = ts( { op => $op, %$req, json => JSON::MaybeXS::true() } );
+  return { text => $text, report => js_parse($text) };
+}
+
+# The same report: the same data, then the same bytes – key order, every array in its order.
+sub same_report {
   my ( $perl, $ts, $name ) = @_;
-  is( js_stringify( canonical( js_parse( js_stringify($perl) ) ), 2 ), js_stringify( canonical($ts), 2 ), $name );
+  is( js_stringify( canonical( js_parse( js_stringify($perl) ) ), 2 ), js_stringify( canonical( $ts->{report} ), 2 ), "$name: the same data" );
+  is( report_json($perl), $ts->{text}, "$name: the same --json bytes" );
 }
 
 sub files {
@@ -175,7 +185,8 @@ my $engine = Skilletor::Engine->new(
   git_tracked      => sub { [] },
 );
 
-my $ts_sync = ts( { op => 'sync', %$req } );
+my $ts_sync_json = ts_report( sync => $req );
+my $ts_sync = $ts_sync_json->{report};
 my %after_ts = (
   home    => tree( $home, '.claude/skilletor' ),
   project => tree( $proj, '.git' ),
@@ -193,15 +204,15 @@ is( scalar( grep { /\Atemplate error in skill broken: / } map { @{ $_->{warnings
 subtest 'the port checks and reports what the reference synced' => sub {
   my $perl_check = $engine->check;
   only_local_moved( $perl_check, 'the port' );
-  same_json( $perl_check, ts( { op => 'check', %$req } ), 'the same check report' );
-  same_json( $engine->status, ts( { op => 'status', %$req } ), 'the same status report' );
+  same_report( $perl_check, ts_report( check => $req ), 'the same check report' );
+  same_report( $engine->status, ts_report( status => $req ), 'the same status report' );
 };
 
 restore();
 my $perl_sync = $engine->sync;
 
 subtest 'the port syncs as the reference did, byte for byte' => sub {
-  same_json( $perl_sync, $ts_sync, 'the same sync report' );
+  same_report( $perl_sync, $ts_sync_json, 'the same sync report' );
   my %after_perl = (
     home    => tree( $home, '.claude/skilletor' ),
     project => tree( $proj, '.git' ),
@@ -216,10 +227,10 @@ subtest 'the port syncs as the reference did, byte for byte' => sub {
 };
 
 subtest 'the reference checks what the port synced' => sub {
-  my $ts_check = ts( { op => 'check', %$req } );
-  only_local_moved( $ts_check, 'the reference' );
-  same_json( $engine->check, $ts_check, 'the same check report' );
-  same_json( $engine->sync, ts( { op => 'sync', %$req } ), 'a second sync of each: the same report' );
+  my $ts_check = ts_report( check => $req );
+  only_local_moved( $ts_check->{report}, 'the reference' );
+  same_report( $engine->check, $ts_check, 'the same check report' );
+  same_report( $engine->sync, ts_report( sync => $req ), 'a second sync of each: the same report' );
 };
 
 done_testing;

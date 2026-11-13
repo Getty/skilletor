@@ -1,7 +1,7 @@
 // The reference implementation, driven from the Perl test suite (t/50-parity.t,
-// t/51-parity-resolve.t, t/52-parity-sync.t, t/53-parity-render.t): reads one JSON request on
-// stdin, runs it against ../src, prints the answer as JSON. Never part of the CPAN dist; the tests
-// skip without it, without node or without the TypeScript tree beside perl/.
+// t/51-parity-resolve.t, t/52-parity-sync.t, t/53-parity-render.t, t/65-report-json.t): reads one
+// JSON request on stdin, runs it against ../src, prints the answer as JSON. Never part of the CPAN
+// dist; the tests skip without it, without node or without the TypeScript tree beside perl/.
 //
 //   { "op": "backend", "src": {...}, "home": "/h" }                 -> resolveBackend
 //   { "op": "git", "action": "resolve" | "check", "opts": {...}, "cached": "git:abc" }
@@ -10,6 +10,10 @@
 //   { "op": "sweep", "root": "/c" }                                 -> sweepGitCache + sweepUrlCache
 //   { "op": "resolve", "home": "/h", "projectDir": "/p", "scope": "all" } -> resolveItems
 //   { "op": "sync" | "check" | "status", "home": "/h", "projectDir": "/p", "scope": "all", "force": false }
+//     "json": true -> the report as `skilletor <op> --json` prints it (no final newline), not the object
+//     "host", "user": the render context's, as the conformance cases fix them (optional)
+//   { "op": "steps", "home": "/h", "projectDir": "/p", "steps": [ { "op": "sync", "scope": "all", "force": false } ] }
+//     -> each resolve, sync, check or status step in turn on one context, as `--json` would print it
 //   { "op": "lock", "root": "/s", "timeoutMs": 200, "holdMs": 0 }  -> State.withLock: "ran"
 //   { "op": "render", "cases": [ { "item": {...}, "sourceDir": "/s", "context": {...} } ] }
 //     -> per case build, executables, rendersEmpty: { output: [[path, hex]], executables, rendersEmpty }
@@ -18,6 +22,7 @@
 import { readFileSync } from "node:fs";
 import { check, resolveBackend, resolveItems, status, sync } from "../../src/engine.ts";
 import { build, executables, rendersEmpty } from "../../src/render.ts";
+import { displaySafe, reportJson } from "../../src/report.ts";
 import { GitSource, sweepGitCache } from "../../src/sources/git.ts";
 import { UrlSource, sweepUrlCache } from "../../src/sources/url.ts";
 import { State } from "../../src/state.ts";
@@ -27,7 +32,27 @@ const req = JSON.parse(readFileSync(0, "utf8"));
 const ctxOf = (r) => ({
   home: r.home, projectDir: r.projectDir ?? undefined, stateRoot: `${r.home}/.claude/skilletor`,
   codexHome: `${r.home}/.codex`, hermesHome: `${r.home}/.hermes`, isGitWorkTree: () => false, gitTracked: () => [],
+  ...(r.host ? { host: r.host } : {}), ...(r.user ? { user: r.user } : {}),
 });
+/** A report as the CLI's `--json` prints it (cli.ts: reportJson or JSON.stringify, then printText),
+ *  without the final newline. */
+const printed = (op, report) =>
+  (op === "sync" ? reportJson(report) : JSON.stringify(report, null, 2)).split("\n").map(displaySafe).join("\n");
+const engineOp = async (ctx, step) => {
+  const opts = { scope: step.scope ?? "all" };
+  switch (step.op) {
+    case "resolve":
+      return resolveItems(ctx, opts);
+    case "sync":
+      return sync(ctx, { ...opts, force: step.force ?? false });
+    case "check":
+      return check(ctx, opts);
+    case "status":
+      return status(ctx, opts);
+    default:
+      throw new Error(`unknown step op ${step.op}`);
+  }
+};
 const run = async () => {
   switch (req.op) {
     case "backend":
@@ -45,11 +70,17 @@ const run = async () => {
     case "resolve":
       return resolveItems(ctxOf(req), { scope: req.scope ?? "all" });
     case "sync":
-      return sync(ctxOf(req), { scope: req.scope ?? "all", force: req.force ?? false });
     case "check":
-      return check(ctxOf(req), { scope: req.scope ?? "all" });
-    case "status":
-      return status(ctxOf(req), { scope: req.scope ?? "all" });
+    case "status": {
+      const report = await engineOp(ctxOf(req), req);
+      return req.json ? printed(req.op, report) : report;
+    }
+    case "steps": {
+      const ctx = ctxOf(req);
+      const out = [];
+      for (const step of req.steps) out.push(printed(step.op, await engineOp(ctx, step)));
+      return out;
+    }
     case "lock":
       return new State(req.root).withLock(() => new Promise((done) => setTimeout(() => done("ran"), req.holdMs ?? 0)), { timeoutMs: req.timeoutMs });
     case "render":

@@ -7,7 +7,7 @@ use warnings;
 use Cwd ();
 use Skilletor::Error;
 use Skilletor::FSUtil qw( decode_utf8_lossy path_resolve );
-use Skilletor::JSON ();
+use Skilletor::JSON qw( js_ordered );
 use Skilletor::Source::Git;
 use Skilletor::Source::Local;
 use Skilletor::Source::Url;
@@ -83,7 +83,7 @@ sub identity {
 # A trust request for a source, naming the backend that would be used.
 sub trust_request {
   my ( $self, $name, $backend ) = @_;
-  return { name => $name, kind => $backend->{kind}, url => $backend->{address} };
+  return js_ordered( name => $name, kind => $backend->{kind}, url => $backend->{address} );
 }
 
 1;
@@ -132,7 +132,7 @@ The backend identity a run resolves once (C<JSON.stringify([kind, address, ref ?
 
 =method trust_request
 
-  Skilletor::Backend->trust_request( $name, $backend );   # { name, kind, url }
+  Skilletor::Backend->trust_request( $name, $backend );   # { name, kind, url }, in that key order
 
 =method local_dir
 

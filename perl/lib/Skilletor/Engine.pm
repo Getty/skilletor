@@ -319,13 +319,13 @@ sub sync {
       Skilletor::Source::Url->sweep_cache( $self->cache_root );
       Skilletor::Source::Git->sweep_cache( $self->cache_root );
       my ( $config, $targets );
-      return { scopes => [], error => _message($@) } unless eval { ( $config, $targets ) = $self->_load_strict; 1 };
+      return js_ordered( scopes => [], error => _message($@) ) unless eval { ( $config, $targets ) = $self->_load_strict; 1 };
       my @scopes = _scopes_of( $config, $sel );
       if ( defined( my $why = $self->_unsupported_targets( $targets, @scopes ) // $self->_foreign_state(@scopes) ) ) {
-        return { scopes => [], error => $why };
+        return js_ordered( scopes => [], error => $why );
       }
       my $run = {};
-      my $out = { scopes => [] };
+      my $out = js_ordered( scopes => [] );
       for my $s (@scopes) {
         my ( $scope, $scope_cfg ) = @$s;
         my $rep = $self->_sync_scope( $config, $scope_cfg, $scope, $targets->{$scope}, \%opts, $state, $run );
@@ -389,7 +389,7 @@ sub _sync_scope_run {
       return 0 unless @targets;
       for my $h (@targets) {
         my $key = lock_key( $h, $item->{target} );
-        $key_info{$key} = { key => $key, type => $item->{type}, name => $item->{name}, source => $item->{source} };
+        $key_info{$key} = js_ordered( key => $key, type => $item->{type}, name => $item->{name}, source => $item->{source} );
       }
       return 1;
     },
@@ -507,7 +507,7 @@ sub _sync_scope_run {
     $out->{settingsSkipped} = [ @{ $settings->{warnings} } ] if @{ $settings->{warnings} };
     if ( defined $settings->{next} ) {
       if ( eval { write_text( $file, $settings->{next} ); 1 } ) {
-        $out->{settingsUpdated} = { path => $label, enabled => $settings->{enabled}, declared => $settings->{declared} };
+        $out->{settingsUpdated} = js_ordered( path => $label, enabled => $settings->{enabled}, declared => $settings->{declared} );
       }
       else {
         push @$warnings, $label.' not updated: '._message($@);
@@ -523,7 +523,9 @@ sub _sync_scope_run {
 
   my $to_change = sub {
     my ( $key ) = @_;
-    return $key_info{$key} // { key => $key, %{ key_to_type_name($key) }, source => ( $info->{old_lock}{$key} || {} )->{source} // '?' };
+    return $key_info{$key} if $key_info{$key};
+    my $t = key_to_type_name($key);
+    return js_ordered( key => $key, type => $t->{type}, name => $t->{name}, source => ( $info->{old_lock}{$key} || {} )->{source} // '?' );
   };
   $out->{$_} = [ map { $to_change->($_) } @{ $result->{$_} } ] for qw( added updated removed unchanged skipped );
   my $shown = sub {
@@ -533,13 +535,13 @@ sub _sync_scope_run {
   };
   $out->{conflicts} = [
     map {
-      my $c = { path => $shown->($_) };
+      my $c = js_ordered( path => $shown->($_) );
       $c->{replace} = $_->{replace} if $_->{replace};
       $c->{notFile} = $_->{notFile} if $_->{notFile};
       $c;
     } @{ $result->{conflicts} }
   ];
-  $out->{overwritten} = [ map { { path => $shown->($_) } } @{ $result->{overwritten} } ];
+  $out->{overwritten} = [ map { js_ordered( path => $shown->($_) ) } @{ $result->{overwritten} } ];
   for my $l ( @{ $result->{leftInPlace} } ) {
     push @$warnings, $shown->($l).' is a symbolic link: files of '.$l->{key}.' behind it left in place (never deleted through a link)';
   }
@@ -695,7 +697,7 @@ sub _briefing_of {
     next unless defined $root && defined $file;
     $roots_of{ $k->{harness} } //= skill_roots( $k->{harness}, $scope, $roots );
     my $missing = missing_skills( $k->{harness}, path_join( $root, $file ), $roots_of{ $k->{harness} } );
-    push @out, { key => $key, harness => $k->{harness}, missing => $missing } if $missing && @$missing;
+    push @out, js_ordered( key => $key, harness => $k->{harness}, missing => $missing ) if $missing && @$missing;
   }
   return @out;
 }
@@ -801,14 +803,14 @@ sub check {
   my $sel = $opts{scope} // 'all';
   my ( $config, $targets );
   unless ( eval { ( $config, $targets ) = $self->_load_strict; 1 } ) {
-    return { changed => _false, sources => [], warnings => [], error => _message($@) };
+    return js_ordered( changed => _false, sources => [], warnings => [], error => _message($@) );
   }
   my @scopes = _scopes_of( $config, $sel );
   if ( defined( my $why = $self->_unsupported_targets( $targets, @scopes ) ) ) {
-    return { changed => _false, sources => [], warnings => [], error => $why };
+    return js_ordered( changed => _false, sources => [], warnings => [], error => $why );
   }
   my $state = Skilletor::State->new( root => $self->state_root );
-  my $out = { changed => _false, sources => [], warnings => [] };
+  my $out = js_ordered( changed => _false, sources => [], warnings => [] );
   my %field = ( targets => 'targetsChanged', layout => 'layoutChanged', declared => 'declaredChanged' );
 
   for my $s (@scopes) {
@@ -852,12 +854,13 @@ sub check {
         my $backend = Skilletor::Backend->resolve( $src, $self->home );
         if ( !$state->is_trusted( $name, $backend ) ) {
           # Named in every check, as a sync names it (spec §4.3); never fetched.
-          push @{ $out->{trustRequests} }, { scope => $scope, %{ Skilletor::Backend->trust_request( $name, $backend ) } };
+          my $t = Skilletor::Backend->trust_request( $name, $backend );
+          push @{ $out->{trustRequests} }, js_ordered( scope => $scope, map { ( $_ => $t->{$_} ) } keys %$t );
           return 1;
         }
         my $version = _checked_version( $read->{$name}, $backend, $old_lock, $name );
         my $changed = Skilletor::Backend->make( $backend, $self->cache_root, $self->timeout_ms )->check($version) ? 1 : 0;
-        push @{ $out->{sources} }, { name => $name, scope => $scope, changed => $changed ? _true : _false };
+        push @{ $out->{sources} }, js_ordered( name => $name, scope => $scope, changed => $changed ? _true : _false );
         $out->{changed} = _true if $changed;
         1;
       };
@@ -873,13 +876,13 @@ sub status {
   my ( $self, %opts ) = @_;
   my $sel = $opts{scope} // 'all';
   my ( $config, $targets );
-  return { scopes => [], error => _message($@) } unless eval { ( $config, $targets ) = $self->_load_strict; 1 };
+  return js_ordered( scopes => [], error => _message($@) ) unless eval { ( $config, $targets ) = $self->_load_strict; 1 };
   my @scopes = _scopes_of( $config, $sel );
   if ( defined( my $why = $self->_unsupported_targets( $targets, @scopes ) ) ) {
-    return { scopes => [], error => $why };
+    return js_ordered( scopes => [], error => $why );
   }
   my $state = Skilletor::State->new( root => $self->state_root );
-  my $out = { scopes => [] };
+  my $out = js_ordered( scopes => [] );
   my $given = $self->project_dir;
   $out->{projectIsHome} = _true if $sel ne 'user' && defined $given && length $given && !defined $self->project_dir_of;
 
@@ -904,7 +907,7 @@ sub status {
     # A skip entry is declared but deliberately not installed.
     my @declared = map {
       my $entry = $lock->{ $_->{key} };
-      my $d = { key => $_->{key}, source => $_->{source}, installed => ( $entry && !$entry->{skipped} ) ? _true : _false };
+      my $d = js_ordered( key => $_->{key}, source => $_->{source}, installed => ( $entry && !$entry->{skipped} ) ? _true : _false );
       $d->{skipped} = $entry->{skipped} if $entry && $entry->{skipped};
       $d->{partial} = _true if $entry && $entry->{partial};
       $d;
@@ -922,10 +925,10 @@ sub status {
       }
       my $label = exists $first->{pattern} ? $first->{raw} : Skilletor::Resolver->bundle_label($first);
       if ( $entry->{skipped} ) {
-        push @declared, { key => $key, source => $entry->{source}, installed => _false, via => $label, skipped => $entry->{skipped} };
+        push @declared, js_ordered( key => $key, source => $entry->{source}, installed => _false, via => $label, skipped => $entry->{skipped} );
         next;
       }
-      my $d = { key => $key, source => $entry->{source}, installed => _true, via => $label };
+      my $d = js_ordered( key => $key, source => $entry->{source}, installed => _true, via => $label );
       $d->{partial} = _true if $entry->{partial};
       push @declared, $d;
       $via{ refaddr $_ }{ $k->{target} } = 1 for @covering;
@@ -933,18 +936,19 @@ sub status {
     my %installed = map { ( $_->{key} => 1 ) } grep { $_->{installed} } @declared;
     my %missing = map { ( $_->{key} => $_->{missing} ) } $self->_briefing_of( $scope, $lock, \%installed );
     $_->{briefingMissing} = $missing{ $_->{key} } for grep { $missing{ $_->{key} } } @declared;
-    push @{ $out->{scopes} }, {
+    my $installed_via = sub { 0 + keys %{ $via{ refaddr $_[0] } // {} } };
+    push @{ $out->{scopes} }, js_ordered(
       scope     => $scope,
       targets   => [@$active],
       declared  => \@declared,
       orphans   => \@orphans,
-      wildcards => [ map { { type => $_->{type}, source => $_->{source}, entry => $_->{raw}, installed => 0 + keys %{ $via{ refaddr $_ } // {} } } }
+      wildcards => [ map { js_ordered( type => $_->{type}, source => $_->{source}, entry => $_->{raw}, installed => $installed_via->($_) ) }
           @{ $scope_cfg->{wildcards} } ],
-      bundles => [ map { { name => $_->{name}, source => $_->{source}, entry => $_->{raw}, installed => 0 + keys %{ $via{ refaddr $_ } // {} } } }
+      bundles => [ map { js_ordered( name => $_->{name}, source => $_->{source}, entry => $_->{raw}, installed => $installed_via->($_) ) }
           @{ $scope_cfg->{bundles} } ],
       trustRequests  => \@trust,
       sourceVersions => $versions,
-    };
+    );
   }
   return $out;
 }
@@ -976,11 +980,14 @@ What it writes is the reference's, byte for byte – installed files with their
 executable bits, the lock, the C<.gitignore> blocks, C<.worktreeinclude>,
 C<.claude/settings.json> – and the reports are the reference's C<SyncReport>,
 C<CheckReport> and C<StatusReport>, field for field, booleans as
-L<JSON::MaybeXS> booleans. The state records (C<render-inputs.json> with the
-same C<RENDER_FORMAT>, C<sources-read.json>, C<unreached.json>) are the same
-bytes too, so a C<check> of either implementation accepts what the other
-synced: the shared conformance cases and F<t/52-parity-sync.t> hold both to
-that. Like the reference, a sync holds the sync lock (L<Skilletor::State/with_lock>);
+L<JSON::MaybeXS> booleans, every object's keys in the order the reference
+builds them (hashes from L<Skilletor::JSON/js_ordered>), so
+L<Skilletor::Report/report_json> prints the bytes C<--json> prints. The state
+records (C<render-inputs.json> with the same C<RENDER_FORMAT>,
+C<sources-read.json>, C<unreached.json>) are the same bytes too, so a C<check>
+of either implementation accepts what the other synced: the shared conformance
+cases, F<t/52-parity-sync.t> and F<t/65-report-json.t> hold both to that. Like
+the reference, a sync holds the sync lock (L<Skilletor::State/with_lock>);
 C<check> and C<status> read without it.
 
 =head2 Claude Code only
@@ -1075,10 +1082,10 @@ reference's does.
       unchanged => [...], skipped => [...],
       conflicts => [ { path, replace?, notFile? } ], overwritten => [ { path } ],
       warnings => [...], trustRequests => [ { name, kind, url } ],
-      briefingMissing?  => [ { key, harness, missing => [...] } ],
       gitignoreUpdated? => [ '.claude/.gitignore', '.worktreeinclude' ],
-      settingsUpdated?  => { path, enabled => [...], declared => [...] },
       settingsSkipped?  => [...],
+      settingsUpdated?  => { path, enabled => [...], declared => [...] },
+      briefingMissing?  => [ { key, harness, missing => [...] } ],
     } ],
     error? => $message,
   }

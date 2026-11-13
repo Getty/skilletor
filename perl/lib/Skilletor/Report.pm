@@ -6,13 +6,14 @@ use warnings;
 use utf8;
 
 use Exporter qw( import );
+use Skilletor::JSON qw( js_ordered js_stringify );
 use Skilletor::Lock qw( parse_lock_key );
 
 our $VERSION = '0.002';
 
 our @EXPORT_OK = qw(
   ACTIVATION empty_scope_report display_safe backend_label conflict_hint has_changes has_notable
-  report_text status_text check_text exit_code
+  report_json report_text status_text check_text exit_code
 );
 
 # Per item type: when Claude Code sees an item a sync installed (spec §12).
@@ -32,10 +33,10 @@ sub _activation_of {
 
 sub empty_scope_report {
   my ( $scope ) = @_;
-  return {
+  return js_ordered(
     scope => $scope, added => [], updated => [], removed => [], unchanged => [], skipped => [], conflicts => [], overwritten => [],
     warnings => [], trustRequests => [],
-  };
+  );
 }
 
 my %C0 = ( "\b" => '\\b', "\f" => '\\f', "\n" => '\\n', "\r" => '\\r' );
@@ -85,6 +86,13 @@ sub _settings_hint {
   push @what, 'enables '.join( ', ', @{ $u->{enabled} } ) if @{ $u->{enabled} };
   push @what, 'declares marketplace'.( @{ $u->{declared} } > 1 ? 's' : '' ).' '.join( ', ', @{ $u->{declared} } ) if @{ $u->{declared} };
   return $u->{path}.' updated ('.join( '; ', @what ).') — commit it';
+}
+
+# A report as `--json` prints it: JSON.stringify(report, null, 2), each line display-safe (the
+# CLI's printText); no final newline.
+sub report_json {
+  my ( $r ) = @_;
+  return join "\n", map { display_safe($_) } split /\n/, js_stringify( $r, 2 ), -1;
 }
 
 # The sync report as the CLI prints it; empty when there is nothing to say.
@@ -169,12 +177,23 @@ sub exit_code {
 =description
 
 The reference's C<report.ts> (spec §8), and the text C<skilletor status> and
-C<skilletor check> print (C<cli.ts>). The reports themselves are plain data –
-what C<skilletor sync --json>, C<check --json> and C<status --json> print –
-built by L<Skilletor::Engine>; this module words them for a person or a model's
-context, line for line as the CLI does: the same marks, the same activation
-hints (a skill is active at once, an agent or rule after C</reload-plugins>),
-every line passed through L</display_safe>.
+C<skilletor check> print (C<cli.ts>). The reports themselves are plain data,
+built by L<Skilletor::Engine> with their keys in the reference's order;
+L</report_json> writes them as C<skilletor sync --json>, C<check --json> and
+C<status --json> print them. The other functions word them for a person or a
+model's context, line for line as the CLI does: the same marks, the same
+activation hints (a skill is active at once, an agent or rule after
+C</reload-plugins>), every line passed through L</display_safe>.
+
+=func report_json
+
+  print report_json( $sk->sync ), "\n";
+
+A sync, check or status report as the CLI's C<--json> prints it, byte for
+byte: C<JSON.stringify(report, null, 2)> (L<Skilletor::JSON/js_stringify>),
+keys in their order, every line through L</display_safe>, without the final
+newline. The escapes are JSON's own, so the text parses back to the same
+values.
 
 =func report_text
 
