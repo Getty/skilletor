@@ -1,0 +1,33 @@
+---
+class: standard
+completed: 2026-11-13T21:03:48Z
+created: 2026-11-13T20:35:11Z
+id: 164
+priority: high
+started: 2026-11-13T20:45:27Z
+status: done
+tags:
+- hooks
+- bug
+- ts
+title: Hook from a deleted cwd exits 1 with a stack trace
+updated: 2026-11-13T21:03:48Z
+---
+
+Found by the Perl-CLI gap scout (2026-11-13), verified by hand probe: `node dist/skilletor.js hook session-start` run from a cwd that no longer exists prints `skilletor: Error: ENOENT: process.cwd failed … uv_cwd` plus a stack trace on stderr and exits 1.
+
+Cause: run() calls makeContext → projectRootOf(process.cwd()) (src/cli.ts:231) before the hook branch and outside its try (:233). That breaks the hook contract (spec §8: a hook never fails, exits 0), and every hook call spawns a needless `git rev-parse` (the hook path takes its project from SKILLETOR_PROJECT_DIR / CLAUDE_PROJECT_DIR / the payload cwd).
+
+Done: the hook branch builds its context inside the exit-0 wrapper (no rev-parse it does not need); a black-box test through the CLI from a removed cwd exits 0, silent or with a systemMessage; dist rebuilt. The Perl CLI (strand card) mirrors the fixed behaviour.
+
+Same contract, second hole (conformance scout, read from the code, JS behaviour confirmed with a minimal snippet): cli.ts:340 'return runHookCommand(...)' without await inside the try, so a rejection skips the catch at :345; homedir() at :380 sits outside the inner try (:390). A throw there exits 1 with a stack (:415-421). Fix both with the deleted-cwd case.
+
+2026-11-13 20:48 Reproduced by hand (temp HOME/CODEX_HOME, cwd removed under sh): dist hook session-start prints 'skilletor: Error: ENOENT: process.cwd failed … uv_cwd' + stack from makeContext2, exit 1. Plan: hook dispatch moves ahead of makeContext and the --scope check; runHookCommand wraps its whole body (homedir included) in the exit-0 catch, so it never rejects. Tests in test/cli.test.ts: removed cwd via sh, an os.homedir fault via --import preload (pins the second hole), a fake git on PATH (no rev-parse when the project is known).
+
+2026-11-13 20:51 Also found (not in this card's scope; changes what a non-hook command prints, so left alone): src/render.ts:111 installPath() calls posix.relative(item.dir, file) on two relative paths, which resolves them against process.cwd(). From a removed cwd every item with a dir (every skill) fails as 'template error in skill foo: ENOENT … uv_cwd' — in the hook (exit 0, one warning, item left at its old state) and in 'skilletor sync --project-dir X' alike. Fix idea: posix.relative('/' + item.dir, '/' + file) or a prefix slice. Agents/rules at a source's agents/ or rules/ have no dir and sync fine. Candidate card for the TS board; the Perl port should be checked for the same (File::Spec->abs2rel on relative paths reads the cwd too).
+
+2026-11-13 20:57 Also found (left as is: it is what a non-hook command prints): 'skilletor status' (any command without --project-dir) from a removed cwd still exits 1 with 'skilletor: Error: ENOENT … uv_cwd' plus a stack, from makeContext outside run()'s try. A one-line error with exit 1 or 2 would be the fix; candidate card for the TS board, and the Perl CLI strand (k181) should decide the same case on purpose.
+
+2026-11-13 20:58 Done. src/cli.ts: run() dispatches 'hook' right after parseFlags, ahead of the unknown-option and --scope checks and of makeContext, so the hook path no longer calls process.cwd() or runs git rev-parse on it; 'case hook' left the switch, and the dead 'cmd === hook' guard on unknownOption went with it. runHookCommand wraps its whole body (homedir(), claudeConfigDirOf, ctx) in its exit-0 catch, so it never rejects; the missing await no longer matters because nothing can reject. dist/skilletor.js rebuilt. Tests (test/cli.test.ts, black-box through the built bundle): (1) hooks from a cwd removed under sh exit 0 with empty stderr: session-start with the payload cwd syncs a rule; session-start and user-prompt-submit with CLAUDE_PROJECT_DIR = the removed dir are silent; an empty payload gives one systemMessage ending in uv_cwd. Skipped on win32. (2) os.homedir faulted via an --import preload: session-start and user-prompt-submit exit 0 with exactly {systemMessage: 'skilletor: no home directory (test fault)'}. This pins the second hole on its own; checked against a half fix that keeps HEAD's runHookCommand. (3) a logging fake git on PATH: user-prompt-submit with CLAUDE_PROJECT_DIR never calls git. Skipped on win32. (4) the hygiene test adds 'hook session-start --scope bogus' with exit 0 and empty stderr; it was exit 2. All four fail on HEAD (checked in a temp copy), pass now. Non-hook commands are unchanged. npm run typecheck clean; npm test 1121 tests / 1120 pass / 0 fail / 1 skipped (hermes plugins install, needs SKILLETOR_HERMES_INSTALL=1); check-dist: up to date. Drift notes above: render.ts:111 reads the cwd; non-hook commands from a removed cwd still exit 1 with a stack.
+
+Committed as 161f605
