@@ -1,0 +1,44 @@
+---
+class: standard
+completed: 2026-11-13T21:55:29Z
+created: 2026-11-13T20:43:28Z
+depends_on:
+- 171
+id: 180
+priority: high
+started: 2026-11-13T21:12:12Z
+status: done
+tags:
+- perl
+- hooks
+title: 'Perl engine: hook prerequisites (check local, deadline, hook state, reportHook)'
+updated: 2026-11-13T21:55:29Z
+---
+
+Part of the Perl CLI strand (see the strand card). These are the engine and state pieces the hooks need. Each is unit-tested, with no CLI involved yet.
+
+Engine options:
+- check {local};
+- sync {deadline, ifChanged} with the deadline error text (engine.ts:1002-1004);
+- lockTimeoutMs per call.
+
+State:
+- pending-report.json (state.ts:239-252);
+- session-cwd.json (at most 256 entries, each {cwd, at}; :258-278);
+- dueAgain and clearChecked.
+
+Report: reportHook and withoutRepeats (report.ts:206-264). Their text must be byte-identical with node on the report.test.ts inputs.
+
+Done: the Perl suite is green.
+
+2026-11-13 21:16 Plan: State.pm gains put_pending_report/take_pending_report (pending-report.json), session_cwd/put_session_cwd (session-cwd.json, 256 kept, stable newest-first prune) and due_again (clear_checked, best effort; clear_checked exists). Report.pm gains report_hook (+ private _without_repeats) and has_notable follows TS truthiness of error. Engine.pm: check(local => 1) skips the source version checks after the trust check; sync(if_changed => 1) runs a local check under the sync lock and returns {scopes: []} when nothing changed and no error; sync(deadline => epoch ms) dies 'sync stopped before writing anything: its sources took too long' after the resolve/build, before apply; sync(lock_timeout_ms => N) per call. Tests: new t/26-state-hooks.t, t/66-report-hook.t, t/67-engine-hook-options.t; TS parity through new ts-run.mjs ops (state, reportHook) and engine options in the sync/check ops.
+
+2026-11-13 21:20 report_hook done (Report.pm): new t/66-report-hook.t, 28 inputs (the 12 of report.test.ts plus withoutRepeats, harness marks, settings hints, empty error), pinned values and byte parity with node through ts-run's new reportHook op; red before (not exported), green now (112 tests). Mutations caught: no withoutRepeats (10 fail), settings warnings filtered despite settingsUpdated (2), no harness mark (2), overwritten not counted (6), has_notable on defined error (3). Found and fixed on the way (needed for parity): Report.pm _activation_of returned '' instead of ACTIVATION for a key with an unknown harness prefix ((defined $h && …) // … never falls through); this also changes report_text for such keys, which a sync never reports (unknown-prefix entries are kept). has_notable now uses JS truthiness for error (an empty error is no error), as hasNotable does; report_text/status_text/check_text/exit_code still test defined, a divergence only for error '' (never produced) - left as is.
+
+2026-11-13 21:24 State done (State.pm): put_pending_report/take_pending_report (pending-report.json; taking a key not there writes nothing), session_cwd/put_session_cwd (session-cwd.json {cwd, at}; same cwd writes nothing; keeps the 255 other sessions with the newest at plus this one, ties in the file's key order, a non-number at as 0), due_again (clear_checked in an eval, never throws). New t/26-state-hooks.t: pinned bytes plus 7 sequences replayed in TS through ts-run's new 'state' op with Date.now fixed per call (300-entry file with ties, index-like ids, malformed entries, string and float at) - same answers, same files byte for byte. Mutations caught: tie order reversed, 256 instead of 255 others, take writing for a missing key, no same-cwd early return, string at numified, due_again without eval.
+
+2026-11-13 21:43 Engine done (Engine.pm): check(local => 1) skips the source checks after the trust check (trust requests still named, sources stays empty); sync(if_changed => 1) runs check(scope, local) after the sweeps under the sync lock and returns {scopes: []} when not changed and no error; sync(deadline => ms) dies 'sync stopped before writing anything: its sources took too long' right after _resolve_scope, before apply, when _now_ms() > deadline (the _sync_scope wrapper drops the scope's records as for any stopped sync); sync(lock_timeout_ms => N) per call over the attribute. New t/67-engine-hook-options.t: Perl-pinned subtests (no source asked: a gone git remote warns only in the full check; if_changed under the lock via a forked holder that reverts the change before release; deadline at vs a ms past via a clock override; per-call lock timeout 0/300 ms over an engine's 60 s) and a 22-step parity run - the same sequence on the same path, TS through ts-run (new local/ifChanged/deadline/lockTimeoutMs request fields) then Perl, every --json output or error and 6 file snapshots (lock, installs, state records incl. render-inputs hash) byte-equal. Mutations caught: check before the lock, >= deadline, deadline check after apply, local skip before the trust check, per-call timeout ignored, if_changed swallowing an error.
+
+2026-11-13 21:50 Done. Files: perl/lib/Skilletor/{Engine,State,Report}.pm, perl/maint/ts-run.mjs (new ops 'state' and 'reportHook'; sync/check requests take local, ifChanged, deadline, lockTimeoutMs), new perl/t/26-state-hooks.t, perl/t/66-report-hook.t, perl/t/67-engine-hook-options.t. No new module (00-load.t untouched); TS untouched. Verified: full Perl suite 31 files, 2226 tests, PASS (incl. the other workers' new t/14, t/15 and k172's cases); 22 skipped subtests, all t/65 'no sync, check or status step to compare' (resolve-only and k172's cli-only cases); 1 TODO (t/53, existing); my three files skip nothing with node. Each new test was red first; mutations caught are listed in the notes above. Open, for the dispatcher: (1) docs/perl.md:120-124 Known gaps is now stale: pending reports, session-cwd.json and check local / sync deadline / ifChanged are ported, the hooks are not yet (docs lane). (2) A TS oddity, not mirrored: putSessionCwd/putPendingReport with the key '__proto__' set the parsed object's prototype, so the entry is never written, and takePendingReport's 'in' finds inherited keys ('constructor'). Session ids are UUIDs and project keys are absolute paths, so this cannot happen in practice. Ticket it for TS or list it as a divergence on k166, your call. (3) Report.pm report_text/status_text/check_text/exit_code test defined error where TS tests truthiness. They differ only for error '' (never produced) and are left as they are; has_notable now follows TS. (4) due_again lives on Skilletor::State for k181 to call. (5) lock_timeout_ms per call is on sync only; Resolver::resolve still uses the attribute, and the hooks need only sync. (6) The if_changed-under-the-lock test in t/67 forks, so it is not Windows-ready (the suite is untested there anyway).
+
+Committed as 15ce8f0
