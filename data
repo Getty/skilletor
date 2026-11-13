@@ -1,0 +1,34 @@
+---
+class: standard
+completed: 2026-11-13T21:55:51Z
+created: 2026-11-13T20:43:44Z
+id: 183
+priority: medium
+started: 2026-11-13T21:26:47Z
+status: done
+tags:
+- perl
+- codex
+title: 'Perl: Codex agent TOML and rule conversion'
+updated: 2026-11-13T21:55:51Z
+---
+
+Part of the Perl CLI strand (see the strand card). Has no dependency, so it can run beside the CLI cards.
+
+Port to Perl:
+- convert.ts: codexAgentToml, the `# briefing: skills = [...]` line, codexRuleSection, convertForTarget;
+- toml.ts: stringifyToml, TomlFloat.
+
+Tests: byte-identical with node on the inputs of convert.test.ts and toml.test.ts, through an oracle (maint/oracle-*.mjs) or live parity.
+
+Done: the Perl suite is green; TS is untouched.
+
+2026-11-13 21:32 Plan: Skilletor::TOML (+ ::Float, Error::TOML), Skilletor::Convert (Error::Convert), and Skilletor::AgentsMD holding only what convert.ts imports from agentsmd.ts (RULES_FILE, MARKER_LINE, normalize_section; k184 ports the rest there). Oracles maint/oracle-toml.mjs + maint/oracle-convert.mjs -> t/data/{toml,convert}-oracle.json, tests t/14-toml.t, t/15-convert.t. Not wired into Engine.pm (k184).
+
+2026-11-13 21:50 Also found (for the dispatcher to file, skilletor board): (1) Skilletor::JSON::js_parse is quadratic: _string/_number copy the whole input (my $s = $p->{s}) on every call; a 221 KB file parses in ~22 s, config-oracle.json (89 KB) in 2.5 s. t/14-toml.t reads its oracle with JSON::MaybeXS for that reason. (2) Frontmatter.pm divergence: a surrogate pair written as two escapes ("\uD83D\uDE00") stays two lone surrogates in Perl (written as two U+FFFD), TS joins them into one code point; shows in a Codex agent description and the briefing line. Fix in _unescape_double. (3) TS oddity in frontmatter.ts: a __proto__ key never becomes an own key (prototype setter), so codex: {__proto__: x} vanishes and a top-level __proto__: {description: inherited} makes the agent's description 'inherited'; Perl keeps it as a plain key. k144-style TS fix, then Perl follows. (4) TS oddity mirrored in Convert.pm (%INHERITED): convert.ts asks 'key in top'/'key in tables', so a codex table named constructor, toString, valueOf, hasOwnProperty ... is dropped as a collision; Object.hasOwn in TS would let Perl drop the list. (5) Engine.pm keeps its own RULES_FILE constant; k184 can import it from Skilletor::AgentsMD.
+
+2026-11-13 21:51 Done: Skilletor::TOML (stringify_toml, toml_key, toml_float/is_toml_float, Error::TOML = TomlWriteError), Skilletor::Convert (codex_agent_toml incl. the # briefing: line, codex_rule_section, convert_for_target over Render's [[path, bytes]] output; Error::Convert = ConvertError), Skilletor::AgentsMD (RULES_FILE, MARKER_LINE, normalize_section only). Not wired into Engine.pm (k184). Oracles: maint/oracle-toml.mjs -> t/data/toml-oracle.json (2660 tables: test/toml.test.ts inputs, every <=3-char string over its alphabet, every ASCII char, astral/non-chars, keys, floats, ints, every error), maint/oracle-convert.mjs -> t/data/convert-oracle.json (186 agents, 65 rules, 21 target mappings incl. Node-specific ill-formed UTF-8 and a lone surrogate). t/14-toml.t 2721 assertions, t/15-convert.t 638 assertions, byte-identical; full suite: prove -lr -j4 t -> Files=31, Tests=2226, PASS, no skips/TODO. 19 mutations of TOML.pm/Convert.pm/AgentsMD.pm each turn the tests red (2-611 failing assertions); two encoding swaps equivalent by design stay green. src/, dist/ untouched. Drift in the notes above.
+
+2026-11-13 21:51 Correction to the handoff note: 20 mutations turned the tests red (7 in TOML.pm, 13 in Convert.pm/AgentsMD.pm); one, encode_text -> Encode::encode('UTF-8'), stays green because both write a lone surrogate as U+FFFD. The strict-decoding mutation stayed green at first, so Node-specific ill-formed bytes (eda080, c0af, e080af, f4908080) went into the oracle; now it is red.
+
+Committed as 6a8d7e7
