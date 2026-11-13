@@ -16,6 +16,10 @@ and sync them into Claude Code's directories as the CLI does, without Node.
 cpanm Skilletor
 ```
 
+Templates are rendered by [Text::Nunjucks](https://github.com/Getty/p5-text-nunjucks),
+the Perl port of the Nunjucks the reference uses. It needs Perl 5.40 and is not
+on CPAN yet: install it from its repository first.
+
 ## Usage
 
 ### Skilletor – where is skill X?
@@ -63,10 +67,11 @@ dir the item lies in.
   does; `'missing'` only sources without a cache yet; `'never'` touches no
   network and serves what the cache holds. The lookups answer from one
   resolution, made at the first call; `$sk->refresh` (or a `sync`) drops it.
-- **Templates:** nothing is rendered. An item with a `.njk` file has
-  `templated => 1`, and `resolve_skill`/`_agent`/`_rule`/`_rules` refuse it
-  with a `Skilletor::Error::Unsupported` – an unrendered template is never
-  served as the item.
+- **Templates:** a lookup serves source files, and renders nothing. An item
+  with a `.njk` file has `templated => 1`, and
+  `resolve_skill`/`_agent`/`_rule`/`_rules` refuse it with a
+  `Skilletor::Error::Unsupported` – an unrendered template is never served as
+  the item. A sync renders it.
 - **No harness needed:** unlike the reference, resolving does not fail on a
   machine without Claude Code or Codex markers (`require_harness => 1` restores
   that).
@@ -100,13 +105,16 @@ way round.
   nothing touched – and so is a sync where the CLI left Codex or Hermes state
   behind (their lock entries, the Codex rules file). Set
   `"targets": ["claude"]`, or run the CLI.
-- **Templates:** a sync never installs a `.njk` item unrendered. It warns and
-  leaves the item as the CLI installed it, files and lock entry; `check`
-  keeps asking for a sync until the CLI's renders it.
+- **Templates:** a `.njk` file is rendered as the CLI renders it – the same
+  context (`vars`, `project`, `scope`, `harness`, `target`, `host`, `user`,
+  `item`), includes confined to the source root, the same bytes. An item
+  whose main template renders empty is skipped (`renders-empty`); a template
+  error is the CLI's warning, and leaves the installed copy as it was.
 - A config error or a machine without an agent harness is the report's
   `error`; a write that fails midway throws, as the CLI's sync does.
 - `is_git_work_tree`, `git_tracked`, `git_remote` and `plugin_root` replace
-  the questions to git and `CLAUDE_PLUGIN_ROOT` (tests, sandboxes).
+  the questions to git and `CLAUDE_PLUGIN_ROOT`, `host` and `user` the
+  template's machine and user (tests, sandboxes).
 
 ### Building blocks
 
@@ -182,7 +190,8 @@ my $fm  = split_frontmatter($agent_md);             # { data, body } – the ref
 ## Development
 
 ```bash
-prove -lr t/                          # t/50-parity.t, t/51-parity-resolve.t, t/52-parity-sync.t also drive the reference (needs node)
+PERL5LIB=/home/getty/dev/p5-text-nunjucks/lib:/home/getty/dev/langertha/lib:$PERL5LIB prove -lr -j4 t
+                                      # t/50-parity.t to t/53-parity-render.t also drive the reference (needs node)
 node maint/oracle-config.mjs > t/data/config-oracle.json     # regenerate an oracle
 node maint/oracle-resolve.mjs > t/data/resolve-oracle.json   # YAML, bundles, catalog scans
 dzil test
@@ -190,10 +199,11 @@ dzil test
 
 `t/60-conformance.t` runs the shared cases of `../conformance` (see its
 README), every step: `resolve`, `sync`, `check`, `status`. Where the port
-differs on purpose (a sync of a `.njk` item) a case holds its own
-`expected.perl/`. It skips outside a checkout of the repository.
-`t/52-parity-sync.t` has the reference and the port sync one machine and
-compares every byte they leave, the state records included.
+differs on purpose a case holds its own `expected.perl/`; no case does today.
+It skips outside a checkout of the repository. `t/52-parity-sync.t` has the
+reference and the port sync one machine and compares every byte they leave,
+the state records included; `t/53-parity-render.t` renders templates with
+both.
 
 ## Author
 

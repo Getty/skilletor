@@ -107,18 +107,9 @@ implied – a step without an entry there must match `expected/` exactly.
 - `steps.<id>.expected`: that engine compares against `<value>.json` and, for a tree step,
   `<value>/` and `<value>.executables.json` (paths relative to the case dir) instead of
   `expected/<id>`. Those files are that engine's and written by hand; the TS runner never
-  reads or regenerates them. Why the engine differs is said below.
+  reads or regenerates them.
 
-The one known difference today: the Perl engine renders no Nunjucks. A resolve does not
-render, so `resolve` steps hold for every engine – an item with a `.njk` file carries
-`"templated": true` there. A `sync` of such an item differs, and case `09-templates` pins
-the Perl engine's own behaviour in `expected.perl/`: an engine that renders nothing never
-installs a templated item unrendered. It warns
-(`skill greet@shared is a Nunjucks template (skills/greet/SKILL.md.njk) the Perl port of
-skilletor does not render; an installed copy stays`) and leaves the item as it is installed,
-files and lock entry, as a sync does for an item whose source is unreachable. Its source then
-counts as not reached for the scope's records, so `check` keeps asking for a sync, and the
-reference's next sync renders the item.
+No case has an engine variant today: every engine runs every step against `expected/`.
 
 ## Environment
 
@@ -146,7 +137,7 @@ The engine runs with:
 - neither `${HOME}` nor `${PROJECT}` inside a git work tree, and git tracking none of their
   files (the TS runner injects both answers; a temp dir outside any repository gives them);
 - for templates, host name `conformance`, OS `linux`, user name `conformance`, user home
-  `${HOME}` (only the TS engine renders; no case's output depends on them yet).
+  `${HOME}` (no case's output depends on them yet).
 
 Nothing reaches the network: every source is a `local` directory, a git repository reached
 through `insteadOf`, or a source the case never fetches (an untrusted `url`).
@@ -365,7 +356,7 @@ show it, its `description` saying which.
 | `06-wildcards` | `perl-*`, `*`, `*-style` overlapping in one source; a bare `*` matching nothing is silent, a pattern matching nothing warns |
 | `07-bundles` | `name@source` and `bundle:` entries, nested bundle vars, an entry of another source served under another name, a missing source and name |
 | `08-overlap` | explicit over a same-source bundle (no bundle vars, `via`) and over another source's wildcard; two sources' wildcards skip a name; a bundle var conflict |
-| `09-templates` | `.njk` items marked `templated`; a sync renders them, a rule gated off by project vars is skipped; `check` then finds nothing (Perl: `expected.perl/`, nothing templated installed, `check` asks for a sync) |
+| `09-templates` | `.njk` items marked `templated`; a sync renders them, a rule gated off by project vars is skipped; `check` then finds nothing |
 | `10-error-unknown-source` | an entry naming no source is a config error; a sync touches nothing |
 | `11-error-bad-entry` | an entry without `@source` in `skilletor.local.json` is a config error naming that file |
 | `12-missing-items` | an unknown item, an unknown bundle, an agent with `.md` and `.md.njk`: warnings, the rest resolves |

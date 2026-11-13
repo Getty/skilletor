@@ -1,7 +1,7 @@
 // The reference implementation, driven from the Perl test suite (t/50-parity.t,
-// t/51-parity-resolve.t, t/52-parity-sync.t): reads one JSON request on stdin, runs it against ../src, prints the
-// answer as JSON. Never part of the CPAN dist; the tests skip without it, without node or without
-// the TypeScript tree beside perl/.
+// t/51-parity-resolve.t, t/52-parity-sync.t, t/53-parity-render.t): reads one JSON request on
+// stdin, runs it against ../src, prints the answer as JSON. Never part of the CPAN dist; the tests
+// skip without it, without node or without the TypeScript tree beside perl/.
 //
 //   { "op": "backend", "src": {...}, "home": "/h" }                 -> resolveBackend
 //   { "op": "git", "action": "resolve" | "check", "opts": {...}, "cached": "git:abc" }
@@ -11,9 +11,13 @@
 //   { "op": "resolve", "home": "/h", "projectDir": "/p", "scope": "all" } -> resolveItems
 //   { "op": "sync" | "check" | "status", "home": "/h", "projectDir": "/p", "scope": "all", "force": false }
 //   { "op": "lock", "root": "/s", "timeoutMs": 200, "holdMs": 0 }  -> State.withLock: "ran"
+//   { "op": "render", "cases": [ { "item": {...}, "sourceDir": "/s", "context": {...} } ] }
+//     -> per case build, executables, rendersEmpty: { output: [[path, hex]], executables, rendersEmpty }
+//        or { error: message, name } (a render error is an answer, not a failure)
 // Answer: { "result": ... } or { "error": message }.
 import { readFileSync } from "node:fs";
 import { check, resolveBackend, resolveItems, status, sync } from "../../src/engine.ts";
+import { build, executables, rendersEmpty } from "../../src/render.ts";
 import { GitSource, sweepGitCache } from "../../src/sources/git.ts";
 import { UrlSource, sweepUrlCache } from "../../src/sources/url.ts";
 import { State } from "../../src/state.ts";
@@ -48,6 +52,20 @@ const run = async () => {
       return status(ctxOf(req), { scope: req.scope ?? "all" });
     case "lock":
       return new State(req.root).withLock(() => new Promise((done) => setTimeout(() => done("ran"), req.holdMs ?? 0)), { timeoutMs: req.timeoutMs });
+    case "render":
+      return req.cases.map((c) => {
+        let output;
+        try {
+          output = build(c.item, c.sourceDir, c.context);
+        } catch (err) {
+          return { error: err.message, name: err.name };
+        }
+        return {
+          output: [...output].map(([path, bytes]) => [path, bytes.toString("hex")]),
+          executables: [...executables(c.item, c.sourceDir)].sort(),
+          rendersEmpty: rendersEmpty(c.item, output),
+        };
+      });
     case "sweep":
       sweepUrlCache(req.root);
       sweepGitCache(req.root);

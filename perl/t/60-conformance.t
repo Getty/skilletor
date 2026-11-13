@@ -231,6 +231,8 @@ sub run_case {
     require_harness  => 1,              # the reference's resolve: a machine without a harness is an error
     is_git_work_tree => sub { 0 },      # neither dir lies in a work tree, git tracks none of their files
     git_tracked      => sub { [] },
+    host             => { name => 'conformance', os => 'linux' },    # for templates (README: environment)
+    user             => { name => 'conformance', home => $r->{home} },
   );
 
   for my $step ( @{ $c->{steps} } ) {

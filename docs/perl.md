@@ -31,9 +31,12 @@ drift away from what the TypeScript engine does.
   Archive::Tar or YAML::PP: the cache trees and error messages have to match.
 - **Moo**, so the dist stays lean. Moose consumers like raider take Moo classes as they
   are.
-- **No templates.** `.njk` items are reported as unsupported, never rendered. No
-  template is used across Getty's fleet, and a second Nunjucks implementation would be
-  a constant source of divergence.
+- **Templates through Text::Nunjucks.** A sync renders `.njk` items with
+  Text::Nunjucks, a 1:1 Perl port of the Nunjucks 3.2.4 the reference uses, through a
+  loader confined to the source root as the reference's is (`Skilletor::Render::Loader`).
+  The port converts its JSON values at the boundary (null, booleans, key order), and
+  `t/53-parity-render.t` renders the same templates with both engines. Text::Nunjucks
+  needs Perl 5.40 and is not on CPAN yet.
 - **Claude target only** for sync/check/status. Codex and Hermes stay TS-only.
 
 ## Against divergence: `conformance/`
@@ -45,7 +48,7 @@ config, source trees (git sources are built as real repos and reached offline th
 `test/conformance.test.ts` and `perl/t/60-conformance.t` both run every case and
 compare the outputs as canonical data, and the installed files byte for byte. A case
 expects a different outcome in Perl only where it says so explicitly under
-`engines.perl`, with the reason given (for example `.njk`).
+`engines.perl`, with the reason given; no case does today.
 
 The expectations are generated from TS (`SKILLETOR_CONFORMANCE_UPDATE=1 npm test`) and
 then hand-reviewed against the design spec, because an expectation that only mirrors the
@@ -81,12 +84,10 @@ Decisions that differ from the TS engine on purpose:
     both, user first. `resolve_rule($name)` throws `Skilletor::Error::Ambiguous` when
     both scopes declare the rule and no scope is given, because any single answer
     would hide a rule Claude Code does load.
-- **`.njk` items in a sync.** A templated item is never installed unrendered. The sync
-  warns, keeps any installed copy and its lock entry, and records the source as not
-  reached. That keeps the scope open for both engines' `check`, so the next TS sync
-  (the hooks) renders the item. If Perl recorded the scope as complete, TS `check`
-  would go quiet and the item would never be installed. Case 09 pins this in
-  `expected.perl/`.
+- **`.njk` items in a lookup.** `resolve_skill` and its siblings serve files of the
+  source tree, so they refuse a templated item with `Skilletor::Error::Unsupported`
+  rather than serve an unrendered template; a sync renders it. TS has no lookup to
+  match.
 - **Other harnesses are refused, not half-written.** A scope that targets Codex or
   Hermes is refused with an error, and nothing is touched. The same goes for a sync
   that would change Codex or Hermes state (their lock entries, `block` entries, the

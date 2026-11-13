@@ -26,6 +26,7 @@ for (qw(
   Skilletor::Error::JSON
   Skilletor::Error::Lock
   Skilletor::Error::LockTimeout
+  Skilletor::Error::Render
   Skilletor::Error::Source
   Skilletor::Error::Spec
   Skilletor::Error::Tar
@@ -42,6 +43,7 @@ for (qw(
   Skilletor::Lock
   Skilletor::Process
   Skilletor::Render
+  Skilletor::Render::Loader
   Skilletor::Report
   Skilletor::Resolver
   Skilletor::Role::Source

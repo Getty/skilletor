@@ -1,6 +1,11 @@
 Revision history for Skilletor
 
 {{$NEXT}}
+  - Renders Nunjucks templates as the reference does, through Text::Nunjucks
+    (a Perl port of Nunjucks 3.2.4, not on CPAN yet; new dependency, Perl
+    5.40): a sync installs .njk items rendered with the reference's context,
+    skips an item whose main template renders empty and words template errors
+    the same. resolve_skill and its siblings still refuse a templated item.
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's

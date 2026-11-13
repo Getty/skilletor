@@ -1,17 +1,21 @@
 package Skilletor::Render;
-# ABSTRACT: Build an item in memory – the copy half of the reference's render.ts
+# ABSTRACT: Build an item in memory – the reference's render.ts
 
 use strict;
 use warnings;
 
-use Carp qw( croak );
 use Exporter qw( import );
+use JSON::MaybeXS ();
 use Path::Tiny qw( path );
-use Skilletor::FSUtil qw( encode_text is_executable path_join path_normalize );
+use Scalar::Util qw( blessed );
+use Skilletor::Error::Render;
+use Skilletor::FSUtil qw( decode_utf8_lossy encode_text is_executable path_join path_normalize );
+use Skilletor::JSON qw( js_sort_keys );
+use Skilletor::JSString qw( js_ws_re );
 
 our $VERSION = '0.002';
 
-our @EXPORT_OK = qw( build executables install_path templates_of );
+our @EXPORT_OK = qw( build executables install_path renders_empty templates_of );
 
 # The item's Nunjucks templates: its files ending in `.njk`.
 sub templates_of {
@@ -38,16 +42,73 @@ sub install_path {
   return path_join( $into, _relative( $item->{dir}, $file ) );
 }
 
-# The item's files, copied byte for byte: [ [ install path, bytes ], ... ] in the item's order.
-# The Perl port renders nothing: an item with a `.njk` file is the caller's to refuse.
-sub build {
-  my ( $item, $source_dir ) = @_;
-  my @tpl = templates_of($item);
-  croak 'build: '.$item->{type}.' '.$item->{name}.' has templates ('.join( ', ', @tpl ).'); the Perl port renders none' if @tpl;
-  return [ map { [ install_path( $item, $_ ), path( encode_text( path_join( $source_dir, $_ ) ) )->slurp_raw ] } @{ $item->{files} } ];
+# The reference's Nunjucks environment: the loader confined to the source root, autoescape off
+# (Markdown), throwOnUndefined on (a typo must not silently produce an empty skill). Text::Nunjucks
+# is loaded with the first template, so an item without one never pays for it.
+sub _env {
+  my ( $source_dir ) = @_;
+  require Text::Nunjucks::Environment;
+  require Skilletor::Render::Loader;
+  return Text::Nunjucks::Environment->new( Skilletor::Render::Loader->new( root => $source_dir ),
+    { autoescape => !!0, throwOnUndefined => !!1 } );
 }
 
-# The install paths of the item's files whose source file has the owner's executable bit.
+# A value of the port's JSON model as the template sees it in the reference (Text::Nunjucks takes
+# Perl 5.40's value kinds): a JSON null is Nunjucks' null, a JSON::MaybeXS boolean a core one, an
+# object a Hash::Ordered in its property order.
+sub _template_value {
+  my ( $v ) = @_;
+  return Text::Nunjucks::Runtime->None unless defined $v;
+  return $v ? !!1 : !!0 if JSON::MaybeXS::is_bool($v);
+  my $ref = ref $v;
+  return [ map { _template_value($_) } @$v ] if $ref eq 'ARRAY';
+  if ( $ref eq 'HASH' ) {
+    my $h = Hash::Ordered->new;
+    $h->set( $_ => _template_value( $v->{$_} ) ) for tied %$v ? keys %$v : js_sort_keys( keys %$v );
+    return $h;
+  }
+  return $v;
+}
+
+# The render context (spec §5): every field but an undefined one (`project` in the user scope).
+sub _template_context {
+  my ( $context ) = @_;
+  require Hash::Ordered;
+  return { map { defined $context->{$_} ? ( $_ => _template_value( $context->{$_} ) ) : () } keys %$context };
+}
+
+sub _message {
+  my ( $err ) = @_;
+  return $err->message if blessed $err && $err->can('message');
+  return ( "$err" =~ s/ at \S+ line \d+\.?\n?\z//r );
+}
+
+# The item's output: [ [ install path, bytes ], ... ] in the item's order. `X.njk` is rendered and
+# installed as `X`, encoded as UTF-8; every other file is copied byte for byte, so a skill that
+# uses `{{ }}` itself stays intact.
+sub build {
+  my ( $item, $source_dir, $context ) = @_;
+  my ( $env, $vars, @out );
+  for my $file ( @{ $item->{files} } ) {
+    unless ( $file =~ /\.njk\z/ ) {
+      push @out, [ install_path( $item, $file ), path( encode_text( path_join( $source_dir, $file ) ) )->slurp_raw ];
+      next;
+    }
+    $env  //= _env($source_dir);
+    $vars //= _template_context($context);
+    my $rendered;
+    unless ( eval { $rendered = $env->render( $file, $vars ); 1 } ) {
+      my $err = $@;
+      die $err if blessed $err && $err->isa('Skilletor::Error::Render');
+      Skilletor::Error::Render->throw( $file.': '._message($err) );
+    }
+    push @out, [ install_path( $item, $file =~ s/\.njk\z//r ), encode_text($rendered) ];
+  }
+  return \@out;
+}
+
+# The install paths of the item's files whose source file has the owner's executable bit: a
+# template passes its bit to what it renders.
 sub executables {
   my ( $item, $source_dir ) = @_;
   my %out;
@@ -60,33 +121,67 @@ sub executables {
   return \%out;
 }
 
+# A leading YAML frontmatter block (after optional whitespace), closed by `---`: the reference's
+# FRONTMATTER, with JavaScript's \s.
+my $WS = js_ws_re();
+my $FRONTMATTER = qr/\A$WS*---[ \t]*\r?\n(?:.*?\r?\n)?---[ \t]*(?:\r?\n|\z)/s;
+
+# Does the item's main file render to nothing but whitespace once a leading frontmatter block is
+# removed (spec §5)? Then the item does not apply here. A non-template main file is never empty.
+sub renders_empty {
+  my ( $item, $output ) = @_;
+  my $src = $item->{type} eq 'skill'
+    ? path_join( $item->{dir} // 'skills/'.$item->{name}, 'SKILL.md' )
+    : path_join( $item->{dir} // $item->{type}.'s', $item->{name}.'.md' );
+  my %files = map { ( $_ => 1 ) } @{ $item->{files} };
+  return 0 if !$files{ $src.'.njk' } || $files{$src};
+  my $want = install_path( $item, $src );
+  my ($bytes) = map { $_->[1] } grep { $_->[0] eq $want } @$output;
+  return 0 unless defined $bytes;
+  ( my $text = decode_utf8_lossy($bytes) ) =~ s/$FRONTMATTER//;
+  return $text =~ /\A$WS*\z/ ? 1 : 0;
+}
+
 1;
 
 =synopsis
 
-  use Skilletor::Render qw( build executables templates_of );
+  use Skilletor::Render qw( build executables renders_empty templates_of );
 
-  my $output = build( $catalog_item, $source_dir );       # [ [ 'skills/foo/SKILL.md', $bytes ], ... ]
-  my $exec   = executables( $catalog_item, $source_dir );  # { 'skills/foo/run.sh' => 1 }
+  my $output = build( $catalog_item, $source_dir, $context );   # [ [ 'skills/foo/SKILL.md', $bytes ], ... ]
+  my $exec   = executables( $catalog_item, $source_dir );        # { 'skills/foo/run.sh' => 1 }
+  my $skip   = renders_empty( $catalog_item, $output );          # the item does not apply here
 
 =description
 
-The reference's C<render.ts> without Nunjucks (spec §5): every file of an item
-is copied byte for byte to its install path – a skill's files under
-C<< skills/<name>/ >>, an agent's or rule's under C<agents/> or C<rules/>,
-wherever the item lies in its source – and a skill's files keep their source's
-executable bit (k99).
+The reference's C<render.ts> (spec §5): an item is built in memory. A file
+C<X.njk> is rendered by Nunjucks – L<Text::Nunjucks>, the Perl port of
+Nunjucks 3.2.4 the reference uses – and installed as C<X>; every other file is
+copied byte for byte, so a skill that writes C<{{ }}> itself stays intact.
+Each file goes to its install path – a skill's under C<< skills/<name>/ >>, an
+agent's or rule's under C<agents/> or C<rules/>, wherever the item lies in its
+source – and a skill's files keep their source's executable bit (k99), a
+template passing its bit to what it renders.
 
-The Perl port renders no templates. L</build> refuses an item with a C<.njk>
-file; L<Skilletor::Engine> never asks it to, and leaves such an item as it is
-installed (see L<Skilletor::Engine/Templates>).
+A template renders as the reference's does: autoescape off, an undefined
+variable an error, includes, imports and macros looked up relative to the
+source root and confined to it (L<Skilletor::Render::Loader>), the source read
+and the output written as UTF-8. A template that fails throws a
+L<Skilletor::Error::Render> with the reference's message, C<< <file>: <the
+Nunjucks message> >>.
 
 =func build
 
-  build( $item, $source_dir );
+  build( $item, $source_dir, $context );
 
-The item's output as an ordered list of C<[ install path, bytes ]>; croaks for
-a templated item.
+The item's output as an ordered list of C<[ install path, bytes ]>. The
+context is the reference's C<RenderContext>, values as L<Skilletor::JSON>
+reads them:
+C<< { vars, project?, scope, harness, target => { dir }, host => { name, os },
+user => { name, home }, item => { name, type, source } } >>. A JSON C<null> in
+it is the template's C<null>, a missing field its C<undefined>; objects keep
+their property order. Throws L<Skilletor::Error::Render> for a template that
+fails.
 
 =func executables
 
@@ -94,6 +189,15 @@ a templated item.
 
 The install paths, as a hash set, of the files whose source has the owner's
 executable bit.
+
+=func renders_empty
+
+  renders_empty( $item, $output );
+
+True when the item's main file (C<SKILL.md>, C<< <name>.md >>) is a template
+whose output is whitespace only once a leading frontmatter block is removed:
+the item does not apply in this scope (C<renders-empty>). False for a main
+file that is no template.
 
 =func install_path
 

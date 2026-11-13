@@ -198,7 +198,7 @@ sub _refuse_template {
   my ( $rec ) = @_;
   return unless $rec->{templated};
   Skilletor::Error::Unsupported->throw( $rec->{type}.' '.$rec->{name}.'@'.$rec->{source}.' is a Nunjucks template ('
-    .join( ', ', @{ $rec->{templates} } ).'); the Perl port of skilletor renders no templates' );
+    .join( ', ', @{ $rec->{templates} } ).'); a lookup serves source files and no unrendered template (a sync renders it)' );
 }
 
 sub _main_file {
@@ -324,13 +324,12 @@ cache alone.
 
 =head2 Templates
 
-The Perl port renders no Nunjucks. An item with a C<.njk> file resolves like
-any other – its record says C<< templated => 1 >> and lists the C<templates> –
-but L</resolve_skill> and its siblings refuse it with a
-L<Skilletor::Error::Unsupported>: an unrendered template is never served as if
-it were the item. A L</sync> never installs one either: it warns and leaves
-such an item as the reference installed it, and its scope stays open for the
-reference's next sync (L<Skilletor::Engine/Templates>).
+An item with a C<.njk> file resolves like any other – its record says
+C<< templated => 1 >> and lists the C<templates> – but L</resolve_skill> and
+its siblings refuse it with a L<Skilletor::Error::Unsupported>: they serve
+files of the source tree, and an unrendered template is never served as if it
+were the item. A L</sync> renders and installs it as the reference does
+(L<Skilletor::Engine/Templates>).
 
 =head2 Claude Code only
 

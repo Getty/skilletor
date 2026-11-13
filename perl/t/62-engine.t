@@ -1,8 +1,8 @@
 #!/usr/bin/env perl
-# What the shared cases cannot show: the port's own rules for sync – an installed template stays
-# as the reference left it and keeps the scope open for the reference; a scope of another
-# harness, or one the reference left Codex state in, is refused before anything is written – a
-# sync that fails midway (partial entries, records cleared), the facade, and the report text.
+# What the shared cases cannot show: templates in a sync – the render context, a template error,
+# an empty render, an executable template; the port's own rules – a scope of another harness, or
+# one the reference left Codex state in, is refused before anything is written – a sync that
+# fails midway (partial entries, records cleared), the facade, and the report text.
 use strict;
 use warnings;
 use utf8;
@@ -55,45 +55,102 @@ sub state_json {
   return -f $f ? js_parse( path($f)->slurp_utf8 ) : {};
 }
 
-subtest 'a template stays as installed, and its scope stays open' => sub {
-  my $m = machine( 'skills/greet/SKILL.md.njk' => skill('hello {{ vars.who }}'), 'skills/plain/SKILL.md' => skill('plain') );
+subtest 'a template renders with the reference context; the scope records are complete' => sub {
+  my $m = machine(
+    'skills/greet/SKILL.md.njk' => "---\ndescription: greets\n---\nhello {{ vars.who }} from {{ item.source }}: {{ item.type }} {{ item.name }}, "
+      ."{{ scope }}/{{ harness }} into {{ target.dir }}, {{ user.name }} at {{ user.home }} on {{ host.name }} ({{ host.os }}), "
+      ."{{ project is defined }}{% include \"snippets/sig.md\" %}\n",
+    'snippets/sig.md'      => ' – {{ vars.sig }}',
+    'skills/plain/SKILL.md' => skill('plain {{ not rendered }}'),
+    'skilletor.json'       => '{"vars": {"who": "source", "sig": "the source"}}',
+  );
   write_json( "$m->{home}/.claude/skilletor.json",
     { sources => { s => { local => $m->{src} } }, install => { skills => [ 'greet@s', 'plain@s' ] }, vars => { who => 'me' } } );
-  # What a reference sync installed of the template.
-  my $rendered = skill('hello me');
-  files( "$m->{home}/.claude", 'skills/greet/SKILL.md' => $rendered );
-  my $lock = { 'skills/greet' => { source => 's', version => 'local', files => { 'skills/greet/SKILL.md' => hash_bytes( encode_text($rendered) ) } } };
-  write_json( "$m->{home}/.claude/skilletor.lock.json", $lock );
-  my $before_lock = path( $m->{home}, '.claude', 'skilletor.lock.json' )->slurp_raw;
-
-  my $r = $m->{engine}->()->sync( scope => 'user' );
-  my $s = $r->{scopes}[0];
-  is_deeply( [ map { $_->{key} } @{ $s->{added} } ], ['skills/plain'], 'the plain skill is installed' );
-  is_deeply( [ map { $_->{key} } @{ $s->{removed} }, @{ $s->{updated} } ], [], 'the template is neither removed nor updated' );
-  is_deeply( $s->{warnings}, [ 'skill greet@s is a Nunjucks template (skills/greet/SKILL.md.njk) the Perl port of skilletor does not render; an installed copy stays' ],
-    'one warning names it' );
-  is( path( $m->{home}, '.claude', 'skills', 'greet', 'SKILL.md' )->slurp_utf8, $rendered, 'its installed copy is untouched' );
-  my $after = read_lock("$m->{home}/.claude/skilletor.lock.json");
-  is_deeply( $after->{'skills/greet'}, js_parse($before_lock)->{'skills/greet'}, 'and its lock entry' );
-  ok( !-e "$m->{home}/.claude/skills/greet/.gitignore", 'nothing of skilletor\'s added to it' );
+  my $e = $m->{engine}->( host => { name => 'box', os => 'linux' }, user => { name => 'getty', home => $m->{home} } );
+  my $s = $e->sync( scope => 'user' )->{scopes}[0];
+  is_deeply( [ map { $_->{key} } @{ $s->{added} } ], [ 'skills/greet', 'skills/plain' ], 'both installed' );
+  is_deeply( $s->{warnings}, [], 'no warning' );
+  is( path( $m->{home}, '.claude', 'skills', 'greet', 'SKILL.md' )->slurp_utf8,
+    "---\ndescription: greets\n---\nhello me from s: skill greet, user/claude into $m->{home}/.claude, getty at $m->{home} on box (linux), "
+      ."false – the source\n", 'rendered: vars, item, scope, harness, target, user, host, no project, an include' );
+  ok( !-e "$m->{home}/.claude/skills/greet/SKILL.md.njk", 'installed without .njk' );
+  is( path( $m->{home}, '.claude', 'skills', 'plain', 'SKILL.md' )->slurp_utf8, skill('plain {{ not rendered }}'), 'a plain file is copied as is' );
 
   my $lock_path = "$m->{home}/.claude/skilletor.lock.json";
-  ok( !exists state_json( $m, 'render-inputs.json' )->{$lock_path}, 'what it rendered with is not recorded' );
-  ok( !exists state_json( $m, 'sources-read.json' )->{$lock_path}, 'nor what it read of the source' );
-  my $check = $m->{engine}->()->check( scope => 'user' );
-  ok( $check->{changed}, 'check still asks for a sync – one the reference can complete' );
-  is_deeply( $check->{varsChanged}, ['user'], 'the render inputs count' );
+  ok( exists state_json( $m, 'render-inputs.json' )->{$lock_path}, 'what it rendered with is recorded' );
+  ok( exists state_json( $m, 'sources-read.json' )->{$lock_path}{s}, 'and what it read of the source' );
+  my $check = $e->check( scope => 'user' );
+  ok( !exists $check->{varsChanged}, 'check: the render inputs hold' ) or diag explain $check;
+  write_json( "$m->{home}/.claude/skilletor.json",
+    { sources => { s => { local => $m->{src} } }, install => { skills => [ 'greet@s', 'plain@s' ] }, vars => { who => 'you' } } );
+  is_deeply( $e->check( scope => 'user' )->{varsChanged}, ['user'], 'until a var changes' );
+  is_deeply( [ map { $_->{key} } @{ $e->sync( scope => 'user' )->{scopes}[0]{updated} } ], ['skills/greet'], 'which the next sync renders' );
+  like( path( $m->{home}, '.claude', 'skills', 'greet', 'SKILL.md' )->slurp_utf8, qr/hello you /, 'with the new value' );
+
+  my $p = $m->{engine}->( host => { name => 'box', os => 'linux' }, user => { name => 'getty', home => $m->{home} },
+    git_remote => sub { 'https://example.invalid/app.git' } );
+  write_json( "$m->{project}/.claude/skilletor.json", { install => { agents => ['who@s'] } } );
+  files( $m->{src}, 'agents/who.md.njk' => "---\nname: who\n---\n{{ project.name }} {{ project.dir }} {{ project.git_remote }} {{ scope }} {{ target.dir }}\n" );
+  my $ps = $p->sync( scope => 'project' )->{scopes}[0];
+  is_deeply( [ map { $_->{key} } @{ $ps->{added} } ], ['agents/who'], 'a project agent' );
+  is( path( $m->{project}, '.claude', 'agents', '.local.who.md' )->slurp_utf8,
+    "---\nname: who\n---\nproject $m->{project} https://example.invalid/app.git project $m->{project}/.claude\n", 'sees the project' );
 };
 
+subtest 'a template error leaves the installed copy; the source still counts as read' => sub {
+  my $m = machine( 'skills/greet/SKILL.md.njk' => skill('hello {{ vars.who }}') );
+  write_json( "$m->{home}/.claude/skilletor.json",
+    { sources => { s => { local => $m->{src} } }, install => { skills => ['greet@s'] }, vars => { who => 'me' } } );
+  my $e = $m->{engine}->();
+  $e->sync( scope => 'user' );
+  my $lock_path = "$m->{home}/.claude/skilletor.lock.json";
+  my $before    = path($lock_path)->slurp_raw;
+  files( $m->{src}, 'skills/greet/SKILL.md.njk' => skill('hello {{ vars.typo }}') );
+  my $s = $e->sync( scope => 'user' )->{scopes}[0];
+  is_deeply( $s->{warnings}, [ "template error in skill greet: skills/greet/SKILL.md.njk: ($m->{src}/skills/greet/SKILL.md.njk) "
+      ."[Line 2, Column 20]\n  attempted to output null or undefined value" ], 'the warning, the reference\'s words' );
+  is_deeply( [ map { @{ $s->{$_} } } qw( added updated removed ) ], [], 'nothing changed' );
+  is( path( $m->{home}, '.claude', 'skills', 'greet', 'SKILL.md' )->slurp_utf8, skill('hello me'), 'the installed copy stays' );
+  is( path($lock_path)->slurp_raw, $before, 'and its lock entry' );
+  ok( exists state_json( $m, 'sources-read.json' )->{$lock_path}{s}, 'the source counts as read' );
+  ok( !exists $e->check( scope => 'user' )->{varsChanged}, 'check does not ask again for what a sync could not do' );
 
-subtest 'a template never installed is not installed unrendered' => sub {
-  my $m = machine( 'agents/helper.md.njk' => skill('{{ vars.x }}') );
-  write_json( "$m->{home}/.claude/skilletor.json", { sources => { s => { local => $m->{src} } }, install => { agents => ['helper@s'] } } );
-  my $r = $m->{engine}->()->sync( scope => 'user' );
-  like( $r->{scopes}[0]{warnings}[0], qr/\Aagent helper\@s is a Nunjucks template/, 'warned' );
-  ok( !-e "$m->{home}/.claude/agents", 'nothing written' );
-  ok( !-e "$m->{home}/.claude/skilletor.lock.json", 'no lock' );
-  is( $m->{engine}->()->status( scope => 'user' )->{scopes}[0]{declared}[0]{installed}, JSON::MaybeXS::false(), 'status: not installed' );
+  files( $m->{src}, 'skills/greet/SKILL.md.njk' => skill('{% include "../../outside.md" %}') );
+  like( $e->sync( scope => 'user' )->{scopes}[0]{warnings}[0],
+    qr/\Atemplate error in skill greet: skills\/greet\/SKILL\.md\.njk: \(\Q$m->{src}\E\/skills\/greet\/SKILL\.md\.njk\)\n  RenderError: template escapes source root: \.\.\/\.\.\/outside\.md\z/,
+    'an include leaving the source root' );
+};
+
+subtest 'renders empty: skipped, what it installed removed' => sub {
+  my $m = machine( 'rules/k8s.md.njk' => "---\ndescription: K\n---\n{% if vars.kubernetes %}Use kubectl.{% endif %}\n" );
+  my $config = sub {
+    write_json( "$m->{home}/.claude/skilletor.json",
+      { sources => { s => { local => $m->{src} } }, install => { rules => ['k8s@s'] }, vars => { kubernetes => $_[0] } } );
+  };
+  my $e = $m->{engine}->();
+  $config->( JSON::MaybeXS::true() );
+  is_deeply( [ map { $_->{key} } @{ $e->sync( scope => 'user' )->{scopes}[0]{added} } ], ['rules/k8s'], 'gated on: installed' );
+  ok( -f "$m->{home}/.claude/rules/.local.k8s.md", 'as its .local. file' );
+  $config->( JSON::MaybeXS::false() );
+  my $s = $e->sync( scope => 'user' )->{scopes}[0];
+  is_deeply( [ map { $_->{key} } @{ $s->{skipped} } ], ['rules/k8s'], 'gated off: skipped' );
+  is_deeply( [ map { $_->{key} } @{ $s->{removed} } ], ['rules/k8s'], 'what it installed removed' );
+  ok( !-e "$m->{home}/.claude/rules/.local.k8s.md", 'the file is gone' );
+  my $entry = read_lock("$m->{home}/.claude/skilletor.lock.json")->{'rules/k8s'};
+  is( $entry->{skipped}, 'renders-empty', 'the lock says why' );
+  is_deeply( { %{ $entry->{files} } }, {}, 'and owns no file' );
+  is( $e->status( scope => 'user' )->{scopes}[0]{declared}[0]{skipped}, 'renders-empty', 'status: skipped' );
+};
+
+subtest 'an executable template passes its bit to what it renders' => sub {
+  my $m = machine( 'skills/tool/SKILL.md.njk' => skill('tool'), 'skills/tool/run.sh.njk' => "#!/bin/sh\necho {{ item.name }}\n" );
+  chmod 0755, "$m->{src}/skills/tool/run.sh.njk";
+  write_json( "$m->{home}/.claude/skilletor.json", { sources => { s => { local => $m->{src} } }, install => { skills => ['tool@s'] } } );
+  $m->{engine}->()->sync( scope => 'user' );
+  my $run = "$m->{home}/.claude/skills/tool/run.sh";
+  is( path($run)->slurp_utf8, "#!/bin/sh\necho tool\n", 'rendered' );
+  ok( ( ( stat $run )[2] & 0100 ), 'and executable' );
+  ok( !( ( stat "$m->{home}/.claude/skills/tool/SKILL.md" )[2] & 0100 ), 'the main file is not' );
 };
 
 subtest 'another harness: refused before anything is written' => sub {

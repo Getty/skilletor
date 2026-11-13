@@ -2,8 +2,9 @@
 # Sync parity on one machine: the reference and Skilletor::Engine sync the same home and project
 # from the same pristine state, and must leave the same bytes – installed files, lock, .gitignore
 # blocks, .worktreeinclude, settings.json and the state records `check` reads (render-inputs.json
-# with its hash, sources-read.json, unreached.json) – and the same reports; each one's `check`
-# must accept what the other synced. Needs node and the TypeScript tree beside perl/.
+# with its hash, sources-read.json, unreached.json), rendered templates with the default host and
+# user – and the same reports; each one's `check` must accept what the other synced. Needs node
+# and the TypeScript tree beside perl/.
 use strict;
 use warnings;
 use Test::More;
@@ -109,14 +110,29 @@ $remote->{commit}->( {
   'agents/rev.md'         => "---\nname: rev\ndescription: reviews\nbriefing:\n  skills: [lint, nowhere]\n---\nReview.\n",
   'rules/style.md'        => "Short sentences.\n",
   'bundles/team.yaml'     => "description: The team set\nskills: [lint]\nrules: [style]\nvars: {from: bundle}\n",
+  # Templates (spec §5): the user's vars as the template sees them, a main file gated off in the
+  # user scope (renders-empty).
+  'skills/greet/SKILL.md.njk' => "---\ndescription: greets\n---\n{{ vars | dump }} {{ project is defined }} {{ scope }}/{{ harness }}\n",
+  'rules/gated.md.njk'        => "{% if project is defined %}Only in a project.{% endif %}\n",
 } );
-my $crew = files( "$root/crew", 'skills/tool/SKILL.md' => skill('tool'), 'skilletor.json' => '{"vars": {"from": "source", "n": 10}}' );
+# A template with the whole context, an include from the source root, and one that fails.
+my $crew = files(
+  "$root/crew",
+  'skills/tool/SKILL.md'       => skill('tool'),
+  'skilletor.json'             => '{"vars": {"from": "source", "n": 10}}',
+  'skills/hello/SKILL.md.njk'  => "---\ndescription: hello for {{ project.name }}\n---\n"
+    ."{{ item.type }} {{ item.name }} from {{ item.source }}, {{ scope }}/{{ harness }} into {{ target.dir }}\n"
+    ."{{ project.dir }} {{ project.git_remote }}\n{{ user.name }} {{ user.home }} on {{ host.name }} ({{ host.os }})\n"
+    ."{{ vars | dump }}\n{% for k, v in vars %}{{ k }}={{ v | dump }};{% endfor %}\n{% include \"snippets/sig.md\" %}\n",
+  'snippets/sig.md'            => "\x{2013} {{ vars.from }}, n={{ vars.n + 1 }}",
+  'skills/broken/SKILL.md.njk' => "---\ndescription: broken\n---\n{{ vars.nope }}\n",
+);
 
 path( $home, '.claude' )->mkpath;
 path( $home, '.claude.json' )->spew_raw("{}\n");
 write_json( "$home/.claude/skilletor.json", {
   sources => { shared => { git => $remote->{url} }, crew => { local => $crew } },
-  install => { skills => [ 'lint@shared', 'taken@shared' ], agents => ['rev@shared'], rules => ['nomatch-*@shared'] },
+  install => { skills => [ 'lint@shared', 'taken@shared', 'greet@shared' ], agents => ['rev@shared'], rules => [ 'nomatch-*@shared', 'gated@shared' ] },
   vars    => { level => 1, nested => { b => [ 1, 'x', JSON::MaybeXS::true() ], a => undef }, 10 => 'ten', 9 => 'nine' },
 } );
 # A hand-written skill where an item goes: a lasting conflict, recorded as unreached.
@@ -130,7 +146,7 @@ git_ok( $proj, 'init', '-q', '-b', 'main' );
 git_ok( $proj, 'remote', 'add', 'origin', 'https://example.invalid/team/app.git' );    # a render input
 write_json( "$proj/.claude/skilletor.json", {
   sources => { team => { git => 'https://example.invalid/team/skills.git' } },    # project-only, untrusted
-  install => { skills => [ 'tool@crew', 'deploy@team' ], bundles => ['team@shared'] },
+  install => { skills => [ 'tool@crew', 'deploy@team', 'hello@crew', 'broken@crew' ], bundles => ['team@shared'] },
   vars    => { team => 'core' },
 } );
 write_json( "$proj/.claude/skilletor.local.json", { vars => { who => 'me' } } );
@@ -167,6 +183,12 @@ my %after_ts = (
 );
 ok( scalar( keys %{ $after_ts{state} } ) >= 3, 'the reference recorded its state' )
   or diag join ', ', sort keys %{ $after_ts{state} };
+# The templates did render there, so the same bytes here are the same rendering.
+like( decode_utf8_lossy( $after_ts{project}{'.claude/skills/hello/SKILL.md'} // '' ),
+  qr/^skill hello from crew, project\/claude into \Q$proj\E\/\.claude\n.*^\x{2013} source, n=11$/ms, 'the reference rendered the templates' );
+is_deeply( [ map { $_->{key} } map { @{ $_->{skipped} } } @{ $ts_sync->{scopes} } ], ['rules/gated'], 'skipped one that renders empty' );
+is( scalar( grep { /\Atemplate error in skill broken: / } map { @{ $_->{warnings} } } @{ $ts_sync->{scopes} } ), 1,
+  'and warned of the one that fails' );
 
 subtest 'the port checks and reports what the reference synced' => sub {
   my $perl_check = $engine->check;

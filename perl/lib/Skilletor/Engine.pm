@@ -23,7 +23,7 @@ use Skilletor::GitEnv qw( git_env );
 use Skilletor::JSON qw( js_ordered js_sort_keys js_stringify js_type );
 use Skilletor::Lock qw( key_to_type_name parse_lock_key read_lock );
 use Skilletor::Process qw( run_command );
-use Skilletor::Render qw( build executables templates_of );
+use Skilletor::Render qw( build executables renders_empty );
 use Skilletor::Report qw( empty_scope_report );
 use Skilletor::Source::Git;
 use Skilletor::Source::Url;
@@ -32,6 +32,7 @@ use Skilletor::Targets qw(
   all_roots default_hermes_home detect_harnesses is_block_type is_local_type lacks_local_prefix lock_key
   place_output receivers root_of root_of_key select_targets supports target_gaps
 );
+use Sys::Hostname ();
 use namespace::clean;
 
 extends 'Skilletor::Resolver';
@@ -45,6 +46,9 @@ use constant RENDER_FORMAT => 2;
 use constant RULES_FILE => 'skilletor-rules.md';
 
 my %TYPE_DIR = ( skill => 'skills', agent => 'agents', rule => 'rules' );
+
+# process.platform where Perl's $^O names the system otherwise.
+my %NODE_PLATFORM = ( MSWin32 => 'win32', solaris => 'sunos' );
 
 # Does a user-scope root lie inside a git work tree (spec §6.4)? Default: ask git.
 has is_git_work_tree => (
@@ -69,6 +73,28 @@ has plugin_root => (
   is      => 'lazy',
   builder => sub { $ENV{CLAUDE_PLUGIN_ROOT} },
 );
+
+# The render context's `host` (spec §5). Default: this machine's name and OS, as Node names them.
+has host => (
+  is      => 'lazy',
+  builder => sub { js_ordered( name => Sys::Hostname::hostname(), os => $NODE_PLATFORM{$^O} // $^O ) },
+);
+
+# The render context's `user` (spec §5). Default: the login name, as Node's os.userInfo() finds
+# it, and the engine's home.
+has user => (
+  is      => 'lazy',
+  builder => sub { js_ordered( name => _user_name(), home => $_[0]->home ) },
+);
+
+# Node's os.userInfo().username: the effective user's passwd entry (Windows: the account name).
+# Without an entry Node throws, and the reference's build of every item fails with its message.
+sub _user_name {
+  return $ENV{USERNAME} // '' if $^O eq 'MSWin32';
+  my $name = getpwuid $>;
+  die "A system error occurred: uv_os_get_passwd returned ENOENT (no such file or directory)\n" unless defined $name;
+  return Encode::decode( 'UTF-8', $name );
+}
 
 sub _git_remote {
   my ( $dir ) = @_;
@@ -228,6 +254,24 @@ sub _render_inputs_hash {
   return hash_bytes( encode_text( _canonical_json( { format => 0 + RENDER_FORMAT, %$inputs } ) ) );
 }
 
+# The template context of one copy (spec §5): the item's vars (source defaults < bundle vars <
+# the scope's), the project, the scope, the harness and the root it is rendered for, host, user,
+# the item. Deliberately no env.* and no git branch.
+sub _render_context {
+  my ( $self, $inputs, $scope, $harness, $target_dir, $item, $source_vars, $bundle_vars ) = @_;
+  my $p = $inputs->{project};
+  return {
+    vars    => Skilletor::Resolver::_item_vars( $source_vars, $bundle_vars, $inputs->{vars} ),
+    project => $p ? js_ordered( dir => $p->{dir}, name => $p->{name}, git_remote => $p->{git_remote} ) : undef,
+    scope   => $scope,
+    harness => $harness,
+    target  => js_ordered( dir => $target_dir ),
+    host    => $self->host,
+    user    => $self->user,
+    item    => js_ordered( name => $item->{name}, type => $item->{type}, source => $item->{source} ),
+  };
+}
+
 sub _scope_sources {
   my ( $scope_cfg ) = @_;
   return _uniq( map { $_->{source} } @{ $scope_cfg->{install} }, @{ $scope_cfg->{wildcards} }, @{ $scope_cfg->{bundles} } );
@@ -330,7 +374,6 @@ sub _sync_scope_run {
   # Entries this version cannot place (an unknown harness prefix) are never touched.
   my @keep = grep { !defined root_of_key( $rc, $_ ) } keys %$old_lock;
   my %key_info;
-  my %held_back;    # sources with an item the Perl port does not build (templates)
   my $receivers_of = sub { @{ receivers( $harnesses, $_[0], $scope ) } };
   my $hooks = {
     keep => sub {
@@ -353,20 +396,14 @@ sub _sync_scope_run {
     build => sub {
       my ( $item, $extra, $found, $warnings ) = @_;
       my ( $r, $cat, $ci ) = @{$found}{qw( r cat item )};
+      # Rendered once per target, with that target's harness and root (spec §14.3).
       for my $h ( $receivers_of->( $item->{type} ) ) {
         my $key = lock_key( $h, $item->{target} );
-        if ( my @tpl = templates_of($ci) ) {
-          # The Perl port renders no Nunjucks: the item stays as it is installed, as for an
-          # unreachable source, and its source counts as not reached for the records.
-          push @$warnings, $item->{type}.' '.$item->{name}.'@'.$item->{source}.' is a Nunjucks template ('.join( ', ', @tpl )
-            .') the Perl port of skilletor does not render; an installed copy stays';
-          push @keep, $key if exists $old_lock->{$key};
-          $held_back{ $item->{source} } = 1;
-          next;
-        }
         my ( $output, $executable );
         my $ok = eval {
-          $output = build( $ci, $r->{dir} );
+          my $context = $self->_render_context( $inputs_of->(), $scope, $h, root_of( $rc, $h, $item->{type} ), $item,
+            $cat->{meta}{vars}, $extra->{bundleVars} );
+          $output = build( $ci, $r->{dir}, $context );
           # A skill's scripts keep their source's executable bit (k99); an agent or rule never.
           $executable = $item->{type} eq 'skill' ? executables( $ci, $r->{dir} ) : {};
           1;
@@ -380,6 +417,13 @@ sub _sync_scope_run {
         my $p = { key => $key, type => $item->{type}, name => $item->{name}, source => $item->{source}, version => $r->{version} };
         $p->{via} = $extra->{via} if $extra->{via} && @{ $extra->{via} };
         $p->{inBlock} = 1 if is_block_type( $h, $item->{type} );
+        # Main template renders empty: not applicable here (spec §5).
+        if ( renders_empty( $ci, $output ) ) {
+          $p->{output}  = [];
+          $p->{skipped} = 'renders-empty';
+          push @plan, $p;
+          next;
+        }
         # Layout names (spec §6.3, §6.4): `.local.` agents and rules claiming their plain path; a
         # skill carries its own `.gitignore` while the scope's switch is on.
         my $placed = place_output( $h, $item->{type}, $output );
@@ -507,15 +551,14 @@ sub _sync_scope_run {
   $out->{briefingMissing} = \@briefing if @briefing;
 
   # The records `check` compares with (spec §14.3). A source counts as reached when it was
-  # resolved and scanned – and, in the Perl port, when it had no item left unbuilt for being a
-  # template: what the port left alone stays open for the next sync, the reference's included.
+  # resolved and scanned: what a sync left in place although it read every source it needed – an
+  # item its source lacks, a lasting conflict, a template error – is not counted again.
   my %resolved = %{ $info->{resolved} };
   my %catalogs = %{ $info->{catalogs} };
   my $reachable = sub {
     my ( $name ) = @_;
     return 0 unless $resolved{$name};
-    return 0 if exists $catalogs{$name} && !defined $catalogs{$name};
-    return $held_back{$name} ? 0 : 1;
+    return ( exists $catalogs{$name} && !defined $catalogs{$name} ) ? 0 : 1;
   };
   my @drift = $self->_scope_drift( $scope, $scope_cfg, $harnesses, $final_lock, $info->{served} );
   $state->put_unreached( $lock_path, [ map { $_->{id} } grep { my $d = $_; !grep { !$reachable->($_) } @{ $d->{sources} } } @drift ] );
@@ -956,18 +999,17 @@ them. Run the skilletor CLI once on such a machine.
 
 =head2 Templates
 
-The port renders no Nunjucks. A declared item with a C<.njk> file is never
-installed unrendered: the sync warns
-(C<< skill greet@shared is a Nunjucks template (skills/greet/SKILL.md.njk) the
-Perl port of skilletor does not render; an installed copy stays >>) and leaves
-the item exactly as it is installed – files and lock entry, never deleted –
-as for an item whose source cannot be reached. For the records the item's
-source then counts as not reached: drift it keeps is not recorded as
-unreached, its C<sources-read.json> entry stays what an earlier sync read, and
-the scope's render inputs are not recorded. So C<check> – the port's and the
-reference's – keeps asking for a sync, and the reference's next sync renders
-the item. A C<renders-empty> skip can only come from a render; such lock
-entries the reference left are kept like any other.
+A declared item with a C<.njk> file is rendered as the reference renders it
+(L<Skilletor::Render>), once per target, with the reference's context: the
+item's C<vars> (source defaults, bundle vars, the scope's), C<project> (in the
+project scope), C<scope>, C<harness>, C<target> (the root the copy goes to),
+C<host> (L</host>), C<user> (L</user>) and C<item>. A template that fails is a
+warning (C<< template error in skill greet: skills/greet/SKILL.md.njk: … >>,
+the reference's) and leaves the item as it is installed, files and lock entry;
+its source still counts as read. An item whose main template renders to
+whitespace once its frontmatter is removed does not apply in the scope: it is
+skipped (C<renders-empty>), what it installed is removed, and its lock entry
+says why.
 
 =head2 Errors
 
@@ -1005,6 +1047,22 @@ The project's C<origin>, a render input of the project scope. Default: ask git.
 
 C<CLAUDE_PLUGIN_ROOT> by default: the running plugin's install, which names
 skilletor's marketplace for the settings requirement. Unset outside a plugin.
+
+=attr host
+
+  host => { name => 'box', os => 'linux' }
+
+The render context's C<host>. Default: the machine's host name and its OS as
+Node's C<process.platform> names it (C<linux>, C<darwin>, C<win32>, …).
+
+=attr user
+
+  user => { name => 'me', home => $home }
+
+The render context's C<user>. Default: the login name of the effective user,
+as Node's C<os.userInfo()> finds it, and L<Skilletor::Resolver/home>. A user
+without a passwd entry fails every item's build with Node's message, as the
+reference's does.
 
 =method sync
 

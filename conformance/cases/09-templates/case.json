@@ -29,20 +29,5 @@
       "id": "check",
       "op": "check"
     }
-  ],
-  "engines": {
-    "perl": {
-      "steps": {
-        "sync": {
-          "expected": "expected.perl/sync"
-        },
-        "status": {
-          "expected": "expected.perl/status"
-        },
-        "check": {
-          "expected": "expected.perl/check"
-        }
-      }
-    }
-  }
+  ]
 }
