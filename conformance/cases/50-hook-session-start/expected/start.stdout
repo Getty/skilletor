@@ -1,0 +1,1 @@
+{"systemMessage":"skilletor: 1 item(s) updated, .claude/.gitignore, .worktreeinclude updated — commit them","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"skilletor synced items:\n- skill foo@shared: active now\n- .claude/.gitignore updated — commit it\n- .worktreeinclude updated — commit it"}}

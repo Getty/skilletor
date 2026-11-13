@@ -1,0 +1,13 @@
+{
+  "sources": {
+    "team": {
+      "git": "https://example.invalid/skills",
+      "ref": "--upload-pack=touch '${PROJECT}/dash-pwned'"
+    }
+  },
+  "install": {
+    "skills": [
+      "foo@team"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "description": "The hook command's quiet and odd paths (spec §8): nothing declared – SessionStart and the prompt (checkInterval 0: never a background sync) say nothing; no event says nothing; an unknown event is one display-safe warning line, also when `--harness` stands where the event goes; `--harness codex` with Claude Code alone in use answers as Claude Code's; --json, --scope and --project-dir are taken off the arguments as for any command (the hook goes by its environment and input), an unknown option or a --scope no command takes is no error. Every run exits 0; none reads its arguments as a reason to fail.",
+  "steps": [
+    { "id": "start-nothing", "op": "cli", "argv": ["hook", "session-start"], "stdin": { "hook_event_name": "SessionStart", "source": "startup" } },
+    { "id": "prompt-nothing", "op": "cli", "argv": ["hook", "user-prompt-submit"], "stdin": {} },
+    { "id": "no-event", "op": "cli", "argv": ["hook"], "stdin": {} },
+    { "id": "unknown-event", "op": "cli", "argv": ["hook", "bogus"], "stdin": {} },
+    { "id": "unknown-event-unsafe", "op": "cli", "argv": ["hook", "bo\u001b[31mgus‮"] },
+    { "id": "harness-first", "op": "cli", "argv": ["hook", "--harness", "codex"], "stdin": {} },
+    { "id": "harness-codex", "op": "cli", "argv": ["hook", "session-start", "--harness", "codex"], "stdin": { "source": "startup" } },
+    { "id": "harness-codex-eq", "op": "cli", "argv": ["hook", "user-prompt-submit", "--harness=codex"], "stdin": {} },
+    { "id": "options-first", "op": "cli", "argv": ["hook", "--json", "--scope", "bogus", "--project-dir", "${TMP}/nowhere", "bogus"], "stdin": {} },
+    { "id": "options-after", "op": "cli", "argv": ["hook", "user-prompt-submit", "--frob", "--scope=everything", "-x"], "stdin": {}, "tree": true }
+  ]
+}

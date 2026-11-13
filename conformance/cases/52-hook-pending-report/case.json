@@ -1,0 +1,31 @@
+{
+  "description": "The background sync and its pending report (spec §8): `hook __sync-background` – as the prompt hook starts it, SKILLETOR_PROJECT_DIR naming the project and winning over CLAUDE_PROJECT_DIR – syncs, says nothing and leaves its report; the next prompt, from a subdirectory of the project's checkout with no project in its environment (the git top level is the project), hands it out once under UserPromptSubmit; the prompt after that is silent. checkInterval 0: no prompt starts a background sync of its own.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "gitInit": ["project"],
+  "steps": [
+    {
+      "id": "background",
+      "op": "cli",
+      "argv": ["hook", "__sync-background"],
+      "env": { "SKILLETOR_PROJECT_DIR": "${PROJECT}", "CLAUDE_PROJECT_DIR": "${TMP}/cwd" },
+      "cwd": "${TMP}/cwd",
+      "tree": true
+    },
+    {
+      "id": "prompt",
+      "op": "cli",
+      "argv": ["hook", "user-prompt-submit"],
+      "cwd": "${PROJECT}/sub/deep",
+      "stdin": { "hook_event_name": "UserPromptSubmit", "cwd": "${PROJECT}/sub/deep", "session_id": "s1", "prompt": "hi" }
+    },
+    {
+      "id": "prompt-again",
+      "op": "cli",
+      "argv": ["hook", "user-prompt-submit"],
+      "cwd": "${PROJECT}/sub/deep",
+      "stdin": { "hook_event_name": "UserPromptSubmit", "cwd": "${PROJECT}/sub/deep", "session_id": "s1", "prompt": "hi" }
+    }
+  ]
+}

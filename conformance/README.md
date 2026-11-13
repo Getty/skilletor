@@ -280,6 +280,15 @@ cd perl && SKILLETOR_CONFORMANCE_CLI='["node", "'"$(dirname "$PWD")"'/dist/skill
 A CLI that does not start, runs past the step's timeout (30 s) or dies of a signal fails the
 step. A step whose `argv` starts with `hook` must expect exit 0: a hook never fails (spec §8).
 
+A `hook user-prompt-submit` that finds its project due starts a real background sync –
+detached, outliving the step, racing the next one and the temp dir's removal – so a case keeps
+every prompt hook not due: `checkInterval` 0 or less in the user config, a `session-start`
+before it that marked the project checked, or a `home/.claude/skilletor/last-check.json` whose
+mark for `${PROJECT}` lies in the future (a config that fails to load makes a project due every
+600 s, and a SessionStart that meets a config error marks nothing). The background sync itself
+is a step of its own, `hook __sync-background` with `SKILLETOR_PROJECT_DIR`, as the prompt
+hook starts it.
+
 ### `resolve`
 
 What each scope resolves to – a sync's steps 1–3 (spec §6.1): config load and merge, trust,
@@ -466,6 +475,16 @@ show it, its `description` saying which.
 | `43-cli-dropped-project` | a project whose `skilletor.json` is gone: status names the orphan, the sync removes it, the lock and both blocks, names nothing to commit; status `--json` reads no lock (k65) |
 | `44-cli-status-targets` | status names a scope's targets unless they are Claude Code alone: a project narrowed to `codex` on a Claude-only machine is `project scope (no targets):`; its sync installs nothing there and says why |
 | `45-cli-force` | `sync --force` through the CLI: a hand-written `SKILL.md` is a conflict without it, adopted and replaced with it |
+| `50-hook-session-start` | SessionStart through the CLI: a project's new skill synced, the line with the block to commit (k62) and the context with the activation hint; the same SessionStart again and the prompt after it are silent; malformed stdin counts as none, the project is then the cwd's |
+| `51-hook-quiet` | the hook command's quiet and odd paths: nothing declared, no event, an unknown or unsafe event (one escaped line), `--harness codex` with Claude Code alone, `--json`, `--scope` and `--project-dir` taken off the arguments, an unknown option no error; every run exits 0 |
+| `52-hook-pending-report` | `hook __sync-background` (`SKILLETOR_PROJECT_DIR` over `CLAUDE_PROJECT_DIR`) syncs silently and leaves its report; the next prompt, from a subdirectory of the checkout, hands it out once under `UserPromptSubmit` (`gitInit`) |
+| `53-hook-config-error` | a config error through the hooks (k86): SessionStart's one line naming the file; the background sync leaves that line, the next prompt hands it out without context, then silence |
+| `54-hook-dash-ref` | a project ref starting with `-` (k85): `sync` exits 2 naming file, source and key; SessionStart, its project from the input's cwd, exits 0 with that line; git never runs |
+| `55-hook-escaped-error` | a config error naming a source with control and bidi characters is one escaped line, at SessionStart and on the prompt after the background sync (k87) |
+| `56-hook-no-harness` | no harness detected (`CLAUDE_CONFIG_DIR` without markers): SessionStart's one warning line, installing nothing; the background sync's report, the same line, on the next prompt |
+| `57-hook-home-project` | a session started in the home dir has no project scope (k44): the user scope synced once, no `.gitignore` block; with `CLAUDE_PROJECT_DIR` the home the same, silent; the prompt after is not due |
+| `58-hook-bundles` | SessionStart's sync with a good bundle and a cyclic one: the good one's skill installed, the cycle one warning in the line and the context (k48) |
+| `59-hook-unused-project` | SessionStart in a project that does not use skilletor: the user scope's skill synced, the old `.gitignore` block in the project removed silently, nothing to commit (k65) |
 
 The state files two engines on one machine share – `render-inputs.json` with its hash,
 `sources-read.json`, `unreached.json` – are not compared here: their keys are absolute lock
@@ -473,8 +492,12 @@ paths and the hash covers the project dir, so they differ from one temp dir to t
 Perl port's `t/52-parity-sync.t` has both engines sync one machine and compares them byte for
 byte.
 
-Not covered yet: the CLI's commands but `sync`, `check` and `status`, and its hooks (the Perl
-CLI runs no other yet); a sync's run-level warnings and notes (the untrusted Codex hook, what
+Not covered yet: the CLI's commands but `sync`, `check`, `status` and `hook` (the Perl CLI
+runs no other yet); of the hooks, the checkout-move ones (`cwd-changed`, `post-tool-use`), what
+`--harness codex` and `--harness hermes` add (Codex's rules context, Hermes' opt-in line, the
+prompt hook following a move), a due prompt's real background sync, the in-session interval
+and the sync lock held by another run (each engine's own tests pin these three, the interval
+on an injected clock); a sync's run-level warnings and notes (the untrusted Codex hook, what
 Hermes gets no copy of – Codex and Hermes targets only); a `url`
 source actually fetched (the engine takes `https://` only, so it needs a local TLS server), a
 source whose fetch fails (the warning quotes git's own message), symbolic links in a target, a

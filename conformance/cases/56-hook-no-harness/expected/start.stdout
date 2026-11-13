@@ -1,0 +1,1 @@
+{"systemMessage":"skilletor: no agent harness detected (looked for claude: ${HOME}/bare/.claude.json, ${HOME}/bare/settings.json, ${HOME}/bare/projects; codex: ${HOME}/.codex/config.toml, ${HOME}/.codex/auth.json, ${HOME}/.codex/sessions, ${HOME}/.codex/installation_id); set \"targets\": [\"claude\"], \"codex\" and/or \"hermes\" in ~/.claude/skilletor.json"}

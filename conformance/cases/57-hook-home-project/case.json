@@ -1,0 +1,32 @@
+{
+  "description": "k44: a session started in the home dir – no project in its environment, the input's cwd the home, outside git – has no project scope: SessionStart syncs the user scope alone, once, with no .gitignore block in ~/.claude; with CLAUDE_PROJECT_DIR the home the same, silent now; the prompt after is not due (checked) and silent.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": ["hook", "session-start"],
+      "cwd": "${HOME}",
+      "stdin": { "hook_event_name": "SessionStart", "source": "startup", "cwd": "${HOME}" },
+      "tree": true
+    },
+    {
+      "id": "start-env",
+      "op": "cli",
+      "argv": ["hook", "session-start"],
+      "cwd": "${HOME}",
+      "env": { "CLAUDE_PROJECT_DIR": "${HOME}" },
+      "stdin": { "hook_event_name": "SessionStart", "source": "startup", "cwd": "${HOME}" },
+      "tree": true
+    },
+    {
+      "id": "prompt",
+      "op": "cli",
+      "argv": ["hook", "user-prompt-submit"],
+      "cwd": "${HOME}",
+      "stdin": { "hook_event_name": "UserPromptSubmit", "cwd": "${HOME}", "prompt": "hi" }
+    }
+  ]
+}

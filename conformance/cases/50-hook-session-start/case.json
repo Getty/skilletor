@@ -1,0 +1,37 @@
+{
+  "description": "The SessionStart hook through the CLI (spec §8): a project config's new skill is synced, the one JSON line – the count, the .gitignore block to commit (k62) – and the context with the activation hint under SessionStart; the same SessionStart again is silent, and so is the prompt after it (checked, not due: no background sync); malformed stdin counts as no input and the project is then the cwd's – nothing changed, silent. Every run exits 0.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": ["hook", "session-start"],
+      "env": { "CLAUDE_PROJECT_DIR": "${PROJECT}" },
+      "stdin": { "hook_event_name": "SessionStart", "source": "startup", "cwd": "${PROJECT}", "session_id": "s1" },
+      "tree": true
+    },
+    {
+      "id": "start-again",
+      "op": "cli",
+      "argv": ["hook", "session-start"],
+      "env": { "CLAUDE_PROJECT_DIR": "${PROJECT}" },
+      "stdin": { "hook_event_name": "SessionStart", "source": "startup", "cwd": "${PROJECT}", "session_id": "s1" }
+    },
+    {
+      "id": "prompt",
+      "op": "cli",
+      "argv": ["hook", "user-prompt-submit"],
+      "env": { "CLAUDE_PROJECT_DIR": "${PROJECT}" },
+      "stdin": { "hook_event_name": "UserPromptSubmit", "cwd": "${PROJECT}", "session_id": "s1", "prompt": "hi" }
+    },
+    {
+      "id": "start-malformed",
+      "op": "cli",
+      "argv": ["hook", "session-start"],
+      "stdin": "{ not json",
+      "tree": true
+    }
+  ]
+}

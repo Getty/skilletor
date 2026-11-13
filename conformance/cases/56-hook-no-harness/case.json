@@ -1,0 +1,18 @@
+{
+  "description": "No agent harness detected (spec §14.1): CLAUDE_CONFIG_DIR names a directory with the user config but none of Claude Code's markers, and Codex is not in use – SessionStart answers the error in one warning line and installs nothing; the background sync leaves the same line, which the next prompt hands out (checkInterval 0: no prompt starts a sync of its own). The hooks' state lives under that config dir.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": ["hook", "session-start"],
+      "env": { "CLAUDE_CONFIG_DIR": "${HOME}/bare" },
+      "stdin": { "hook_event_name": "SessionStart", "source": "startup" },
+      "tree": true
+    },
+    { "id": "background", "op": "cli", "argv": ["hook", "__sync-background"], "env": { "CLAUDE_CONFIG_DIR": "${HOME}/bare", "SKILLETOR_PROJECT_DIR": "${TMP}/cwd" } },
+    { "id": "prompt", "op": "cli", "argv": ["hook", "user-prompt-submit"], "env": { "CLAUDE_CONFIG_DIR": "${HOME}/bare" }, "stdin": {}, "tree": true }
+  ]
+}

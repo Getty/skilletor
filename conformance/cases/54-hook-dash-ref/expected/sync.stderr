@@ -1,0 +1,1 @@
+skilletor: config error, nothing changed — ${PROJECT}/.claude/skilletor.json: sources.team.ref "--upload-pack=touch '${PROJECT}/dash-pwned'" must not start with "-" (git would read it as an option)

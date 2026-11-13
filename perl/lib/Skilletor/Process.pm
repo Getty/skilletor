@@ -13,7 +13,7 @@ use Time::HiRes ();
 
 our $VERSION = '0.002';
 
-our @EXPORT_OK = qw( run_command );
+our @EXPORT_OK = qw( run_command spawn_detached );
 
 sub run_command {
   my ( %args ) = @_;
@@ -136,6 +136,33 @@ sub run_command {
   };
 }
 
+# Start a program and leave it running on its own: a session of its own (setsid, so a kill of the
+# caller's process group spares it), stdio on /dev/null, never waited for – the intermediate child
+# that starts it exits at once, so no zombie is left behind. Node's spawn with `detached` and
+# `stdio: "ignore"`, `unref()`ed. True when the program was started (its exec is not awaited).
+sub spawn_detached {
+  my ( %args ) = @_;
+  my $cmd = $args{cmd} or croak __PACKAGE__.'->spawn_detached needs cmd';
+  croak __PACKAGE__.'->spawn_detached: no detached spawn on Windows yet (k186)' if $^O eq 'MSWin32';
+  my ( $file, @argv ) = @$cmd;
+  my $pid = fork;
+  return 0 unless defined $pid;
+  if ( !$pid ) {
+    POSIX::setsid();
+    my $grandchild = fork;
+    POSIX::_exit(1) unless defined $grandchild;    # no second fork: nothing started
+    POSIX::_exit(0) if $grandchild;                # the intermediate goes, the program runs on
+    open( STDIN,  '<', '/dev/null' );
+    open( STDOUT, '>', '/dev/null' );
+    open( STDERR, '>', '/dev/null' );
+    %ENV = %{ $args{env} } if $args{env};
+    { no warnings 'exec'; exec {$file} $file, @argv; }
+    POSIX::_exit(127);
+  }
+  waitpid $pid, 0;
+  return $? == 0 ? 1 : 0;
+}
+
 1;
 
 =synopsis
@@ -168,5 +195,15 @@ Returns C<< { code, signal, stdout, stderr, timed_out, spawn_error? } >>.
 C<code> is C<undef> when a signal ended the child. C<spawn_error>
 (C<< { stage => 'chdir' | 'exec', errno, message } >>) says the program never
 ran: no such directory, no such program.
+
+=func spawn_detached
+
+  spawn_detached( cmd => [ $program, @args ], env => \%env );
+
+Starts the program and returns without waiting for it: in a session of its
+own, stdin, stdout and stderr on F</dev/null>, the given environment (default:
+this process's). The background sync of the hooks runs this way. True when the
+program was started; whether its C<exec> succeeded is not known. Not on
+Windows yet (k186): it dies there.
 
 =cut

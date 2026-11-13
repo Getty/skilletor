@@ -1,0 +1,16 @@
+{
+  "description": "k65 (spec §6.4): SessionStart in a project that does not use skilletor – no config there, only the .gitignore block an earlier version left – syncs the user scope's new skill and the project scope with it: the old block goes, silently, nothing else is written there, and the line asks for no commit.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": ["hook", "session-start"],
+      "env": { "CLAUDE_PROJECT_DIR": "${PROJECT}" },
+      "stdin": { "hook_event_name": "SessionStart", "source": "startup", "cwd": "${PROJECT}" },
+      "tree": true
+    }
+  ]
+}

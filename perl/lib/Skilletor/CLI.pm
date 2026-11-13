@@ -9,14 +9,14 @@ use Cwd ();
 use Encode ();
 use Exporter qw( import );
 use Scalar::Util qw( blessed );
-use Skilletor::FSUtil qw( decode_utf8_lossy encode_text path_resolve );
-use Skilletor::GitEnv qw( git_env );
-use Skilletor::Process qw( run_command );
+use Skilletor::FSUtil qw( decode_utf8_lossy path_join );
+use Skilletor::Hooks qw( project_root_of );
+use Skilletor::JSON qw( js_ordered js_parse js_stringify js_type );
 use Skilletor::Report qw( display_safe report_json report_text status_text );
 
 our $VERSION = '0.002';
 
-our @EXPORT_OK = qw( run parse_flags unknown_option project_root_of CLI_VERSION USAGE );
+our @EXPORT_OK = qw( run parse_flags unknown_option project_root_of self_command is_packed CLI_VERSION USAGE );
 
 # The version the CLI reports: the plugin's (package.json), which t/60-conformance.t pins.
 # Provisional until k167 decides between it and the dist's own $VERSION.
@@ -130,18 +130,6 @@ sub _print_text {
 # A string's truthiness in JavaScript: set and not empty.
 sub _truthy { defined $_[0] && length $_[0] }
 
-# The project root of a directory, as the hooks find it (spec §14.5): git's top level of $cwd,
-# else $cwd itself. The reference's projectRootOf: one git run, 2 s, git's environment.
-sub project_root_of {
-  my ( $cwd ) = @_;
-  my $r = eval {
-    run_command( cmd => [ 'git', '-C', encode_text($cwd), 'rev-parse', '--show-toplevel' ], env => git_env(), timeout_ms => 2_000 );
-  };
-  return $cwd unless $r && !$r->{spawn_error} && !$r->{timed_out} && defined $r->{code} && $r->{code} == 0;
-  ( my $top = decode_utf8_lossy( $r->{stdout} ) ) =~ s/\A\s+|\s+\z//g;
-  return length $top ? path_resolve($top) : $cwd;
-}
-
 # Node's os.homedir(): $HOME, else the user's passwd entry.
 sub _home {
   return decode_utf8_lossy( $ENV{HOME} ) if defined $ENV{HOME};
@@ -243,6 +231,77 @@ sub _message {
   return $text;
 }
 
+#### hook ####################################################################
+
+# Is this a PAR-packed binary? PAR's loader is loaded and names the program in PAR_PROGNAME.
+sub is_packed { exists $INC{'PAR.pm'} && _truthy( $ENV{PAR_PROGNAME} ) ? 1 : 0 }
+
+# The command line that runs this CLI once more, for the hooks' detached background sync (the
+# reference's binPath). A PAR-packed binary is its own program: PAR_PROGNAME, its full path – in
+# one, $^X is the bare name `perl` and $0 the name it was called by. Plain perl runs $^X with the
+# script and, as -I, every module dir it searches, so the child finds what this run found.
+sub self_command {
+  my ( %args ) = @_;
+  my $packed = $args{packed} // is_packed();
+  return [ $args{progname} // $ENV{PAR_PROGNAME} ] if $packed;
+  return [ $args{perl} // $^X, ( map { "-I$_" } grep { !ref } @{ $args{inc} // \@INC } ), $args{script} // $0 ];
+}
+
+# JavaScript's truthiness of a JSON value.
+sub _js_truthy {
+  my ( $v ) = @_;
+  my $type = js_type($v);
+  return 0 if $type eq 'null';
+  return length $v ? 1 : 0 if $type eq 'string';
+  return $v ? 1 : 0 if $type eq 'number' || $type eq 'boolean';
+  return 1;
+}
+
+# The hook's input: stdin as JSON, nothing on a terminal; malformed input, or JSON that is no
+# object, counts as none.
+sub _hook_input {
+  return {} if -t STDIN;
+  my $raw = do { no warnings; local $/; binmode STDIN; <STDIN> } // '';
+  my $input = eval { $raw =~ /\S/ ? js_parse( decode_utf8_lossy($raw) ) : undef };
+  return js_type($input) eq 'object' ? $input : {};
+}
+
+# `skilletor hook <event> [--harness codex|hermes]` (the reference's runHookCommand): stdin JSON
+# in, a compact JSON line out when there is something to say, exit 0 always (spec §8). A die in
+# its own setup – no home, say (k164) – is that one line as well.
+sub _hook {
+  my ( @args ) = @_;
+  local $SIG{PIPE} = 'IGNORE';    # a reader gone is no reason to exit otherwise
+  my $out;
+  $out = js_ordered( systemMessage => display_safe( 'skilletor: '._message($@) ) ) unless eval { $out = _hook_output(@args); 1 };
+  if ( ref $out eq 'HASH' && ( _js_truthy( $out->{systemMessage} ) || _js_truthy( $out->{hookSpecificOutput} ) ) ) {
+    _write( \*STDOUT, js_stringify($out)."\n" );
+  }
+  return 0;
+}
+
+sub _hook_output {
+  my ( @args ) = @_;
+  my $event = $args[0];
+  my ($at) = grep { $args[$_] eq '--harness' } 0 .. $#args;
+  my $harness = defined $at ? $args[ $at + 1 ] : ( map { /\A--harness=(.*)\z/s ? $1 : () } @args )[0];
+  return undef unless _truthy($event);    # nothing to do, never disturb the session
+  my $input = _hook_input();
+  my $home  = _home();
+  # Unset under Codex: the hook then takes the git top level of the input's cwd (spec §14.5).
+  my ($project_dir) = grep { _truthy($_) } map { defined $_ ? decode_utf8_lossy($_) : undef } @ENV{qw( SKILLETOR_PROJECT_DIR CLAUDE_PROJECT_DIR )};
+  my $config_dir = _truthy( $ENV{CLAUDE_CONFIG_DIR} ) ? decode_utf8_lossy( $ENV{CLAUDE_CONFIG_DIR} ) : undef;
+  my %ctx = (
+    home              => $home,
+    project_dir       => $project_dir,
+    claude_config_dir => $config_dir,
+    state_root        => path_join( $config_dir // path_join( $home, '.claude' ), 'skilletor' ),
+    self_command      => self_command(),
+  );
+  $ctx{harness} = $harness if defined $harness && ( $harness eq 'codex' || $harness eq 'hermes' );
+  return Skilletor::Hooks::run_hook( $event, $input, \%ctx );
+}
+
 sub run {
   my ( @argv ) = map { Encode::decode( 'UTF-8', $_ ) } @_;
   # Argument hygiene (spec §7): --version only first, --help anywhere and alone.
@@ -261,8 +320,9 @@ sub run {
     return 2;
   }
   my $flags = parse_flags( @argv[ 1 .. $#argv ] );
-  # Ahead of every check (k164): a hook never fails on its arguments.
-  return _not_ported('hook') if $cmd eq 'hook';
+  # Ahead of every check (k164): a hook never fails on its arguments, and it takes its project
+  # from its environment or input, not from the process cwd – which may be gone.
+  return _hook( @{ $flags->{rest} } ) if $cmd eq 'hook';
   my $unknown = unknown_option( $cmd, $flags );
   if ( defined $unknown ) {
     my $name = $cmd eq 'source' && exists $ACCEPTED{ _source_key($flags) } ? _source_key($flags) : $cmd;
@@ -354,9 +414,18 @@ C<--project-dir> or the git top level of the working directory
 F<skilletor/>, and the real host and user for templates. The engine is loaded
 only for these commands, so C<--help> and a usage error stay quick.
 
-Every other command and C<hook> is not ported yet: it says so on stderr and
-exits 1. Beside them the CLI has the argument layer: C<--help>, C<--version>,
-the options each command accepts, an unknown option or command, an invalid
+C<hook E<lt>eventE<gt> [--harness codex|hermes]> runs a hook
+(L<Skilletor::Hooks>): the input is stdin's JSON (none on a terminal; malformed
+input counts as none), the project C<$SKILLETOR_PROJECT_DIR>, else
+C<$CLAUDE_PROJECT_DIR>, else the git top level of the input's C<cwd>. It prints
+one compact JSON line when the hook has something to say and exits 0 whatever
+happens – a failure is that line's C<systemMessage>, its own setup's too. It is
+dispatched before any option check, so no option makes it fail. Its background
+sync re-runs this CLI (L</self_command>).
+
+Every other command is not ported yet: it says so on stderr and exits 1.
+Beside them the CLI has the argument layer: C<--help>, C<--version>, the
+options each command accepts, an unknown option or command, an invalid
 C<--scope> and a missing operand.
 
 Output is UTF-8; every line a user's input reaches is escaped by
@@ -384,10 +453,26 @@ last argument.
 
   my $root = project_root_of($cwd);
 
-The project of a working directory as the reference's hooks and CLI find it:
-C<git -C $cwd rev-parse --show-toplevel> in git's environment
-(L<Skilletor::GitEnv>), given 2 seconds; when git fails, times out or prints
-nothing, C<$cwd> itself.
+The project of a working directory as the reference's hooks and CLI find it;
+L<Skilletor::Hooks/project_root_of>, exported here as well.
+
+=func self_command
+
+  my $argv = self_command();
+  my $argv = self_command( packed => 0, perl => $^X, inc => \@INC, script => $0 );
+  my $argv = self_command( packed => 1, progname => $ENV{PAR_PROGNAME} );
+
+The command line that runs this CLI once more, without its arguments – what the
+hooks' background sync starts. A PAR-packed binary (L</is_packed>) is its own
+program: C<[ $ENV{PAR_PROGNAME} ]>, the binary's full path (in a packed binary
+C<$^X> is the bare name C<perl>, and C<$0> the name it was called by). Plain
+perl runs C<$^X> with the script C<$0>, and every directory of C<@INC> as C<-I>,
+so the child loads the same modules. Each part can be given, for a test.
+
+=func is_packed
+
+True in a PAR-packed binary: PAR's loader is loaded (C<$INC{'PAR.pm'}>) and
+names the program in C<PAR_PROGNAME>.
 
 =func unknown_option
 

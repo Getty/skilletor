@@ -1,0 +1,15 @@
+{
+  "description": "k48: bundle expansion runs inside SessionStart's sync – of a good bundle and one that names itself, the good one's skill is installed and the cycle is one warning, counted in the line and named in the context; the hook exits 0.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": ["hook", "session-start"],
+      "stdin": { "hook_event_name": "SessionStart", "source": "startup" },
+      "tree": true
+    }
+  ]
+}

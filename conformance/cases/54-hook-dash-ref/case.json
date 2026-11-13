@@ -1,0 +1,14 @@
+{
+  "description": "k85: a project ref starting with \"-\" – which git would read as an option – is a config error: `sync` exits 2 naming the file, the source and the key; SessionStart on the same project, which it finds from its input's cwd (no project in its environment, its own cwd elsewhere), exits 0 with that one line. git never runs: the --upload-pack's marker file is never written.",
+  "steps": [
+    { "id": "sync", "op": "cli", "argv": ["sync"], "tree": true },
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": ["hook", "session-start"],
+      "cwd": "${TMP}/cwd",
+      "stdin": { "hook_event_name": "SessionStart", "source": "startup", "cwd": "${PROJECT}" },
+      "tree": true
+    }
+  ]
+}

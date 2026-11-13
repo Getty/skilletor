@@ -1,0 +1,19 @@
+{
+  "description": "k86: a config error through the hooks – SessionStart answers the one line naming the file and touches nothing; the background sync leaves exactly that line as its report, never \"changes applied\"; the next prompt hands it out with no context, the prompt after is silent. The project's check mark in home/.claude/skilletor/last-check.json lies in the future, so no prompt is due: a config that fails to load would otherwise make one due every 600 s and start a real background sync.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": ["hook", "session-start"],
+      "env": { "CLAUDE_PROJECT_DIR": "${PROJECT}" },
+      "stdin": { "hook_event_name": "SessionStart", "source": "startup", "cwd": "${PROJECT}" },
+      "tree": true
+    },
+    { "id": "background", "op": "cli", "argv": ["hook", "__sync-background"], "env": { "SKILLETOR_PROJECT_DIR": "${PROJECT}" } },
+    { "id": "prompt", "op": "cli", "argv": ["hook", "user-prompt-submit"], "env": { "CLAUDE_PROJECT_DIR": "${PROJECT}" }, "stdin": { "cwd": "${PROJECT}" } },
+    { "id": "prompt-again", "op": "cli", "argv": ["hook", "user-prompt-submit"], "env": { "CLAUDE_PROJECT_DIR": "${PROJECT}" }, "stdin": { "cwd": "${PROJECT}" }, "tree": true }
+  ]
+}

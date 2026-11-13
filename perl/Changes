@@ -1,6 +1,12 @@
 Revision history for Skilletor
 
 {{$NEXT}}
+  - `skilletor hook session-start|user-prompt-submit` for Claude Code: the
+    SessionStart check and sync, the prompt's interval check with a detached
+    background sync (a packed binary re-runs itself via PAR_PROGNAME), and
+    pending reports. Every failure is one warning line with exit 0, and a
+    prompt with nothing due never loads the engine. New conformance cases 50
+    to 59 hold both CLIs to the same hook output.
   - Renders Nunjucks templates as the reference does, through Text::Nunjucks
     (a Perl port of Nunjucks 3.2.4, not on CPAN yet; new dependency, Perl
     5.40): a sync installs .njk items rendered with the reference's context,

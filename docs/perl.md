@@ -44,9 +44,13 @@ drift away from what the TypeScript engine does.
 The cases live in `conformance/cases/<NN-slug>/` and are language-neutral: JSON plus
 plain file trees, with the format given in `conformance/README.md`. Each case has a
 config, source trees (git sources are built as real repos and reached offline through
-`insteadOf`), steps (`resolve`, `sync`, `check`, `status`) and the expected results.
-`test/conformance.test.ts` and `perl/t/60-conformance.t` both run every case and
-compare the outputs as canonical data, and the installed files byte for byte. A case
+`insteadOf`), steps (`resolve`, `sync`, `check`, `status`, and `cli`, which runs a whole
+command line) and the expected results. `test/conformance.test.ts` and
+`perl/t/60-conformance.t` both run every case and compare the outputs as canonical data,
+and the installed files byte for byte; a `cli` step's exit code, stdout and stderr are
+compared as bytes. Each runner takes the CLI to run from `SKILLETOR_CONFORMANCE_CLI` (a
+JSON argv prefix), so either runner can hold the other implementation's CLI to the same
+cases. A case
 expects a different outcome in Perl only where it says so explicitly under
 `engines.perl`, with the reason given; no case does today.
 
@@ -118,14 +122,15 @@ It also requires each engine's `check` to accept the other engine's sync.
 ## Known gaps
 
 - Codex and Hermes targets are not ported to sync, check and status yet (the Codex
-  conversion itself is: `Skilletor::Convert`, `Skilletor::TOML`, k183), and neither is
-  `hooks.ts` – so neither are the hook commands nor the checkout-move hooks (`hook
-  cwd-changed` and `hook post-tool-use`, k147). What the hooks build on is ported (k180): the
-  pending report and the per-session cwd record `session-cwd.json` in `Skilletor::State`,
-  `report_hook`, and the engine options only the hooks set – `check`'s `local` (no source
-  asked), the sync's `deadline`, its `if_changed` (compare once more under the sync lock) and a
-  per-call `lock_timeout_ms`. The Perl CLI (`bin/skilletor`) is being ported command by
-  command under k166.
+  conversion itself is: `Skilletor::Convert`, `Skilletor::TOML`, k183). The Claude hooks are
+  (`Skilletor::Hooks`, k181): `hook session-start`, `hook user-prompt-submit` and its detached
+  background sync (`hook __sync-background`; a PAR-packed binary re-runs itself through
+  `PAR_PROGNAME`, plain perl re-runs `$^X` with the script). `--harness codex|hermes` is
+  parsed but answers as Claude Code's hook does until k184/k185, and the checkout-move hooks
+  (`hook cwd-changed`, `hook post-tool-use`, k147) say they are not ported and exit 0 (k182).
+  The Perl CLI (`bin/skilletor`) runs `sync`, `check`, `status` (k173) and the hooks; the
+  other commands are being ported one by one under k166, and each one not ported yet says so
+  and exits 1.
 - Windows is untested.
 - There are no conformance cases for a `url` fetch (it needs TLS), for symlink
   conflicts, or for partial syncs. `perl/t/62-engine.t` covers partial syncs.

@@ -1,0 +1,14 @@
+{
+  "description": "k87: a config error naming a source whose name holds an escape sequence, a bell, a bidi override and a newline – not valid (k95), found before the source's unknown key – is one warning line at SessionStart with each of them escaped, and the background sync's report the next prompt hands out is that same line. The project's check mark lies in the future (home/.claude/skilletor/last-check.json): no prompt is due, none starts a background sync.",
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": ["hook", "session-start"],
+      "env": { "CLAUDE_PROJECT_DIR": "${PROJECT}" },
+      "stdin": { "hook_event_name": "SessionStart", "source": "startup" }
+    },
+    { "id": "background", "op": "cli", "argv": ["hook", "__sync-background"], "env": { "SKILLETOR_PROJECT_DIR": "${PROJECT}" } },
+    { "id": "prompt", "op": "cli", "argv": ["hook", "user-prompt-submit"], "env": { "CLAUDE_PROJECT_DIR": "${PROJECT}" }, "stdin": {} }
+  ]
+}
