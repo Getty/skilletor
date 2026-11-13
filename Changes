@@ -58,6 +58,11 @@ Revision history for skilletor
     After updating, trust the changed hooks again in Codex `/hooks` and run
     `hermes plugins update skilletor` for the Hermes plugin. The Perl port has
     no hooks.
+  - A hook run from a working directory that no longer exists, or whose own
+    setup failed, exited 1 with a stack trace; it now exits 0 with at most one
+    warning line, and no longer runs `git rev-parse` on the process cwd when
+    its project is known. `hook ... --scope bogus` exits 0 too: the hook is
+    dispatched before the option checks.
 
 0.7.0     2026-10-16 20:00:22Z
   - The plugin, package and README descriptions name Hermes Agent as the third

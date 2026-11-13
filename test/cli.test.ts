@@ -3,7 +3,8 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { buildToString } from "../scripts/esbuild.config.mjs";
 import { claudeOnlyEnv, homeEnv } from "./helpers/harness.ts";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
@@ -648,6 +649,9 @@ test("every documented option still works for its command", () => {
   // names no cwd, so the project is the spawn's cwd: ~, as for the commands above.
   const hook = runCli(["hook", "session-start", "--harness", "codex", "--whatever"], h.env, "{}", h.home);
   assert.equal(hook.status, 0);
+  // k164: a --scope no command takes is the commands' exit 2, never the hook's.
+  const scoped = runCli(["hook", "session-start", "--scope", "bogus"], h.env, "{}", h.home);
+  assert.deepEqual([scoped.status, scoped.stderr], [0, ""]);
 });
 
 // k56: status names an agent's missing briefing skills, in text and --json.
@@ -775,6 +779,94 @@ test("k149: hook user-prompt-submit --harness codex syncs the worktree the sessi
   assert.equal(readFileSync(join(wt, ".agents", "skills", "foo", "SKILL.md"), "utf8"), "---\nname: foo\ndescription: foo\n---\nFOO\n");
   const again = hook("user-prompt-submit", wt, { hook_event_name: "UserPromptSubmit" });
   assert.deepEqual([again.status, again.stdout], [0, ""]);
+});
+
+// ---- k164: a hook exits 0 whatever its own setup meets (spec §8) ----------------------
+
+/** Run the bundle from a cwd that is gone: `sh` enters `dir`, removes it and execs node there
+ *  (Windows removes no process's cwd). */
+function runCliFromRemovedCwd(dir: string, args: string[], env: NodeJS.ProcessEnv, input: string) {
+  mkdirSync(dir, { recursive: true });
+  const script = 'cd "$1" && rmdir "$1" && shift && exec "$@"';
+  return spawnSync("sh", ["-c", script, "sh", dir, process.execPath, bundle, ...args], { encoding: "utf8", env, input });
+}
+
+const noRemovedCwd = process.platform === "win32" && "Windows cannot remove a process's cwd";
+
+// Asserts: through the built bundle, run from a cwd that no longer exists (a session whose
+// worktree was removed), every hook exits 0 with nothing on stderr. With a project to go by – the
+// payload's cwd, or CLAUDE_PROJECT_DIR naming the removed directory itself – it does its work: the
+// user scope syncs, then nothing is left to say. With none, the one place left to look is the
+// process cwd, and the hook says in one warning line that it is gone. The item is a rule: a
+// skill's install path still reads the cwd in render.ts (noted on k164, its own fix).
+test("k164: a hook run from a removed cwd exits 0 and still syncs", { skip: noRemovedCwd }, () => {
+  const home = join(tmp.dir, "k164-home");
+  const src = join(tmp.dir, "k164-src");
+  const proj = join(tmp.dir, "k164-proj");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(src, "rules"), { recursive: true });
+  mkdirSync(proj);
+  writeFileSync(join(src, "rules", "house.md"), "HOUSE\n");
+  // checkInterval 0: the prompt hook starts no background sync that would outlive the test.
+  const cfg = { sources: { s: { local: src } }, install: { rules: ["house@s"] }, checkInterval: 0 };
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify(cfg));
+  const env = claudeOnlyEnv(home);
+  const gone = (n: number) => join(tmp.dir, `k164-gone-${n}`);
+
+  const first = runCliFromRemovedCwd(gone(1), ["hook", "session-start"], env,
+    JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: proj }));
+  assert.deepEqual([first.status, first.stderr], [0, ""], first.stderr);
+  assert.match(JSON.parse(first.stdout).systemMessage, /^skilletor: 1 item\(s\) updated/);
+  assert.equal(readFileSync(join(home, ".claude", "rules", ".local.house.md"), "utf8"), "HOUSE\n");
+
+  for (const [n, event] of [[2, "session-start"], [3, "user-prompt-submit"]] as const) {
+    const r = runCliFromRemovedCwd(gone(n), ["hook", event], { ...env, CLAUDE_PROJECT_DIR: gone(n) }, JSON.stringify({ cwd: gone(n) }));
+    assert.deepEqual([r.status, r.stderr, r.stdout], [0, "", ""], event);
+  }
+
+  const lost = runCliFromRemovedCwd(gone(4), ["hook", "session-start"], env, "{}");
+  assert.deepEqual([lost.status, lost.stderr], [0, ""], lost.stderr);
+  assert.equal(lost.stdout.split("\n").length, 2, lost.stdout);
+  const out = JSON.parse(lost.stdout);
+  assert.deepEqual(Object.keys(out), ["systemMessage"]);
+  assert.match(out.systemMessage, /^skilletor: ENOENT: .*uv_cwd$/);
+});
+
+// Asserts: a throw in the hook command's own setup – here os.homedir(), faulted by a preload –
+// still ends in exit 0 with one warning line and nothing on stderr. Before k164 it reached the
+// entry point's handler: exit 1 and a stack trace, as the removed cwd did.
+test("k164: a hook whose setup throws exits 0 with one warning line", () => {
+  const preload = join(tmp.dir, "k164-no-home.mjs");
+  writeFileSync(preload, [
+    'import os from "node:os";',
+    'import { syncBuiltinESMExports } from "node:module";',
+    'os.homedir = () => { throw new Error("no home directory (test fault)"); };',
+    "syncBuiltinESMExports();",
+  ].join("\n"));
+  for (const event of ["session-start", "user-prompt-submit"]) {
+    const r = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, bundle, "hook", event], {
+      encoding: "utf8", env: process.env, input: "{}", cwd: noProject,
+    });
+    assert.deepEqual([r.status, r.stderr], [0, ""], `${event}: ${r.stderr}`);
+    assert.equal(r.stdout, JSON.stringify({ systemMessage: "skilletor: no home directory (test fault)" }) + "\n", event);
+  }
+});
+
+// Asserts: a hook whose project is known (CLAUDE_PROJECT_DIR) runs no git to find one – here a
+// prompt hook with nothing to do, which needs no git at all: a `git` first on PATH that logs its
+// calls is never called. Before k164 every hook ran `git rev-parse` on the process cwd first.
+test("k164: a hook with its project known runs no git rev-parse", { skip: process.platform === "win32" && "a shell script as git" }, () => {
+  const home = join(tmp.dir, "k164-git-home");
+  const bin = join(tmp.dir, "k164-git-bin");
+  const log = join(tmp.dir, "k164-git.log");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(bin);
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ checkInterval: 0 }));
+  writeFileSync(join(bin, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexit 1\n`, { mode: 0o755 });
+  const env = claudeOnlyEnv(home, { CLAUDE_PROJECT_DIR: noProject, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` });
+  const r = runCli(["hook", "user-prompt-submit"], env, JSON.stringify({ cwd: noProject }));
+  assert.deepEqual([r.status, r.stderr, r.stdout], [0, "", ""]);
+  assert.equal(existsSync(log) ? readFileSync(log, "utf8") : "", "");
 });
 
 // ---- k87: strings from a config, a source or git are display-safe --------------------

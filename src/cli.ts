@@ -218,7 +218,10 @@ export async function run(argv: string[]): Promise<number> {
     return 2;
   }
   const flags = parseFlags(argv.slice(1));
-  const unknown = cmd === "hook" ? undefined : unknownOption(cmd, flags);
+  // Ahead of every check and of makeContext (spec §8): a hook never fails, and it takes its
+  // project from its environment or input, not from the process cwd – which may be gone (k164).
+  if (cmd === "hook") return runHookCommand(flags.rest);
+  const unknown = unknownOption(cmd, flags);
   if (unknown !== undefined) {
     const name = cmd === "source" && Object.hasOwn(ACCEPTED, `source ${flags.rest[0]}`) ? `source ${flags.rest[0]}` : cmd;
     printLines(process.stderr, [`skilletor: unknown option for ${name}: ${unknown} (run skilletor --help)`]);
@@ -336,8 +339,6 @@ export async function run(argv: string[]): Promise<number> {
         printLines(process.stdout, [`trusted source ${r.name} (${backendLabel(r)})`]);
         return 0;
       }
-      case "hook":
-        return runHookCommand(flags.rest);
       default:
         printLines(process.stderr, [`skilletor: unknown command: ${cmd}`]);
         return 2;
@@ -364,30 +365,31 @@ function readStdin(): Promise<string> {
 
 /** `skilletor hook <event> [--harness codex|hermes]`: read stdin JSON, run the hook, print
  *  JSON, always exit 0. `--harness` is internal (the Codex plugin's hooks file, spec §14.8;
- *  the Hermes plugin, spec §16.4); any other value is Claude Code's behavior. */
+ *  the Hermes plugin, spec §16.4); any other value is Claude Code's behavior. Never rejects: a
+ *  throw in its own setup (`homedir()`, k164) is the one warning line as well. */
 async function runHookCommand(args: string[]): Promise<number> {
-  const event = args[0];
-  const at = args.indexOf("--harness");
-  const harness = at === -1 ? args.find((x) => x.startsWith("--harness="))?.slice(10) : args[at + 1];
-  if (!event) return 0; // nothing to do, never disturb the session
-  let input: HookInput = {};
   try {
-    const raw = await readStdin();
-    if (raw.trim()) input = JSON.parse(raw) as HookInput;
-  } catch {
-    // ignore malformed hook input
-  }
-  const home = homedir();
-  // Unset under Codex: runHook then takes the git top level of input.cwd (spec §14.5).
-  const projectDir = process.env.SKILLETOR_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || undefined;
-  const ctx: HookContext = {
-    home,
-    projectDir,
-    stateRoot: join(claudeConfigDirOf(home), "skilletor"),
-    binPath: fileURLToPath(import.meta.url),
-  };
-  if (harness === "codex" || harness === "hermes") ctx.harness = harness;
-  try {
+    const event = args[0];
+    const at = args.indexOf("--harness");
+    const harness = at === -1 ? args.find((x) => x.startsWith("--harness="))?.slice(10) : args[at + 1];
+    if (!event) return 0; // nothing to do, never disturb the session
+    let input: HookInput = {};
+    try {
+      const raw = await readStdin();
+      if (raw.trim()) input = JSON.parse(raw) as HookInput;
+    } catch {
+      // ignore malformed hook input
+    }
+    const home = homedir();
+    // Unset under Codex: runHook then takes the git top level of input.cwd (spec §14.5).
+    const projectDir = process.env.SKILLETOR_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || undefined;
+    const ctx: HookContext = {
+      home,
+      projectDir,
+      stateRoot: join(claudeConfigDirOf(home), "skilletor"),
+      binPath: fileURLToPath(import.meta.url),
+    };
+    if (harness === "codex" || harness === "hermes") ctx.harness = harness;
     const out = await runHook(event, input, ctx);
     if (out.systemMessage || out.hookSpecificOutput) {
       process.stdout.write(JSON.stringify(out) + "\n");

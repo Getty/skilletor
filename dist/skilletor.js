@@ -11979,7 +11979,8 @@ async function run(argv) {
     return 2;
   }
   const flags = parseFlags(argv.slice(1));
-  const unknown = cmd === "hook" ? void 0 : unknownOption(cmd, flags);
+  if (cmd === "hook") return runHookCommand(flags.rest);
+  const unknown = unknownOption(cmd, flags);
   if (unknown !== void 0) {
     const name = cmd === "source" && Object.hasOwn(ACCEPTED, `source ${flags.rest[0]}`) ? `source ${flags.rest[0]}` : cmd;
     printLines(process.stderr, [`skilletor: unknown option for ${name}: ${unknown} (run skilletor --help)`]);
@@ -12093,8 +12094,6 @@ async function run(argv) {
         printLines(process.stdout, [`trusted source ${r.name} (${backendLabel(r)})`]);
         return 0;
       }
-      case "hook":
-        return runHookCommand(flags.rest);
       default:
         printLines(process.stderr, [`skilletor: unknown command: ${cmd}`]);
         return 2;
@@ -12118,26 +12117,26 @@ function readStdin() {
   });
 }
 async function runHookCommand(args) {
-  const event = args[0];
-  const at = args.indexOf("--harness");
-  const harness = at === -1 ? args.find((x) => x.startsWith("--harness="))?.slice(10) : args[at + 1];
-  if (!event) return 0;
-  let input = {};
   try {
-    const raw = await readStdin();
-    if (raw.trim()) input = JSON.parse(raw);
-  } catch {
-  }
-  const home = homedir();
-  const projectDir = process.env.SKILLETOR_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || void 0;
-  const ctx = {
-    home,
-    projectDir,
-    stateRoot: join18(claudeConfigDirOf(home), "skilletor"),
-    binPath: fileURLToPath(import.meta.url)
-  };
-  if (harness === "codex" || harness === "hermes") ctx.harness = harness;
-  try {
+    const event = args[0];
+    const at = args.indexOf("--harness");
+    const harness = at === -1 ? args.find((x) => x.startsWith("--harness="))?.slice(10) : args[at + 1];
+    if (!event) return 0;
+    let input = {};
+    try {
+      const raw = await readStdin();
+      if (raw.trim()) input = JSON.parse(raw);
+    } catch {
+    }
+    const home = homedir();
+    const projectDir = process.env.SKILLETOR_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || void 0;
+    const ctx = {
+      home,
+      projectDir,
+      stateRoot: join18(claudeConfigDirOf(home), "skilletor"),
+      binPath: fileURLToPath(import.meta.url)
+    };
+    if (harness === "codex" || harness === "hermes") ctx.harness = harness;
     const out = await runHook(event, input, ctx);
     if (out.systemMessage || out.hookSpecificOutput) {
       process.stdout.write(JSON.stringify(out) + "\n");
