@@ -1,0 +1,72 @@
+---
+class: standard
+completed: 2026-11-13T23:43:44Z
+created: 2026-11-13T20:44:18Z
+depends_on:
+- 168
+- 169
+- 188
+id: 190
+priority: medium
+started: 2026-11-13T22:34:55Z
+status: done
+tags:
+- binary
+- starter
+title: 'Plugin starter: binary, else download with checksum, else Node, else Perl
+  (prepared, not wired)'
+updated: 2026-11-13T23:43:44Z
+---
+
+Part of the Perl CLI strand (see the strand card). Step 4: prepared, not wired.
+
+Write a new starter file, for example bin/skilletor-start (sh). Nothing references it: hooks.json, codex-hooks.json, bin/skilletor, the winlaunch line and the Hermes adapter's find_cli stay as they are.
+
+The starter tries, in order:
+1. The cached binary for the plugin's version and this platform. Location per the starter decision.
+2. Otherwise a one-time download from the GitHub release:
+   - curl, else wget;
+   - the checksum through sha256sum, else `shasum -a 256`, against the trust anchor per the decision;
+   - written to a temp file, then renamed atomically;
+   - safe when two sessions start at once;
+   - a mismatch is refused and leaves nothing behind.
+3. Otherwise Node: node >= 18 and dist/skilletor.js, as today's launcher.
+4. Otherwise Perl: perl >= 5.40, perl/lib and its dependencies (the starter checks that they load).
+5. Otherwise a message, with exit codes as today's launcher's.
+
+On every path, `hook …` keeps the hook contract.
+
+Tests (sh, on Linux):
+- a local file:// or http server serves the download;
+- the checksum mismatch;
+- no curl, no wget;
+- offline: falls to Node, then to Perl;
+- the concurrent first start.
+
+Windows: per the Windows starter decision. Untested here.
+
+Depends on the starter decision and the Linux binary card.
+
+Starter decision: k168. Windows starter decision: k169.
+
+From the k188 probe: a PAR binary extracts its whole archive into PAR_GLOBAL_TEMP (default /tmp/par-<user>/cache-<sha>) on its first start, which took 10+ s, and /tmp is emptied at reboot. So the starter should set PAR_GLOBAL_TEMP to a persistent dir beside the binary (k168 location) and warm it right after the download (run --version once), so no hook pays the extraction.
+
+Dispatcher: prepared under the recommended options of k168 (location b: <claudeConfigDir>/skilletor/bin/<version>/; trust anchor a: checksums pinned in the plugin) and k167 (assets skilletor-<version>-<os>-<arch>, skilletor-<version>-checksums.txt, as skill perl-par-binary-release names them). That choice is the dispatcher's, provisional until the maintainer decides k168/k169; the values sit in named settings at the top of the starter. Without a pinned checksum file the starter skips the download, so nothing is fetched before activation (k191).
+
+2026-11-13 22:44 Started. Read bin/skilletor (Node >= 18 check, three messages, exit 1 on each, also for 'hook' - the hook contract is kept by the Node CLI itself), hooks/*.json, the Hermes find_cli, k167/k168/k169. Plan: new bin/skilletor-start (POSIX sh) + test/starter.test.ts; nothing references the starter. Design notes follow when the tests are green.
+
+2026-11-13 23:03 Design (worker's choices, provisional with the settings): (1) engine paths exec as bin/skilletor does, so on hook the engine keeps the contract itself; only the starter's own last path is its own: CLI -> one line on stderr, exit 1, bin/skilletor's Node messages verbatim as its first clause; hook -> the same line as {"systemMessage":...} on stdout, exit 0. That differs from bin/skilletor, which exits 1 on hook without Node. (2) cached file <cfg>/skilletor/bin/<version>/skilletor-<version>-<os>-<arch>-<sha256>, PAR dir <that>.par: the pinned checksum is in the name, so a release rebuilt under the same version never runs stale bytes; no re-hash per start. (3) checksum tool looked for before any download; download bounded (curl --connect-timeout 10 --max-time 60, wget -T 10). (4) warmed under the temp name before the rename: a binary whose --version fails is never cached. Hand probe with pp 1.064 (tiny packed script, outside the repo): PAR_GLOBAL_TEMP is used as is (no cache-<sha> subdir), its parent must exist (errno 2 otherwise; the cache dir is it), and the first run after the rename adds only a ~47 KB loader copy, the unpacked set is reused; each download leaves one such copy named .<asset>.<pid>.tmp in the PAR dir. (5) no set -e/-u: -u exits 2, which a UserPromptSubmit hook reads as block.
+
+2026-11-13 23:03 Open before wiring (k191), not done here: (a) Perl CLI hook: when I read perl/lib/Skilletor/CLI.pm, hook said 'not ported', exit 1 (k181 in progress) - the binary and Perl paths of the starter keep the hook contract only once that port lands. (b) No backoff: a download that fails for good (mismatch, a binary that does not run here, a network that drops packets) is retried at every start, each hook paying a re-download. (c) Time budget: a first start inside UserPromptSubmit (10 s) - download plus cold unpack (k188: 9.5-13 s untrimmed) - is cut off and retried; downloading only from SessionStart (30 s) or in the background is a decision for k188's numbers. (d) Hermes stops a hook with SIGKILL to its group: the trap cannot run and .<asset>.<pid>.tmp stays; SIGTERM to the group is tested (temp removed, exit 0). Nothing sweeps stale temp files or old versions. (e) Perl path loads the modules twice (check, then run): ~0.5 s each here. (f) test/starter.test.ts asserts nothing wired names skilletor-start; k191 flips that test. (g) Also found: bin/skilletor itself has shellcheck SC1007 (CDPATH= cd); left byte-identical, the starter uses CDPATH=''.
+
+2026-11-13 23:08 Done, not committed. Files (both new, nothing else touched): bin/skilletor-start (POSIX sh, mode 755, nothing references it), test/starter.test.ts (26 tests, no fixtures dir - stubs are written per case into a temp dir). Byte-identical: hooks/hooks.json, hooks/codex-hooks.json, bin/skilletor, bin/skilletor.exe, hermes/, package.json, plugin manifests, src/, dist/ (git diff --quiet on them). Verified: npm run typecheck clean; npm test 1169 tests, 1168 pass, 0 fail, 1 skipped (hermes-real, needs SKILLETOR_HERMES_INSTALL=1, not mine), all 26 starter tests among them, none skipped here; npm run check-dist up to date; shellcheck 0.11.0 -s sh clean; sh/dash -n clean. Written and tested on Linux x86_64 (Debian, /bin/sh = dash; the suite also re-run with the shebang swapped to bash --posix, bash and busybox sh, all 26 green, file restored): no pinned file -> Node, nothing fetched; download over http (curl) and file:// (curl), wget without curl, shasum -a 256 without sha256sum; checked, warmed (PAR_GLOBAL_TEMP beside the binary, unpacked before the first real run), atomic rename, second start from the cache; cached binary under HOME/.claude without CLAUDE_CONFIG_DIR; a cache for other bytes of the same version is not run; symlinked starter; two concurrent first starts (server holds until both are inside their download); SIGTERM to the group mid-download (temp removed, hook exit 0); checksum mismatch refused, nothing left (no binary, no temp, no empty version dir); binary that fails --version not cached; offline; no curl/wget; no checksum tool (zero requests); no pinned line / malformed lines; no HOME; Node absent / too old / dist missing -> Perl; Perl too old / modules not loading / perl/ missing -> the line, exit 1, hook exit 0 with it as systemMessage; the machine's own perl version read. Mutations checked: removing the checksum compare, the warm, the per-pid temp name, the hook exit 0, the rmdir, the Perl module check or the TERM trap each turns tests red. Untested: macOS (BSD userland, bash 3.2 sh, its own shasum; macOS CI will run the file, wget cases skip there), Windows (not covered, k169), the real GitHub download (redirect, real asset), a real PAR binary through the starter (only the hand pp probe noted above). Open points: see the previous note (a)-(g).
+
+Review (dispatcher), sent back: typecheck green; npm test 1159/1158 pass/1 skip/0 fail with all 26 starter tests; check-dist green in the main tree (red only in the review worktree, the node_modules symlink path). Finding: find_perl checks 'require Skilletor::CLI', but Skilletor::CLI loads Skilletor::Engine lazily (CLI.pm:147), so Text::Nunjucks and the engine's other dependencies are never checked - verified: after require Skilletor::CLI no Skilletor/Engine.pm or Text/Nunjucks.pm is in %INC. A perl 5.40 with Moo but without Text::Nunjucks passes the check and then dies in sync instead of falling through to the line. Fix: check what the commands load (require Skilletor::Engine as well) and add a fixture where Skilletor::CLI loads but the engine's dependency is missing.
+
+2026-11-13 23:24 Review finding fixed. Cause: the check was require Skilletor::CLI, which loads Skilletor::Engine lazily. Requiring the engine as well, as suggested, is not enough on its own: Skilletor::Render loads Text::Nunjucks::Environment (and Hash::Ordered) only with the first template, so after require Skilletor::Engine Text::Nunjucks is still not in %INC (checked). The check ($perl_check in the starter, one perl run) now: (1) every runtime requirement in perl/cpanfile (evaluated with stub requires/on; on test => sub is skipped), required at its minimum version; (2) then require Skilletor::CLI and Skilletor::Engine. It prints what is wrong and the line names it, e.g. 'skilletor's Perl port cannot run: Text::Nunjucks is missing'. The output is checked against a safe character set before it goes into the line or the JSON. Against the real port here: PERL5LIB without p5-text-nunjucks -> sync exit 1 with that line, hook session-start exit 0 with it as systemMessage; with it -> --version runs. Cost on the Perl path (host load avg ~7): the check alone 0.6-1.3 s wall (0.4-0.7 s at a quieter moment), against 0.3 s for the old require Skilletor::CLI; the starter's whole Perl path for --version 1.8-2.1 s, against 0.34-0.47 s for perl -Iperl/lib perl/bin/skilletor --version directly. Not done: caching the check result (e.g. keyed on the perl version and the cpanfile) - for the wiring decision. Tests: the Perl stub now has Engine.pm and a cpanfile; one test covers 6 cases (CLI does not load; CLI loads but the engine does not; a cpanfile dependency nothing loads at start; one older than its minimum; no cpanfile; no perl/bin/skilletor): each gives the line, exit 1, and the hook exits 0. Removing the engine require, the cpanfile loop, the version check or the runtime-only phase filter each turns a test red.
+
+2026-11-13 23:24 Review finding fixed (see the previous note). Not committed. Files (both new, nothing else touched): bin/skilletor-start (mode 755, nothing references it), test/starter.test.ts (26 tests; the 'Perl modules do not load' test is now 'a Perl port that cannot run' with 6 cases). Verified: npm run typecheck clean; npm test 1169 tests, 1168 pass, 0 fail, 1 skipped (hermes-real, needs SKILLETOR_HERMES_INSTALL=1), all 26 starter tests among them; npm run check-dist up to date; shellcheck 0.11.0 -s sh clean (one SC2016 disable for the single-quoted Perl, as install.sh does); sh -n and dash -n clean. The Linux-tested and untested lists of the first handoff still hold. The Perl check also ran against the real port in this tree: it names Text::Nunjucks when that is missing, and passes when it is there. perl/ was read, not touched.
+
+Review round 2 (dispatcher), green: isolated worktree HEAD 2dff015 + bin/skilletor-start + test/starter.test.ts. typecheck clean; npm test 1159 tests, 1158 pass, 0 fail, 1 skip; test/starter.test.ts 26/26. The finding is fixed: the Perl check reads perl/cpanfile's runtime requires (minimum versions included) and loads Skilletor::CLI and Skilletor::Engine, naming what is missing.
+
+Committed as 6302832
