@@ -1,0 +1,42 @@
+---
+class: standard
+completed: 2026-11-13T21:11:33Z
+created: 2026-11-13T20:42:30Z
+id: 171
+priority: high
+started: 2026-11-13T20:45:17Z
+status: done
+tags:
+- perl
+- report
+title: 'Perl: reports in the reference''s key order (--json bytes)'
+updated: 2026-11-13T21:11:50Z
+---
+
+Part of the Perl CLI strand (see the strand card).
+
+Perl builds the sync, check and status reports as plain hashes, so Skilletor::JSON writes their keys sorted (Report.pm:33-44, JSON.pm:47-56). TS prints them in JSON.stringify insertion order. Verified by the gap scout: Perl writes `{"added":…,"scope":…}` where TS writes `{"scope":…,"added":…}`.
+
+Work:
+- Build every report as an ordered hash in TS's construction order: SyncReport, CheckReport, StatusReport, their scope entries, trust requests and nested records. Leave out the fields TS leaves undefined.
+- Add `report_json` with the same bytes as reportJson: JSON.stringify(x, null, 2), every line through displaySafe (report.ts:159-161).
+
+Tests: the --json bytes of the Perl reports equal node's for
+- every sync, check and status step of conformance/cases (through maint/ts-run.mjs or dist/skilletor.js);
+- the t/52 parity machine.
+
+Done:
+- The conformance data comparison stays green.
+- The Perl suite is green; TS is untouched.
+
+2026-11-13 20:50 Plan: ordered hashes (js_ordered) at every report construction site in Engine.pm (sync scope reports, ItemChange key/type/name/source, conflicts path/replace/notFile, check sources + trust requests scope/name/kind/url, status scopes/declared/wildcards/bundles), Report.pm empty_scope_report, Backend.pm trust_request (name/kind/url); Report.pm gains report_json = js_stringify(r,2) split on \n, each line display_safe (what cli.ts printText receives). Byte tests: new t/65-report-json.t runs every sync/check/status step of conformance/cases in two environments (TS via maint/ts-run.mjs batch op, Perl in-process) and compares the bytes after placeholders; t/52 compares its reports byte for byte. Baseline Perl suite: 25 files, 2037 tests, PASS.
+
+2026-11-13 21:07 Done in code: Engine.pm builds sync/check/status reports with js_ordered in engine.ts construction order (scope reports' optional keys land as TS assigns them: gitignoreUpdated, settingsSkipped, settingsUpdated, briefingMissing; check's optional fields in first-push order; trust requests in check scope-first); Report.pm empty_scope_report ordered + new report_json; Backend.pm trust_request ordered (name, kind, url; the resolve report's trust requests follow). Verified red-then-green: t/65-report-json.t failed 15 of 15 sync-case subtests against HEAD's Engine.pm, t/52 byte asserts failed 5 of 5; both green now (44 conformance steps byte-equal, 3 repeated runs stable). Case 40-cli-args (k172's cli op) is skipped by 65: it compares engine steps only, up to the first step of another op.
+
+2026-11-13 21:09 Also found (for the dispatcher, not in scope): (1) perl/t/lib/SkilletorTest/Conformance.pm repeats the case setup of t/60-conformance.t (k172's file) - 60 could use it once k172 lands. (2) cli.ts prints a check error as the line 'skilletor: <error>' on stderr, never as JSON; the Perl CLI card that wires check --json must follow that, not print report_json of the error report. (3) Resolver.pm's resolve report is still a plain hash (no CLI prints it); only its trust requests are ordered now, through the shared trust_request. (4) k165: no conformance case or t/52 has two sources whose warnings land after an await, so the byte tests are stable today; a case with two failing or cache-fallback sources would make t/65 flaky until k165 lands. (5) docs/perl.md 'Report text' bullet and conformance/README.md could name report_json / t/65 (docs lane / k172 lane).
+
+2026-11-13 21:09 Done: the Perl sync, check and status reports are built with js_ordered in engine.ts construction order (Engine.pm, Report.pm empty_scope_report, Backend.pm trust_request), and Skilletor::Report::report_json = js_stringify(r, 2), each line through display_safe, no final newline (what cli.ts printText gets). Tests: new t/65-report-json.t (report_json escapes; key order pinned without node; every sync/check/status step of conformance/cases run in two copies of the case's machine, TS through maint/ts-run.mjs's new 'steps' op, bytes equal after placeholders: 44 steps), t/52-parity-sync.t compares every report's --json bytes too (ts-run 'json': true). Red against HEAD's Engine.pm, green now. Perl suite: 26 files, 2075 tests, PASS; 16 skipped subtests, all in t/65 (15 resolve-only cases, 40-cli-args); 1 TODO (t/53, existing). TS untouched (no npm run, no src/dist edits). Files: perl/lib/Skilletor/{Engine,Report,Backend}.pm, perl/maint/ts-run.mjs, perl/t/52-parity-sync.t, new perl/t/65-report-json.t, new perl/t/lib/SkilletorTest/Conformance.pm.
+
+Committed as 14c9e14
+
+Amended: Committed as 56adbeb (supersedes previous hash)
