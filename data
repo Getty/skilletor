@@ -1,0 +1,69 @@
+---
+class: standard
+completed: 2026-11-13T22:33:07Z
+created: 2026-11-13T20:42:43Z
+depends_on:
+- 171
+- 172
+id: 173
+priority: high
+started: 2026-11-13T21:26:42Z
+status: done
+tags:
+- perl
+- cli
+- conformance
+title: 'Perl CLI: sync, check, status'
+updated: 2026-11-13T22:33:07Z
+---
+
+Part of the Perl CLI strand (see the strand card).
+
+Work: Skilletor::CLI runs sync, check and status as cli.ts does.
+- syncText; syncFailed (with `saved`).
+- check: exit 0, 1 or 2 with `changed`, `up to date` or the error.
+- statusText, including the target naming.
+- --scope, --force, --json.
+- projectRootOf: `git -C cwd rev-parse --show-toplevel`, 2 s, the git env, falling back to cwd.
+- stateRoot = claudeConfigDir/skilletor; the real host and user render context.
+
+Cases: `cli` steps added to the existing cases 09, 10, 20-24, 26, 27 and 30.
+- sync text and `skilletor: up to date`; sync --json;
+- check exit 1 and 0; check --json;
+- status text and --json;
+- --scope user and --scope project.
+
+New case knob `gitInit` (["project"] / ["home"]) for cli.test.ts:455 (default project dir) and :495/:528 (unused or dropped project).
+
+Done:
+- Both runners are green with both CLIs.
+- The regenerated expectations are hand-reviewed against the spec.
+
+2026-11-13 21:34 Plan: Skilletor::CLI gets sync/check/status after cli.ts (syncText, syncFailed with saved, check 0/1/2 with 'skilletor: <error>' on stderr even under --json, status text/--json with exit 2 on error to stdout), make_context (HOME, --project-dir else project_root_of = git -C cwd rev-parse --show-toplevel, 2 s, git_env, else cwd; state root claudeConfigDir/skilletor; engine defaults for host, user, git answers), Skilletor::Engine loaded only for those commands. Cases: cli steps appended after the engine steps (read-only check/status may sit earlier: they write nothing, so the engine expectations stay as they are); 23 gets check exit 1 after its engine check. New knob gitInit (["project"]/["home"]: git init -q -b main there; its .git/ not compared; engine ops of such a case ask git instead of the injected answers) with new cli-only cases for cli.test.ts:455 (git top level from a subdir; ~ a checkout), :495 (unused git project), :528 (dropped project); one for status target naming ('(no targets)').
+
+2026-11-13 21:55 Progress: Skilletor::CLI runs sync/check/status (engine loaded lazily; project_root_of exported). cli steps on 09, 10, 20-24, 26, 27, 30 and 32 (CLI state root under CLAUDE_CONFIG_DIR), engine expectations unchanged (git status: only new expected files); new cli-only cases 41-cli-project-root (gitInit home+project), 42-cli-unused-project, 43-cli-dropped-project, 44-cli-status-targets ('(no targets)'), 45-cli-force. Runner format: gitInit knob, and trees also compare ${TMP}/cwd (a user-only case's cli project, so a stray write there shows). Green: TS runner own bundle 39/39 and on perl/bin/skilletor 39/39; Perl runner own CLI and on node dist/skilletor.js. 9 CLI mutations (force, check exit, status stream, project root, up to date, check --json error, scope, sync --json stream, state root) each fail a case. New t/68-cli.t for project_root_of, run-level syncText and syncFailed with saved (values checked against report.ts through node).
+
+Drift and open items, for the dispatcher (no change made for any):
+- t/65-report-json.t (no owner named) stops at a case's first cli step, so 23 (after check), 24 and 30 (after status) lose its comparison of their later engine steps. Proposal for this board: let t/65 skip read-only cli steps (check, status) instead of stopping there.
+- Resolver/Engine read CLAUDE_CONFIG_DIR, CODEX_HOME and CLAUDE_PLUGIN_ROOT as raw bytes, while every other path is decoded characters. A non-ASCII value may come out double-encoded. Unverified; Engine.pm and Resolver are k180's lane, not touched. Ticket for this board.
+- When the cwd was removed: TS makeContext runs outside the try and prints a stack; Perl prints one line. Exit is 1 both ways. Not pinned (k170 territory).
+- SkilletorTest::Conformance _copy_tree still copies file modes (the k172 note); harmless, left as it is.
+- docs/perl.md does not mention the CLI yet (docs lane).
+- _sync_failed's saved form has no caller until add/install are ported; t/68 pins it.
+- Start time: Perl CLI status is about 0.93 s (Skilletor::Engine alone loads in about 0.48 s); node dist status is about 0.29 s.
+- Not mine, untouched in the tree: .claude/skilletor.json (modified) and perl/scripts/loaded-modules.pl (untracked).
+
+Done, ready for review.
+- Case 22: its leading cli-status step is gone, so t/65 compares 22 again; case 43 pins the orphans.
+- Verified on the final tree:
+  - TS conformance, own bundle: 39/39.
+  - TS conformance, SKILLETOR_CONFORMANCE_CLI=perl bin/skilletor: 39/39.
+  - Perl t/60, own CLI: 40 tests PASS. Perl t/60 on node dist/skilletor.js: 40 PASS.
+  - npm run typecheck && npm test: 1133 tests, 1132 pass, 0 fail, 1 skipped (hermes-real: set SKILLETOR_HERMES_INSTALL=1), 0 todo.
+  - npm run check-dist: up to date. src/ was not touched.
+  - Perl prove -lr -j4 t: 32 files, 2229 tests, PASS.
+    - 21 skips, all in t/65 ('no sync, check or status step to compare'): cases 01-08, 11-16, 33, 40-45.
+    - 1 TODO, pre-existing: t/53, an include of a file with a syntax error.
+- Expectations were hand-reviewed against src/cli.ts and the spec; none of the existing ones changed, only new files were added. Never committed.
+
+Committed as 2438530
