@@ -1,0 +1,27 @@
+---
+class: standard
+completed: 2026-11-13T21:26:24Z
+created: 2026-11-13T20:35:28Z
+id: 165
+priority: medium
+started: 2026-11-13T21:04:10Z
+status: done
+tags:
+- engine
+- bug
+- ts
+title: Warning order follows which source resolves first
+updated: 2026-11-13T21:26:24Z
+---
+
+Found by the Perl-CLI gap scout (2026-11-13), from reading the code, not yet reproduced: resolveAll resolves sources in parallel (src/engine.ts:673-698) and pushes warnings after await (:690 in the catch, :902), so with two or more failing or cache-fallback sources the warning order in report text and --json follows completion order. conformance/ compares canonical (sorted) data, so it never sees this; a byte-exact CLI parity harness (TS CLI vs Perl CLI) cannot hold while the order is nondeterministic.
+
+Done: reproduce with a TS test (two failing sources whose completion order is forced both ways) and make the order deterministic — declaration order of the sources (the order a sequential resolve gives) — without giving up the parallel fetch; dist rebuilt; the Perl port (sequential) already yields declaration order, confirm.
+
+2026-11-13 21:06 Read: resolveAll (src/engine.ts:673-698) pushes warnings AND inserts into `resolved` after the await, so both follow completion order. `resolved`'s order also feeds resolveItems' sources list (collectSources iterates it) and the key order of the sources-read record. Writing the repro: two user-scope url sources, fetch mocked and gated so each completion order is forced, failure and cache-fallback variants.
+
+2026-11-13 21:08 Reproduced: test/resolve-order.test.ts (new) - two user-scope url sources a, b with fetch mocked and gated (both downloads must be in flight before either is answered, then answered in a forced order). Before the fix, 'b completes before a' failed for both the failure warning and the cache-fallback warning; resolveItems' sources listed [b, a] too (probed). Fix in syncScopeRun's resolveAll: the parallel Promise.all now returns each name's outcome, applied afterwards in the order of names (warnings, trust requests, resolved-map insertion). Mutation check: serialising the resolves makes all 4 tests fail fast (5 s ctx timeoutMs, 'never answered: the downloads did not run in parallel'), so the test also pins the parallel fetch.
+
+2026-11-13 21:21 Done. Changed: src/engine.ts (syncScopeRun resolveAll: Promise.all returns each name's outcome; warnings, trust requests and resolved-map insertion are applied after it in the order of names, so declaration order whatever the completion order; the fetches stay parallel), dist/skilletor.js rebuilt, test/resolve-order.test.ts new (4 tests: failure and cache-fallback warnings, completion forced a-first and b-first; the failure case also checks resolveItems' sources order). Verified: before the fix the two b-first tests failed (order [b, a]); after, npm run typecheck clean, npm test 1128 tests, 1127 pass, 0 fail, 1 skip (hermes-real 'hermes plugins install <git URL>#hermes/skilletor --enable', needs SKILLETOR_HERMES_INSTALL=1); npm run build + check-dist: up to date. Mutation check: serialising the resolves fails all 4 tests in ~5 s ('never answered: the downloads did not run in parallel'). Conformance expectations unchanged (no case touched; conformance.test.ts green in the run). Perl port (perl/lib/Skilletor/Resolver.pm resolve_all, read only) is sequential over the same names and pushes warnings, trust requests and @resolved_order in that order, so it already gives this order. Also fixed by the same change: resolveItems' sources list and the sources-read record's key order followed completion order too.
+
+Committed as 7971be0
