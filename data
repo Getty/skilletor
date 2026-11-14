@@ -1,0 +1,112 @@
+---
+class: standard
+completed: 2026-11-14T04:11:08Z
+created: 2026-11-13T20:43:55Z
+depends_on:
+- 184
+id: 185
+priority: medium
+started: 2026-11-14T02:33:37Z
+status: done
+tags:
+- perl
+- hermes
+- hooks
+title: 'Perl: Hermes target and --harness hermes'
+updated: 2026-11-14T04:11:08Z
+---
+
+Part of the Perl CLI strand (see the strand card).
+
+Port the Hermes target:
+- read HERMES_HOME (Engine.pm _root_context ignores it today);
+- the hermes-home records and their drift;
+- moveHermesHome;
+- hermesOptInHint and the trust hint (k152);
+- runNotes.
+
+Then:
+- remove the refusal of the hermes target;
+- `--harness hermes` in the hooks, including the prompt-move.
+
+Cases: hermes.test.ts :668, :712, :737, and cli.test.ts:740.
+
+docs/perl.md: the "Claude target only" line goes.
+
+Done: both runners are green with both CLIs.
+
+Progress: implementation done and verified on a clean worktree (HEAD 00d300a plus only my files). Perl prove -lr -j4 t: 44 files, 2534 tests, PASS. npm typecheck+test: 1227 tests, 1226 pass, 0 fail, 1 skipped (live Hermes install). Cross-runs: TS runner with the Perl CLI 107/107; Perl t/60 with node dist 108 PASS. New cases 110-125, expectations reviewed by hand. Full report in the handoff note.
+
+k185 ready for review: the Hermes target in the Perl engine (sync, check, status) and --harness hermes in the Perl hooks, following the TS source byte for byte. Nothing committed.
+
+FILES (all mine unless marked):
+- perl/lib/Skilletor/Engine.pm: hermes_home attr (lazy, $ENV{HERMES_HOME} decoded) and _hermes_home_of (given -> expand_home + path_resolve, else the recorded home, else ~/.hermes); the Hermes refusal is gone (%PORTED, _unsupported_targets, _foreign_state); _move_hermes_home runs before the lock is read (empty plan applied to the old root, the move warning first, the new home recorded, undef when it is the default); the record is dropped once hermes is no user target, and such a run removes from the recorded home; check gets the hermes-home:<home> targets drift; hermes_opt_in_hint; POD.
+- perl/lib/Skilletor/Hooks.pm: _with_hermes_opt_in on SessionStart under --harness hermes (line joined with '; ', the context gets the line); _follows_moves (codex|hermes) on the prompt hook; the k152 trust hint (_adds_hermes_skill, _with_hermes_trust) on a hermes move that added or updated a hermes or codex skill; POD. The Claude prompt fast path still loads no Skilletor::Engine (t/69 still pins it).
+- perl/lib/Skilletor.pm: hermes_home passed through to the Engine; POD ("Claude Code, Codex and Hermes", the sync error text).
+- perl/lib/Skilletor/State.pm: POD only (hermes-home.json, hermes_home/put_hermes_home).
+- perl/t/60-conformance.t: one line in the RUNNER, hermes_home => "$r->{home}/.hermes" in Engine->new. The TS runner already passes hermesHome: join(r.home, ".hermes"). The Perl runner now matches it, so both runners agree.
+- perl/t/62-engine.t: the header, and two subtests that replace the Hermes-refusal subtests (a project narrowed to hermes warns; Hermes entries under a recorded home are orphans / targetsChanged / removed, Hermes' own config.yaml kept, the record dropped, an unknown harness's entry kept).
+- perl/t/69-hooks.t: the '--harness hermes answers as Claude Code' subtest is now '--harness codex without Codex as a target', with a pointer to t/75.
+- perl/t/72-engine-codex.t: header comment ("only Hermes makes any; t/74-engine-hermes.t syncs them").
+- perl/t/68-cli.t (k176's file; I own only the header-comment hunk). No subtest changed. Its syncText subtests still pass for the right reason: they unit-test the note/warning combinations.
+    -# run-level notes, alone or beside warnings (only Hermes targets make notes, and the Perl engine
+    -# refuses them; case 100 reaches the untrusted Codex hook's warning alone), the
+    +# run-level notes, alone or beside warnings (cases 110-112, 115 and 117 reach a Hermes note
+    +# alone, case 100 the untrusted Codex hook's warning alone; no case has both), the
+  The working tree's t/68 also has a second hunk that is NOT mine: the `available` lines in @quick and the 'available: the commands loaded' test. That hunk belongs to the worker doing `available` (cases 93-97, t/76, CLI.pm, Commands.pm, Error/Command.pm, bin/skilletor, conformance/README.md).
+- new perl/t/74-engine-hermes.t (17 subtests: the engine half of hermes.test.ts; :668, the $HERMES_HOME record, is its 'a sync under a Hermes home of its own records it' subtest plus case 113)
+- new perl/t/75-hooks-hermes.t (8 subtests: hermes.test.ts :712/:737, the session-start answer and the opt-in line, and prompt-move.test.ts :276/:333 for k152; cli.test.ts:740 (k149, the prompt hook syncing the worktree a session moved into) is done under --harness hermes in its 'a prompt in a worktree without a lock' subtest and in case 121)
+- new conformance/cases/110-hermes-user ... 125-hook-hermes-move-removal (16 cases). Inputs are hand-written. Expectations come from the TS runner (SKILLETOR_CONFORMANCE_UPDATE=1, one case at a time) and were reviewed by hand. No existing expectation changed. Cases 126-129 are unused.
+perl/t/00-load.t: untouched (no new modules).
+
+VERIFIED, clean worktree = HEAD 00d300a + only the files above:
+- Perl `prove -lr -j4 t`: Files=44, Tests=2534, PASS (t/54 and t/60 included).
+- `npm run typecheck && npm test`: tests 1227, pass 1226, fail 0, skipped 1
+- TS runner with the Perl CLI (SKILLETOR_CONFORMANCE_CLI=perl bin/skilletor): 107/107 pass
+- Perl runner with the reference CLI (node dist/skilletor.js): t/60 Tests=108, PASS
+- `npm run check-dist` in the main tree: "dist/skilletor.js is up to date" (no src/ change). In the worktree it reported out of date, but only because esbuild's path comments named the symlinked node_modules: 96 diff lines, all `// ../../../home/.../node_modules/...` against `// node_modules/...`.
+Skipped: 1, the live Hermes plugin-install test ("set SKILLETOR_HERMES_INSTALL=1"; it downloads Hermes' plugin runtime).
+
+conformance/README.md TEXT (not edited, per brief):
+Runners bullet:
+- Perl: `perl/t/60-conformance.t` (every step; the Perl engine syncs for Claude Code, Codex and Hermes).
+HERMES_HOME (env list, now "`HERMES_HOME` = `${HOME}/.hermes`;"):
+  `HERMES_HOME` = `${HOME}/.hermes` – both runners pass it to the engine ops as the Hermes home, and a step's `env` `HERMES_HOME` reaches only a `cli` step, whose CLI otherwise uses Hermes' default home under `${HOME}`. Hermes is never detected: a case opts in with `"targets"` in `home/.claude/skilletor.json` (cases 110-125);
+"Not covered yet", drop three clauses:
+  - "of the hooks, what `--harness hermes` adds (Hermes' opt-in line, its prompt hook following a move),". Keep "of the hooks, a due prompt's real background sync, ..." as it reads.
+  - "a sync's run-level notes (what Hermes gets no copy of – Hermes targets only);"
+  - ", and Hermes targets (the Perl engine refuses a scope that targets them)". End the sentence after "(`partial`; `67` starts from the lock one left)".
+  Add one clause next to the trust.json one: "the Hermes home a user-scope lock serves as recorded in `hermes-home.json` (state, outside the compared trees; cases 113, 114 and 117 prove it through the syncs that follow, each engine's own tests pin the file)".
+Table rows:
+| `110-hermes-user` | Hermes alone (`"claude": false`, the user config's `"targets": ["hermes"]` – Hermes is never detected), `gitInit` home: the user sync installs the skill in `~/.hermes/skills` with its own `.gitignore`, the agent and the rule nowhere, one run note naming them; the user's `~/.hermes/.gitignore` kept byte for byte, no managed block in it (`~/.claude` gets its own); check, status, a resync changes nothing; the CLI's resync (text, `--json`: up to date with the note), check and status (`user scope (hermes):`) |
+| `111-hermes-project` | Claude Code and Hermes in a git project: the skill in `.claude/skills` and `.hermes/skills`, the agent for Claude Code alone with one run note; a `.gitignore` block in `.claude`, none in `.hermes`, the user's `.hermes/.gitignore` kept; `.worktreeinclude` names `/.hermes/skills/` among the roots; check, status, a resync; the CLI's status and resync |
+| `112-hermes-codex-project` | Codex (hook trusted) and Hermes, `"claude": false`: the user skill gets a copy in `~/.agents/skills` and in `~/.hermes/skills`; the project's two skills only the Codex copy in `.agents/skills`, which Hermes reads – no `.hermes` in the project, one run note saying so; check, status; the CLI's resync (text, `--json`) and status |
+| `113-hermes-home-move` | the one Hermes home a user-scope lock serves (spec §16.2): a CLI sync under `HERMES_HOME=~/hermes-a` installs there, status without `HERMES_HOME` serves the recorded home; under `~/hermes-b` check exits 1 (`--json` `targetsChanged: ["user"]`), a project-scope sync leaves the move to the user scope, the user sync removes both items from `~/hermes-a` with one warning and installs under `~/hermes-b` (a file already there a conflict); a plain CLI sync meets that conflict again (the new home recorded); an engine sync with the default home moves to `~/.hermes`; a last CLI sync is up to date |
+| `114-hermes-upgrade` | upgrade from the auto-detecting build: a lock with a Hermes entry and its home recorded (`~/hermes-a`), no `"targets"`, Claude Code alone detected: status names the entry an orphan, check counts it as `targetsChanged`; a CLI sync under `HERMES_HOME=~/hermes-b` removes it from the recorded home, Hermes' own files kept; check after up to date |
+| `115-hermes-codex-takes-over` | a project lock holding Hermes' own copy of a skill once Codex is a target too (`["codex", "hermes"]`, hook trusted, `"claude": false`): check counts `targetsChanged` for the project; the sync removes the `.hermes/skills` copy and installs the Codex copy that serves Hermes, with the run note; check then finds nothing; the CLI's status and resync |
+| `116-hermes-not-opted-in` | a Hermes home in use (`HERMES_HOME`) is no target until the user's `"targets"` name hermes, and a project cannot add it: with the project narrowed to `["hermes"]`, the CLI sync installs the user skill for Claude Code, nothing in the project or the Hermes home, with the project's warning; status says `project scope (no targets):`; check |
+| `117-hook-hermes-session-start` | SessionStart under `--harness hermes` (Hermes alone, `HERMES_HOME=~/srv/hermes`): the sync installs in that home and answers with the line and the context, the agent's note left unsaid; again, and the prompt hook, silent; a CLI sync without `HERMES_HOME` serves the recorded home – up to date with the note, the tree unchanged |
+| `118-hook-hermes-opt-in` | SessionStart under `--harness hermes` while `hermes` is no target (spec §16.4): the sync's line and context each end with the opt-in line (`"targets": ["claude", "hermes"]`), nothing synced for Hermes; a resumed session with nothing to do gets that line alone; Claude Code's and Codex's SessionStart and Hermes' prompt hook never say it |
+| `119-hook-hermes-opt-in-warning` | Claude Code and Codex (hook trusted) detected: the opt-in line names `["claude", "codex", "hermes"]` and follows the sync's warning in the line and at the end of the context; Codex's SessionStart gives its rules context and no such line |
+| `120-hook-hermes-config-error` | SessionStart under `--harness hermes` with a user config that does not load: the error line, no opt-in line (the targets cannot be read), no context, nothing written |
+| `121-hook-hermes-prompt-move` | Hermes' prompt hook follows a move (k149, `gitInit`): the checkout's project scope synced into `.hermes/skills` before the prompt returns, the line and the context naming it and the `hermes skills trust` it may need (k152), the pending report joined to both; the same prompt again and one from a subdirectory are silent |
+| `122-hook-hermes-move-codex-copy` | the move into a checkout where Codex (hook trusted) is a target too: the skill lands as the Codex copy in `.agents/skills`, which Hermes reads, so the line and the context still name `hermes skills trust` (k152) |
+| `123-hook-hermes-move-agent` | a move into a checkout that installs only an agent (Claude Code and Hermes targets): the agent synced and named, the run note left unsaid, no `hermes skills trust` (k152) |
+| `124-hook-hermes-claude-move` | Claude Code's PostToolUse with Hermes the only target: the move syncs the Hermes copy and answers without `hermes skills trust` – the hint follows the harness whose hook runs, not the targets (k152) |
+| `125-hook-hermes-move-removal` | a move into a checkout whose lock holds a Hermes skill the config no longer declares, its blocks in place: removed, one line `skilletor: 1 removed in ${PROJECT}`, no `hermes skills trust` (k152) |
+
+docs/perl.md TEXT (not edited, per brief):
+- line 40-41 bullet becomes: "- **Claude Code, Codex and Hermes targets** for sync/check/status (Codex since k184, Hermes since k185)."
+- line 72 (raider API): "- `sync`, `check` and `status` work for the Claude Code, Codex and Hermes targets."
+- lines 96-98: the "Hermes is refused, not half-written" decision goes. Replace it with: "- **Hermes as the CLI has it.** Skills only, in the Hermes home's `skills` (`$HERMES_HOME`, else the recorded home, else `~/.hermes`) and `<repo>/.hermes/skills`, with no managed `.gitignore` block; never detected, a target only through the user config's `"targets"`; in a project with Codex active, the Codex copy serves Hermes. One home per user-scope lock, recorded in `hermes-home.json`; a sync under another home moves the items first and warns. `Skilletor::Engine` takes `hermes_home` as the CLI takes `HERMES_HOME`."
+- Known gaps, line 132: drop the first sentence ("The Hermes target is not ported ... (k185).") and start with "The Codex target is ported (k184): ...". Lines 142-143: replace "`--harness hermes` is parsed but answers as Claude Code's hook does until k185." with "under `--harness hermes` SessionStart ends with the line saying how to opt in while `hermes` is no target, and the prompt hook follows a move, naming `hermes skills trust` once a skill Hermes loads landed (k185)."
+perl/README.md (written by the dispatcher in k184; the "No Hermes yet" bullet at ~line 109 is now wrong). Proposed replacement:
+- **Hermes:** skills only, in the Hermes home (`HERMES_HOME`, else the one the last sync recorded, else `~/.hermes`) and a project's `.hermes/skills`, as the CLI installs them. Hermes is never detected: add `"hermes"` to `"targets"` in `~/.claude/skilletor.json` to opt in. In a project where Codex is active, Hermes reads the Codex copy.
+
+OPEN / DRIFT (for the dispatcher to file if wanted; no fixes made):
+1. perl Skilletor::Resolver's codex_home builder takes $ENV{CODEX_HOME} without decode_utf8_lossy, but the Engine decodes HERMES_HOME. A non-ASCII CODEX_HOME may get double-encoded. Perl board, low priority. Not reproduced.
+2. TS hooks.ts withHermesTrust interpolates `${out.systemMessage}` and would print "undefined" if there were no line. The Perl mirrors that ("// 'undefined'"). It cannot happen today, because a move that adds a skill always has a line. This is a note for the TS board, not a bug fix.
+3. hermes-home.json is state outside the compared trees. Cases 113/114/117 prove the record only through the syncs that follow it. t/74 pins the file directly (dropped, kept, undef for the default).
+4. perl/Changes, k184 entry: "A scope that targets Hermes is still refused." goes stale with this card. The release-manager should reword or drop it when cutting k185.
+
+Committed as c038961
