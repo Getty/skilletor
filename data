@@ -1,0 +1,22 @@
+---
+class: standard
+completed: 2026-11-14T04:30:48Z
+created: 2026-11-14T01:16:24Z
+id: 211
+priority: low
+started: 2026-11-14T03:28:21Z
+status: done
+tags:
+- perl
+- test
+title: Perl t/26 and t/66 die without the reference's node_modules
+updated: 2026-11-14T04:30:48Z
+---
+
+From k187. perl/t/26-state-hooks.t and perl/t/66-report-hook.t drive the reference (node, src/ through perl/maint/ts-run.mjs) and die with no plan in a checkout without node_modules, where t/52 and t/53 skip with a named reason. Give them the same skip (no node, or no node_modules / nunjucks resolvable).
+
+2026-11-14 03:49 Reproduced: in a HEAD copy without node_modules anywhere up the tree (git archive to /tmp/k211-bare-YJOgi3), t/26 dies after 5 tests (ERR_MODULE_NOT_FOUND, 'No plan found'), t/66 after 84 ('Unexpected end of JSON input', no plan), t/52/t/53 skip 'needs the reference's node_modules'. Note: inside this agent worktree (.claude/worktrees/<x>/ under the main checkout) t/26 and t/66 pass without a local node_modules, since node resolves nunjucks from the main checkout's node_modules up the tree, while t/52's check looks only at ../../node_modules/nunjucks and skips; the same will hold for t/26 and t/66 once they reuse it. Fix: t/52's third condition (path($FindBin::Bin, '..', '..', 'node_modules', 'nunjucks')->exists, reason "needs the reference's node_modules") added to the $why_not chain of each, no helper.
+
+2026-11-14 03:51 Done in worktree /home/getty/dev/skilletor/.claude/worktrees/agent-a4a6c587e81e766e1 (uncommitted). Patch /tmp/k211-only.patch sha256 c484edc3b8135d8aa386363fc82676c733c4c8bed82762261afdbf4a844729ef; files: perl/t/26-state-hooks.t, perl/t/66-report-hook.t. Change: t/52's own check, path($FindBin::Bin, '..', '..', 'node_modules', 'nunjucks')->exists with reason "needs the reference's node_modules" (as t/52, t/53, t/65 have it), added as the third condition of each file's $why_not chain; the chain realigned; no helper. Proof: with node_modules (worktree symlink), HEAD vs changed: t/26 1..11 all ok, 7 'the reference:' subtests both; t/66 1..112 all ok, 28 'the reference:' both. Without node_modules (worktree with the symlink removed, and the HEAD copy /tmp/k211-bare-YJOgi3 with the two files copied in): both exit 0, t/26 1..11 with the reference block as 'skip needs the reference's node_modules', t/66 1..112 likewise; before the change the copy died (t/26 after 5, t/66 after 84, no plan). Not changed, for a separate card if wanted: the check (t/52, t/53, t/65 and now t/26, t/66) looks only at ../../node_modules, while node also resolves nunjucks from node_modules further up, so in a nested checkout such as .claude/worktrees/<x> these files skip even though the reference would run.
+
+Committed as 4452918
