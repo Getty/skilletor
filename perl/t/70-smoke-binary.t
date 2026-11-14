@@ -51,16 +51,23 @@ if ( $ENV{SKILLETOR_SMOKE_UPDATE} ) {
   like( $out, qr/^smoke: transcript written/m, 'the expectation is written' );
 }
 else {
-  like( $out, qr/^smoke sync, check, status: OK/m, 'the transcript equals t/data/smoke/expected.txt' );
+  like( $out, qr/^smoke sync, check, status, hooks: OK/m, 'the transcript equals t/data/smoke/expected.txt' );
   like( $out, qr/^smoke: OK$/m, 'every smoke stage passes' );
 }
 
-# The expectation covers what the smoke claims: the rendered template, the url source's warning.
+# The expectation covers what the smoke claims: the rendered template, the url source's warning,
+# the background sync's report handed out by the next prompt, both moves into a checkout.
 my $expected = $dist->child( 't', 'data', 'smoke', 'expected.txt' );
 ok( $expected->is_file, 't/data/smoke/expected.txt exists' );
 my $text = $expected->is_file ? $expected->slurp_raw : '';
 like( $text, qr/^Hello WORLD from loc \(claude, user\)\.$/m, 'the expectation holds the rendered template' );
 like( $text, qr/^  warning: source web: url source https:\/\/127\.0\.0\.1:1\/skills\.tar\.gz failed: /m,
   "the expectation holds the url source's warning" );
+like( $text, qr/^=== the next prompt there: the background sync's pending report\n--- stdout\n\{"systemMessage":"skilletor: [^\n]*"hookEventName":"UserPromptSubmit"/m,
+  "the expectation holds the background sync's pending report" );
+like( $text, qr/^\{"systemMessage":"skilletor: [^"\n]* in <work>\/checkouts\/cwd-changed"\}$/m,
+  'the expectation holds the cwd-changed sync of its checkout' );
+like( $text, qr/^\{"systemMessage":"skilletor: [^"\n]* in <work>\/checkouts\/post-tool-use","hookSpecificOutput":\{"hookEventName":"PostToolUse"/m,
+  'the expectation holds the post-tool-use sync of its checkout' );
 
 done_testing;

@@ -220,6 +220,38 @@ skilletor: user scope
 --- stderr
 skilletor: unknown option for sync: --bogus (run skilletor --help)
 --- exit 2
+=== hook session-start (the check says changed: a sync, the url source's warning)
+--- stdout
+{"systemMessage":"skilletor: 1 warning(s)","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"- warning: source web: url source https://127.0.0.1:1/skills.tar.gz failed: fetch failed"}}
+--- stderr
+--- exit 0
+=== hook user-prompt-submit (checked at the session start: nothing due)
+--- stdout
+--- stderr
+--- exit 0
+=== hook user-prompt-submit in a checkout never checked (due: the background sync starts)
+--- stdout
+--- stderr
+--- exit 0
+=== the next prompt there: the background sync's pending report
+--- stdout
+{"systemMessage":"skilletor: 1 item(s) updated, 1 warning(s), .claude/.gitignore, .worktreeinclude updated — commit them","hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"skilletor synced items:\n- skill hello@loc: active now\n- warning: source web: url source https://127.0.0.1:1/skills.tar.gz failed: fetch failed\n- .claude/.gitignore updated — commit it\n- .worktreeinclude updated — commit it"}}
+--- stderr
+--- exit 0
+=== hook cwd-changed (into a checkout whose lock does not match its config: synced)
+--- stdout
+{"systemMessage":"skilletor: 1 item(s) updated, .claude/.gitignore, .worktreeinclude updated — commit them in <work>/checkouts/cwd-changed"}
+--- stderr
+--- exit 0
+=== hook post-tool-use (a cd from the session's start into another checkout: synced)
+--- stdout
+{"systemMessage":"skilletor: 1 item(s) updated, .claude/.gitignore, .worktreeinclude updated — commit them in <work>/checkouts/post-tool-use","hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"skilletor: in <work>/checkouts/post-tool-use:\nskilletor synced items:\n- skill hello@loc: active now\n- .claude/.gitignore updated — commit it\n- .worktreeinclude updated — commit it"}}
+--- stderr
+--- exit 0
+=== hook post-tool-use again (the session's cwd as recorded: nothing to do)
+--- stdout
+--- stderr
+--- exit 0
 === files at the end
 ./.claude.json
 ./.claude/agents/.local.rev.md
@@ -237,3 +269,25 @@ skilletor: unknown option for sync: --bogus (run skilletor --help)
 ./src/skills/hello/SKILL.md
 ./src/skills/hello/docs/ref.md
 ./src/skills/tpl/SKILL.md.njk
+=== files of the checkouts at the end
+./cwd-changed/.claude/.gitignore
+./cwd-changed/.claude/skilletor.json
+./cwd-changed/.claude/skilletor.lock.json
+./cwd-changed/.claude/skills/hello/.gitignore
+./cwd-changed/.claude/skills/hello/SKILL.md
+./cwd-changed/.claude/skills/hello/docs/ref.md
+./cwd-changed/.worktreeinclude
+./post-tool-use/.claude/.gitignore
+./post-tool-use/.claude/skilletor.json
+./post-tool-use/.claude/skilletor.lock.json
+./post-tool-use/.claude/skills/hello/.gitignore
+./post-tool-use/.claude/skills/hello/SKILL.md
+./post-tool-use/.claude/skills/hello/docs/ref.md
+./post-tool-use/.worktreeinclude
+./prompted/.claude/.gitignore
+./prompted/.claude/skilletor.json
+./prompted/.claude/skilletor.lock.json
+./prompted/.claude/skills/hello/.gitignore
+./prompted/.claude/skills/hello/SKILL.md
+./prompted/.claude/skills/hello/docs/ref.md
+./prompted/.worktreeinclude
