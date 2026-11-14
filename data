@@ -1,0 +1,37 @@
+---
+class: standard
+completed: 2026-11-14T01:17:11Z
+created: 2026-11-13T20:44:04Z
+depends_on:
+- 173
+id: 187
+priority: low
+started: 2026-11-14T00:31:47Z
+status: done
+tags:
+- perl
+- cli
+- parity
+title: 'Perl: differential CLI parity on one machine (t/54-parity-cli.t)'
+updated: 2026-11-14T01:17:11Z
+---
+
+Part of the Perl CLI strand (see the strand card).
+
+A differential test, t/54-parity-cli.t. It runs both CLIs on one machine, as t/52 does, over the same case format, and covers what golden files cannot pin:
+- git failure wording;
+- the real host and user in templates;
+- the state files (sources-read and unreached, after placeholders; render-inputs, whose hash covers absolute paths);
+- both CLIs sharing one sync lock.
+
+The test skips without node or dist/skilletor.js, with a named reason.
+
+2026-11-14 00:55 Progress: perl/t/54-parity-cli.t + new helper perl/t/lib/SkilletorTest/ParityCLI.pm written; green in the shared tree and on a HEAD worktree (~48 s alone). Design (mine): each machine is set up once, saved, and restored before each CLI's run, so both CLIs run in the very same paths - every byte compares raw, no path placeholders, render-inputs hash included. Parts: (1) five conformance cases through both CLIs (24, 32, 52, 60, 64: state the golden trees leave out; engine ops run as their command --json); (2) own machine: git failure wording (missing repo, missing ref, cache reuse, ls-remote in check, no git on PATH -> spawn git ENOENT, a git that fails silently -> Command failed), real host/user/project in a .njk, render-inputs/sources-read/unreached/last-check/session-cwd; (3) one sync lock: a holder whose fetch is slowed through ext::, the other CLI's sync + SessionStart wait (2 s) or time out (8 s), both directions. No difference found so far. Next: mutations, skip checks, suite timing.
+
+2026-11-14 01:10 Verified. Differences found between the CLIs: none - five conformance cases, every git failure wording, the templates with this machine's host/user/project, every state file and the lock owner record are byte-identical, in both race directions. (One-off, not kept: all 42 cases with a cli or engine step through both CLIs, ~200 s, no difference either; cut to five for time.) Mutations, each in a throwaway worktree, reverted: Perl git 'Command failed: ' wording -> 'sync, mute git: stdout' fails; Perl lock-timeout wording -> waiting sync stderr + SessionStart stdout fail; Perl RENDER_FORMAT 2->3 -> render-inputs.json bytes fail in every case; reference bundle 'up to date' text -> case 32 cli-sync stdout + lock wait fail; Perl host name uc -> template bytes fail; Perl last-check in seconds -> last-check.json bytes fail (case 64, lock wait). Skips verified: PATH=/usr/bin:/bin -> 'needs node on PATH: the reference CLI runs on it'; dist/skilletor.js moved away -> 'needs the reference CLI bundle <checkout>/dist/skilletor.js (a skilletor checkout; npm run build)'; MSWin32 skips too (fork/exec/sh). Also found, not fixed (for this board): (a) t/26-state-hooks.t and t/66-report-hook.t do not skip without the reference's node_modules - in a worktree without it they die with no plan, where t/52/t/53 skip. (b) check --json repeats a source's ls-remote failure once per scope that uses it, same text, no scope named - both CLIs alike, a reference question, not a parity finding. (c) conformance/README.md 'Not covered yet' (fetch failure, lock held by another run), its state-files paragraph and docs/perl.md 'Proof of shared state' could name t/54 - prose, main agent's lane.
+
+2026-11-14 01:11 Done, commit-ready, not committed. Files (both new, nothing else touched): perl/t/54-parity-cli.t, perl/t/lib/SkilletorTest/ParityCLI.pm. Each machine is set up once, saved, and restored before each CLI's run, so both CLIs run in the very same paths: every byte compares raw (exit, stdout, stderr, all files, directories, exec bits under TMP), no path placeholders, the render-inputs hash included. Normalised only (comments in ParityCLI::snapshot and the race): .git dirs (git's own bytes) and sync.lock* (pid/host/token) left out; epoch-ms marks in last-check.json/session-cwd.json named by the step window that wrote them; owner record pid/token/at named. Counts: 3 subtests, 295 assertions - 161 over conformance cases 24, 32, 52, 60, 64 (engine ops run as their command --json); 82 in a machine of its own (10 steps: missing repo, missing ref, cache reuse, ls-remote failure in check, SessionStart, no git on PATH, a git failing silently; real host/user/project in a .njk; render-inputs/sources-read/unreached/last-check/session-cwd); 52 in the lock races (holder slowed via ext::, other CLI's sync + SessionStart wait 2 s or time out at 5 s against an 8 s hold; both directions; owner record compared). Wall time: t/54 alone 48-50 s (~35 s CPU; ~90 s on a loaded machine); full suite -j4 on a HEAD worktree 139 s with t/54 vs 133 s without (t/60 stays the long pole). Green: main tree prove -lr -j4 t (37 files, 2346 tests, PASS); t/54 on fresh worktrees of HEAD be0526f (full suite 2332 tests PASS) and 1161b23. Differences found: none. Mutations, skips and drift: see the previous note.
+
+Review (dispatcher), green: isolated worktree HEAD 1161b23 + perl/t/54-parity-cli.t + perl/t/lib/SkilletorTest/ParityCLI.pm. Perl prove -lr -j4 t 37 files 2346 tests PASS; t/54 alone PASS (65 s under load); with PATH=/usr/bin:/bin it skips: 'needs node on PATH: the reference CLI runs on it'. docs/perl.md (dispatcher) names t/54 under 'Proof of shared state'; goes into this commit. Drift filed: k211 (t/26, t/66 skips), k212 (check --json repeated ls-remote failure).
+
+Committed as baf5b17
