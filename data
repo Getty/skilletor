@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T01:16:30Z
+id: 212
+priority: low
+status: backlog
+tags:
+- ts
+- check
+- question
+title: 'TS: check --json repeats a source''s ls-remote failure once per scope'
+updated: 2026-11-14T01:16:30Z
+---
+
+From k187 (t/54 differential, both CLIs agree, so not a parity finding). When a source used by both the user and the project scope cannot be reached, `skilletor check --json` lists its ls-remote failure once per scope that uses it, with the same text and no scope named. Decide: report it once (k165 dedups warnings in sync by text), or name the scope in each. Then change the reference and the Perl port together, with a case.
