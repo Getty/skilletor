@@ -1,0 +1,10 @@
+{
+  "targets": [
+    "hermes"
+  ],
+  "install": {
+    "skills": [
+      "greet@shared"
+    ]
+  }
+}

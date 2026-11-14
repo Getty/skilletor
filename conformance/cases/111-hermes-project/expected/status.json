@@ -1,0 +1,48 @@
+{
+  "scopes": [
+    {
+      "bundles": [],
+      "declared": [],
+      "orphans": [],
+      "scope": "user",
+      "sourceVersions": {},
+      "targets": [
+        "claude",
+        "hermes"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    },
+    {
+      "bundles": [],
+      "declared": [
+        {
+          "installed": true,
+          "key": "agents/helper",
+          "source": "shared"
+        },
+        {
+          "installed": true,
+          "key": "hermes:skills/greet",
+          "source": "shared"
+        },
+        {
+          "installed": true,
+          "key": "skills/greet",
+          "source": "shared"
+        }
+      ],
+      "orphans": [],
+      "scope": "project",
+      "sourceVersions": {
+        "shared": "git:66b11b9"
+      },
+      "targets": [
+        "claude",
+        "hermes"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    }
+  ]
+}

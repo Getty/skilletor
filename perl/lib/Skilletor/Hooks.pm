@@ -153,8 +153,8 @@ sub _dispatch {
 }
 
 # Under Codex a new session (no source, `startup` or `clear`) gets the rules context; a resumed
-# one still has the first copy in its history (spec §14.8). Hermes' opt-in line comes with k185;
-# until then `--harness hermes` answers as Claude Code's.
+# one still has the first copy in its history (spec §14.8). Under Hermes, while `hermes` is no
+# target, the answer says how to opt in (spec §16.2).
 sub _session_start {
   my ( $input, $ctx ) = @_;
   my $out;
@@ -165,7 +165,28 @@ sub _session_start {
     && ( !defined $source || ( js_type($source) eq 'string' && ( $source eq 'startup' || $source eq 'clear' ) ) ) ) {
     $out = _with_codex_rules( $out, $ctx );
   }
+  $out = _with_hermes_opt_in( $out, $ctx ) if ( $ctx->{harness} // '' ) eq 'hermes';
   return $out;
+}
+
+# Under Hermes while `hermes` is no target (spec §16.2): the opt-in line, once per answer – after
+# its warning line, and after its context when it has one, since the plugin hands the model the
+# context and the warning line only without one (spec §16.4).
+sub _with_hermes_opt_in {
+  my ( $out, $ctx ) = @_;
+  my $hint = _engine($ctx)->hermes_opt_in_hint;
+  return $out unless _truthy($hint);
+  my $line   = _warn($hint)->{systemMessage};
+  my $result = js_ordered( map { ( $_ => $out->{$_} ) } keys %$out );
+  $result->{systemMessage} = join '; ', grep { _truthy($_) } $out->{systemMessage}, $line;
+  my $hso     = $out->{hookSpecificOutput};
+  my $context = ref $hso eq 'HASH' ? $hso->{additionalContext} : undef;
+  if ( _truthy($context) ) {
+    my $copy = js_ordered( map { ( $_ => $hso->{$_} ) } keys %$hso );
+    $copy->{additionalContext} = "$context\n$line";
+    $result->{hookSpecificOutput} = $copy;
+  }
+  return $result;
 }
 
 # The Codex rules files, read from disk, at the start of the output's additionalContext, so the
@@ -270,8 +291,8 @@ sub _now_ms { int( Time::HiRes::time() * 1000 ) }
 # lock_until_deadline (wait for the sync lock until the deadline, not the usual 5 s: Claude Code
 # fires two move hooks for one `cd`, and the second waits out the other's sync). Returns the
 # answer and – when it answered for the checkout, with a sync or with what is left to do there –
-# that checkout. Hermes' `hermes skills trust` line (k152) comes with k185: the Perl engine adds
-# no Codex or Hermes skill yet.
+# that checkout. Under Hermes, once skills landed, the line also names `hermes skills trust` as
+# one that may be needed (k152).
 sub _move_checkout {
   my ( $move, $ctx ) = @_;
   my $root = project_root_of( $move->{cwd} );
@@ -306,7 +327,41 @@ sub _move_checkout_of {
   my $report = $engine->sync( scope => 'project', if_changed => 1, deadline => $deadline, lock_timeout_ms => $lock_timeout );
   return js_ordered() if !_truthy( $report->{error} ) && !@{ $report->{scopes} };
   return ( _cannot_sync( $root, $report->{error} ), $root ) if _truthy( $report->{error} );
-  return ( _moved_output( $report, $root, $move->{event} ), $root );
+  my $out = _moved_output( $report, $root, $move->{event} );
+  $out = _with_hermes_trust( $out, $root ) if ( $ctx->{harness} // '' ) eq 'hermes' && grep { _adds_hermes_skill($_) } @{ $report->{scopes} };
+  return ( $out, $root );
+}
+
+# Did a scope's sync add or update a skill Hermes loads from the project – its own copy, or the
+# Codex copy in `.agents/skills` it reads instead (spec §16.2)?
+sub _adds_hermes_skill {
+  my ( $s ) = @_;
+  require Skilletor::Lock;
+  for my $it ( @{ $s->{added} // [] }, @{ $s->{updated} // [] } ) {
+    my $k = Skilletor::Lock::parse_lock_key( $it->{key} );
+    return 1 if $k->{type} eq 'skill' && defined $k->{harness} && ( $k->{harness} eq 'hermes' || $k->{harness} eq 'codex' );
+  }
+  return 0;
+}
+
+# A Hermes move that put skills into a checkout (k152): Hermes loads a project's skills only once
+# `hermes skills trust` named its root, and skilletor does not read that list (spec §16.5) – so
+# the line and the context name the command as one that may be needed, the context as the user's
+# to run.
+sub _with_hermes_trust {
+  my ( $out, $dir ) = @_;
+  my $command = "hermes skills trust $dir";
+  my $result  = js_ordered( map { ( $_ => $out->{$_} ) } keys %$out );
+  $result->{systemMessage} = display_safe( ( $out->{systemMessage} // 'undefined' )." — if Hermes does not trust this project yet: $command" );
+  my $hso     = $out->{hookSpecificOutput};
+  my $context = ref $hso eq 'HASH' ? $hso->{additionalContext} : undef;
+  if ( _truthy($context) ) {
+    my $line = "- Hermes loads project skills only from a project it trusts; if this one is not yet, the user can run: $command";
+    my $copy = js_ordered( map { ( $_ => $hso->{$_} ) } keys %$hso );
+    $copy->{additionalContext} = "$context\n".display_safe($line);
+    $result->{hookSpecificOutput} = $copy;
+  }
+  return $result;
 }
 
 # The one line of a move that could not sync: the checkout, why, and what to run there.
@@ -353,10 +408,10 @@ sub _post_tool_use {
   return _session_move( $input, $ctx, _state($ctx), { event => 'PostToolUse', lock_until_deadline => 1 } );
 }
 
-# A move a hook sees only as the session's cwd (the reference's sessionMove): Codex's prompt hook –
-# a session there moves only between turns, and that hook is the first to see the new cwd, awaited,
-# before the model's request (k149; Hermes' comes with k185) – and Claude Code's PostToolUse on a
-# Bash `cd`.
+# A move a hook sees only as the session's cwd (the reference's sessionMove): Codex's and Hermes'
+# prompt hook – a session there moves only between turns, and that hook is the first to see the
+# new cwd, awaited, before the model's request (k149) – and Claude Code's PostToolUse on a Bash
+# `cd`.
 # The cwd the session's hook last looked at is kept per session id (written at SessionStart): the
 # same cwd again asks nothing; another goes to the move core, which tells a move within one
 # checkout from one into another. A move that answered for its checkout marks it checked, so the
@@ -396,12 +451,15 @@ sub _joined {
   return $out;
 }
 
-# Codex's prompt hook follows a move first (k149); Hermes' comes with k185.
+# Codex's and Hermes' hooks, which notice a move at the next prompt (k149).
+sub _follows_moves { my $h = $_[0]{harness} // ''; return $h eq 'codex' || $h eq 'hermes' }
+
+# Codex's and Hermes' prompt hook follows a move first (k149).
 sub _user_prompt_submit {
   my ( $input, $ctx ) = @_;
   my $state = _state($ctx);
   my $key = _project_key( $ctx, $input );
-  my $moved = ( $ctx->{harness} // '' ) eq 'codex' ? _session_move( $input, $ctx, $state, { event => 'UserPromptSubmit' } ) : js_ordered();
+  my $moved = _follows_moves($ctx) ? _session_move( $input, $ctx, $state, { event => 'UserPromptSubmit' } ) : js_ordered();
   my $pending = $state->take_pending_report($key);
 
   my $interval = DEFAULT_INTERVAL;
@@ -465,7 +523,7 @@ sub default_background {
 
 =description
 
-The reference's F<src/hooks.ts> for Claude Code and Codex: a black box from a hook's
+The reference's F<src/hooks.ts> for Claude Code, Codex and Hermes: a black box from a hook's
 input to its output, which never disturbs the session – every path catches and
 says what went wrong in one warning line (C<skilletor: …>, display-safe).
 L<Skilletor::CLI> runs it as C<skilletor hook E<lt>eventE<gt>>.
@@ -482,15 +540,18 @@ C<cwd> is recorded for its session (C<session-cwd.json>). Under Codex
 C<startup> or C<clear> – also gets the Codex rules files
 (L<Skilletor::Engine/codex_rules_files>) at the start of its context; a
 resumed one has them in its history already (spec §14.8). A rules file that
-cannot be read is a warning.
+cannot be read is a warning. Under Hermes (C<< harness => 'hermes' >>), while
+C<hermes> is no target, the answer ends with the line that says how to opt in
+(L<Skilletor::Engine/hermes_opt_in_hint>): after its warning line, joined with
+C<; >, and after its context when it has one (spec §16.2, §16.4).
 
 =item * C<user-prompt-submit>: hands out the project's pending report; when
 the project is due (C<checkInterval> of the config, 600 s when it cannot be
 loaded; 0 or less never), marks it checked and starts the background sync. No
-engine is loaded on this path. Under Codex the prompt hook first follows a
-move, as C<post-tool-use> does below (a Codex session moves only between
-turns): its answer and the pending report come as one, both lines, and both
-in the context when either has one.
+engine is loaded on this path. Under Codex and Hermes the prompt hook first
+follows a move, as C<post-tool-use> does below (a session there moves only
+between turns): its answer and the pending report come as one, both lines,
+and both in the context when either has one.
 
 =item * C<__sync-background>: a sync whose answer becomes the project's pending
 report; a lock timeout leaves none, and the project due again.
@@ -517,14 +578,15 @@ C<MOVE_DEADLINE_MS> (20 s) has passed and waits for the sync lock until then;
 a trust request is answered without a sync. The line names the checkout
 (C<… in E<lt>dirE<gt>>) and what to run there for what is left (C<skilletor
 trust E<lt>nameE<gt>>, C<skilletor sync>); a failure is C<cannot sync
-E<lt>dirE<gt>: E<lt>messageE<gt> — run there: skilletor sync>.
+E<lt>dirE<gt>: E<lt>messageE<gt> — run there: skilletor sync>. Under Hermes a
+sync that added or updated a skill Hermes loads there – its own or the Codex
+copy – also names C<hermes skills trust E<lt>dirE<gt>>, in the line and in the
+context, as one that may be needed (k152): skilletor does not read Hermes'
+list of trusted projects.
 
 Without C<project_dir> the project is the git top level of the input's C<cwd>,
 else of the process's (L</project_root_of>). The project dir is also the key of
 the check mark and the pending report.
-
-Not ported yet: C<harness> C<hermes> changes nothing yet (Hermes' opt-in
-line and its prompt hook's move, k185) – such a hook answers as Claude Code's.
 
 =func run_hook
 

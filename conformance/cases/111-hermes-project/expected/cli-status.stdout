@@ -1,0 +1,5 @@
+user scope (claude, hermes):
+project scope (claude, hermes):
+  ✓ skills/greet @shared
+  ✓ hermes:skills/greet @shared
+  ✓ agents/helper @shared

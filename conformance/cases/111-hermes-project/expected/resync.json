@@ -1,0 +1,50 @@
+{
+  "notes": [
+    "1 agent(s) not installed for Hermes (Hermes has no agent files and no rules directory)"
+  ],
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [
+        {
+          "key": "agents/helper",
+          "name": "helper",
+          "source": "shared",
+          "type": "agent"
+        },
+        {
+          "key": "hermes:skills/greet",
+          "name": "greet",
+          "source": "shared",
+          "type": "skill"
+        },
+        {
+          "key": "skills/greet",
+          "name": "greet",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "updated": [],
+      "warnings": []
+    },
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

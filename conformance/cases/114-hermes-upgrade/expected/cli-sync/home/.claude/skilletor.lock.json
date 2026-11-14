@@ -1,0 +1,10 @@
+{
+  "skills/greet": {
+    "source": "shared",
+    "version": "git:66b11b9",
+    "files": {
+      "skills/greet/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/greet/SKILL.md": "sha256:aca2cd981bb32465ce0c2861681553e3e214ab8ab2a0f3d2416d56fe2a6b9989"
+    }
+  }
+}

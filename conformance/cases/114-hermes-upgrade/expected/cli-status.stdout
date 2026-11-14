@@ -1,0 +1,4 @@
+user scope:
+  · skills/greet @shared
+  ? hermes:skills/greet (in lock, not declared)
+project scope:

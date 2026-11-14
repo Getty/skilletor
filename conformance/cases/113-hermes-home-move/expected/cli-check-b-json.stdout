@@ -1,0 +1,19 @@
+{
+  "changed": true,
+  "sources": [
+    {
+      "name": "shared",
+      "scope": "user",
+      "changed": false
+    },
+    {
+      "name": "shared",
+      "scope": "project",
+      "changed": false
+    }
+  ],
+  "warnings": [],
+  "targetsChanged": [
+    "user"
+  ]
+}

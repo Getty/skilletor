@@ -1,0 +1,8 @@
+{
+  "install": {
+    "skills": [
+      "greet@shared",
+      "tidy@shared"
+    ]
+  }
+}

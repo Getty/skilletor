@@ -1,0 +1,93 @@
+{
+  "description": "SessionStart under --harness hermes while \"hermes\" is no target (Claude Code alone in use, spec §16.4): the sync's line and context, each followed by the line that says how to opt in (\"targets\": [\"claude\", \"hermes\"]); nothing synced for Hermes; a resumed session with nothing to do gets that line alone; Claude Code's and Codex's SessionStart and Hermes' prompt never say it.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "hermes"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      },
+      "tree": true
+    },
+    {
+      "id": "resume",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "hermes"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "resume",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      }
+    },
+    {
+      "id": "claude",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      }
+    },
+    {
+      "id": "codex",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "codex"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      }
+    },
+    {
+      "id": "prompt",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "user-prompt-submit",
+        "--harness",
+        "hermes"
+      ],
+      "stdin": {
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      }
+    }
+  ]
+}

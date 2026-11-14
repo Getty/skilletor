@@ -343,6 +343,7 @@ sub run_case {
     ( $r->{project} ? ( project_dir => $r->{project} ) : () ),
     state_root       => "$r->{home}/.claude/skilletor",
     codex_home       => "$r->{home}/.codex",
+    hermes_home      => "$r->{home}/.hermes",
     require_harness  => 1,              # the reference's resolve: a machine without a harness is an error
     # Neither dir lies in a work tree, git tracks none of their files – unless gitInit made one:
     # then git answers, as for the CLI.

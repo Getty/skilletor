@@ -1,8 +1,8 @@
 #!/usr/bin/env perl
 # Skilletor::CLI's pieces no conformance case reaches (../conformance runs the commands
 # themselves, against the reference's bytes): the project root of a cwd, a sync's text with
-# run-level notes, alone or beside warnings (only Hermes targets make notes, and the Perl engine
-# refuses them; case 100 reaches the untrusted Codex hook's warning alone), the
+# run-level notes, alone or beside warnings (cases 110-112, 115 and 117 reach a Hermes note
+# alone, case 100 the untrusted Codex hook's warning alone; no case has both), the
 # lines of a sync that failed after a command's config edit with --json asked for (no command
 # takes both), what the argument layer loads, and an edit's config path without any project dir
 # (the CLI always has one). The expected text is the reference's (cli.ts syncText, syncFailed;

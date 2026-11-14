@@ -37,8 +37,8 @@ drift away from what the TypeScript engine does.
   The port converts its JSON values at the boundary (null, booleans, key order), and
   `t/53-parity-render.t` renders the same templates with both engines. Text::Nunjucks
   needs Perl 5.40 and is not on CPAN yet.
-- **Claude Code and Codex targets** for sync/check/status (Codex since k184). Hermes stays
-  TS-only until k185.
+- **Claude Code, Codex and Hermes targets** for sync/check/status (Codex since k184, Hermes
+  since k185).
 
 ## Against divergence: `conformance/`
 
@@ -69,7 +69,7 @@ drive both engines live against the same remotes and cache.
 - `resolve_skill`, `resolve_agent` and `resolve_rule` return a path into the source or
   cache, with nothing installed.
 - `resolve_item` and `items` return the item records.
-- `sync`, `check` and `status` work for the Claude Code and Codex targets.
+- `sync`, `check` and `status` work for the Claude Code, Codex and Hermes targets.
 
 Decisions that differ from the TS engine on purpose:
 
@@ -93,9 +93,12 @@ Decisions that differ from the TS engine on purpose:
   source tree, so they refuse a templated item with `Skilletor::Error::Unsupported`
   rather than serve an unrendered template; a sync renders it. TS has no lookup to
   match.
-- **Hermes is refused, not half-written.** A scope that targets Hermes is refused with
-  an error, and nothing is touched. The same goes for a sync that would change Hermes
-  state (its lock entries).
+- **Hermes as the CLI has it.** Skills only, in the Hermes home's `skills` (`$HERMES_HOME`,
+  else the recorded home, else `~/.hermes`) and `<repo>/.hermes/skills`, with no managed
+  `.gitignore` block; never detected, a target only through the user config's `"targets"`;
+  in a project with Codex active, the Codex copy serves Hermes. One home per user-scope lock,
+  recorded in `hermes-home.json`; a sync under another home moves the items first and warns.
+  `Skilletor::Engine` takes `hermes_home` as the CLI takes `HERMES_HOME`.
 - **Report text.** `Skilletor::Report` ports the CLI's sync, status and check text and
   exit codes, so raider can show the same lines the CLI prints.
 
@@ -129,18 +132,19 @@ other's `sync` and SessionStart wait or time out. It skips without node or the b
 
 ## Known gaps
 
-- The Hermes target is not ported to sync, check and status yet (k185). The Codex target is
-  (k184): skills in `.agents/skills`, agents as TOML, the rules file with its `AGENTS.md`
-  pointer, its warnings and the migration of a first-design rules block, and the warning while
-  Codex has not trusted skilletor's SessionStart hook; its conversion came with k183
+- The Codex target is ported (k184): skills in `.agents/skills`, agents as TOML, the rules
+  file with its `AGENTS.md` pointer, its warnings and the migration of a first-design rules
+  block, and the warning while Codex has not trusted skilletor's SessionStart hook; its
+  conversion came with k183
   (`Skilletor::Convert`, `Skilletor::TOML`). The Claude hooks are ported
   (`Skilletor::Hooks`, k181): `hook session-start`, `hook user-prompt-submit` and its detached
   background sync (`hook __sync-background`; a PAR-packed binary re-runs itself through
   `PAR_PROGNAME`, plain perl re-runs `$^X` with the script), and the checkout-move hooks
   (`hook cwd-changed`, `hook post-tool-use`, k147; ported in k182). Under
   `--harness codex` a new session's context starts with the Codex rules files and the prompt
-  hook follows a move (k184); `--harness hermes` is parsed but answers as Claude Code's hook
-  does until k185.
+  hook follows a move (k184); under `--harness hermes` SessionStart ends with the line saying
+  how to opt in while `hermes` is no target, and the prompt hook follows a move, naming
+  `hermes skills trust` once a skill Hermes loads landed (k185).
   The Perl CLI (`bin/skilletor`) runs `sync`, `check`, `status` (k173), `trust`, `source list`,
   `source remove` (k175), `add` with the probe of a generic host (k176: `git ls-remote`, then a
   HEAD on the tarball through HTTP::Tiny in the process, so a packed binary needs neither Node

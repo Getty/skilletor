@@ -504,8 +504,8 @@ left for one of its next prompts to show.
 =item * C<session-cwd.json>: per session id, the cwd its hook last looked at
 and when (C<{ cwd, at }>), for the 256 sessions recorded last.
 
-=item * C<hermes-home.json>: the Hermes home the user scope was synced under;
-the port, which never targets Hermes, only ever drops it as the reference does.
+=item * C<hermes-home.json>: the Hermes home the user scope was synced under
+(C<{ home }>), while Hermes is a target and the home is not Hermes' default.
 
 =back
 
@@ -601,7 +601,13 @@ oldest first.
 
 =method put_hermes_home
 
-  $state->put_hermes_home(undef);   # drop the record
+  my $home = $state->hermes_home;                    # undef: none recorded
+  $state->put_hermes_home('/home/me/hermes-b');      # record it
+  $state->put_hermes_home(undef);                    # drop the record
+
+The Hermes home the user scope's C<hermes:> entries were synced under (spec
+§16.2). A record that is no non-empty string is none. The file is written, or
+removed, only when the record changes.
 
 =method with_lock
 

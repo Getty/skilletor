@@ -1,0 +1,43 @@
+{
+  "description": "A project whose lock holds Hermes' own copy of a skill (.hermes/skills) once Codex is a target too (\"targets\": [\"codex\", \"hermes\"], hook trusted, \"claude\": false): check counts it as targetsChanged for the project; the sync removes Hermes' copy and installs the Codex copy in .agents/skills, which serves Hermes, with the run note; check then finds nothing; the CLI's status and resync.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "claude": false,
+  "steps": [
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check-after",
+      "op": "check"
+    },
+    {
+      "id": "cli-status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
+    },
+    {
+      "id": "cli-resync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "targets": [
+    "hermes"
+  ],
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    }
+  },
+  "checkInterval": 0
+}

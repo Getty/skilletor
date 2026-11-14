@@ -1,0 +1,6 @@
+user scope (codex, hermes):
+  ✓ codex:skills/greet @shared
+  ✓ hermes:skills/greet @shared
+project scope (codex, hermes):
+  ✓ codex:skills/greet @shared
+  ✓ codex:skills/tidy @shared

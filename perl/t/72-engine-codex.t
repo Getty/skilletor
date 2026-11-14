@@ -5,7 +5,7 @@
 # reference and by Skilletor::Engine from the same state in the same paths, which must leave the
 # same files and links and give the same reports, down to the --json bytes. Then the port's own
 # pieces: the tracked-file warning of the rules file (git injected), the run notes of what a
-# harness gets no copy of (only Hermes, which the port does not sync yet, makes any), and the
+# harness gets no copy of (only Hermes makes any; t/74-engine-hermes.t syncs them), and the
 # rules files the SessionStart hook reads. Needs node and the TypeScript tree beside perl/ for the
 # first part.
 use strict;

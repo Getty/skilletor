@@ -1,0 +1,51 @@
+{
+  "description": "Hermes' prompt hook moving into a checkout where Codex (hook trusted) is a target too (k152): the skill lands as the Codex copy in .agents/skills, which Hermes reads, so the line and the context still name `hermes skills trust`.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "claude": false,
+  "gitInit": [
+    "project"
+  ],
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "hermes"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      }
+    },
+    {
+      "id": "moved",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "user-prompt-submit",
+        "--harness",
+        "hermes"
+      ],
+      "stdin": {
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "s1",
+        "cwd": "${PROJECT}"
+      },
+      "tree": true
+    }
+  ]
+}

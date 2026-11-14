@@ -106,10 +106,11 @@ way round.
   place, `AGENTS.override.md`, `project_doc_max_bytes`) and the migration of a
   first-design rules block as the CLI has them – and the run's warning while
   Codex has not trusted skilletor's SessionStart hook.
-- **No Hermes yet:** a scope that targets Hermes (`"targets"`) is refused –
-  the report's `error`, nothing touched – and so is a sync where the CLI left
-  Hermes state behind (its lock entries). Leave `"hermes"` out of
-  `"targets"`, or run the CLI.
+- **Hermes:** skills only, in the Hermes home (`HERMES_HOME`, else the one the
+  last sync recorded, else `~/.hermes`) and a project's `.hermes/skills`, as the
+  CLI installs them. Hermes is never detected: add `"hermes"` to `"targets"` in
+  `~/.claude/skilletor.json` to opt in. In a project where Codex is active,
+  Hermes reads the Codex copy.
 - **Templates:** a `.njk` file is rendered as the CLI renders it – the same
   context (`vars`, `project`, `scope`, `harness`, `target`, `host`, `user`,
   `item`), includes confined to the source root, the same bytes. An item

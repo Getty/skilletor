@@ -1,0 +1,66 @@
+{
+  "description": "Hermes alone (\"claude\": false; the user config's \"targets\": [\"hermes\"] – Hermes is never detected) with ~ a git work tree: a user sync installs the skill in ~/.hermes/skills with its own .gitignore, the agent and the rule nowhere – one run note names them – the user's ~/.hermes/.gitignore left byte for byte, no managed block in it (~/.claude, which holds the lock and the state dir, gets its own); check finds nothing; a second sync says the note again; the CLI's resync (text, --json), check and status (its target named).",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "claude": false,
+  "gitInit": [
+    "home"
+  ],
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "status",
+      "op": "status"
+    },
+    {
+      "id": "resync",
+      "op": "sync"
+    },
+    {
+      "id": "cli-resync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ]
+    },
+    {
+      "id": "cli-resync-json",
+      "op": "cli",
+      "argv": [
+        "sync",
+        "--json"
+      ]
+    },
+    {
+      "id": "cli-check",
+      "op": "cli",
+      "argv": [
+        "check"
+      ]
+    },
+    {
+      "id": "cli-status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ],
+      "tree": true
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "agents/helper": {
+    "source": "shared",
+    "version": "git:66b11b9",
+    "files": {
+      "agents/.local.helper.md": "sha256:8d5b02b8b49f2a465bab8fda1756ebf114b1b4d65cee78190d189e8892566e30"
+    }
+  },
+  "hermes:skills/greet": {
+    "source": "shared",
+    "version": "git:66b11b9",
+    "files": {
+      "skills/greet/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/greet/SKILL.md": "sha256:aca2cd981bb32465ce0c2861681553e3e214ab8ab2a0f3d2416d56fe2a6b9989"
+    }
+  },
+  "skills/greet": {
+    "source": "shared",
+    "version": "git:66b11b9",
+    "files": {
+      "skills/greet/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/greet/SKILL.md": "sha256:aca2cd981bb32465ce0c2861681553e3e214ab8ab2a0f3d2416d56fe2a6b9989"
+    }
+  }
+}

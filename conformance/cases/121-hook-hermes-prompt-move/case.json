@@ -1,0 +1,82 @@
+{
+  "description": "Hermes' prompt hook follows a move (k149, Hermes alone, gitInit): a session started outside any project, then a prompt in a checkout with a config – its project scope synced into .hermes/skills before the prompt returns, the line and the context naming the checkout and the `hermes skills trust` it may need (k152), the pending report waiting there joined to both; the same prompt again and one from a subdirectory are silent.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "claude": false,
+  "gitInit": [
+    "project"
+  ],
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "hermes"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      }
+    },
+    {
+      "id": "moved",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "user-prompt-submit",
+        "--harness",
+        "hermes"
+      ],
+      "stdin": {
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "s1",
+        "cwd": "${PROJECT}"
+      },
+      "tree": true
+    },
+    {
+      "id": "again",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "user-prompt-submit",
+        "--harness",
+        "hermes"
+      ],
+      "stdin": {
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "s1",
+        "cwd": "${PROJECT}"
+      }
+    },
+    {
+      "id": "subdir",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "user-prompt-submit",
+        "--harness",
+        "hermes"
+      ],
+      "stdin": {
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "s1",
+        "cwd": "${PROJECT}/sub"
+      },
+      "tree": true
+    }
+  ]
+}

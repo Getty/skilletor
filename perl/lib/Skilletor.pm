@@ -31,7 +31,7 @@ has require_harness => (
   default => sub { 0 },
 );
 
-has [qw( state_root cache_root codex_home timeout_ms lock_timeout_ms is_git_work_tree git_tracked git_remote plugin_root )] => (
+has [qw( state_root cache_root codex_home timeout_ms lock_timeout_ms is_git_work_tree git_tracked git_remote hermes_home plugin_root )] => (
   is => 'ro',
 );
 
@@ -45,7 +45,7 @@ has resolver => (
       fetch           => $self->fetch,
       require_harness => $self->require_harness,
       map { defined $self->$_ ? ( $_ => $self->$_ ) : () }
-        qw( state_root cache_root codex_home timeout_ms lock_timeout_ms is_git_work_tree git_tracked git_remote plugin_root ),
+        qw( state_root cache_root codex_home timeout_ms lock_timeout_ms is_git_work_tree git_tracked git_remote hermes_home plugin_root ),
     );
   },
 );
@@ -331,13 +331,11 @@ files of the source tree, and an unrendered template is never served as if it
 were the item. A L</sync> renders and installs it as the reference does
 (L<Skilletor::Engine/Templates>).
 
-=head2 Claude Code and Codex
+=head2 Claude Code, Codex and Hermes
 
-L</sync>, L</check> and L</status> serve Claude Code and Codex, as the
-reference does. A scope that targets Hermes is refused with an C<error> in the
-report, and a sync is refused where the reference left Hermes entries in a
-lock; nothing is written then (L<Skilletor::Engine/Claude Code and Codex>).
-Unlike the lookups, they need an agent harness, as the reference does.
+L</sync>, L</check> and L</status> serve Claude Code, Codex and Hermes, as the
+reference does (L<Skilletor::Engine/Claude Code, Codex and Hermes>). Unlike
+the lookups, they need an agent harness, as the reference does.
 
 =head2 Modules
 
@@ -424,10 +422,13 @@ Passed to L<Skilletor::Resolver>; its defaults without them.
 
 =attr git_remote
 
+=attr hermes_home
+
 =attr plugin_root
 
-Passed to L<Skilletor::Engine>, where they are described; the questions to git
-and the plugin root they answer default to git and C<CLAUDE_PLUGIN_ROOT>.
+Passed to L<Skilletor::Engine>, where they are described; the questions to git,
+the Hermes home and the plugin root they answer default to git, C<HERMES_HOME>
+and C<CLAUDE_PLUGIN_ROOT>.
 
 =attr resolver
 
@@ -520,10 +521,10 @@ C<scope> are optional filters.
 
   my $report = $sk->sync( scope => 'all', force => 0 );
 
-Install what the config declares for Claude Code, as C<skilletor sync> does,
+Install what the config declares for its targets, as C<skilletor sync> does,
 and drop the resolution the lookups answer from. The reference's
-C<SyncReport> (L<Skilletor::Engine/sync>); a config error, no agent harness, a
-scope targeting another harness are its C<error>, with nothing touched. Throws
+C<SyncReport> (L<Skilletor::Engine/sync>); a config error or no agent harness
+is its C<error>, with nothing touched. Throws
 when a write fails midway (the lock then owns what landed, marked
 C<partial>). L<Skilletor::Report> words it.
 

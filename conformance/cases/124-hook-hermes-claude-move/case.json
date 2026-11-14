@@ -1,0 +1,48 @@
+{
+  "description": "Claude Code's PostToolUse with Hermes the only target (k152): the move into a checkout syncs its Hermes copy and answers with the line and the context, without `hermes skills trust` – the hint follows the harness whose hook runs, not the targets.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "claude": false,
+  "gitInit": [
+    "project"
+  ],
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      }
+    },
+    {
+      "id": "bash",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "post-tool-use"
+      ],
+      "stdin": {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "session_id": "s1",
+        "cwd": "${PROJECT}"
+      },
+      "tree": true
+    }
+  ]
+}

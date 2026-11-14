@@ -1,0 +1,6 @@
+skilletor: user scope
+  + skills/greet (active now)
+skilletor: project scope
+  .claude/.gitignore updated — commit it
+  .worktreeinclude updated — commit it
+  warning: project targets (hermes) are not in use on this machine (claude); nothing is installed for the project

@@ -1,6 +1,7 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - Conformance cases 110-125: the Hermes target in sync, check and status, its home move and upgrade, and the Hermes hooks (k185).
   - Conformance cases 83-92: the CLI's add, its refusals and the probe of a generic host (k176).
   - Conformance cases 100-108: the Codex target in sync, check and status, and the Codex hooks (k184).
   - Conformance cases 72-82: the CLI's trust, source list and source remove (k175).

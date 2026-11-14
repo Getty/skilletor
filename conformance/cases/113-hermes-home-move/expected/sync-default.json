@@ -1,0 +1,69 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [
+        {
+          "key": "hermes:skills/greet",
+          "name": "greet",
+          "source": "shared",
+          "type": "skill"
+        },
+        {
+          "key": "skills/greet",
+          "name": "greet",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "updated": [],
+      "warnings": []
+    },
+    {
+      "added": [
+        {
+          "key": "hermes:skills/greet",
+          "name": "greet",
+          "source": "shared",
+          "type": "skill"
+        },
+        {
+          "key": "hermes:skills/tidy",
+          "name": "tidy",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [
+        {
+          "key": "skills/greet",
+          "name": "greet",
+          "source": "shared",
+          "type": "skill"
+        },
+        {
+          "key": "skills/tidy",
+          "name": "tidy",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "updated": [],
+      "warnings": [
+        "Hermes home changed from ${HOME}/hermes-b to ${HOME}/.hermes: 1 item(s) removed from the old home; what is declared installs anew under the new one"
+      ]
+    }
+  ]
+}

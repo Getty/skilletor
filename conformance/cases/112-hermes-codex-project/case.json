@@ -1,0 +1,51 @@
+{
+  "description": "Codex (hook trusted) and Hermes (\"claude\": false): the user scope's skill gets a copy for each – ~/.agents/skills and ~/.hermes/skills, Hermes reading no ~/.agents – while the project's two skills get the Codex copy alone in .agents/skills, which Hermes reads: no .hermes in the project, one run note saying so; check, status; the CLI's resync (text, --json) and status.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "claude": false,
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "status",
+      "op": "status"
+    },
+    {
+      "id": "cli-resync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ]
+    },
+    {
+      "id": "cli-resync-json",
+      "op": "cli",
+      "argv": [
+        "sync",
+        "--json"
+      ]
+    },
+    {
+      "id": "cli-status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
+    }
+  ]
+}

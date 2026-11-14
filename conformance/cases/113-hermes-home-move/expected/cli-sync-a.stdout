@@ -1,0 +1,10 @@
+skilletor: user scope
+  + skills/greet (active now)
+  + hermes:skills/greet (active from the next Hermes session)
+  + skills/tidy (active now)
+  + hermes:skills/tidy (active from the next Hermes session)
+skilletor: project scope
+  + skills/greet (active now)
+  + hermes:skills/greet (active from the next Hermes session)
+  .claude/.gitignore updated — commit it
+  .worktreeinclude updated — commit it

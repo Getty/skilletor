@@ -1,0 +1,48 @@
+{
+  "description": "The opt-in line on a machine where Claude Code and Codex (hook trusted) are detected: it names [\"claude\", \"codex\", \"hermes\"] and follows the sync's line with its warning (an item the source lacks) and ends the context after the warning; Codex's SessionStart gives its rules context and no such line.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "hermes"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      },
+      "tree": true
+    },
+    {
+      "id": "codex",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "codex"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      }
+    }
+  ]
+}

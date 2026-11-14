@@ -1,0 +1,50 @@
+{
+  "description": "Claude Code and Hermes (\"targets\": [\"claude\", \"hermes\"]) in a project that is a git work tree: the skill in .claude/skills and .hermes/skills, the agent for Claude Code alone – one run note names it – a .gitignore block in .claude, none in .hermes, whose .gitignore of the user's is left byte for byte, .worktreeinclude naming every root, .hermes/skills among them; check, status, a second sync changes nothing; the CLI's status names both targets, its resync the note.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "gitInit": [
+    "project"
+  ],
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "status",
+      "op": "status"
+    },
+    {
+      "id": "resync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "cli-status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
+    },
+    {
+      "id": "cli-resync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ]
+    }
+  ]
+}

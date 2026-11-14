@@ -1,9 +1,9 @@
 #!/usr/bin/env perl
 # What the shared cases cannot show: templates in a sync – the render context, a template error,
-# an empty render, an executable template; the port's own rules – a scope of Hermes, or one the
-# reference left Hermes entries in, is refused before anything is written – a sync that fails
-# midway (partial entries, records cleared), the facade, and the report text. The Codex target:
-# t/72-engine-codex.t.
+# an empty render, an executable template; the lock entries of other harnesses – Hermes' removed
+# once Hermes is no target, those of a harness neither implementation knows kept untouched – a
+# sync that fails midway (partial entries, records cleared), the facade, and the report text. The
+# Codex target: t/72-engine-codex.t; the Hermes target: t/74-engine-hermes.t.
 use strict;
 use warnings;
 use utf8;
@@ -154,45 +154,39 @@ subtest 'an executable template passes its bit to what it renders' => sub {
   ok( !( ( stat "$m->{home}/.claude/skills/tool/SKILL.md" )[2] & 0100 ), 'the main file is not' );
 };
 
-subtest 'Hermes: refused before anything is written' => sub {
+subtest 'a project narrowed to a harness not in use: no error, the reference\'s warning' => sub {
   my $m = machine( 'skills/a/SKILL.md' => skill('a') );
-  write_json( "$m->{home}/.claude/skilletor.json",
-    { sources => { s => { local => $m->{src} } }, install => { skills => ['a@s'] }, targets => [ 'claude', 'codex', 'hermes' ] } );
-  my $e = $m->{engine}->();
-  my $want = 'the user scope targets hermes; the Perl port of skilletor installs for Claude Code and Codex only (leave "hermes" out of "targets" in ~/.claude/skilletor.json, or use the skilletor CLI)';
-  is_deeply( $e->sync, { scopes => [], error => $want }, 'sync: an error' );
-  ok( !-e "$m->{home}/.claude/skills", 'nothing installed' );
-  ok( !-e "$m->{home}/.agents", 'nothing for Codex either' );
-  ok( !-e "$m->{home}/.hermes", 'nor for Hermes' );
-  is( $e->check->{error}, $want, 'check refuses too' );
-  is( $e->status->{error}, $want, 'and status' );
-
   write_json( "$m->{home}/.claude/skilletor.json", { sources => { s => { local => $m->{src} } }, install => { skills => ['a@s'] }, targets => ['claude'] } );
   write_json( "$m->{project}/.claude/skilletor.json", { targets => ['codex'] } );
-  my $r = $e->sync;
-  is( $r->{error}, undef, 'a project narrowed to a harness not in use is no error' );
+  my $r = $m->{engine}->()->sync;
+  is( $r->{error}, undef, 'no error' );
   like( $r->{scopes}[1]{warnings}[0], qr/\Aproject targets \(codex\) are not in use on this machine/, 'the reference\'s warning' );
 };
 
-subtest 'Hermes entries the reference left: refused, untouched' => sub {
+subtest 'Hermes entries once Hermes is no target: removed from the recorded home; unknown harnesses kept' => sub {
   my $m = machine( 'skills/a/SKILL.md' => skill('a') );
   write_json( "$m->{home}/.claude/skilletor.json", { sources => { s => { local => $m->{src} } }, install => { skills => ['a@s'] } } );
-  files( "$m->{home}/.hermes", 'skills/a/SKILL.md' => skill('a') );
+  files( "$m->{root}/hermes-a", 'skills/a/SKILL.md' => skill('a'), 'config.yaml' => '' );
+  Skilletor::State->new( root => "$m->{home}/.claude/skilletor" )->put_hermes_home("$m->{root}/hermes-a");
   write_json( "$m->{home}/.claude/skilletor.lock.json",
     { 'hermes:skills/a' => { source => 's', version => 'local', files => { 'skills/a/SKILL.md' => hash_bytes( encode_text( skill('a') ) ) } } } );
-  my $r = $m->{engine}->()->sync;
-  is( $r->{error}, "$m->{home}/.claude/skilletor.lock.json holds items of another harness (hermes:skills/a); the Perl port of skilletor "
-      .'installs for Claude Code and Codex only and leaves them to the skilletor CLI (run skilletor sync)', 'a lock with Hermes entries' );
-  ok( -e "$m->{home}/.hermes/skills/a/SKILL.md", 'the Hermes copy stays' );
-  ok( !-e "$m->{home}/.claude/skills/a", 'and nothing was installed' );
   my $status = $m->{engine}->()->status( scope => 'user' );
-  is_deeply( $status->{scopes}[0]{orphans}, ['hermes:skills/a'], 'status reads it: an entry of an inactive target' );
-  ok( $m->{engine}->()->check( scope => 'user' )->{targetsChanged}, 'check: target drift, as the reference says' );
+  is_deeply( $status->{scopes}[0]{orphans}, ['hermes:skills/a'], 'status: an entry of an inactive target' );
+  is_deeply( $m->{engine}->()->check( scope => 'user' )->{targetsChanged}, ['user'], 'check: target drift' );
+  my $r = $m->{engine}->()->sync;
+  is( $r->{error}, undef, 'the sync runs' );
+  is_deeply( [ map { $_->{key} } @{ $r->{scopes}[0]{removed} } ], ['hermes:skills/a'], 'the Hermes entry removed' );
+  is_deeply( $r->{scopes}[0]{warnings}, [], 'no move warning: Hermes is no target' );
+  ok( !-e "$m->{root}/hermes-a/skills", 'from the home it was synced under' );
+  ok( -e "$m->{root}/hermes-a/config.yaml", 'Hermes\' own files stay' );
+  ok( !-e "$m->{home}/.hermes", 'nothing in the default home' );
+  ok( -e "$m->{home}/.claude/skills/a/SKILL.md", 'Claude Code\'s copy installed' );
+  is( Skilletor::State->new( root => "$m->{home}/.claude/skilletor" )->hermes_home, undef, 'the record dropped' );
+  is_deeply( [ keys %{ read_lock("$m->{home}/.claude/skilletor.lock.json") } ], ['skills/a'], 'the lock' );
 
-  path( $m->{home}, '.claude', 'skilletor.lock.json' )->remove;
   write_json( "$m->{home}/.claude/skilletor.lock.json", { 'future:skills/x' => { source => 's', version => 'local', files => {} } } );
   my $ok = $m->{engine}->()->sync( scope => 'user' );
-  is( $ok->{error}, undef, 'an entry of an unknown harness is no refusal' );
+  is( $ok->{error}, undef, 'an entry of an unknown harness is no error' );
   ok( exists read_lock("$m->{home}/.claude/skilletor.lock.json")->{'future:skills/x'}, 'it is kept untouched' );
 };
 

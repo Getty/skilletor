@@ -1,0 +1,26 @@
+{
+  "notes": [
+    "1 agent(s) and 1 rule(s) not installed for Hermes (Hermes has no agent files and no rules directory)"
+  ],
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [
+        {
+          "key": "hermes:skills/greet",
+          "name": "greet",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

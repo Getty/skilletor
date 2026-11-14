@@ -1,5 +1,5 @@
 package Skilletor::Engine;
-# ABSTRACT: sync, check and status for Claude Code and Codex – the reference's engine pipeline after the resolve
+# ABSTRACT: sync, check and status for Claude Code, Codex and Hermes – the reference's engine pipeline after the resolve
 
 use Moo;
 use utf8;
@@ -32,6 +32,7 @@ use Skilletor::Process qw( run_command );
 use Skilletor::Render qw( build executables renders_empty );
 use Skilletor::Report qw( empty_scope_report );
 use Skilletor::Source::Git;
+use Skilletor::Source::Local;
 use Skilletor::Source::Url;
 use Skilletor::State;
 use Skilletor::Targets qw(
@@ -71,6 +72,13 @@ has git_tracked => (
 has git_remote => (
   is      => 'ro',
   default => sub { \&_git_remote },
+);
+
+# `$HERMES_HOME` (spec §16.2): the root of user-scope Hermes skills – the Hermes plugin passes its
+# session's. Unset or empty: the home the last user-scope sync recorded, else Hermes' default.
+has hermes_home => (
+  is      => 'lazy',
+  builder => sub { defined $ENV{HERMES_HOME} ? decode_utf8_lossy( $ENV{HERMES_HOME} ) : undef },
 );
 
 # `CLAUDE_PLUGIN_ROOT`: the running plugin's install, naming skilletor's marketplace (spec §6.8).
@@ -151,16 +159,36 @@ sub _codex_home_of {
 
 sub _lock_path  { my ( $self, $scope ) = @_; return path_join( $self->_target_dir($scope), 'skilletor.lock.json' ) }
 
-# Where a scope's roots live. Hermes is never a target here: its home is the recorded one.
+# Hermes' default home for this machine (`~/.hermes`; `%LOCALAPPDATA%\hermes` on Windows).
+sub _hermes_default { default_hermes_home( $_[0]->home ) }
+
+# The Hermes home the user scope's `hermes:` entries were last synced under (spec §16.2): the
+# recorded one, else the default. Never dies: a state dir that cannot be read is the default.
+sub _recorded_hermes_home {
+  my ( $self ) = @_;
+  my $recorded = eval { Skilletor::State->new( root => $self->state_root )->hermes_home };
+  return $recorded // $self->_hermes_default;
+}
+
+# The Hermes home this run serves (spec §16.2): `$HERMES_HOME` (L</hermes_home>), else the
+# recorded one, else Hermes' default. So a run no Hermes started – a Claude Code session – sees
+# the same home, and with it the same targets and root, as the Hermes session before it.
+sub _hermes_home_of {
+  my ( $self ) = @_;
+  my $given = $self->hermes_home;
+  return $self->_recorded_hermes_home unless defined $given && length $given;
+  return path_resolve( Skilletor::Source::Local->expand_home( $given, $self->home ) );
+}
+
+# Where a scope's roots live (spec §14.2, §16.2).
 sub _root_context {
   my ( $self, $scope ) = @_;
-  my $recorded = eval { Skilletor::State->new( root => $self->state_root )->hermes_home };
   return {
     base        => $self->_base_of($scope),
     scope       => $scope,
     claude_dir  => $self->claude_dir,
     codex_home  => $self->_codex_home_of,
-    hermes_home => $recorded // default_hermes_home( $self->home ),
+    hermes_home => $self->_hermes_home_of,
   };
 }
 
@@ -202,42 +230,18 @@ sub _scopes_of {
   return @scopes;
 }
 
-# The harnesses the Perl port installs for (Hermes comes with k185).
-my %PORTED = ( claude => 1, codex => 1 );
-
-# A scope that targets a harness the port does not install for is refused whole, before anything
-# is read or written.
-sub _unsupported_targets {
-  my ( $self, $targets, @scopes ) = @_;
-  for my $s (@scopes) {
-    my @other = grep { !$PORTED{$_} } @{ $targets->{ $s->[0] } };
-    next unless @other;
-    my $where = $s->[0] eq 'user' ? '~/.claude/skilletor.json' : q{the project's .claude/skilletor.json or skilletor.local.json};
-    return 'the '.$s->[0].' scope targets '.join( ', ', @other ).'; the Perl port of skilletor installs for Claude Code and Codex only '
-      .'(leave '.join( ' and ', map {"\"$_\""} @other ).' out of "targets" in '.$where.', or use the skilletor CLI)';
-  }
-  return undef;
-}
-
-# What a sync would have to leave half done: lock entries of a harness the port does not install
-# for (the reference removes them from their roots).
-sub _foreign_state {
-  my ( $self, @scopes ) = @_;
-  for my $s (@scopes) {
-    my $scope = $s->[0];
-    my $rc    = $self->_root_context($scope);
-    my $lock_path = $self->_lock_path($scope);
-    my $lock  = eval { read_lock($lock_path) } or next;    # unreadable: the scope's sync reports it
-    my @keys  = grep {
-      my $k = parse_lock_key($_);
-      defined $k->{harness} && !$PORTED{ $k->{harness} } && defined root_of_key( $rc, $_ );
-    } keys %$lock;
-    if (@keys) {
-      return $lock_path.' holds items of another harness ('.join( ', ', js_sort_keys(@keys) ).'); the Perl port of skilletor '
-        .'installs for Claude Code and Codex only and leaves them to the skilletor CLI (run skilletor sync)';
-    }
-  }
-  return undef;
+# For a run Hermes started (spec §16.4): while `hermes` is no machine target – it is never
+# detected, so until the user config's `targets` names it – the line that says how to opt in,
+# naming the targets in use plus `hermes`. Undef when Hermes is a target, or when the config or
+# the targets cannot be read (that error is reported on its own). Never dies.
+sub hermes_opt_in_hint {
+  my ( $self ) = @_;
+  my ( $config, $targets );
+  return undef unless eval { ( $config, $targets ) = $self->_load_strict; 1 };
+  my @machine = @{ $targets->{user} };
+  return undef if grep { $_ eq 'hermes' } @machine;
+  my $wanted = join ', ', map {"\"$_\""} @machine, 'hermes';
+  return 'Hermes gets no skills: "hermes" is not in "targets"; to opt in, set "targets": ['.$wanted.'] in ~/.claude/skilletor.json';
 }
 
 # The CLAUDE.md files Claude Code reads for a scope (spec §14.8).
@@ -390,17 +394,14 @@ sub sync {
       my ( $config, $targets );
       return js_ordered( scopes => [], error => _message($@) ) unless eval { ( $config, $targets ) = $self->_load_strict; 1 };
       my @scopes = _scopes_of( $config, $sel );
-      if ( defined( my $why = $self->_unsupported_targets( $targets, @scopes ) // $self->_foreign_state(@scopes) ) ) {
-        return js_ordered( scopes => [], error => $why );
-      }
       my $run = {};
       my $no_copy = [];    # what an active harness got no copy of, named once per run
       my $out = js_ordered( scopes => [] );
       for my $s (@scopes) {
         my ( $scope, $scope_cfg ) = @$s;
         my $rep = $self->_sync_scope( $config, $scope_cfg, $scope, $targets->{$scope}, \%opts, $state, $run, $no_copy );
-        # The Hermes home record lives while Hermes is a target; it never is here.
-        $state->put_hermes_home(undef) if $scope eq 'user';
+        # The record lives while Hermes is a target (spec §16.2); its entries went with it.
+        $state->put_hermes_home(undef) if $scope eq 'user' && !grep { $_ eq 'hermes' } @{ $targets->{user} };
         unshift @{ $rep->{warnings} }, @{ $targets->{warnings} } if $scope eq 'project';
         push @{ $out->{scopes} }, $rep;
       }
@@ -438,7 +439,11 @@ sub _sync_scope_run {
   my $target_dir = $self->_target_dir($scope);
   my $base       = $self->_base_of($scope);
   my $rc         = $self->_root_context($scope);
-  my $lock_path  = path_join( $target_dir, 'skilletor.lock.json' );
+  # Hermes no target: its entries go as an inactive target's, from the home they were synced under.
+  $rc->{hermes_home} = $self->_recorded_hermes_home if $scope eq 'user' && !grep { $_ eq 'hermes' } @$harnesses;
+  my $lock_path = path_join( $target_dir, 'skilletor.lock.json' );
+  my @move_warnings;
+  $self->_move_hermes_home( $state, $target_dir, $rc, $harnesses, \@move_warnings ) if $scope eq 'user';
   my $old_lock   = read_lock($lock_path);
   my $gitignore_on = $scope_cfg->{gitignore} ? 1 : 0;
   my $inputs;
@@ -539,7 +544,7 @@ sub _sync_scope_run {
   # Past its deadline (spec §8): nothing of the scope is written. From here on all is local.
   die "sync stopped before writing anything: its sources took too long\n" if defined $opts->{deadline} && _now_ms() > $opts->{deadline};
   my $out = empty_scope_report($scope);
-  $out->{warnings}      = $rep->{warnings};
+  $out->{warnings}      = [ @move_warnings, @{ $rep->{warnings} } ];
   $out->{trustRequests} = $rep->{trustRequests};
   my $warnings = $out->{warnings};
   my $label_of = sub {
@@ -928,9 +933,46 @@ sub _scope_drift {
       ? { kind => 'targets', id => 'missing:'.$g->{missing}.'@'.( $source // 'undefined' ), sources => [$source] }
       : { kind => 'targets', id => 'orphan:'.$g->{key}, sources => [] };
   }
+  # The run's Hermes home is not the one the user scope was last synced under (spec §16.2): a
+  # sync moves the lock's Hermes entries there, or just records the home Hermes now uses.
+  # (Hermes no target: its entries are orphans above.)
+  if ( $scope eq 'user' && grep { $_ eq 'hermes' } @$harnesses ) {
+    my $home = $self->_hermes_home_of;
+    push @out, { kind => 'targets', id => 'hermes-home:'.$home, sources => [] } unless same_path( $home, $self->_recorded_hermes_home );
+  }
   my $settings = $self->_claude_settings_plan( $scope, $scope_cfg, $harnesses );
   push @out, { kind => 'layout', id => 'layout:claude-settings', sources => [] } if $settings && defined $settings->{next};
   return ( @out, $self->_layout_drift( $scope, $scope_cfg, $lock ), _declared_drift( $scope_cfg, $scope, $harnesses, $lock, $served_by ) );
+}
+
+# A user-scope sync under another Hermes home than the last (spec §16.2): the lock's Hermes
+# entries are paths under the old home, so what it owns there is deleted and the entries are
+# dropped – the sync then installs under the new home by the ordinary rules, and a file already
+# there is never taken for skilletor's own. The new home is recorded before anything is
+# installed under it: a sync that stops later leaves a lock and a record that agree. With Hermes
+# no target nothing moves: the sync removes its entries from the recorded home as an inactive
+# target's, and then drops the record.
+sub _move_hermes_home {
+  my ( $self, $state, $target_dir, $rc, $harnesses, $warnings ) = @_;
+  return unless grep { $_ eq 'hermes' } @$harnesses;
+  my $previous = $self->_recorded_hermes_home;
+  my $current  = $self->_hermes_home_of;
+  return if same_path( $previous, $current );
+  my $lock  = read_lock( path_join( $target_dir, 'skilletor.lock.json' ) );
+  my @moved = grep { ( parse_lock_key($_)->{harness} // '' ) eq 'hermes' } keys %$lock;
+  if (@moved) {
+    my %moved = map { ( $_ => 1 ) } @moved;
+    my $old   = { %$rc, hermes_home => $previous };
+    apply(
+      [],
+      target_dir => $target_dir,
+      keep       => [ grep { !$moved{$_} } keys %$lock ],
+      root_of    => sub { root_of_key( $old, $_[0] ) // $target_dir },
+    );
+    push @$warnings, 'Hermes home changed from '.$previous.' to '.$current.': '.scalar(@moved).' item(s) removed from the old home; '
+      .'what is declared installs anew under the new one';
+  }
+  $state->put_hermes_home( same_path( $current, $self->_hermes_default ) ? undef : $current );
 }
 
 sub _layout_drift {
@@ -1018,9 +1060,6 @@ sub check {
     return js_ordered( changed => _false, sources => [], warnings => [], error => _message($@) );
   }
   my @scopes = _scopes_of( $config, $sel );
-  if ( defined( my $why = $self->_unsupported_targets( $targets, @scopes ) ) ) {
-    return js_ordered( changed => _false, sources => [], warnings => [], error => $why );
-  }
   my $state = Skilletor::State->new( root => $self->state_root );
   my $out = js_ordered( changed => _false, sources => [], warnings => [] );
   my %field = ( targets => 'targetsChanged', layout => 'layoutChanged', declared => 'declaredChanged' );
@@ -1091,9 +1130,6 @@ sub status {
   my ( $config, $targets );
   return js_ordered( scopes => [], error => _message($@) ) unless eval { ( $config, $targets ) = $self->_load_strict; 1 };
   my @scopes = _scopes_of( $config, $sel );
-  if ( defined( my $why = $self->_unsupported_targets( $targets, @scopes ) ) ) {
-    return js_ordered( scopes => [], error => $why );
-  }
   my $state = Skilletor::State->new( root => $self->state_root );
   my $out = js_ordered( scopes => [] );
   my $given = $self->project_dir;
@@ -1201,7 +1237,7 @@ sub codex_rules_files {
 =description
 
 The reference's engine (C<engine.ts>) after the resolve: C<sync>, C<check>
-and C<status> for Claude Code and Codex. It extends L<Skilletor::Resolver> – a sync runs
+and C<status> for Claude Code, Codex and Hermes. It extends L<Skilletor::Resolver> – a sync runs
 the very resolve that class reports, then builds every declared item in memory,
 applies it (L<Skilletor::Apply>), writes the managed blocks
 (L<Skilletor::Gitignore>) and the project's plugin requirement
@@ -1223,9 +1259,9 @@ cases, F<t/52-parity-sync.t> and F<t/65-report-json.t> hold both to that. Like
 the reference, a sync holds the sync lock (L<Skilletor::State/with_lock>);
 C<check> and C<status> read without it.
 
-=head2 Claude Code and Codex
+=head2 Claude Code, Codex and Hermes
 
-The port installs for Claude Code and Codex, as the reference does (spec
+The port installs for Claude Code, Codex and Hermes, as the reference does (spec
 §14): skills of both in C<.agents/skills> when Codex alone is a target, each
 agent converted to Codex's TOML (L<Skilletor::Convert>), the rules as
 sections of one C<skilletor-rules.md> under C<$CODEX_HOME> or the project's
@@ -1239,13 +1275,20 @@ like C<status>, the run's C<warnings> (Codex has not trusted skilletor's
 SessionStart hook). The SessionStart hook injects the rules files
 (L</codex_rules_files>).
 
-Hermes is not ported yet. A scope whose targets name C<hermes> is refused
-whole: C<sync>, C<check> and C<status> return the report with an C<error> and
-touch nothing. A project narrowed to no harness in use is no error (the
-reference's warning). A C<sync> is also refused, before anything is written,
-when a scope's lock holds Hermes entries (the reference removes them from
-their roots). Lock entries of a harness neither knows are kept untouched, as
-the reference keeps them. Run the skilletor CLI once on such a machine.
+Hermes gets skills only (spec §16), and only while the user config's
+C<targets> names it – it is never detected. Its user root is the Hermes home's
+C<skills> (L</hermes_home>), its project root the project's C<.hermes/skills>,
+which gets no managed C<.gitignore> block; in a project where Codex is a target
+too, Hermes reads the Codex copy in C<.agents/skills> and gets none of its own.
+The user scope records the Hermes home it synced under in the state dir
+(L<Skilletor::State/hermes_home>): a sync under another home removes the lock's
+Hermes entries from the old one, with a warning, and installs them anew under
+the new one, and C<check> counts the move as C<targetsChanged>; once Hermes is
+no target, a sync removes its entries from the recorded home and drops the
+record. What Hermes gets no copy of – agents and rules, project skills Codex
+serves – is a sync's C<notes>. L</hermes_opt_in_hint> words how to opt in.
+Lock entries of a harness neither implementation knows are kept untouched, as
+the reference keeps them.
 
 =head2 Templates
 
@@ -1292,6 +1335,15 @@ command that untracks it.
   git_remote => sub { my ( $project_dir ) = @_; return $url }
 
 The project's C<origin>, a render input of the project scope. Default: ask git.
+
+=attr hermes_home
+
+C<$HERMES_HOME> (spec §16.2), by default from the environment: the Hermes home
+whose C<skills> is the user scope's Hermes root – the Hermes plugin passes its
+session's. A leading C<~> is the L<Skilletor::Resolver/home>. Unset or empty:
+the home the last user-scope sync recorded, else Hermes' default
+(C<~/.hermes>; C<%LOCALAPPDATA%\hermes> on Windows), so a run no Hermes started
+serves the same home as the Hermes session before it.
 
 =attr plugin_root
 
@@ -1391,6 +1443,17 @@ The Codex rules files the SessionStart hook injects (spec §14.8): the user
 scope's, then the project's, each when it exists and Codex is a target of that
 scope. When the config or the targets cannot be loaded, every existing file
 (the last good state). Reads no source and never throws.
+
+=method hermes_opt_in_hint
+
+  my $line = $engine->hermes_opt_in_hint;
+  # Hermes gets no skills: "hermes" is not in "targets"; to opt in, set
+  # "targets": ["claude", "hermes"] in ~/.claude/skilletor.json
+
+For a run Hermes started (spec §16.4): while C<hermes> is no machine target,
+the line that says how to opt in, naming the targets in use plus C<hermes>.
+Undef when Hermes is a target, or when the config or the targets cannot be read
+(that error is reported on its own). Never throws.
 
 =method RENDER_FORMAT
 

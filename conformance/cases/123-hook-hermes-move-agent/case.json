@@ -1,0 +1,50 @@
+{
+  "description": "Hermes' prompt hook moving into a checkout that installs only an agent (Claude Code and Hermes targets, k152): Claude Code's agent is synced and named, the run note left unsaid, and no `hermes skills trust` – Hermes loads nothing there.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "gitInit": [
+    "project"
+  ],
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "hermes"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      }
+    },
+    {
+      "id": "moved",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "user-prompt-submit",
+        "--harness",
+        "hermes"
+      ],
+      "stdin": {
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "s1",
+        "cwd": "${PROJECT}"
+      },
+      "tree": true
+    }
+  ]
+}

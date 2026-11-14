@@ -1,0 +1,57 @@
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "added": [],
+      "updated": [],
+      "removed": [],
+      "unchanged": [
+        {
+          "key": "codex:skills/greet",
+          "type": "skill",
+          "name": "greet",
+          "source": "shared"
+        },
+        {
+          "key": "hermes:skills/greet",
+          "type": "skill",
+          "name": "greet",
+          "source": "shared"
+        }
+      ],
+      "skipped": [],
+      "conflicts": [],
+      "overwritten": [],
+      "warnings": [],
+      "trustRequests": []
+    },
+    {
+      "scope": "project",
+      "added": [],
+      "updated": [],
+      "removed": [],
+      "unchanged": [
+        {
+          "key": "codex:skills/greet",
+          "type": "skill",
+          "name": "greet",
+          "source": "shared"
+        },
+        {
+          "key": "codex:skills/tidy",
+          "type": "skill",
+          "name": "tidy",
+          "source": "shared"
+        }
+      ],
+      "skipped": [],
+      "conflicts": [],
+      "overwritten": [],
+      "warnings": [],
+      "trustRequests": []
+    }
+  ],
+  "notes": [
+    "2 skill(s) not installed for Hermes in the project scope (Hermes reads the Codex copy in .agents/skills)"
+  ]
+}

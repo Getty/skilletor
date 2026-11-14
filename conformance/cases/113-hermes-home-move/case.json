@@ -1,0 +1,97 @@
+{
+  "description": "The one Hermes home a user-scope lock serves (spec §16.2): a CLI sync under HERMES_HOME=~/hermes-a installs there, a run without HERMES_HOME serves the recorded home (status); under ~/hermes-b check counts the move as targetsChanged, a project-scope sync leaves it to the user scope, the user-scope sync removes the items from ~/hermes-a with one warning, installs them under ~/hermes-b and leaves a skill of the user's there as a conflict; a sync without HERMES_HOME then serves ~/hermes-b; an engine sync under the default ~/.hermes moves them there, and a CLI sync without HERMES_HOME then finds them there: the default needs no record.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "cli-sync-a",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "env": {
+        "HERMES_HOME": "${HOME}/hermes-a"
+      },
+      "tree": true
+    },
+    {
+      "id": "cli-status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
+    },
+    {
+      "id": "cli-check-b",
+      "op": "cli",
+      "argv": [
+        "check"
+      ],
+      "env": {
+        "HERMES_HOME": "${HOME}/hermes-b"
+      }
+    },
+    {
+      "id": "cli-check-b-json",
+      "op": "cli",
+      "argv": [
+        "check",
+        "--json"
+      ],
+      "env": {
+        "HERMES_HOME": "${HOME}/hermes-b"
+      }
+    },
+    {
+      "id": "cli-sync-b-project",
+      "op": "cli",
+      "argv": [
+        "sync",
+        "--scope",
+        "project"
+      ],
+      "env": {
+        "HERMES_HOME": "${HOME}/hermes-b"
+      }
+    },
+    {
+      "id": "cli-sync-b",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "env": {
+        "HERMES_HOME": "${HOME}/hermes-b"
+      },
+      "tree": true
+    },
+    {
+      "id": "cli-sync-plain",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ]
+    },
+    {
+      "id": "sync-default",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "cli-sync-final",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "tree": true
+    }
+  ]
+}

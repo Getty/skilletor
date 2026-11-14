@@ -1,0 +1,3 @@
+skilletor: user scope
+  + skills/greet (active now)
+  - hermes:skills/greet (removed)

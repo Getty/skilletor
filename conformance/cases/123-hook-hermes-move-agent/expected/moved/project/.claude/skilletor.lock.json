@@ -1,0 +1,9 @@
+{
+  "agents/helper": {
+    "source": "shared",
+    "version": "git:66b11b9",
+    "files": {
+      "agents/.local.helper.md": "sha256:8d5b02b8b49f2a465bab8fda1756ebf114b1b4d65cee78190d189e8892566e30"
+    }
+  }
+}

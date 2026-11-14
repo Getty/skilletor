@@ -1,0 +1,40 @@
+{
+  "description": "A Hermes home in use is no target until the user's \"targets\" name hermes (spec §16.2), and a project cannot add it: a CLI sync under HERMES_HOME=~/hermes-a, with Claude Code alone detected and the project narrowed to [\"hermes\"], installs the user's skill for Claude Code, nothing in the project or the Hermes home, with the project's warning; status names the project scope's targets as none.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "cli-sync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "env": {
+        "HERMES_HOME": "${HOME}/hermes-a"
+      },
+      "tree": true
+    },
+    {
+      "id": "cli-status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ],
+      "env": {
+        "HERMES_HOME": "${HOME}/hermes-a"
+      }
+    },
+    {
+      "id": "check",
+      "op": "check"
+    }
+  ]
+}

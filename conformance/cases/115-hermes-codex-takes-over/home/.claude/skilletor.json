@@ -1,0 +1,11 @@
+{
+  "targets": [
+    "codex",
+    "hermes"
+  ],
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    }
+  }
+}

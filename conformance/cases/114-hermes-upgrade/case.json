@@ -1,0 +1,55 @@
+{
+  "description": "Upgrade from the auto-detecting build: a lock with a Hermes entry and its home recorded (~/hermes-a), and a user config without \"targets\" – Claude Code alone is detected: status names the entry an orphan, check counts it as targetsChanged; a CLI sync under HERMES_HOME=~/hermes-b (the Hermes plugin's run) removes it from the recorded home, Hermes' own files kept, writes nothing under ~/hermes-b, warns of no move and installs Claude Code's copy; check and status then find nothing.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "cli-status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ]
+    },
+    {
+      "id": "cli-check",
+      "op": "cli",
+      "argv": [
+        "check"
+      ]
+    },
+    {
+      "id": "cli-sync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "env": {
+        "HERMES_HOME": "${HOME}/hermes-b"
+      },
+      "tree": true
+    },
+    {
+      "id": "cli-check-after",
+      "op": "cli",
+      "argv": [
+        "check"
+      ]
+    },
+    {
+      "id": "status",
+      "op": "status"
+    }
+  ]
+}

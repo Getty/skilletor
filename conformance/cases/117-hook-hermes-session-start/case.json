@@ -1,0 +1,81 @@
+{
+  "description": "SessionStart under --harness hermes (Hermes alone, \"claude\": false, HERMES_HOME=~/srv/hermes): the sync installs the skill in that home and answers with the line and the context the plugin hands to the model, the agent Hermes gets no copy of left unsaid (a note is no warning); the same SessionStart again and the prompt after it are silent; a CLI sync without HERMES_HOME serves the same home: up to date, the note said, nothing in ~/.hermes.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "claude": false,
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "hermes"
+      ],
+      "env": {
+        "HERMES_HOME": "${HOME}/srv/hermes"
+      },
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      },
+      "tree": true
+    },
+    {
+      "id": "again",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "hermes"
+      ],
+      "env": {
+        "HERMES_HOME": "${HOME}/srv/hermes"
+      },
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      }
+    },
+    {
+      "id": "prompt",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "user-prompt-submit",
+        "--harness",
+        "hermes"
+      ],
+      "env": {
+        "HERMES_HOME": "${HOME}/srv/hermes"
+      },
+      "stdin": {
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "s1",
+        "cwd": "${TMP}/cwd"
+      }
+    },
+    {
+      "id": "cli-sync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ],
+      "tree": true
+    }
+  ]
+}

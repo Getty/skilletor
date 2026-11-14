@@ -1,0 +1,4 @@
+skilletor: user scope
+  + hermes:skills/greet (active from the next Hermes session)
+  conflict: hermes-b/skills/tidy/SKILL.md already exists (use --force to adopt)
+  warning: Hermes home changed from ${HOME}/hermes-a to ${HOME}/hermes-b: 2 item(s) removed from the old home; what is declared installs anew under the new one

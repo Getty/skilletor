@@ -1,6 +1,21 @@
 Revision history for Skilletor
 
 {{$NEXT}}
+  - The Perl engine now syncs, checks and reports the Hermes target as the
+    reference does (spec section 16): skills only, in the Hermes home's
+    skills ($HERMES_HOME, else the recorded home, else ~/.hermes) and
+    <project>/.hermes/skills, with no managed .gitignore block. It is never
+    detected, a target only through the user config's "targets"; in a project
+    with Codex active, the Codex copy serves Hermes. One home per user-scope
+    lock, recorded in hermes-home.json: a sync under another home removes the
+    old home's items with a warning and installs anew, and check counts it as
+    targetsChanged. Once hermes is no target, a sync removes its entries from
+    the recorded home and drops the record. Skilletor::Engine has a new
+    hermes_home attribute and a hermes_opt_in_hint method. Under --harness
+    hermes, SessionStart ends with the opt-in line while hermes is no target,
+    and the prompt hook follows a move, naming `hermes skills trust <dir>`
+    once a skill Hermes loads landed (k152). Tested in t/74-engine-hermes.t
+    and t/75-hooks-hermes.t (k185).
   - A Skilletor::Error stringifies to its message, as its documentation says:
     an error no one catches prints the message, not
     Skilletor::Error::Config=HASH(0x...). namespace::clean removed the subs
@@ -23,11 +38,11 @@ Revision history for Skilletor
     CLAUDE.md in its place, AGENTS.override.md, project_doc_max_bytes) and the
     migration of a first-design rules block as the reference has them - and
     warn while Codex has not trusted skilletor's SessionStart hook
-    (Skilletor::AgentsMD, after agentsmd.ts; Skilletor::Error::Block). A
-    scope that targets Hermes is still refused. The hooks under --harness
-    codex: a new session's context starts with the rules files, and the
-    prompt hook syncs the checkout a session moved into, its answer joined
-    with a pending report (k184).
+    (Skilletor::AgentsMD, after agentsmd.ts; Skilletor::Error::Block).
+    Hermes followed in k185. The hooks under --harness codex: a new
+    session's context starts with the rules files, and the prompt hook syncs
+    the checkout a session moved into, its answer joined with a pending
+    report (k184).
   - `skilletor trust`, `skilletor source list [--json]` and `skilletor source
     remove <name> [--project] [--force]` in the Perl CLI (Skilletor::Commands,
     after the reference's commands.ts): the same checks in the same order (an

@@ -10,8 +10,8 @@ command line prints and exits with, byte for byte.
 Runners:
 
 - TypeScript: `test/conformance.test.ts` (part of `npm test`).
-- Perl: `perl/t/60-conformance.t` (every step; the Perl engine syncs for Claude Code and Codex
-  and refuses a scope that targets Hermes).
+- Perl: `perl/t/60-conformance.t` (every step; the Perl engine syncs for Claude Code, Codex and
+  Hermes).
 
 Both run the `cli` steps against their own CLI by default and against any other on request
 (below), so one set of expectations holds the TS bundle, `perl/bin/skilletor` and, later, a
@@ -145,7 +145,10 @@ The engine ops run with:
 - `CODEX_HOME` = `${HOME}/.codex`, which does not exist, so Codex is not detected – a case
   that seeds `home/.codex/config.toml` (cases 100-108) makes it detected, and that file's
   `trusted_hash` for skilletor's SessionStart hook decides the untrusted-hook warning;
-  `HERMES_HOME` = `${HOME}/.hermes`; `CLAUDE_PLUGIN_ROOT` and `CLAUDE_CONFIG_DIR` unset,
+  `HERMES_HOME` = `${HOME}/.hermes` – both runners pass it to the engine ops as the Hermes home,
+  and a step's `env` `HERMES_HOME` reaches only a `cli` step, whose CLI otherwise uses Hermes'
+  default home under `${HOME}`. Hermes is never detected: a case opts in with `"targets"` in
+  `home/.claude/skilletor.json` (cases 110-125); `CLAUDE_PLUGIN_ROOT` and `CLAUDE_CONFIG_DIR` unset,
   unless the case's `env` sets them (below). The active target is Claude
   Code alone, detected from the marker (none without it, `"claude": false`) – no case sets
   `targets` unless it is about them;
@@ -533,6 +536,22 @@ show it, its `description` saying which.
 | `106-hook-codex-rules` | SessionStart under `--harness codex`: a new session's context starts with the user's rules file, then the project's, the report (its warning too) after them; with nothing to sync, `startup`, `clear`, a missing and a `null` source get exactly the rules, `resume` none; without `--harness codex` no rules, nor on the prompt |
 | `107-hook-codex-prompt-move` | Codex's prompt hook follows a move (k149, `gitInit`): a session started outside any project, then a prompt in a checkout with a config – its project scope synced before the prompt returns, line and context naming it, the pending report waiting there joined to both; the same prompt again and one from a subdirectory are silent |
 | `108-hook-codex-config-error` | SessionStart under Codex with a config that does not load: the line names the error, the context is the last good rules files as they are on disk, nothing written; without `--harness codex` the line alone |
+| `110-hermes-user` | Hermes alone (`"claude": false`, the user config's `"targets": ["hermes"]` – Hermes is never detected), `gitInit` home: the user sync installs the skill in `~/.hermes/skills` with its own `.gitignore`, the agent and the rule nowhere, one run note naming them; the user's `~/.hermes/.gitignore` kept byte for byte, no managed block in it (`~/.claude` gets its own); check, status, a resync changes nothing; the CLI's resync (text, `--json`: up to date with the note), check and status (`user scope (hermes):`) |
+| `111-hermes-project` | Claude Code and Hermes in a git project: the skill in `.claude/skills` and `.hermes/skills`, the agent for Claude Code alone with one run note; a `.gitignore` block in `.claude`, none in `.hermes`, the user's `.hermes/.gitignore` kept; `.worktreeinclude` names `/.hermes/skills/` among the roots; check, status, a resync; the CLI's status and resync |
+| `112-hermes-codex-project` | Codex (hook trusted) and Hermes, `"claude": false`: the user skill gets a copy in `~/.agents/skills` and in `~/.hermes/skills`; the project's two skills only the Codex copy in `.agents/skills`, which Hermes reads – no `.hermes` in the project, one run note saying so; check, status; the CLI's resync (text, `--json`) and status |
+| `113-hermes-home-move` | the one Hermes home a user-scope lock serves (spec §16.2): a CLI sync under `HERMES_HOME=~/hermes-a` installs there, status without `HERMES_HOME` serves the recorded home; under `~/hermes-b` check exits 1 (`--json` `targetsChanged: ["user"]`), a project-scope sync leaves the move to the user scope, the user sync removes both items from `~/hermes-a` with one warning and installs under `~/hermes-b` (a file already there a conflict); a plain CLI sync meets that conflict again (the new home recorded); an engine sync with the default home moves to `~/.hermes`; a last CLI sync is up to date |
+| `114-hermes-upgrade` | upgrade from the auto-detecting build: a lock with a Hermes entry and its home recorded (`~/hermes-a`), no `"targets"`, Claude Code alone detected: status names the entry an orphan, check counts it as `targetsChanged`; a CLI sync under `HERMES_HOME=~/hermes-b` removes it from the recorded home, Hermes' own files kept; check after up to date |
+| `115-hermes-codex-takes-over` | a project lock holding Hermes' own copy of a skill once Codex is a target too (`["codex", "hermes"]`, hook trusted, `"claude": false`): check counts `targetsChanged` for the project; the sync removes the `.hermes/skills` copy and installs the Codex copy that serves Hermes, with the run note; check then finds nothing; the CLI's status and resync |
+| `116-hermes-not-opted-in` | a Hermes home in use (`HERMES_HOME`) is no target until the user's `"targets"` name hermes, and a project cannot add it: with the project narrowed to `["hermes"]`, the CLI sync installs the user skill for Claude Code, nothing in the project or the Hermes home, with the project's warning; status says `project scope (no targets):`; check |
+| `117-hook-hermes-session-start` | SessionStart under `--harness hermes` (Hermes alone, `HERMES_HOME=~/srv/hermes`): the sync installs in that home and answers with the line and the context, the agent's note left unsaid; again, and the prompt hook, silent; a CLI sync without `HERMES_HOME` serves the recorded home – up to date with the note, the tree unchanged |
+| `118-hook-hermes-opt-in` | SessionStart under `--harness hermes` while `hermes` is no target (spec §16.4): the sync's line and context each end with the opt-in line (`"targets": ["claude", "hermes"]`), nothing synced for Hermes; a resumed session with nothing to do gets that line alone; Claude Code's and Codex's SessionStart and Hermes' prompt hook never say it |
+| `119-hook-hermes-opt-in-warning` | Claude Code and Codex (hook trusted) detected: the opt-in line names `["claude", "codex", "hermes"]` and follows the sync's warning in the line and at the end of the context; Codex's SessionStart gives its rules context and no such line |
+| `120-hook-hermes-config-error` | SessionStart under `--harness hermes` with a user config that does not load: the error line, no opt-in line (the targets cannot be read), no context, nothing written |
+| `121-hook-hermes-prompt-move` | Hermes' prompt hook follows a move (k149, `gitInit`): the checkout's project scope synced into `.hermes/skills` before the prompt returns, the line and the context naming it and the `hermes skills trust` it may need (k152), the pending report joined to both; the same prompt again and one from a subdirectory are silent |
+| `122-hook-hermes-move-codex-copy` | the move into a checkout where Codex (hook trusted) is a target too: the skill lands as the Codex copy in `.agents/skills`, which Hermes reads, so the line and the context still name `hermes skills trust` (k152) |
+| `123-hook-hermes-move-agent` | a move into a checkout that installs only an agent (Claude Code and Hermes targets): the agent synced and named, the run note left unsaid, no `hermes skills trust` (k152) |
+| `124-hook-hermes-claude-move` | Claude Code's PostToolUse with Hermes the only target: the move syncs the Hermes copy and answers without `hermes skills trust` – the hint follows the harness whose hook runs, not the targets (k152) |
+| `125-hook-hermes-move-removal` | a move into a checkout whose lock holds a Hermes skill the config no longer declares, its blocks in place: removed, one line `skilletor: 1 removed in ${PROJECT}`, no `hermes skills trust` (k152) |
 
 The state files two engines on one machine share – `render-inputs.json` with its hash,
 `sources-read.json`, `unreached.json` – are not compared here: their keys are absolute lock
@@ -544,15 +563,14 @@ Not covered yet: the CLI's `available`, `install` and `uninstall` (the Perl CLI 
 them yet); of `add`, a generic host whose tarball answers the probe's HEAD (it needs a TLS
 server; the Perl port's `t/31-probe.t` pins the HEAD against a local HTTP server, the reference
 has no test of it yet); the bytes `trust` and `add` write to `trust.json` (state, outside the
-compared trees; each engine's own tests pin them); of the hooks, what `--harness hermes` adds (Hermes'
-opt-in line, its prompt hook following a move), a due prompt's real
-background sync, the in-session interval, the sync lock held by another run – a move's wait on
-it and the race of one `cd`'s two hooks too – and a move's 20 s deadline (each engine's own
-tests pin these, the interval on an injected clock, the deadline injected); a sync's run-level
-notes (what Hermes gets no copy of – Hermes targets only); a `url`
+compared trees; each engine's own tests pin them); the Hermes home a user-scope lock serves as
+recorded in `hermes-home.json` (state, outside the compared trees; cases 113, 114 and 117 prove
+it through the syncs that follow, each engine's own tests pin the record); of the hooks, a due
+prompt's real background sync, the in-session interval, the sync lock held by another run – a
+move's wait on it and the race of one `cd`'s two hooks too – and a move's 20 s deadline (each
+engine's own tests pin these, the interval on an injected clock, the deadline injected); a `url`
 source actually fetched (the engine takes `https://` only, so it needs a local TLS server), a
 source whose fetch fails (the warning quotes git's own message), symbolic links in a target –
 a `CLAUDE.md` that is the Codex `AGENTS.md`, an `AGENTS.md` that is a link (the Perl port's
-`t/72-engine-codex.t` syncs those with both engines) –, a
-sync that fails midway (`partial`; `67` starts from the lock one left), and Hermes targets (the
-Perl engine refuses a scope that targets them).
+`t/72-engine-codex.t` syncs those with both engines) –, and a sync that fails midway
+(`partial`; `67` starts from the lock one left).

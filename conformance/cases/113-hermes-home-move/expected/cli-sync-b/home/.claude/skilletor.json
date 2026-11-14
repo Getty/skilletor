@@ -1,0 +1,17 @@
+{
+  "targets": [
+    "claude",
+    "hermes"
+  ],
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    }
+  },
+  "install": {
+    "skills": [
+      "greet@shared",
+      "tidy@shared"
+    ]
+  }
+}
