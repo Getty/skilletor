@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-14T04:12:28Z
+id: 224
+priority: low
+status: backlog
+tags:
+- perl
+- test
+- drift
+title: 'perl: reference-parity tests skip in a nested checkout although node finds
+  node_modules above it'
+updated: 2026-11-14T04:12:28Z
+---
+
+Found by k211. t/26, t/52, t/53, t/65 and t/66 skip their reference half unless ../../node_modules/nunjucks exists (relative to perl/t). Node resolves node_modules up the directory tree, so in a checkout nested in another (a .claude/worktrees/agent-* worktree without its own node_modules) the reference would run, yet these files skip – silently green. Done: the check asks node itself (for example `node -e "require.resolve(\"nunjucks\")"` from the repo root) or walks up as node does; a skip names the reason; one shared helper in t/lib instead of five copies.
