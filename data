@@ -1,0 +1,46 @@
+---
+class: standard
+completed: 2026-11-14T02:00:52Z
+created: 2026-11-13T20:42:57Z
+depends_on:
+- 173
+id: 175
+priority: medium
+started: 2026-11-14T01:06:57Z
+status: done
+tags:
+- perl
+- cli
+- commands
+title: 'Perl CLI: trust, source list, source remove'
+updated: 2026-11-14T02:16:48Z
+---
+
+Part of the Perl CLI strand (see the strand card).
+
+Port from src/commands.ts and cli.ts:270-338:
+- cmdTrust: `trusted source N (kind url)`.
+- cmdSourceList: pickDef key order git, ref, url, local, path; text `<name> [<origin>] <json>`, and --json.
+- cmdSourceRemove:
+  - strandedOverrides, removalConfig, usedSources;
+  - --force;
+  - --project.
+
+Cases:
+- k103 (cli.test.ts:935), k114 (:987), k120 (:1032);
+- k87 escaping for trust and source list;
+- the edited config files compared as a tree (the bytes come from Skilletor::JSON).
+
+Done: both runners are green with both CLIs.
+
+From k174: carry the k87 escaping assertions of cli.test.ts:899 (source list, trust: a name/address with control and bidi characters, displaySafe on stdout and stderr) as cli cases here; case 70/71 show the pattern.
+
+2026-11-14 01:13 Started: plan is cases 72-81 (source list, trust, source remove: k114/k103/k120/k137 paths, k87 escaping), then Skilletor::Commands (+ Skilletor::Error::Command) dispatched lazily from Skilletor::CLI.
+
+2026-11-14 01:27 Cases 72-82 written and generated from TS (hand-reviewed against commands.ts/cli.ts); red against the Perl CLI, then Skilletor::Commands + Skilletor::Error::Command + Config::has_source_entry; Perl runner green on all 11. Also found: Skilletor::Error's '""' overload has no effect (an error object stringifies as Skilletor::Error::Config=HASH(...)); namespace::clean after 'use overload' likely strips it – the POD synopsis claims it. Not touched (outside k175).
+
+2026-11-14 01:47 Done. Perl CLI runs trust, source list (text/--json), source remove (--project, --force; k114 not-declared + where else, k137 stranded overrides, k120 removalConfig with the entry unchecked, usedSources, k103 saved lines) via new Skilletor::Commands (after commands.ts) + Skilletor::Error::Command; loaded lazily (t/68 pins that --help/--version/usage errors load neither Engine, Commands nor Config). Config: has_source_entry (sourceEntry !== undefined: a null entry is declared). Files: perl/lib/Skilletor/{Commands.pm,Error/Command.pm} (new), perl/lib/Skilletor/{CLI.pm,Config.pm}, perl/bin/skilletor (POD), perl/t/00-load.t (+2 lines; the file also carries another worker's Skilletor::Error::Block line), perl/t/68-cli.t, conformance/cases/72..82 (new, generated from TS, hand-reviewed against commands.ts/cli.ts), conformance/README.md (rows 72-82, not-covered sentence), docs/perl.md (known-gaps sentence). No existing expectation changed; src/dist untouched (check-dist up to date). Verified: npm typecheck+test 1192 tests, 1191 pass, 1 skip (live Hermes install, SKILLETOR_HERMES_INSTALL unset). Perl prove -lr -j4 t on HEAD 79264fb + only these changes (temp copy): 37 files, 2372 tests PASS; cross-runs there: TS runner vs Perl CLI 72/72, Perl runner vs node CLI 73 PASS. Live tree: t/62-engine.t fails 2 subtests and TS-runner-vs-Perl-CLI fails cases 100-103 - both from the parallel, uncommitted Codex-target work (Engine/AgentsMD/Hooks, cases 100-108), all 11 k175 cases green there. Open/drift for the dispatcher: (1) Skilletor::Error's '""' overload has no effect (stringifies as HASH(...)), skilletor board; (2) TS sourceEntry treats an array 'sources' indices and 'length' as declared names (Object.hasOwn on an array) - not mirrored, both exit 1 with different text; (3) TS prints an error's newline from a user-supplied name (trust/source remove argv) as a real line break - pinned as is in case 80.
+
+Committed as 441d8d3
+
+Process note (dispatcher): 441d8d3 also carries k184's conformance/README.md hunks (rows 100-108, the Runners line, the CODEX_HOME bullet, the Codex part of the Not-covered-yet paragraph): the dispatcher fingerprinted the shared README after the review run, not at copy time, and k184 had edited it meanwhile. Docs only, no runner reads it; consistent again once k184 is committed. Reviews now freeze a patch at copy time and the release-manager applies that patch.
