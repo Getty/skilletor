@@ -1,0 +1,28 @@
+---
+class: standard
+completed: 2026-11-14T01:24:28Z
+created: 2026-11-14T00:16:30Z
+id: 204
+priority: low
+started: 2026-11-14T00:51:51Z
+status: done
+tags:
+- perl
+- binary
+- scripts
+title: 'perl/scripts: loaded-modules.pl skips its git path on git < 2.32; stale OpenSSL
+  comment'
+updated: 2026-11-14T01:24:28Z
+---
+
+From k189. (1) perl/scripts/loaded-modules.pl points git at its fixture gitconfig through GIT_CONFIG_GLOBAL, which git < 2.32 ignores (perl:5.40-bullseye has git 2.30.2), so on the build image its git source never resolves and the modules only that path loads are not seen. Today harmless (the 6 modules the bullseye build packs fewer than the host are host-optional), but the build image is where it counts. Fix as k189 did in verify-binary.sh: also write the gitconfig as $HOME/.gitconfig of the fixture home. (2) check-binary-libs.sh says "OpenSSL 3" in a comment; the bullseye build links OpenSSL 1.1.
+
+2026-11-14 00:58 Reproduced (worker): with a guard added to loaded-modules.pl (die unless the git source's skills/remote-skill got installed), the unfixed script in k189-build2:deps (perl:5.40-bullseye deps, git 2.30.2) dies 'the git source did not resolve'. Found on the way: the END block's system('rm') clobbered $?, so any die after the temp dir exited 0 (rc=0 with empty stdout) - fixed with local $? (rc now non-zero). Fix: the fixture gitconfig is also written as $HOME/.gitconfig of the fixture home. With it, bullseye: rc=0, 171 modules; host (git 2.47.3): 177. The 6-module gap is unchanged by the fix (Class::XSAccessor, ::Heavy, Moo::HandleMoose::_TypeMap, URI::_idna, URI::_punycode, XString: host-optional), so the git path loads no module of its own today. check-binary-libs.sh comment: OpenSSL 1.1 in the bullseye image (ldd: libssl.so.1.1), 3 on Debian 12+ (host: libssl.so.3).
+
+2026-11-14 01:05 Done (worker), commit-ready, not committed.
+FILES: perl/scripts/loaded-modules.pl, perl/scripts/check-binary-libs.sh (nothing else).
+CHANGES: loaded-modules.pl writes the fixture gitconfig as $HOME/.gitconfig of the fixture home too (git < 2.32 ignores GIT_CONFIG_GLOBAL); dies unless the git source's sync installed skills/remote-skill (my choice: the regression guard, so a source that never resolves fails the list instead of shortening it silently); END keeps the exit code (local $?: its system('rm') turned every die after the temp dir into exit 0). check-binary-libs.sh: the libssl/libcrypto comment names OpenSSL 1.1 in perl:5.40-bullseye, 3 on Debian 12+.
+CHECKS: in k189-build2:deps (perl 5.40.5, git 2.30.2): unfixed script + guard -> 'loaded-modules: the git source did not resolve', rc=2; fixed -> rc=0, 171 modules; then build-binary.sh 'Built (8.3M, 171 modules, 846 left out)', verify-binary.sh 'verify: OK', check-binary-libs.sh 'glibc floor 2.29 within 2.31', smoke-binary.sh 'smoke: OK'. Host (git 2.47.3): loaded-modules rc=0, 177 modules; SKILLETOR_BIN_OUT=/tmp/k204-host/skilletor build 9.1M/177 modules/1848 left out; verify-binary.sh 'verify: OK'; smoke-binary.sh 'smoke: OK'. shellcheck (koalaman/shellcheck:stable) check-binary-libs.sh rc 0; perl -c loaded-modules.pl OK; prove -lr -j4 t: Files=37, Tests=2346, PASS.
+NOTE: the git path loads no module of its own today: the bullseye list is 171 before and after (the 6 missing vs host are host-optional). Not fixed, same class: the fixture repos' git init/commit in loaded-modules.pl and verify-binary.sh run with the caller's HOME, so on git < 2.32 they read the builder's ~/.gitconfig (harmless in CI).
+
+Committed as 79264fb
