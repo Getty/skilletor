@@ -1,0 +1,52 @@
+---
+class: standard
+completed: 2026-11-14T03:05:25Z
+created: 2026-11-13T20:43:05Z
+depends_on:
+- 173
+id: 176
+priority: medium
+started: 2026-11-14T02:01:55Z
+status: done
+tags:
+- perl
+- cli
+- commands
+title: 'Perl CLI: add, with the source probe'
+updated: 2026-11-14T03:05:25Z
+---
+
+Part of the Perl CLI strand (see the strand card).
+
+Port cmdAdd (commands.ts:78-143):
+- loadRefusal, sameAddress;
+- the k119/k126 ref and path checks;
+- trustDef, then the sync;
+- the output `added source N (def)` or `source N already added (def), kept as is`;
+- syncFailed with the `saved` line.
+
+Port the probe (probe.ts): `git ls-remote -- url` (5 s), then a HEAD request on url.tar.gz. Perl's resolve_spec takes an injected probe today.
+
+Cases: k101 (cli.test.ts:896), k110 (:1096), k116 (:1128), with git sources reached through insteadOf.
+
+The HTTPS HEAD probe cannot go into conformance (no TLS server there), so each engine tests it with its own tests.
+
+Done: both runners are green with both CLIs.
+
+2026-11-14 02:07 Started (worker). Plan: new perl/lib/Skilletor/Probe.pm (make_probe: git ls-remote -- url via Skilletor::Process run_command, git_env, 5 s; then HTTP::Tiny HEAD on url.tar.gz with fetch's headers, in-process so the PAR binary needs no perl/node); Skilletor::Commands::add after cmdAdd (loadRefusal via Config->source_fields, sameAddress via Bundles::same_identity / Backend->resolve, k119 ref and k126 path checks, entryDef, trust, sync), the probe injected as an argument so Engine.pm (k184's) stays untouched; CLI _add with the added/kept line and _sync_failed saved. Cases 83-*.
+
+2026-11-14 02:14 Probe.pm, Commands::add, CLI _add written; t/31-probe.t (probe vs local HTTP server and file:// repos, add with injected probe) and t/68-cli.t argument-layer rows for add green. Next: conformance cases 83-*.
+
+2026-11-14 02:22 Cases 83-92 written (83 basic, 84 --project, 85 k101 taken, 86 k116 refused entry, 87 refusals before read incl. k110/k119/k126, 88 forge tree links, 89 k103 no harness, 90 generic-host probe through insteadOf + 127.0.0.1:1 neither, 91 k87 escaped, 92 CLAUDE_CONFIG_DIR); TS-generated, hand-reviewed against cmdAdd; Perl runner green on each. Also applied the dispatcher's two additions (68-cli.t header, bin/skilletor POD). Running full suites next.
+
+2026-11-14 02:38 Full suites green on the main tree: npm typecheck+test 1211 (1210 pass, 0 fail, 1 skip: the Hermes install test, SKILLETOR_HERMES_INSTALL unset); Perl prove -lr -j4 t Files=41 Tests=2453 PASS (54-parity-cli ok, no skips); check-dist up to date; cross-runs: TS runner with the Perl CLI 91/91 pass, Perl runner with the TS dist 92 ok. HEAD moved to 03cb5d3 (k184, k210 committed); bin/skilletor POD now reads 'and the hooks)' as the dispatcher asked. Re-running the whole gate in an isolated worktree of 03cb5d3 with only k176's files.
+
+Done, for review. Commit only these files (the main tree also holds another agent's uncommitted Hermes work: Skilletor.pm, Engine.pm, Hooks.pm, State.pm, t/60, t/62, t/69, t/74; and nytprof.out; none of it is k176's).
+New: perl/lib/Skilletor/Probe.pm; perl/t/31-probe.t; conformance/cases/83-cli-add, 84-cli-add-project, 85-cli-add-taken, 86-cli-add-refused-entry, 87-cli-add-refused-spec, 88-cli-add-forge-link, 89-cli-add-no-harness, 90-cli-add-probe, 91-cli-add-escaped, 92-cli-add-claude-config-dir.
+Modified: perl/lib/Skilletor/Commands.pm (add + helpers, POD); perl/lib/Skilletor/CLI.pm (_add, dispatch, POD); perl/bin/skilletor (POD: add in SYNOPSIS, hook line [--harness codex|hermes], 'and the hooks)'); perl/t/68-cli.t (header reworded per dispatcher; add rows in the argument-layer subtest); shared-file hunks: perl/t/00-load.t one line '+  Skilletor::Probe' only; conformance/README.md the 10 table rows 83-92 only.
+Gate, main tree and again in an isolated worktree of 03cb5d3 with only these files: npm typecheck 0; npm test 1211 tests, 1210 pass, 0 fail, 1 skipped (Hermes install test, SKILLETOR_HERMES_INSTALL unset); check-dist up to date; Perl prove -lr -j4 t Files=41 Tests=2453 PASS, no skips (54-parity-cli ok); TS runner + Perl CLI 91/91 pass; Perl runner + TS dist 92 ok. No existing expectation changed; 83-92 TS-generated and hand-reviewed.
+README text for the dispatcher. Network sentence, append: '; the one probe of a generic host that finds nothing (`90`) asks 127.0.0.1 port 1, where nothing listens.' Not covered yet, start: 'Not covered yet: the CLI's `available`, `install` and `uninstall` (the Perl CLI runs none of them yet); of `add`, a generic host whose tarball answers the probe's HEAD (it needs a TLS server: the Perl port's `t/31-probe.t` pins the HEAD against a local HTTP server, the reference has no test of it yet); the bytes `trust` and `add` write to `trust.json` (state, outside the compared trees; each engine's own tests pin them); of the hooks, ...' (rest unchanged).
+docs/perl.md Known gaps, replace the CLI sentence: 'The Perl CLI (`bin/skilletor`) runs `sync`, `check`, `status` (k173), `trust`, `source list`, `source remove` (k175), `add` with the probe of a generic host (k176: `git ls-remote`, then an in-process HEAD on the tarball through HTTP::Tiny, so a packed binary needs neither Node nor Perl for it) and the hooks; the other commands are being ported one by one under k166, and each one not ported yet says so and exits 1.'
+Open / drift (not done): (1) skilletor board: the reference's makeProbe HEAD path has no test (test/gitenv.test.ts covers ls-remote only). (2) Error/Command.pm POD (outside my lane list) should name add's refusals: 'a source name or spec add refuses, a taken name with another address, ref or path, a kept entry config load refuses'. (3) k205/k210 lane: smoke-binary.sh could smoke add (local path) in the packed binary. (4) 54-parity-cli.t could gain an add step to pin trust.json bytes across engines. (5) Divergence for k143: HTTP::Tiny turns a 303 HEAD into a GET, does not resolve a relative Location, and its timeout is per connect/read, not total (same as Url.pm). (6) For k185: the 68-cli.t header says only Hermes targets make notes and the Perl engine refuses them; stale once Hermes lands.
+
+Committed as 8b411fb
