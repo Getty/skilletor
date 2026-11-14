@@ -1,0 +1,105 @@
+---
+class: standard
+completed: 2026-11-14T00:22:50Z
+created: 2026-11-13T20:44:13Z
+depends_on:
+- 167
+- 188
+id: 189
+priority: medium
+started: 2026-11-13T23:30:11Z
+status: done
+tags:
+- binary
+- ci
+title: Release workflow for the binaries (prepared, not active)
+updated: 2026-11-14T00:22:50Z
+---
+
+Part of the Perl CLI strand (see the strand card). Step 4: prepared, not active.
+
+Write a workflow that builds the binaries from a tag and attaches them, with one checksum file, to the GitHub release.
+- Platforms: per the build-vehicle decision; assumed linux-x86_64, linux-arm64, macos-arm64, windows-x86_64.
+- Shape per skill perl-par-binary-release:
+  - build, smoke, release;
+  - least privilege, tag only through env;
+  - Linux build in perl:5.40-bullseye;
+  - macOS via shogo82148/actions-setup-perl;
+  - smoke on clean images without Perl.
+- A Windows leg, which the skill lacks: Strawberry Perl 5.40, pp, and a smoke run on windows-latest.
+
+Not active until the maintainer says so:
+- no `release: published` trigger, only workflow_dispatch;
+- a run without a tag is a probe that keeps only Actions artifacts;
+- the card says how to switch the trigger on.
+
+Untested here: every leg. GitHub Actions does not run locally; actionlint and a local docker run of the Linux leg are what can be checked.
+
+Depends on the build-vehicle decision and the Linux binary card.
+
+Build-vehicle decision: k167.
+
+2026-11-13 23:51 Progress (worker): written .github/workflows/release-binaries.yml (workflow_dispatch only; build linux-x86_64/linux-arm64 in perl:5.40-bullseye, macos-arm64 on macos-14, windows-x86_64 with Strawberry 5.40; smoke on clean cells; tag-only release job with contents: write), perl/scripts/smoke-binary.sh (new), perl/t/70-smoke-binary.t (keeper test: runs the smoke script with the Perl CLI as stand-in binary), perl/t/data/smoke/ (fixture + expected.txt). actionlint 1.7.12 clean (shellcheck integration proven live by a negative copy); shellcheck clean on smoke-binary.sh; keeper test green, fails on a drifted expectation; the same smoke run against node dist/skilletor.js is byte-identical (the expectation is the reference's behaviour). Running now: the Linux build leg's run steps, extracted from the YAML, in perl:5.40-bullseye. k188 scripts untouched so far.
+
+2026-11-14 00:14 Drift and assumptions (worker), for the dispatcher to file or decide:
+- DEFECT FIX in a k188 script, forced: perl/scripts/verify-binary.sh failed in perl:5.40-bullseye ("FAIL: sync installed no skills/remote-skill from the git source"). git 2.30.2 there predates GIT_CONFIG_GLOBAL (2.32), so the fixture's insteadOf was never read. Fix, 3 lines: the same gitconfig is also copied to the pristine home's .gitconfig. Rerun green.
+- Same latent gap, NOT fixed (k188 lane, skilletor board): perl/scripts/loaded-modules.pl relies on GIT_CONFIG_GLOBAL, so on git < 2.32 its git path never runs. The bullseye build still packs 171 modules; the 6 not packed against the host's 177 are host-optional only (Class::XSAccessor, ::Heavy, Moo::HandleMoose::_TypeMap, URI::_idna, URI::_punycode, XString). Candidate ticket for the skilletor board.
+- perl.yml (not my lane): `cpanm --installdeps .` most likely cannot install Text::Nunjucks, which is not on CPAN. My workflow checks it out instead. Candidate ticket for the skilletor board.
+- check-binary-libs.sh says "OpenSSL 3" in a comment, but the bullseye build links libssl.so.1.1 / libcrypto.so.1.1. Comment-only drift.
+- README.md has no binaries section yet. A tag run's "README names every runtime lib" step fails until README.md names `libcrypt`, `libssl`, `libcrypto`, `libz` and `libzstd` in backticks (the skill's gate). This is docs, the main agent's lane. A probe skips the step.
+- Text::Nunjucks: pinned at 1a9a608ad90270a7ae0d15a92466fc186fda00fd (TEXT_NUNJUCKS_REF, repo Getty/p5-text-nunjucks). Assumed public; not checked against GitHub, as briefed. The commit is on origin/main only per the local tracking ref. If the repo is private, its checkout step needs a token secret. The pin lives in the workflow, so rebuilding an old tag takes today's pin.
+- For k190/k169 (starter): the Windows asset is skilletor-<V>-windows-x86_64.exe. The pinned file holds the 4 bare-binary lines, the .exe line included; the starter's grep for skilletor-<v>-<os>-<arch> ignores the .exe line and the tarballs (checked locally).
+- My choice, not a requirement: the tarball's LICENSE is perl/LICENSE (Perl_5), not the root MIT license.
+- Action versions: actions/checkout@v6 and upload/download-artifact@v4, as in the skill.
+- k167 trade-off, not decided: bullseye gives a glibc floor of 2.29 (documented ceiling 2.31), but links OpenSSL 1.1. Debian 12+ and Ubuntu 22.04+ do not ship it, and RHEL 9 has it only via compat-openssl11, so https url sources fail there. No smoke proves TLS (the url case says "fetch failed" either way). Options: bundle libssl/libcrypto (pp -l), a newer build image (higher glibc floor), or a static OpenSSL for Net::SSLeay. Unknown: macOS Net::SSLeay's linkage (toolcache or Homebrew OpenSSL could fail check-binary-libs or fail on users' machines), and whether the Windows binary carries Strawberry's OpenSSL DLLs (no pp -l), so https on Windows is untested.
+- Hooks are not in the smoke: k181's hooks are uncommitted in this tree. Add hook cases to smoke-binary.sh and expected.txt once k181 lands.
+
+2026-11-14 00:14 Ready for review (worker). Commit-ready, not committed.
+
+FILES (mine; nothing else in the tree touched):
+- .github/workflows/release-binaries.yml (new)
+- perl/scripts/smoke-binary.sh (new, 0755)
+- perl/t/70-smoke-binary.t (new; keeper of the smoke expectation)
+- perl/t/data/smoke/ (new: user-config.json, expected.txt, src/skilletor.json, src/skills/hello/SKILL.md, src/skills/hello/docs/ref.md, src/skills/tpl/SKILL.md.njk, src/agents/rev.md, src/rules/style.md)
+- perl/scripts/verify-binary.sh (k188 script, +3 lines, forced by a defect: see the drift note)
+Other cards' work in the tree, not mine: conformance/, docs/perl.md, perl/lib/Skilletor/Hooks.pm, perl/t/69-hooks.t, perl/t/71-hooks-move.t, nytprof.out.
+
+SWITCH ON (the maintainer's call): under `on:`, beside workflow_dispatch, add
+    release:
+      types: [published]
+Nothing else changes: every TAG reads github.event.release.tag_name first. It fires for a release made with the maintainer's own token (docs/release.md step 5); a release created with GITHUB_TOKEN starts no workflow. Before switching it on: one green probe (`gh workflow run release-binaries.yml`), then one tag dispatch onto an existing release (`-f tag=vX.Y.Z`).
+
+CHECKED LOCALLY:
+- actionlint 1.7.12 (rhysd/actionlint docker image): rc 0 on all workflows. Its shellcheck integration is live: a negative copy reported SC2086.
+- shellcheck (koalaman/shellcheck:stable): rc 0 on smoke-binary.sh and verify-binary.sh.
+- Linux x86_64 build leg: the run steps were extracted from the YAML and run in a clean perl:5.40-bullseye container (perl v5.40.5, glibc 2.31, git 2.30.2), probe mode, 233 s. Output:
+  - "Built skilletor-probe-bdd3466-linux-x86_64 (8.3M, 171 modules, 846 left out)", then "verify: OK";
+  - check-binary-libs: "glibc floor: 2.29 (documented ceiling: 2.31)", needs libcrypt/libssl/libcrypto/libc..., summary shows libssl.so.1.1 and libcrypto.so.1.1;
+  - the README step was skipped (probe); the tarball holds README, LICENSE and skilletor (0755).
+  - The first run failed in verify (the git < 2.32 defect); after the fix it is green.
+- Version step: v0.7.0 passes (exit 0) and prints the asset names. v0.7.1 and 0.7.0 fail with exit 1 and ::error. An empty tag gives probe-bdd3466.
+- Windows build logic, emulated on Linux. The pp @options-file build gives 8.3M and 171 modules; the file has 846 -X lines and 25,165 chars, and its member list equals build-binary.sh's (317 members). The packed-module check passes; its negative fails as it should (exit 1).
+- Smoke, through the YAML step's commands, against the bullseye binary:
+  - ubuntu:22.04, debian:bullseye-slim, almalinux:9 with the dnf line, and an image with no perl, no node and no git: all reach "smoke: OK";
+  - negatives: almalinux:9 without libxcrypt-compat exits 127 (libcrypt.so.1), and a tarball holding a different binary FAILs.
+- Release job, emulated with stub assets and a stub gh: the upload args are right, and the pinned file holds the 4 bare lines. A negative with a missing asset exits 1.
+- Starter end-to-end: an unmodified copy of bin/skilletor-start took the release job's pinned line for the real binary, served from 127.0.0.1 via SKILLETOR_BINARY_BASE_URL. It downloaded, verified, cached and printed 0.7.0.
+- Keeper test t/70-smoke-binary.t: 8 tests pass and fail with a diff on a drifted expectation. expected.txt is byte-identical for the Perl CLI and for node dist/skilletor.js.
+- Perl suite `prove -lr -j4 t`: Files=35, Tests=2305, Result: PASS.
+- `npm run typecheck && npm test && npm run build && npm run check-dist`: exit 0. tests 1174, pass 1173, fail 0, skipped 1 (the Hermes install test, which needs SKILLETOR_HERMES_INSTALL=1). "check-dist: dist/skilletor.js is up to date"; no src/ or dist/ change.
+
+UNTESTED (written only):
+- linux-arm64: the build on ubuntu-24.04-arm in perl:5.40-bullseye, and its almalinux:9 arm64 smoke.
+- macos-arm64:
+  - the build on macos-14 (shogo82148/actions-setup-perl 5.40, compiling Net::SSLeay, the otool lib check);
+  - the macos-14 and macos-15 smokes, including the no-toolcache-perl assert.
+- windows-x86_64, the whole leg: autocrlf, Strawberry via setup-perl, perl -S cpanm/pp under Git Bash, Archive::Zip on the .exe, the cygpath env in the smoke, the no-strawberry assert. The smoke covers --version, --help and the error path only (k186).
+- The real GitHub runtime: actions/checkout with refs/tags/<tag>, the Text::Nunjucks checkout (public assumption), artifact upload/download between jobs, the real `gh release upload --clobber`, the pinned-binary-checksums artifact, the job-summary rendering, the README gate on a tag run, concurrency, and the release: published activation.
+
+PROPOSED COMMIT: "ci: release-binaries workflow for the pp binaries, prepared, not active (k189)"
+PROPOSED Changes entry (root Changes):
+  - A release-binaries workflow, prepared and not active (workflow_dispatch only): it packs the Perl port with PAR::Packer for linux-x86_64, linux-arm64, macos-arm64 and windows-x86_64, smokes each binary on clean machines without Perl, and on a tag run attaches the binaries, tarballs and one checksums file to the GitHub release vX.Y.Z, with the checksums for bin/skilletor-binaries.sha256 as an artifact. A run without a tag is a probe that touches no release.
+
+Review (dispatcher), green: isolated worktree HEAD 6302832 + the k189 files. actionlint (rhysd/actionlint:latest) 0; shellcheck smoke-binary.sh verify-binary.sh 0; prove t/70-smoke-binary.t 8 PASS; build-binary.sh 9.1M/177 modules; verify-binary.sh (with the git<2.32 fix) OK; smoke-binary.sh on the host binary OK (version, help, error path, sync/check/status byte-identical); Perl prove -lr -j4 t 34 files 2281 tests PASS; typecheck clean; npm test 1169/1168 pass/1 skip/0 fail. Triggers: workflow_dispatch only; permissions read, write only on the tag-only release job; tag via env. Untested: every leg on GitHub (list above). Follow-ups filed: k204 (loaded-modules.pl git<2.32, stale comment), k205 (hooks in the smoke); notes on k159, k167, k169, k191.
+
+Committed as 79e08d3
