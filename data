@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-14T00:43:03Z
+id: 209
+priority: medium
+status: backlog
+tags:
+- perl
+- windows
+- binary
+title: 'Windows binary: non-ASCII paths through Perl''s ANSI file APIs'
+updated: 2026-11-14T00:43:03Z
+---
+
+From k186. Perl on Windows calls the ANSI file APIs, so a non-ASCII path (a user name with an umlaut in %USERPROFILE%, a source dir, an item name) is mangled through the active code page. Options to weigh: a UTF-8 activeCodePage manifest embedded in the PAR binary (Windows 10 1903+), Win32::LongPath/Win32 wide calls at the FSUtil boundary, or documenting the limit. Needs a real Windows run (release-binaries Windows leg, k189) to prove either way.
