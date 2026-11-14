@@ -1,6 +1,15 @@
 Revision history for Skilletor
 
 {{$NEXT}}
+  - `skilletor add [name] <spec> [--project]` in the Perl CLI
+    (Skilletor::Commands::add, after cmdAdd): the same checks in the same
+    order - the k95 name, no project scope, the spec, the k110 definition, the
+    k101 taken name, the k119 ref, the k126 path, the k116 kept entry. It then
+    trusts the source and syncs, prints the added or kept line, and prints the
+    k103 saved lines when the sync fails (k176).
+  - New Skilletor::Probe: `git ls-remote -- url` (5 s), then an in-process
+    HEAD on url.tar.gz through HTTP::Tiny with fetch's headers, so a packed
+    binary needs neither Node nor Perl for it. Tested in t/31-probe.t (k176).
   - The Codex target in the Perl engine: sync, check and status install
     skills in .agents/skills, agents as TOML and rules as sections of one
     skilletor-rules.md with the pointer block in the Codex AGENTS.md - its

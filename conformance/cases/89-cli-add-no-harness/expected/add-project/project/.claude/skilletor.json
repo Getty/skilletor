@@ -1,0 +1,7 @@
+{
+  "sources": {
+    "team": {
+      "local": "${HOME}/dev/tools"
+    }
+  }
+}

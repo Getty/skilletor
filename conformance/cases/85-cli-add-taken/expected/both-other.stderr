@@ -1,0 +1,1 @@
+skilletor: source "both" in ${HOME}/.claude/skilletor.json is git https://conformance.invalid/shared.git, local ~/dev/gone, not local ${HOME}/dev/other; nothing was changed. Add it under another name (skilletor add <name> ${HOME}/dev/other) or remove the source first (skilletor source remove both).

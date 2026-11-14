@@ -221,6 +221,24 @@ sub _source_list {
   return 0;
 }
 
+# The added or kept line, then the sync's text. A kept entry wrote nothing to the config: a sync
+# that stopped at a config error says so as sync does.
+sub _add {
+  my ( $flags ) = @_;
+  my @rest = @{ $flags->{rest} };
+  my ( $name, $spec ) = @rest >= 2 ? @rest[ 0, 1 ] : ( undef, $rest[0] );
+  my $engine = _engine($flags);
+  require Skilletor::Commands;
+  my $r = Skilletor::Commands::add( $engine, name => $name, spec => $spec, project => $flags->{project} );
+  my $def = js_stringify( $r->{def} );
+  _print_lines( \*STDOUT, $r->{kept} ? "source $r->{name} already added ($def), kept as is" : "added source $r->{name} ($def)" );
+  if ( _truthy( $r->{report}{error} ) ) {
+    return _sync_failed( $r->{report}, saved => $r->{kept} ? undef : Skilletor::Commands::config_path( $engine, $flags->{project} ) );
+  }
+  _print_text( \*STDOUT, _sync_text( $r->{report} ) );
+  return 0;
+}
+
 # The sync's report after the edit, or `removed source <name>` when it has nothing to say.
 sub _source_remove {
   my ( $flags, $name ) = @_;
@@ -387,7 +405,7 @@ sub _dispatch {
   return _not_ported($cmd) if $cmd eq 'available';
   if ( $cmd eq 'add' ) {
     return _usage_error('skilletor: add needs a source spec') unless @rest;
-    return _not_ported('add');
+    return _add($flags);
   }
   if ( $cmd eq 'source' ) {
     my $sub = $rest[0] // '';
@@ -444,10 +462,19 @@ stdout as well, exit 2.
 
 =back
 
-It runs C<trust>, C<source list> and C<source remove> through
+It runs C<add>, C<trust>, C<source list> and C<source remove> through
 L<Skilletor::Commands>:
 
 =over 4
+
+=item * C<add [E<lt>nameE<gt>] E<lt>specE<gt> [--project]> resolves the spec
+(a generic host probed, L<Skilletor::Probe>), adds the source to the user
+config, or the project config, trusts it and syncs: C<added source
+E<lt>nameE<gt> (E<lt>fields as JSONE<gt>)>, or C<source E<lt>nameE<gt> already
+added (E<lt>fields as JSONE<gt>), kept as is> when that config has the name at
+the same address, then the sync's text. A sync that stops at a config error
+exits 2: after an edit with the two lines naming the saved config file (k103),
+after a kept entry with the sync's own report.
 
 =item * C<trust E<lt>sourceE<gt>> trusts the source for the backend it would
 use now and prints C<trusted source E<lt>nameE<gt> (E<lt>kindE<gt>
@@ -484,8 +511,8 @@ happens – a failure is that line's C<systemMessage>, its own setup's too. It i
 dispatched before any option check, so no option makes it fail. Its background
 sync re-runs this CLI (L</self_command>).
 
-C<add>, C<available>, C<install> and C<uninstall> are not ported yet: each
-says so on stderr and exits 1.
+C<available>, C<install> and C<uninstall> are not ported yet: each says so on
+stderr and exits 1.
 Beside them the CLI has the argument layer: C<--help>, C<--version>, the
 options each command accepts, an unknown option or command, an invalid
 C<--scope> and a missing operand.

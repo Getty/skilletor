@@ -1,0 +1,1 @@
+skilletor: cannot add https://conformance.invalid/tools: ${HOME}/.claude/skilletor.json: sources.tools.ref "" must not be empty (omit "ref" for the remote's HEAD); nothing was changed. Source "tools" there already has this address: fix its entry by hand, or remove it (skilletor source remove tools).

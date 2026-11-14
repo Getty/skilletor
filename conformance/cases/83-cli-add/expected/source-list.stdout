@@ -1,0 +1,4 @@
+shared [user] {"git":"https://conformance.invalid/shared.git"}
+tools [user] {"local":"${HOME}/dev/tools"}
+mine [user] {"local":"~/dev/tools"}
+conformance-invalid [user] {"git":"https://conformance.invalid/team"}

@@ -1,0 +1,1 @@
+skilletor: cannot add ${HOME}/dev/tools: ${HOME}/.claude/skilletor.json: sources.odd: unknown key "bogus"; nothing was changed. Source "odd" there already has this address: fix its entry by hand, or remove it (skilletor source remove odd).

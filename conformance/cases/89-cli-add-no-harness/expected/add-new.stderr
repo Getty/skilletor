@@ -1,0 +1,2 @@
+skilletor: config error, nothing synced — no agent harness detected (looked for claude: ${HOME}/.claude.json, ${HOME}/.claude/settings.json, ${HOME}/.claude/projects; codex: ${HOME}/.codex/config.toml, ${HOME}/.codex/auth.json, ${HOME}/.codex/sessions, ${HOME}/.codex/installation_id); set "targets": ["claude"], "codex" and/or "hermes" in ~/.claude/skilletor.json
+skilletor: the config edit itself was saved in ${HOME}/.claude/skilletor.json (not rolled back); fix the error, then run skilletor sync

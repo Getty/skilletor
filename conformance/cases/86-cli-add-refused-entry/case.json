@@ -1,0 +1,10 @@
+{
+  "description": "add of an address whose entry the target config already holds but config load refuses (k116) – a hand-written `ref: \"\"` in the user config, `ref: \"-x\"` in the project's, an unknown key – exits 1 quoting load's error for that file and the ways out, before anything is trusted or synced; an entry written as null or as an array has no address, so the name counts as taken by another: `is null`, `is [\"…\"]`. Nothing written, no lock.",
+  "steps": [
+    { "id": "empty-ref", "op": "cli", "argv": ["add", "https://conformance.invalid/tools"] },
+    { "id": "dash-ref-project", "op": "cli", "argv": ["add", "tools", "https://conformance.invalid/tools", "--project"] },
+    { "id": "unknown-key", "op": "cli", "argv": ["add", "odd", "${HOME}/dev/tools"] },
+    { "id": "null-entry", "op": "cli", "argv": ["add", "nul", "${HOME}/dev/tools"] },
+    { "id": "array-entry", "op": "cli", "argv": ["add", "list", "${HOME}/dev/tools"], "tree": true }
+  ]
+}

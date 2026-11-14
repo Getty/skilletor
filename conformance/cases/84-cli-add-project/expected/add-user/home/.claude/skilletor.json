@@ -1,0 +1,7 @@
+{
+  "sources": {
+    "mine": {
+      "local": "${HOME}/dev/mine"
+    }
+  }
+}

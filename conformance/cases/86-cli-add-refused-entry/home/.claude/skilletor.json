@@ -1,0 +1,8 @@
+{
+  "sources": {
+    "tools": { "git": "https://conformance.invalid/tools", "ref": "" },
+    "odd": { "local": "${HOME}/dev/tools", "bogus": 1 },
+    "nul": null,
+    "list": ["${HOME}/dev/tools"]
+  }
+}

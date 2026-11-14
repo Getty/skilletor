@@ -1,0 +1,1 @@
+skilletor: source "team" in ${PROJECT}/.claude/skilletor.json is git https://conformance.invalid/team.git, not local ${HOME}/dev/tools; nothing was changed. Add it under another name (skilletor add <name> ${HOME}/dev/tools --project) or remove the source first (skilletor source remove team --project).

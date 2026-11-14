@@ -1,0 +1,15 @@
+{
+  "description": "add --project: the source is written into the project's skilletor.json after the keys it had, trusted – status then asks for no trust – and the sync after it fetches and installs the skill the project asked for, with the project's blocks; the same add again keeps the entry; without --project the user config gets it. Before anything is read: an invalid name is refused first, then --project with the home as project dir (no project scope), before the spec is resolved.",
+  "git": {
+    "team": { "url": "https://conformance.invalid/team.git", "commits": [{ "tree": "sources/team" }] }
+  },
+  "steps": [
+    { "id": "add-project", "op": "cli", "argv": ["add", "team", "https://conformance.invalid/team.git", "--project"], "tree": true },
+    { "id": "status", "op": "cli", "argv": ["status", "--scope", "project"] },
+    { "id": "add-project-again", "op": "cli", "argv": ["add", "team", "https://conformance.invalid/team.git", "--project"] },
+    { "id": "home-project", "op": "cli", "argv": ["add", "x", "${HOME}/dev/x", "--project", "--project-dir", "${HOME}"] },
+    { "id": "home-project-bad-spec", "op": "cli", "argv": ["add", "", "--project", "--project-dir", "${HOME}"] },
+    { "id": "home-project-bad-name", "op": "cli", "argv": ["add", "bad name", "", "--project", "--project-dir", "${HOME}"] },
+    { "id": "add-user", "op": "cli", "argv": ["add", "mine", "${HOME}/dev/mine"], "tree": true }
+  ]
+}

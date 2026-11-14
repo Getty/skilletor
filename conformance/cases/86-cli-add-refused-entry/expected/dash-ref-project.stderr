@@ -1,0 +1,1 @@
+skilletor: cannot add https://conformance.invalid/tools: ${PROJECT}/.claude/skilletor.json: sources.tools.ref "-x" must not start with "-" (git would read it as an option); nothing was changed. Source "tools" there already has this address: fix its entry by hand, or remove it (skilletor source remove tools --project).

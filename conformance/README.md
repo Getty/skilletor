@@ -159,7 +159,8 @@ The engine ops run with:
   `${HOME}` (no case's output depends on them yet).
 
 Nothing reaches the network: every source is a `local` directory, a git repository reached
-through `insteadOf`, or a source the case never fetches (an untrusted `url`).
+through `insteadOf`, or a source the case never fetches (an untrusted `url`); the one probe of
+a generic host that finds nothing (`90`) asks 127.0.0.1 port 1, where nothing listens.
 
 ### Git sources
 
@@ -513,6 +514,16 @@ show it, its `description` saying which.
 | `80-cli-escaped-source` | k87: a project source whose local address holds an escape sequence, a BEL, a bidi override and a newline – escaped in `source list` (text, `--json`) and `trust`; status then asks for no trust; `trust` and `source remove` of such a name exit 1 with it escaped, its newline a line break |
 | `81-cli-escaped-remove` | k87: a source name with those characters is a config error (`source list` exits 1, escaped); `source remove` of it removes the one refused entry (k120), `removed source …` on one escaped line; an empty `source list` is an empty line, `--json` `[]` |
 | `82-cli-source-remove-null` | a source entry written as `null` is declared (the reference's `sourceEntry` tells null from absent): `source list` exits 1 with load's error, `source remove` removes it, exit 0 |
+| `83-cli-add` | `add` into the user config: an explicit git address (`added source …`, trusted, the sync installs what the config asked for), the same again kept as is, a local path by derived and by given name (a third operand ignored), a generic host the probe finds through `git ls-remote` (insteadOf); `source list` after |
+| `84-cli-add-project` | `add --project`: written after the project config's keys, trusted (status asks for nothing), the sync installs with the project's blocks; again kept; without `--project` the user config; an invalid name refused before the missing project scope, that before the spec |
+| `85-cli-add-taken` | k101: a taken name with the same backend and address – a local path spelled otherwise, a git URL of the same identity, either field of a git + local entry – is kept as written, trusted and synced (a project-only source then installs); another address or backend exits 1 naming the entry's backends and the ways out (`--project` too); only the target file counts |
+| `86-cli-add-refused-entry` | k116: a kept entry config load refuses (`ref: ""`, `ref: "-x"` with `--project`, an unknown key) exits 1 with load's error for that file, nothing trusted or synced; an entry written as `null` or an array counts as another address |
+| `87-cli-add-refused-spec` | refusals before any file is read: an invalid name (k95), an empty or `-` spec (k85), an `http://` or `file://` tarball (k110), a tree link whose ref or path load refuses (k119, k126), beside a project config that is no JSON; then a valid `--project` add fails on that file |
+| `88-cli-add-forge-link` | k119, k126: a GitHub tree link (insteadOf) is the repo at that ref with its skills beneath the link's directory, synced; kept again, by the bare repo link and by an entry whose path names the same directory (`./perl/`, `["perl"]`); another ref, no ref, another path, no path or two paths exit 1 naming what the entry has |
+| `89-cli-add-no-harness` | k103: `add` with no harness (`"claude": false`): a new source is written and the sync's config error exits 2 naming the saved file (user or project); a kept entry wrote nothing, so its exit 2 carries the sync's own report |
+| `90-cli-add-probe` | the probe of a generic host: `git ls-remote` through insteadOf makes it git at `https://<host>/<path>` (a trailing `/` dropped) or `/skills`, named after the host; kept again, refused under the taken name; at 127.0.0.1:1, where nothing listens, neither git nor the HEAD on the tarball answers: exit 1 naming both URLs (the HEAD's 2xx is each engine's own test: no TLS server here) |
+| `91-cli-add-escaped` | k87: an added local path with an escape sequence, a bidi override and a newline is one escaped line in the added message; a refused add naming it escapes it on stderr, its newline a line break |
+| `92-cli-add-claude-config-dir` | `add` under `CLAUDE_CONFIG_DIR` (k145): the user config written there, the decoy in `~/.claude` untouched, the saved file named when the sync stops at a project install of an undeclared source (k103); a project source trusted in the state root there |
 | `100-codex-user` | Codex alone (`"claude": false`, a `~/.codex/config.toml` without hook trust): the user sync installs the skill in `~/.agents/skills`, the agent as `~/.codex/agents/.local.helper.toml`, the rule as its section of `~/.codex/skilletor-rules.md` and the pointer block in `~/.codex/AGENTS.md`; one run warning that Codex has not trusted the SessionStart hook, in status too; check up to date, a resync changes nothing; the CLI's resync (text, `--json`), check and status |
 | `101-codex-project` | Claude Code and Codex (hook trusted) in the project scope: each its own copy of skill, agent and rule, the pointer appended to the project's own `AGENTS.md`, a `.gitignore` block in `.claude` and in `.codex`, `.worktreeinclude` naming every root; no run warning; check, status, a resync changes nothing; the CLI's status names both targets |
 | `102-codex-convert` | what the Codex mapping refuses or warns about: an agent whose `codex` is no mapping installs with a warning, one without a description and a rule holding a skilletor marker line install nothing, a rule that renders empty is skipped and gets no section; the resync says the same; the CLI's resync text |
@@ -529,9 +540,11 @@ paths and the hash covers the project dir, so they differ from one temp dir to t
 Perl port's `t/52-parity-sync.t` has both engines sync one machine and compares them byte for
 byte.
 
-Not covered yet: the CLI's `add`, `available`, `install` and `uninstall` (the Perl CLI runs
-none of them yet), and the bytes `trust` writes to `trust.json` (state, outside the compared
-trees; each engine's own tests pin them); of the hooks, what `--harness hermes` adds (Hermes'
+Not covered yet: the CLI's `available`, `install` and `uninstall` (the Perl CLI runs none of
+them yet); of `add`, a generic host whose tarball answers the probe's HEAD (it needs a TLS
+server; the Perl port's `t/31-probe.t` pins the HEAD against a local HTTP server, the reference
+has no test of it yet); the bytes `trust` and `add` write to `trust.json` (state, outside the
+compared trees; each engine's own tests pin them); of the hooks, what `--harness hermes` adds (Hermes'
 opt-in line, its prompt hook following a move), a due prompt's real
 background sync, the in-session interval, the sync lock held by another run – a move's wait on
 it and the race of one `cd`'s two hooks too – and a move's 20 s deadline (each engine's own

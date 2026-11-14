@@ -1,0 +1,12 @@
+{
+  "install": {
+    "skills": [
+      "lint@team"
+    ]
+  },
+  "sources": {
+    "team": {
+      "git": "https://conformance.invalid/team.git"
+    }
+  }
+}

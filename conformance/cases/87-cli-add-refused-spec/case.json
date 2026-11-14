@@ -1,0 +1,13 @@
+{
+  "description": "add refusals before any config file is read: a name config load would refuse (k95), a spec that does not resolve (empty; `-x` once trimmed, k85), a definition load would refuse – an http:// or file:// tarball (k110), a GitHub tree link whose ref or path load refuses (k119, k126) – each exit 1 (a name or definition refused saying nothing was changed), even beside a project config that is no JSON; a valid add with --project then fails on that file. Nothing written.",
+  "steps": [
+    { "id": "bad-name", "op": "cli", "argv": ["add", ".hidden", "${HOME}/dev/x"] },
+    { "id": "empty-spec", "op": "cli", "argv": ["add", ""] },
+    { "id": "dash-spec", "op": "cli", "argv": ["add", "x", " -x"] },
+    { "id": "url-http", "op": "cli", "argv": ["add", "http://host/x.tar.gz"] },
+    { "id": "url-file-project", "op": "cli", "argv": ["add", "web", "file:///x.tar.gz", "--project"] },
+    { "id": "link-dash-ref", "op": "cli", "argv": ["add", "https://github.com/Getty/skills/tree/-x"] },
+    { "id": "link-dotdot-path", "op": "cli", "argv": ["add", "https://github.com/Getty/skills/tree/main/a/../.."] },
+    { "id": "invalid-json-project", "op": "cli", "argv": ["add", "x", "${HOME}/dev/x", "--project"], "tree": true }
+  ]
+}

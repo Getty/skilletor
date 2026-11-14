@@ -1,0 +1,1 @@
+skilletor: source "getty" in ${HOME}/.claude/skilletor.json is git https://github.com/Getty/skills with path "perl", not path "other"; nothing was changed. Set its "path" by hand, add it under another name (skilletor add <name> https://github.com/Getty/skills/tree/main/other) or remove the source first (skilletor source remove getty).

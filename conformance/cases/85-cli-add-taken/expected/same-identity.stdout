@@ -1,0 +1,3 @@
+source shared already added ({"git":"https://conformance.invalid/shared.git"}), kept as is
+skilletor: project scope
+  trust: source "team" (git https://conformance.invalid/team.git) — run: skilletor trust team

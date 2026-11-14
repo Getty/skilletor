@@ -1,0 +1,41 @@
+{
+  "sources": {
+    "plain": {
+      "git": "https://github.com/Getty/skills"
+    },
+    "pinned": {
+      "git": "https://github.com/Getty/skills",
+      "ref": "main"
+    },
+    "seg": {
+      "git": "https://github.com/Getty/skills.git",
+      "ref": "main",
+      "path": "./perl/"
+    },
+    "one": {
+      "git": "https://github.com/Getty/skills",
+      "ref": "main",
+      "path": [
+        "perl"
+      ]
+    },
+    "two": {
+      "git": "https://github.com/Getty/skills",
+      "ref": "main",
+      "path": [
+        "perl",
+        "other"
+      ]
+    },
+    "getty": {
+      "git": "https://github.com/Getty/skills",
+      "ref": "main",
+      "path": "perl"
+    }
+  },
+  "install": {
+    "skills": [
+      "moo@getty"
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 package Skilletor::Commands;
-# ABSTRACT: The CLI's config commands – trust, source list, source remove – after the reference's commands.ts
+# ABSTRACT: The CLI's config commands – add, trust, source list, source remove – after the reference's commands.ts
 
 use strict;
 use warnings;
@@ -7,17 +7,23 @@ use warnings;
 use Exporter qw( import );
 use Scalar::Util qw( blessed );
 use Skilletor::Backend;
+use Skilletor::Bundles qw( same_identity );
 use Skilletor::Config;
+use Skilletor::Entry qw( SOURCE_NAME_RULE is_source_name );
 use Skilletor::Error::Command;
-use Skilletor::FSUtil qw( path_join );
-use Skilletor::JSON qw( js_ordered js_type );
+use Skilletor::FSUtil qw( inner_segments path_join );
+use Skilletor::JSON qw( js_ordered js_stringify js_type );
+use Skilletor::Probe qw( make_probe );
+use Skilletor::Spec qw( resolve_spec );
 use Skilletor::State;
 
 our $VERSION = '0.002';
 
-our @EXPORT_OK = qw( config_path source_list source_remove trust );
+our @EXPORT_OK = qw( add config_path source_list source_remove trust );
 
 my @ADDRESS_KEYS = qw( git url local );
+my %ADDRESS_KEY  = map { ( $_ => 1 ) } @ADDRESS_KEYS;
+my %DEF_KEY      = map { ( $_ => 1 ) } qw( git ref url local path );
 
 sub _fail { Skilletor::Error::Command->throw( $_[0] ) }
 
@@ -48,6 +54,121 @@ sub _load {
     claude_config_dir => $engine->claude_config_dir,
     project_dir       => $engine->project_dir_of,
     %more,
+  );
+}
+
+#### add #######################################################################
+
+# Add a source to one config, trust it, sync. Never replaces a source (k101): a name the config
+# already has keeps its entry untouched when it has the same backend and address – still trusted
+# and synced, `kept` set – and is refused, before anything is written or trusted, when it has
+# another one. A name load would refuse (k95) is refused first, a definition it would refuse
+# (k110) next, a kept entry it would refuse (k116) before it is trusted; a spec's ref (k119) and
+# path (k126) keep an entry only at that ref and path.
+sub add {
+  my ( $engine, %args ) = @_;
+  my ( $name, $spec ) = @args{qw( name spec )};
+  my $flag = $args{project} ? ' --project' : '';
+  if ( defined $name && !is_source_name($name) ) {
+    _fail( 'source name '.js_stringify($name).' is not valid ('.SOURCE_NAME_RULE.'); nothing was changed' );
+  }
+  my $path     = config_path( $engine, $args{project} );
+  my $resolved = resolve_spec( $spec, $args{probe} // make_probe() );
+  $name //= $resolved->{derivedName};
+  my $def = js_ordered( $resolved->{kind} => $resolved->{value} );
+  $def->{$_} = $resolved->{$_} for grep { exists $resolved->{$_} } qw( ref path );
+  my $invalid = _load_refusal( $name, $def );
+  _fail( 'cannot add '.$spec.': '.$invalid.'; nothing was changed' ) if defined $invalid;
+
+  my $kept = Skilletor::Config->has_source_entry( $path, $name );
+  if ($kept) {
+    my $existing = Skilletor::Config->source_entry( $path, $name );
+    my $ways = 'add it under another name (skilletor add <name> '.$spec.$flag.') '
+      .'or remove the source first (skilletor source remove '.$name.$flag.').';
+    unless ( _same_address( $engine, $name, $existing, $resolved ) ) {
+      _fail( 'source "'.$name.'" in '.$path.' is '._address_text($existing).', not '.$resolved->{kind}.' '.$resolved->{value}
+          .'; nothing was changed. '.ucfirst($ways) );
+    }
+    # A spec's ref (k119) is what the user asked for: keeping the entry at another would drop it.
+    my $has = $existing->{ref};
+    if ( exists $resolved->{ref} && !( js_type($has) eq 'string' && $has eq $resolved->{ref} ) ) {
+      _fail( 'source "'.$name.'" in '.$path.' is '._address_text($existing).' '
+          .( defined $has ? 'with ref '.js_stringify($has) : 'with no ref' ).', not ref '.js_stringify( $resolved->{ref} )
+          .'; nothing was changed. Set its "ref" by hand, '.$ways );
+    }
+    # So is a spec's path (k126): the entry would go on offering what lies elsewhere in the repo.
+    if ( exists $resolved->{path} && !_same_paths( $existing->{path}, $resolved->{path} ) ) {
+      _fail( 'source "'.$name.'" in '.$path.' is '._address_text($existing).' '
+          .( exists $existing->{path} ? 'with path '.js_stringify( $existing->{path} ) : 'with no path' )
+          .', not path '.js_stringify( $resolved->{path} ).'; nothing was changed. Set its "path" by hand, '.$ways );
+    }
+    # Kept as written, so checked as load reads it: an entry the sync would refuse is not trusted.
+    my $refused = _load_refusal( $name, $existing, $path );
+    if ( defined $refused ) {
+      _fail( 'cannot add '.$spec.': '.$refused.'; nothing was changed. Source "'.$name.'" there already has this address: '
+          .'fix its entry by hand, or remove it (skilletor source remove '.$name.$flag.').' );
+    }
+    $def = _entry_def($existing);
+  }
+  else {
+    Skilletor::Config->add_source( $path, $name, $def );
+  }
+  # add is the trust act.
+  Skilletor::State->new( root => $engine->state_root )
+    ->trust( $name, Skilletor::Backend->resolve( { name => $name, %$def, origins => {} }, $engine->home ) );
+
+  return { name => $name, def => $def, kept => $kept, report => $engine->sync };
+}
+
+# Why config load would refuse source $name defined as $def, by load's own check (k110) – with
+# $file, as load words it for that file; undef when it would load.
+sub _load_refusal {
+  my ( $name, $def, $file ) = @_;
+  return undef if eval { Skilletor::Config->source_fields( $def, ( defined $file ? $file.': ' : '' ).'sources.'.$name ); 1 };
+  my $err = $@;
+  die $err unless blessed $err && $err->isa('Skilletor::Error::Config');
+  return $err->message;
+}
+
+# Does a config entry name the backend and address a spec resolved to? git and url compare as
+# source identities (spec §15.6), a local path as the directory it names.
+sub _same_address {
+  my ( $engine, $name, $entry, $resolved ) = @_;
+  return 0 unless js_type($entry) eq 'object';
+  my $field = $entry->{ $resolved->{kind} };
+  return 0 unless js_type($field) eq 'string';
+  return same_identity( $field, $resolved->{value} ) if $resolved->{kind} ne 'local';
+  my $dir = sub { Skilletor::Backend->resolve( { name => $name, local => $_[0], origins => {} }, $engine->home )->{address} };
+  return $dir->($field) eq $dir->( $resolved->{value} ) ? 1 : 0;
+}
+
+# An entry's backends as written (`git https://…, local ~/dev/x`), else the entry as JSON.
+sub _address_text {
+  my ( $entry ) = @_;
+  my @parts = js_type($entry) eq 'object'
+    ? map { $_.' '.$entry->{$_} } grep { $ADDRESS_KEY{$_} && js_type( $entry->{$_} ) eq 'string' } keys %$entry
+    : ();
+  return @parts ? join( ', ', @parts ) : js_stringify($entry);
+}
+
+# Does an entry's `path`, as written, name the one directory $path? A string or a list of one,
+# compared by segments (`./skills/` is `skills`); anything else does not.
+sub _same_paths {
+  my ( $entry, $path ) = @_;
+  my $type = js_type($entry);
+  $entry = $entry->[0] if $type eq 'array' && @$entry == 1;
+  return 0 unless js_type($entry) eq 'string';
+  my $segments = sub { my $s = inner_segments( $_[0] ); ref $s ? join( '/', @$s ) : undef };
+  my $mine = $segments->($entry);
+  my $theirs = $segments->($path);
+  return defined $mine && defined $theirs && $mine eq $theirs ? 1 : 0;
+}
+
+# The source fields of an entry as written, in its key order (`path` a string or a list).
+sub _entry_def {
+  my ( $entry ) = @_;
+  return js_ordered(
+    map { ( $_ => $entry->{$_} ) } grep { $DEF_KEY{$_} && ( $_ eq 'path' || js_type( $entry->{$_} ) eq 'string' ) } keys %$entry
   );
 }
 
@@ -175,25 +296,50 @@ sub trust {
 
 =synopsis
 
-  use Skilletor::Commands qw( source_list source_remove trust );
+  use Skilletor::Commands qw( add source_list source_remove trust );
 
   my $engine = Skilletor::Engine->new( home => $ENV{HOME}, project_dir => $project );
+  my $added  = add( $engine, spec => 'Getty/skills', project => 0 );   # { name, def, kept, report }
   my $list   = source_list($engine);                    # [ { name, def, origin }, ... ]
   my $r      = trust( $engine, 'team' );                 # { name, kind, url }
   my $report = source_remove( $engine, name => 'extra', project => 0, force => 0 );
 
 =description
 
-The commands of the CLI that read or edit the config without fetching, after
-the reference's F<src/commands.ts>: the same checks in the same order, the
-same messages, the config files written by L<Skilletor::Config>'s edit
-operations (two-space JSON, the file's key order kept). Each takes the
-L<Skilletor::Engine> the CLI runs on as its context – home, project dir,
-C<CLAUDE_CONFIG_DIR>, state root – as the reference's take its
-C<CommandContext>.
+The commands of the CLI that read or edit the config, after the reference's
+F<src/commands.ts>: the same checks in the same order, the same messages, the
+config files written by L<Skilletor::Config>'s edit operations (two-space
+JSON, the file's key order kept); an edit is followed by the engine's sync,
+whose report the command returns. Each takes the L<Skilletor::Engine> the CLI
+runs on as its context – home, project dir, C<CLAUDE_CONFIG_DIR>, state root –
+as the reference's take its C<CommandContext>.
 
-A refusal is a L<Skilletor::Error::Command>, a config file load refuses a
-L<Skilletor::Error::Config>; neither changes anything.
+A refusal is a L<Skilletor::Error::Command>, a spec that does not resolve a
+L<Skilletor::Error::Spec>, a config file load refuses a
+L<Skilletor::Error::Config>; none of them changes anything.
+
+=func add
+
+  my $r = add( $engine, spec => $spec, name => $name, project => $bool, probe => $probe );
+
+Adds the source C<$spec> resolves to (L<Skilletor::Spec/resolve_spec>) to the
+user config, or the project config with C<project>, under C<name> or the name
+the spec derives, trusts it for the backend it names and syncs. Returns C<<
+{ name, def, kept, report } >>: C<def> the source's fields as written, in
+their order, C<report> the sync's (its C<error> set when that sync stopped at a
+config error; the edit stays).
+
+It never replaces a source (k101): when the config already declares the name
+with the same backend and address – git and url as one source identity, a
+local path as the directory it names – that entry is kept as it is (C<kept>
+set, C<def> its fields), trusted and synced. It throws, before anything is
+written or trusted, for a name config load would refuse (k95), a definition it
+would refuse (k110: a C<url> not C<https://>), no project scope with
+C<project>, a taken name with another address, a spec's ref (k119) or path
+(k126) the kept entry does not have, and a kept entry load would refuse (k116).
+
+A generic host (C<host.tld[/path]>) is probed through C<probe>, by default
+L<Skilletor::Probe/make_probe>'s.
 
 =func config_path
 

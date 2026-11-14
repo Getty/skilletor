@@ -1,0 +1,3 @@
+source tools already added ({"local":"${HOME}/dev/tools"}), kept as is
+skilletor: project scope
+  trust: source "team" (git https://conformance.invalid/team.git) — run: skilletor trust team

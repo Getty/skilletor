@@ -1,0 +1,1 @@
+skilletor: cannot resolve "": empty source; expected a local path (/path, ./path, ../path, ~/path), scheme://..., transport::address, user@host:path, github:owner[/repo], owner[/repo] or host.tld[/path]

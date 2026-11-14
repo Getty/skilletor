@@ -1,0 +1,10 @@
+{
+  "sources": {
+    "conformance-invalid": {
+      "git": "https://conformance.invalid/team"
+    },
+    "other": {
+      "git": "https://conformance.invalid/skills"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "sources": {
+    "shared": {
+      "local": "${HOME}/dev/tools"
+    },
+    "extra": {
+      "local": "${HOME}/dev/tools"
+    }
+  }
+}

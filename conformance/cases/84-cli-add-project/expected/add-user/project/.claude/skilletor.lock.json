@@ -1,0 +1,10 @@
+{
+  "skills/lint": {
+    "source": "team",
+    "version": "git:2fb7e79",
+    "files": {
+      "skills/lint/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/lint/SKILL.md": "sha256:61197c6669bf6940057ec9f6d3844a7a610774ea581403d1b5262b4bc099d940"
+    }
+  }
+}

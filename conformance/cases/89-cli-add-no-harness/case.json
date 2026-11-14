@@ -1,0 +1,9 @@
+{
+  "description": "add on a machine with no agent harness (\"claude\": false), so the sync after it stops at a config error (k103): a new source is written – the added line on stdout – then exit 2 with the error and the saved config file (the user's, or the project's with --project) on stderr, the edit kept; a kept entry wrote nothing, so its exit 2 carries the sync's own report.",
+  "claude": false,
+  "steps": [
+    { "id": "add-new", "op": "cli", "argv": ["add", "extra", "${HOME}/dev/tools"], "tree": true },
+    { "id": "add-kept", "op": "cli", "argv": ["add", "shared", "${HOME}/dev/tools"] },
+    { "id": "add-project", "op": "cli", "argv": ["add", "team", "${HOME}/dev/tools", "--project"], "tree": true }
+  ]
+}

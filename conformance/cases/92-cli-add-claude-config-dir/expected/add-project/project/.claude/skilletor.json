@@ -1,0 +1,12 @@
+{
+  "install": {
+    "skills": [
+      "bar@team"
+    ]
+  },
+  "sources": {
+    "team": {
+      "local": "${HOME}/dev/tools"
+    }
+  }
+}

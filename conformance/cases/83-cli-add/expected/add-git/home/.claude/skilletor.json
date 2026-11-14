@@ -1,0 +1,12 @@
+{
+  "install": {
+    "skills": [
+      "foo@shared"
+    ]
+  },
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    }
+  }
+}

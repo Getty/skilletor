@@ -1,0 +1,17 @@
+{
+  "sources": {
+    "tools": {
+      "local": "${HOME}/dev/tools"
+    },
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    },
+    "both": {
+      "git": "https://conformance.invalid/shared.git",
+      "local": "~/dev/gone"
+    },
+    "team": {
+      "local": "${HOME}/dev/tools"
+    }
+  }
+}

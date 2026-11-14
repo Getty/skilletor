@@ -1,0 +1,11 @@
+{
+  "description": "add under CLAUDE_CONFIG_DIR (k145): the user config it writes is ${HOME}/cfg/skilletor.json, the decoy under ${HOME}/.claude untouched – and the sync after it stops at the project's install of a source not declared yet: exit 2, that file named as saved (k103); the project source then added is trusted in the CLI's state root there, so the sync installs it and status asks for no trust.",
+  "env": {
+    "CLAUDE_CONFIG_DIR": "${HOME}/cfg"
+  },
+  "steps": [
+    { "id": "add-user", "op": "cli", "argv": ["add", "mine", "${HOME}/dev/tools"], "tree": true },
+    { "id": "add-project", "op": "cli", "argv": ["add", "team", "${HOME}/dev/tools", "--project"], "tree": true },
+    { "id": "status", "op": "cli", "argv": ["status", "--scope", "project"] }
+  ]
+}

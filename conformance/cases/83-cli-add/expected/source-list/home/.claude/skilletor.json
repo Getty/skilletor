@@ -1,0 +1,21 @@
+{
+  "install": {
+    "skills": [
+      "foo@shared"
+    ]
+  },
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    },
+    "tools": {
+      "local": "${HOME}/dev/tools"
+    },
+    "mine": {
+      "local": "~/dev/tools"
+    },
+    "conformance-invalid": {
+      "git": "https://conformance.invalid/team"
+    }
+  }
+}

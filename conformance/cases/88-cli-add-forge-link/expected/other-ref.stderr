@@ -1,0 +1,1 @@
+skilletor: source "getty" in ${HOME}/.claude/skilletor.json is git https://github.com/Getty/skills with ref "main", not ref "v2"; nothing was changed. Set its "ref" by hand, add it under another name (skilletor add <name> https://github.com/Getty/skills/tree/v2/perl) or remove the source first (skilletor source remove getty).

@@ -49,6 +49,7 @@ for (qw(
   Skilletor::JSON::OrderedHash
   Skilletor::JSString
   Skilletor::Lock
+  Skilletor::Probe
   Skilletor::Process
   Skilletor::Render
   Skilletor::Render::Loader

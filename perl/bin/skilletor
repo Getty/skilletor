@@ -15,10 +15,11 @@ __END__
   skilletor sync [--scope user|project|all] [--force] [--json]
   skilletor check [--scope user|project|all] [--json]
   skilletor status [--scope user|project|all] [--json]
+  skilletor add [name] <spec> [--project]
   skilletor trust <source>
   skilletor source list [--json]
   skilletor source remove <name> [--project] [--force]
-  skilletor hook session-start|user-prompt-submit|cwd-changed|post-tool-use < input.json
+  skilletor hook session-start|user-prompt-submit|cwd-changed|post-tool-use [--harness codex|hermes] < input.json
   skilletor --help
   skilletor --version
 
@@ -26,8 +27,8 @@ __END__
 
 The command line of L<Skilletor>, the Perl port of skilletor; see
 L<Skilletor::CLI>. It mirrors the reference CLI byte for byte, command by
-command as each is ported (C<sync>, C<check>, C<status>, C<trust>,
-C<source list>, C<source remove> and the Claude Code hooks so far); a command
+command as each is ported (C<sync>, C<check>, C<status>, C<add>, C<trust>,
+C<source list>, C<source remove> and the hooks); a command
 not ported yet says so and exits 1.
 
 =cut

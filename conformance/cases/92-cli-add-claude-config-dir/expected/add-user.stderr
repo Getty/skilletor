@@ -1,0 +1,2 @@
+skilletor: config error, nothing synced — ${PROJECT}/.claude/skilletor.json: project install "bar@team" references unknown source "team"
+skilletor: the config edit itself was saved in ${HOME}/cfg/skilletor.json (not rolled back); fix the error, then run skilletor sync

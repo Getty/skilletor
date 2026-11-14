@@ -1,0 +1,7 @@
+{
+  "description": "k87: add of a local path holding an escape sequence, a bidi override and a newline: the added line shows the fields as JSON with the override escaped too, one line, and the config stores the path as given; a refused add naming that entry's address escapes it on stderr, its newline a line break.",
+  "steps": [
+    { "id": "add", "op": "cli", "argv": ["add", "${HOME}/dev/t\u001b[31m‮x\ny"], "tree": true },
+    { "id": "taken", "op": "cli", "argv": ["add", "t-31m-x-y", "${HOME}/dev/other"] }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "description": "add through the CLI into the user config: an explicit git address – `added source shared (<fields as JSON>)`, trusted, and the sync after it fetches and installs the skill the config already asked for; the same address again is kept as is and synced; a local path under the name it derives, one under a name given (a third operand ignored); a generic host the probe finds through `git ls-remote` (insteadOf), named after the host; source list then shows each as written.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] },
+    "team": { "url": "https://conformance.invalid/team", "commits": [{ "tree": "sources/team" }] }
+  },
+  "steps": [
+    { "id": "add-git", "op": "cli", "argv": ["add", "https://conformance.invalid/shared.git"], "tree": true },
+    { "id": "add-again", "op": "cli", "argv": ["add", "https://conformance.invalid/shared.git"] },
+    { "id": "add-local", "op": "cli", "argv": ["add", "${HOME}/dev/tools"] },
+    { "id": "add-named", "op": "cli", "argv": ["add", "mine", "~/dev/tools", "surplus"] },
+    { "id": "add-probed", "op": "cli", "argv": ["add", "conformance.invalid/team"] },
+    { "id": "source-list", "op": "cli", "argv": ["source", "list"], "tree": true }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "description": "add of a generic host (`host.tld[/path]`, spec §4.2): the probe's `git ls-remote` reaches the repository through insteadOf, so the source is git at `https://<host>/<path>` (a trailing `/` dropped), or `/skills` for the bare host, named after the host unless named; the same base again is kept, another under the taken name refused; at 127.0.0.1:1, where nothing listens, neither git nor the HEAD on the tarball answers: exit 1 naming both URLs, nothing written.",
+  "git": {
+    "team": { "url": "https://conformance.invalid/team", "commits": [{ "tree": "sources/team" }] },
+    "skills": { "url": "https://conformance.invalid/skills", "commits": [{ "tree": "sources/skills" }] }
+  },
+  "steps": [
+    { "id": "probe-path", "op": "cli", "argv": ["add", "conformance.invalid/team"] },
+    { "id": "probe-trailing", "op": "cli", "argv": ["add", "conformance.invalid/team/"] },
+    { "id": "probe-default-taken", "op": "cli", "argv": ["add", "conformance.invalid"] },
+    { "id": "probe-default-named", "op": "cli", "argv": ["add", "other", "conformance.invalid"] },
+    { "id": "probe-none", "op": "cli", "argv": ["add", "none", "127.0.0.1:1/x"], "tree": true }
+  ]
+}

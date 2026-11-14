@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
 # Skilletor::CLI's pieces no conformance case reaches (../conformance runs the commands
 # themselves, against the reference's bytes): the project root of a cwd, a sync's text with
-# run-level warnings and notes (the Perl engine targets Claude Code alone, so it makes none), the
+# run-level notes, alone or beside warnings (only Hermes targets make notes, and the Perl engine
+# refuses them; case 100 reaches the untrusted Codex hook's warning alone), the
 # lines of a sync that failed after a command's config edit with --json asked for (no command
 # takes both), what the argument layer loads, and an edit's config path without any project dir
 # (the CLI always has one). The expected text is the reference's (cli.ts syncText, syncFailed;
@@ -118,11 +119,13 @@ END
     return $r->{stdout} =~ s/\n\z//r;
   };
   my @quick = ( ['--help'], ['--version'], ['trust'], [ 'trust', '' ], [ 'trust', 'x', '--json' ], ['source'], [ 'source', 'remove' ],
-    [ 'source', 'list', '--force' ], [ 'source', 'remove', 'x', '--json' ], [ 'trust', 'x', '--help' ] );
+    [ 'source', 'list', '--force' ], [ 'source', 'remove', 'x', '--json' ], [ 'trust', 'x', '--help' ], ['add'], [ 'add', '--project' ],
+    [ 'add', 'x', './y', '--json' ], [ 'add', './y', '--scope', 'user' ], [ 'add', 'x', './y', '-h' ] );
   for my $argv (@quick) {
     like( $run->(@$argv), qr/\A[02] \z/, "@$argv: answered, nothing of the engine loaded" );
   }
   like( $run->( 'source', 'list', '--project-dir', "$home" ), qr{\A0 .*Skilletor/Commands\.pm}, 'source list: the commands loaded' );
+  like( $run->( 'add', 'bad name', './y', '--project-dir', "$home" ), qr{\A1 .*Skilletor/Commands\.pm}, 'add: the commands loaded' );
 };
 
 subtest "an edit's config path: the user config, the project's, no project scope" => sub {

@@ -1,0 +1,1 @@
+skilletor: source "list" in ${HOME}/.claude/skilletor.json is ["${HOME}/dev/tools"], not local ${HOME}/dev/tools; nothing was changed. Add it under another name (skilletor add <name> ${HOME}/dev/tools) or remove the source first (skilletor source remove list).

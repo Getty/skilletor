@@ -1,0 +1,1 @@
+skilletor: source "conformance-invalid" in ${HOME}/.claude/skilletor.json is git https://conformance.invalid/team, not git https://conformance.invalid/skills; nothing was changed. Add it under another name (skilletor add <name> conformance.invalid) or remove the source first (skilletor source remove conformance-invalid).

@@ -1,0 +1,10 @@
+{
+  "skills/moo": {
+    "source": "getty",
+    "version": "git:16e19e6",
+    "files": {
+      "skills/moo/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/moo/SKILL.md": "sha256:a8833388b4f70e46d349f4c5cbafdbc46bc3aad34997687a5055eea5dc77df96"
+    }
+  }
+}

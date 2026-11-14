@@ -1,0 +1,21 @@
+{
+  "description": "add of a name the target config already declares never replaces it (k101): the same backend and address – a local path spelled otherwise (`~`, a trailing `/`) naming the same directory, a git URL the same source identity (host case, trailing `/`, `.git`), either field of an entry with git and local – keeps the entry as written (`source N already added (<its fields>), kept as is`), trusts and syncs it, so a project-only source then installs; another address or another backend exits 1 naming the entry's backends and both ways out (with --project for the project config), nothing written. Only the target file counts: the user config takes a name the project declares.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] },
+    "team": { "url": "https://conformance.invalid/team.git", "commits": [{ "tree": "sources/team" }] }
+  },
+  "steps": [
+    { "id": "status-before", "op": "cli", "argv": ["status", "--scope", "project"] },
+    { "id": "same-local", "op": "cli", "argv": ["add", "${HOME}/dev/tools"] },
+    { "id": "same-local-spelled", "op": "cli", "argv": ["add", "tools", "~/dev/tools/"] },
+    { "id": "other-local", "op": "cli", "argv": ["add", "tools", "${HOME}/dev/other"] },
+    { "id": "same-identity", "op": "cli", "argv": ["add", "shared", "https://CONFORMANCE.invalid/shared/"] },
+    { "id": "other-kind", "op": "cli", "argv": ["add", "shared", "${HOME}/dev/tools"] },
+    { "id": "both-same-local", "op": "cli", "argv": ["add", "both", "${HOME}/dev/gone"] },
+    { "id": "both-other", "op": "cli", "argv": ["add", "both", "${HOME}/dev/other"], "tree": true },
+    { "id": "project-other", "op": "cli", "argv": ["add", "team", "${HOME}/dev/tools", "--project"] },
+    { "id": "project-same", "op": "cli", "argv": ["add", "team", "https://conformance.invalid/team.git", "--project"], "tree": true },
+    { "id": "status-after", "op": "cli", "argv": ["status", "--scope", "project"] },
+    { "id": "user-takes-project-name", "op": "cli", "argv": ["add", "team", "${HOME}/dev/tools"], "tree": true }
+  ]
+}

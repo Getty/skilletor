@@ -1,0 +1,18 @@
+{
+  "description": "add of a GitHub tree link (k119, k126), the repository reached through insteadOf: the repo at that ref with its skills beneath the link's directory – `{\"git\":…,\"ref\":\"main\",\"path\":\"perl\"}` – and the sync installs from there; the same link again, the bare repo link (no ref, no path asked) and an entry whose path names the same directory (`./perl/`, `[\"perl\"]`) are kept as written; an entry at another ref, without a ref, at another path, without a path or with two paths exits 1 naming what it has and the ways out (set it by hand among them), nothing written.",
+  "git": {
+    "skills": { "url": "https://github.com/Getty/skills", "commits": [{ "tree": "sources/skills" }] }
+  },
+  "steps": [
+    { "id": "link", "op": "cli", "argv": ["add", "https://github.com/Getty/skills/tree/main/perl"], "tree": true },
+    { "id": "link-again", "op": "cli", "argv": ["add", "https://github.com/Getty/skills/tree/main/perl"] },
+    { "id": "repo-link", "op": "cli", "argv": ["add", "https://github.com/Getty/skills"] },
+    { "id": "other-ref", "op": "cli", "argv": ["add", "https://github.com/Getty/skills/tree/v2/perl"] },
+    { "id": "other-path", "op": "cli", "argv": ["add", "https://github.com/Getty/skills/tree/main/other"] },
+    { "id": "no-ref", "op": "cli", "argv": ["add", "plain", "https://github.com/Getty/skills/tree/main"] },
+    { "id": "no-path", "op": "cli", "argv": ["add", "pinned", "https://github.com/Getty/skills/tree/main/perl"] },
+    { "id": "path-segments", "op": "cli", "argv": ["add", "seg", "https://github.com/Getty/skills/tree/main/perl"] },
+    { "id": "path-list-one", "op": "cli", "argv": ["add", "one", "github.com/Getty/skills/tree/main/perl"] },
+    { "id": "path-list-two", "op": "cli", "argv": ["add", "two", "https://github.com/Getty/skills/tree/main/perl"], "tree": true }
+  ]
+}
