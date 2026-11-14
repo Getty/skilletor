@@ -485,6 +485,11 @@ show it, its `description` saying which.
 | `57-hook-home-project` | a session started in the home dir has no project scope (k44): the user scope synced once, no `.gitignore` block; with `CLAUDE_PROJECT_DIR` the home the same, silent; the prompt after is not due |
 | `58-hook-bundles` | SessionStart's sync with a good bundle and a cyclic one: the good one's skill installed, the cycle one warning in the line and the context (k48) |
 | `59-hook-unused-project` | SessionStart in a project that does not use skilletor: the user scope's skill synced, the old `.gitignore` block in the project removed silently, nothing to commit (k65) |
+| `60-hook-cwd-changed` | CwdChanged (k147): a move within the session's checkout syncs nothing; one from elsewhere into its subdirectory syncs the checkout's project scope at the git top level – not `CLAUDE_PROJECT_DIR`, not the user scope – with one line naming it; the same move again is silent (`gitInit`) |
+| `61-hook-move-noop` | CwdChanged and PostToolUse into a git checkout without a config, a plain directory and the home dir, or without a usable cwd: silent, nothing written (`gitInit`) |
+| `62-hook-move-untrusted` | a move into a checkout whose own source awaits trust: CwdChanged's line names it and `skilletor trust`, PostToolUse's context says the same; the same `cd` again is silent; nothing fetched or written (`gitInit`) |
+| `63-hook-move-config-error` | a config error in the checkout moved into: `cannot sync <dir>: <error> — run there: skilletor sync`, no context, nothing written |
+| `64-hook-post-tool-use` | PostToolUse against a seeded `session-cwd.json`: a `cd` within the recorded checkout asks nothing, from another one syncs with the line and a context naming the checkout; again, or a session without a record once the lock matches, is silent (`gitInit`) |
 
 The state files two engines on one machine share – `render-inputs.json` with its hash,
 `sources-read.json`, `unreached.json` – are not compared here: their keys are absolute lock
@@ -493,11 +498,11 @@ Perl port's `t/52-parity-sync.t` has both engines sync one machine and compares 
 byte.
 
 Not covered yet: the CLI's commands but `sync`, `check`, `status` and `hook` (the Perl CLI
-runs no other yet); of the hooks, the checkout-move ones (`cwd-changed`, `post-tool-use`), what
-`--harness codex` and `--harness hermes` add (Codex's rules context, Hermes' opt-in line, the
-prompt hook following a move), a due prompt's real background sync, the in-session interval
-and the sync lock held by another run (each engine's own tests pin these three, the interval
-on an injected clock); a sync's run-level warnings and notes (the untrusted Codex hook, what
+runs no other yet); of the hooks, what `--harness codex` and `--harness hermes` add (Codex's
+rules context, Hermes' opt-in line, the prompt hook following a move), a due prompt's real
+background sync, the in-session interval, the sync lock held by another run – a move's wait on
+it and the race of one `cd`'s two hooks too – and a move's 20 s deadline (each engine's own
+tests pin these, the interval on an injected clock, the deadline injected); a sync's run-level warnings and notes (the untrusted Codex hook, what
 Hermes gets no copy of – Codex and Hermes targets only); a `url`
 source actually fetched (the engine takes `https://` only, so it needs a local TLS server), a
 source whose fetch fails (the warning quotes git's own message), symbolic links in a target, a

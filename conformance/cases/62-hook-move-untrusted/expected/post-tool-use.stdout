@@ -1,0 +1,1 @@
+{"systemMessage":"skilletor: 1 warning(s) in ${PROJECT} — run there: skilletor trust team","hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"skilletor: in ${PROJECT}:\n- untrusted source team (git https://conformance.invalid/team.git); run: skilletor trust team"}}

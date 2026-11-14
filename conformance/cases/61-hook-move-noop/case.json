@@ -1,0 +1,206 @@
+{
+  "description": "A move into no skilletor project is silent and writes nothing (spec §8, k147): CwdChanged and PostToolUse into a git checkout without a skilletor.json (from a subdirectory: its top level has none), a plain directory outside git and the home dir – whose .claude/skilletor.json is the user config, and whose user scope a move never syncs, though it installs a skill – and input without a cwd or with one that is no string. Every run exits 0.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "gitInit": [
+    "project"
+  ],
+  "steps": [
+    {
+      "id": "cwd-checkout",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "cwd-changed"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${TMP}/cwd",
+      "stdin": {
+        "hook_event_name": "CwdChanged",
+        "old_cwd": "${TMP}/cwd",
+        "new_cwd": "${PROJECT}/sub",
+        "cwd": "${PROJECT}/sub",
+        "session_id": "s1"
+      }
+    },
+    {
+      "id": "cwd-plain",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "cwd-changed"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${TMP}/cwd",
+      "stdin": {
+        "hook_event_name": "CwdChanged",
+        "old_cwd": "${PROJECT}/sub",
+        "new_cwd": "${TMP}/cwd",
+        "cwd": "${TMP}/cwd",
+        "session_id": "s1"
+      }
+    },
+    {
+      "id": "cwd-home",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "cwd-changed"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${TMP}/cwd",
+      "stdin": {
+        "hook_event_name": "CwdChanged",
+        "old_cwd": "${TMP}/cwd",
+        "new_cwd": "${HOME}",
+        "cwd": "${HOME}",
+        "session_id": "s1"
+      }
+    },
+    {
+      "id": "cwd-none",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "cwd-changed"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${TMP}/cwd",
+      "stdin": {
+        "hook_event_name": "CwdChanged",
+        "session_id": "s1"
+      }
+    },
+    {
+      "id": "cwd-number",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "cwd-changed"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${TMP}/cwd",
+      "stdin": {
+        "hook_event_name": "CwdChanged",
+        "new_cwd": 42,
+        "session_id": "s1"
+      }
+    },
+    {
+      "id": "post-checkout",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "post-tool-use"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${TMP}/cwd",
+      "stdin": {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cd ${PROJECT}/sub"
+        },
+        "cwd": "${PROJECT}/sub",
+        "session_id": "s-checkout"
+      }
+    },
+    {
+      "id": "post-plain",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "post-tool-use"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${TMP}/cwd",
+      "stdin": {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cd ${TMP}/cwd"
+        },
+        "cwd": "${TMP}/cwd",
+        "session_id": "s-plain"
+      }
+    },
+    {
+      "id": "post-home",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "post-tool-use"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${TMP}/cwd",
+      "stdin": {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cd ${HOME}"
+        },
+        "cwd": "${HOME}",
+        "session_id": "s-home"
+      }
+    },
+    {
+      "id": "post-none",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "post-tool-use"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${TMP}/cwd",
+      "stdin": {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "session_id": "s1"
+      }
+    },
+    {
+      "id": "post-number",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "post-tool-use"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${TMP}/cwd",
+      "stdin": {
+        "hook_event_name": "PostToolUse",
+        "cwd": 42,
+        "session_id": "s1"
+      },
+      "tree": true
+    }
+  ]
+}

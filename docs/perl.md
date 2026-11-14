@@ -125,9 +125,9 @@ It also requires each engine's `check` to accept the other engine's sync.
   conversion itself is: `Skilletor::Convert`, `Skilletor::TOML`, k183). The Claude hooks are
   (`Skilletor::Hooks`, k181): `hook session-start`, `hook user-prompt-submit` and its detached
   background sync (`hook __sync-background`; a PAR-packed binary re-runs itself through
-  `PAR_PROGNAME`, plain perl re-runs `$^X` with the script). `--harness codex|hermes` is
-  parsed but answers as Claude Code's hook does until k184/k185, and the checkout-move hooks
-  (`hook cwd-changed`, `hook post-tool-use`, k147) say they are not ported and exit 0 (k182).
+  `PAR_PROGNAME`, plain perl re-runs `$^X` with the script), and the checkout-move hooks
+  (`hook cwd-changed`, `hook post-tool-use`, k147; ported in k182). `--harness codex|hermes` is
+  parsed but answers as Claude Code's hook does until k184/k185.
   The Perl CLI (`bin/skilletor`) runs `sync`, `check`, `status` (k173) and the hooks; the
   other commands are being ported one by one under k166, and each one not ported yet says so
   and exits 1.

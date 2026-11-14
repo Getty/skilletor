@@ -1,0 +1,1 @@
+{"systemMessage":"skilletor: cannot sync ${PROJECT}: ${PROJECT}/.claude/skilletor.json: install.skills[0] \"foo\" must be name@source — run there: skilletor sync"}

@@ -1,6 +1,14 @@
 Revision history for Skilletor
 
 {{$NEXT}}
+  - `skilletor hook cwd-changed|post-tool-use` for Claude Code: a session
+    that moves into another checkout gets that checkout's project scope
+    synced – its git top level, never CLAUDE_PROJECT_DIR – when its lock no
+    longer matches its config (a local check, no source asked), with a 20 s
+    deadline past which nothing is written and a wait on the sync lock up to
+    it; one line names the checkout and what to run there, PostToolUse adds
+    a context for the model. New conformance cases 60 to 64 hold both CLIs
+    to the same bytes.
   - `skilletor hook session-start|user-prompt-submit` for Claude Code: the
     SessionStart check and sync, the prompt's interval check with a detached
     background sync (a packed binary re-runs itself via PAR_PROGNAME), and

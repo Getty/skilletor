@@ -1,0 +1,22 @@
+{
+  "description": "A config error in the checkout moved into (spec §8, k147) – an entry without @source; outside git, so the directory itself is the checkout: CwdChanged and PostToolUse each answer with the one line `cannot sync <dir>: <error> — run there: skilletor sync`, no context, and write nothing. Every run exits 0.",
+  "steps": [
+    {
+      "id": "cwd-changed",
+      "op": "cli",
+      "argv": ["hook", "cwd-changed"],
+      "env": { "CLAUDE_PROJECT_DIR": "${TMP}/cwd" },
+      "cwd": "${TMP}/cwd",
+      "stdin": { "hook_event_name": "CwdChanged", "old_cwd": "${TMP}/cwd", "new_cwd": "${PROJECT}", "cwd": "${PROJECT}", "session_id": "s1" }
+    },
+    {
+      "id": "post-tool-use",
+      "op": "cli",
+      "argv": ["hook", "post-tool-use"],
+      "env": { "CLAUDE_PROJECT_DIR": "${TMP}/cwd" },
+      "cwd": "${PROJECT}",
+      "stdin": { "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": { "command": "cd ${PROJECT}" }, "cwd": "${PROJECT}", "session_id": "s1" },
+      "tree": true
+    }
+  ]
+}

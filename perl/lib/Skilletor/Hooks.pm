@@ -1,5 +1,5 @@
 package Skilletor::Hooks;
-# ABSTRACT: The Claude Code hooks – SessionStart, UserPromptSubmit and the background sync (spec §8)
+# ABSTRACT: The Claude Code hooks – SessionStart, UserPromptSubmit, the background sync and the checkout moves (spec §8)
 
 use strict;
 use warnings;
@@ -8,7 +8,8 @@ use utf8;
 use Cwd ();
 use Exporter qw( import );
 use Scalar::Util qw( blessed );
-use Skilletor::FSUtil qw( decode_utf8_lossy encode_text path_resolve same_path );
+use Time::HiRes ();
+use Skilletor::FSUtil qw( decode_utf8_lossy encode_text path_join path_resolve same_path );
 use Skilletor::GitEnv qw( git_env );
 use Skilletor::JSON qw( js_ordered js_type );
 use Skilletor::Process qw( run_command spawn_detached );
@@ -16,7 +17,7 @@ use Skilletor::Report qw( display_safe empty_scope_report report_hook );
 
 our $VERSION = '0.002';
 
-our @EXPORT_OK = qw( run_hook project_root_of default_background SESSION_START_TIMEOUT_MS DEFAULT_INTERVAL );
+our @EXPORT_OK = qw( run_hook project_root_of default_background SESSION_START_TIMEOUT_MS DEFAULT_INTERVAL MOVE_DEADLINE_MS );
 
 # A SessionStart check and sync give each source this long (the reference's 5 s).
 use constant SESSION_START_TIMEOUT_MS => 5_000;
@@ -24,6 +25,10 @@ use constant SESSION_START_TIMEOUT_MS => 5_000;
 # The in-session check's interval when the config cannot be loaded; the config's own default
 # (checkInterval, 1800 s) is Skilletor::Config's.
 use constant DEFAULT_INTERVAL => 600;
+
+# A move's sync writes nothing once this has passed (spec §8): Claude Code kills the hook at 30 s,
+# which leaves the local rest of a sync 10 s. Its two move hooks wait for the sync lock up to it.
+use constant MOVE_DEADLINE_MS => 20_000;
 
 # State, Config and Engine are loaded by the events that use them: a prompt with nothing due
 # loads no engine.
@@ -134,8 +139,9 @@ sub run_hook {
 
 sub _dispatch {
   my ( $event, $input, $hook_ctx ) = @_;
-  # The checkout-move hooks (spec §8) come with k182.
-  return _warn("hook $event is not ported to the Perl CLI yet") if $event eq 'cwd-changed' || $event eq 'post-tool-use';
+  # The checkout the session moved into is the project, never the session's own (spec §8).
+  return _cwd_changed( $input, $hook_ctx )   if $event eq 'cwd-changed';
+  return _post_tool_use( $input, $hook_ctx ) if $event eq 'post-tool-use';
   my $ctx = _truthy( $hook_ctx->{project_dir} ) ? $hook_ctx : { %$hook_ctx, project_dir => project_root_of( _text( $input->{cwd} ) // _cwd() ) };
   return _session_start( $input, $ctx )      if $event eq 'session-start';
   return _user_prompt_submit( $input, $ctx ) if $event eq 'user-prompt-submit';
@@ -210,6 +216,126 @@ sub _record_session_cwd {
   my $cwd = _text( $input->{cwd} ) // return;
   eval { _state($ctx)->put_session_cwd( _session_of($input), $cwd ); 1 };
   return;
+}
+
+# ---- checkout moves (spec §8) ----------------------------------------------------------------
+
+sub _now_ms { int( Time::HiRes::time() * 1000 ) }
+
+# A session moved into $move->{cwd} (the reference's moveCheckout): the checkout is the git top
+# level of the new cwd, never the session's project. Nothing to do – no source asked, nothing
+# written – when it is the old cwd's checkout, the home dir, has no `.claude/skilletor.json`, or
+# its lock already matches its config (a local check). Otherwise its project scope syncs as at
+# SessionStart – 5 s per source, nothing written once the deadline has passed – unless, once the
+# sync lock is held, its lock matches after all: another run synced it meanwhile. One line names
+# the checkout and, when something is left to do, the command to run there. Never dies.
+#
+# $move: cwd, old_cwd (when the event names one), event (the answer's hookEventName),
+# lock_until_deadline (wait for the sync lock until the deadline, not the usual 5 s: Claude Code
+# fires two move hooks for one `cd`, and the second waits out the other's sync). Returns the
+# answer and – when it answered for the checkout, with a sync or with what is left to do there –
+# that checkout. Hermes' `hermes skills trust` line (k152) comes with k185: the Perl engine adds
+# no Codex or Hermes skill yet.
+sub _move_checkout {
+  my ( $move, $ctx ) = @_;
+  my $root = project_root_of( $move->{cwd} );
+  my @result;
+  return @result if eval { @result = _move_checkout_of( $root, $move, $ctx ); 1 };
+  my $err = $@;
+  # Timed out on the sync lock: another run holds it – a background sync of this very checkout,
+  # maybe – and synced nothing here, so the interval check is left to retry (k89).
+  return ( _cannot_sync( $root, _message($err) ), _lock_timeout($err) ? undef : $root );
+}
+
+sub _move_checkout_of {
+  my ( $root, $move, $ctx ) = @_;
+  return js_ordered() if same_path( $root, $ctx->{home} ) || !-e encode_text( path_join( $root, '.claude', 'skilletor.json' ) );
+  return js_ordered() if defined $move->{old_cwd} && same_path( project_root_of( $move->{old_cwd} ), $root );
+  my $deadline = $ctx->{deadline} // _now_ms() + MOVE_DEADLINE_MS;
+  # Past the deadline the sync writes nothing: a longer wait would be for nothing.
+  my $lock_timeout = ( $ctx->{engine} // {} )->{lock_timeout_ms};
+  if ( !defined $lock_timeout && $move->{lock_until_deadline} ) {
+    $lock_timeout = $deadline - _now_ms();
+    $lock_timeout = 0 if $lock_timeout < 0;
+  }
+  my $engine = _engine( { %$ctx, project_dir => $root }, timeout_ms => SESSION_START_TIMEOUT_MS );
+  my $chk = $engine->check( scope => 'project', local => 1 );
+  return ( _cannot_sync( $root, $chk->{error} ), $root ) if _truthy( $chk->{error} );
+  unless ( $chk->{changed} ) {
+    return ( _moved_output( _trust_report($chk), $root, $move->{event} ), $root ) if @{ $chk->{trustRequests} // [] };
+    return @{ $chk->{warnings} } ? ( _cannot_sync( $root, join '; ', @{ $chk->{warnings} } ), $root ) : js_ordered();
+  }
+  # No scopes: a run this one waited for on the sync lock – the other Claude Code hook of the
+  # same `cd`, say – synced the checkout meanwhile, and its answer was that run's to give.
+  my $report = $engine->sync( scope => 'project', if_changed => 1, deadline => $deadline, lock_timeout_ms => $lock_timeout );
+  return js_ordered() if !_truthy( $report->{error} ) && !@{ $report->{scopes} };
+  return ( _cannot_sync( $root, $report->{error} ), $root ) if _truthy( $report->{error} );
+  return ( _moved_output( $report, $root, $move->{event} ), $root );
+}
+
+# The one line of a move that could not sync: the checkout, why, and what to run there.
+sub _cannot_sync {
+  my ( $dir, $message ) = @_;
+  return _warn("cannot sync $dir: $message — run there: skilletor sync");
+}
+
+# A move's report: the line says where, and what to run there for what is left – trusting a
+# source, or a sync that shows each warning and conflict; the context says where first.
+sub _moved_output {
+  my ( $report, $dir, $event ) = @_;
+  my $out = _to_output( $report, $event );
+  return $out unless _truthy( $out->{systemMessage} );
+  my ( @fixes, %seen );
+  for my $s ( @{ $report->{scopes} } ) {
+    push @fixes, grep { !$seen{$_}++ } map { "skilletor trust $_->{name}" } @{ $s->{trustRequests} // [] };
+  }
+  push @fixes, 'skilletor sync' if grep { @{ $_->{warnings} // [] } || @{ $_->{conflicts} // [] } } @{ $report->{scopes} };
+  my $result = js_ordered( systemMessage => display_safe( "$out->{systemMessage} in $dir".( @fixes ? ' — run there: '.join( '; ', @fixes ) : '' ) ) );
+  my $context = ( $out->{hookSpecificOutput} // {} )->{additionalContext};
+  if ( _truthy($context) ) {
+    $result->{hookSpecificOutput} = js_ordered( hookEventName => $event, additionalContext => display_safe("skilletor: in $dir:")."\n$context" );
+  }
+  return $result;
+}
+
+# Claude Code's CwdChanged (spec §8): it is not awaited, and its output takes no context (only
+# `watchPaths`), so the line is all it gives – it reaches the user, not the model. It never
+# writes the session's cwd record: PostToolUse, fired for the same `cd`, would take it for a move
+# already done and answer before this hook's sync is.
+sub _cwd_changed {
+  my ( $input, $ctx ) = @_;
+  my $cwd = _text( $input->{new_cwd} ) // _text( $input->{cwd} ) // return js_ordered();
+  my ($out) = _move_checkout( { cwd => $cwd, old_cwd => _text( $input->{old_cwd} ), event => 'CwdChanged', lock_until_deadline => 1 }, $ctx );
+  return _truthy( $out->{systemMessage} ) ? js_ordered( systemMessage => $out->{systemMessage} ) : js_ordered();
+}
+
+# Claude Code's PostToolUse, which its hooks file runs on a Bash call with a `cd` only (spec §8):
+# awaited – the next tool call waits for it – with the cwd after the command as `cwd`, and no old
+# one: the session's record stands in. Its context reaches the model.
+sub _post_tool_use {
+  my ( $input, $ctx ) = @_;
+  return _session_move( $input, $ctx, _state($ctx), { event => 'PostToolUse', lock_until_deadline => 1 } );
+}
+
+# A move a hook sees only as the session's cwd (the reference's sessionMove): Claude Code's
+# PostToolUse on a Bash `cd` – and, with k184 and k185, Codex's and Hermes' prompt hook (k149).
+# The cwd the session's hook last looked at is kept per session id (written at SessionStart): the
+# same cwd again asks nothing; another goes to the move core, which tells a move within one
+# checkout from one into another. A move that answered for its checkout marks it checked, so the
+# interval check starts no second sync of it beside this one.
+sub _session_move {
+  my ( $input, $ctx, $state, $event ) = @_;
+  my $cwd = _text( $input->{cwd} ) // return js_ordered();
+  my $session = _session_of($input);
+  my $last = $state->session_cwd($session);
+  return js_ordered() if defined $last && same_path( $last, $cwd );
+  my ( $out, $answered ) = _move_checkout( { cwd => $cwd, old_cwd => $last, %$event }, $ctx );
+  eval {    # the state dir cannot be written: the next move looks again
+    $state->mark_checked($answered) if defined $answered;
+    $state->put_session_cwd( $session, $cwd );
+    1;
+  };
+  return $out;
 }
 
 # Codex's and Hermes' prompt hook follows a move first (k149); that comes with k184 and k185.
@@ -302,16 +428,37 @@ engine is loaded on this path.
 =item * C<__sync-background>: a sync whose answer becomes the project's pending
 report; a lock timeout leaves none, and the project due again.
 
+=item * C<cwd-changed>: the session moved from C<old_cwd> into C<new_cwd>
+(else C<cwd>); the checkout moved into is synced (below). Its answer is the
+line alone – Claude Code's CwdChanged takes no context – and it writes no
+session record.
+
+=item * C<post-tool-use>, after a Bash C<cd>: the session's C<cwd> against
+the one its session record names (SessionStart's, or the last move's); the
+same cwd asks nothing, another is a move from the recorded one. The answer
+has the line and a context for the model; a move that answered for its
+checkout marks that checkout checked, and the record moves to the new cwd.
+
 =back
+
+A move into another checkout (spec §8) syncs that checkout – the git top level
+of the new cwd, never C<project_dir> – in project scope: nothing happens when it
+is the old cwd's checkout, the home dir, has no F<.claude/skilletor.json>, or
+its lock already matches its config (a check with C<local>: no source asked).
+Otherwise a sync with C<if_changed>, 5 s per source, writes nothing once
+C<MOVE_DEADLINE_MS> (20 s) has passed and waits for the sync lock until then;
+a trust request is answered without a sync. The line names the checkout
+(C<… in E<lt>dirE<gt>>) and what to run there for what is left (C<skilletor
+trust E<lt>nameE<gt>>, C<skilletor sync>); a failure is C<cannot sync
+E<lt>dirE<gt>: E<lt>messageE<gt> — run there: skilletor sync>.
 
 Without C<project_dir> the project is the git top level of the input's C<cwd>,
 else of the process's (L</project_root_of>). The project dir is also the key of
 the check mark and the pending report.
 
-Not ported yet: C<cwd-changed> and C<post-tool-use> (k182) answer that they are
-not, in one warning line; C<harness> C<codex> or C<hermes> changes nothing yet
-(Codex's rules context, Hermes' opt-in line and their prompt hook's move, k184
-and k185) – such a hook answers as Claude Code's.
+Not ported yet: C<harness> C<codex> or C<hermes> changes nothing yet (Codex's
+rules context, Hermes' opt-in line and their prompt hook's move, k184 and
+k185) – such a hook answers as Claude Code's.
 
 =func run_hook
 
@@ -320,9 +467,11 @@ and k185) – such a hook answers as Claude Code's.
 Never dies. C<%ctx>: C<home>, C<project_dir>, C<state_root>, C<harness>,
 C<claude_config_dir> (default C<CLAUDE_CONFIG_DIR>), C<self_command>,
 C<background> (a code ref called with the context instead of
-L</default_background>) and C<engine>, more arguments of
+L</default_background>), C<deadline> (a move's, in epoch ms; default
+C<MOVE_DEADLINE_MS> from the hook's start) and C<engine>, more arguments of
 L<Skilletor::Engine/new> (C<markers>, C<timeout_ms>, C<lock_timeout_ms>, …),
-which win over the hook's own.
+which win over the hook's own – a C<lock_timeout_ms> there over a move's wait
+until its deadline as well.
 
 =func default_background
 
@@ -345,5 +494,7 @@ nothing, C<$cwd> itself.
 =func SESSION_START_TIMEOUT_MS
 
 =func DEFAULT_INTERVAL
+
+=func MOVE_DEADLINE_MS
 
 =cut

@@ -1,0 +1,35 @@
+{
+  "description": "CwdChanged through the CLI (spec §8, k147): a move within the session's checkout – CLAUDE_PROJECT_DIR the project, into a subdirectory – syncs nothing, though the project has no lock; a move from another directory into that subdirectory syncs the checkout's project scope at its git top level, not the subdirectory and not CLAUDE_PROJECT_DIR (the session's, here the empty cwd), and leaves the user scope's own install alone; the answer is the one line naming the checkout, no context. The same move again finds the lock matching the config: silent. Every run exits 0.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "gitInit": ["project"],
+  "steps": [
+    {
+      "id": "within",
+      "op": "cli",
+      "argv": ["hook", "cwd-changed"],
+      "env": { "CLAUDE_PROJECT_DIR": "${PROJECT}" },
+      "cwd": "${PROJECT}/sub",
+      "stdin": { "hook_event_name": "CwdChanged", "old_cwd": "${PROJECT}", "new_cwd": "${PROJECT}/sub", "cwd": "${PROJECT}/sub", "session_id": "s1" },
+      "tree": true
+    },
+    {
+      "id": "move",
+      "op": "cli",
+      "argv": ["hook", "cwd-changed"],
+      "env": { "CLAUDE_PROJECT_DIR": "${TMP}/cwd" },
+      "cwd": "${PROJECT}/sub",
+      "stdin": { "hook_event_name": "CwdChanged", "old_cwd": "${TMP}/cwd", "new_cwd": "${PROJECT}/sub", "cwd": "${PROJECT}/sub", "session_id": "s2" },
+      "tree": true
+    },
+    {
+      "id": "move-again",
+      "op": "cli",
+      "argv": ["hook", "cwd-changed"],
+      "env": { "CLAUDE_PROJECT_DIR": "${TMP}/cwd" },
+      "cwd": "${PROJECT}/sub",
+      "stdin": { "hook_event_name": "CwdChanged", "old_cwd": "${TMP}/cwd", "new_cwd": "${PROJECT}/sub", "cwd": "${PROJECT}/sub", "session_id": "s2" }
+    }
+  ]
+}

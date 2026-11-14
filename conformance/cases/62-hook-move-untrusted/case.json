@@ -1,0 +1,32 @@
+{
+  "description": "A move into a checkout whose project config declares its own, untrusted source (spec §4.3, §8, k147): CwdChanged's one line names the checkout and the `skilletor trust` to run there; PostToolUse says the same, and the model gets the trust request in a context whose first line names the checkout; the same `cd` again is silent. Nothing is fetched – the source's address leads nowhere, so a fetch would warn – and nothing is written. Every run exits 0.",
+  "gitInit": ["project"],
+  "steps": [
+    {
+      "id": "cwd-changed",
+      "op": "cli",
+      "argv": ["hook", "cwd-changed"],
+      "env": { "CLAUDE_PROJECT_DIR": "${TMP}/cwd" },
+      "cwd": "${TMP}/cwd",
+      "stdin": { "hook_event_name": "CwdChanged", "old_cwd": "${TMP}/cwd", "new_cwd": "${PROJECT}", "cwd": "${PROJECT}", "session_id": "s1" },
+      "tree": true
+    },
+    {
+      "id": "post-tool-use",
+      "op": "cli",
+      "argv": ["hook", "post-tool-use"],
+      "env": { "CLAUDE_PROJECT_DIR": "${TMP}/cwd" },
+      "cwd": "${PROJECT}",
+      "stdin": { "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": { "command": "cd ${PROJECT}" }, "cwd": "${PROJECT}", "session_id": "s1" },
+      "tree": true
+    },
+    {
+      "id": "post-tool-use-again",
+      "op": "cli",
+      "argv": ["hook", "post-tool-use"],
+      "env": { "CLAUDE_PROJECT_DIR": "${TMP}/cwd" },
+      "cwd": "${PROJECT}",
+      "stdin": { "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": { "command": "cd ${PROJECT} && ls" }, "cwd": "${PROJECT}", "session_id": "s1" }
+    }
+  ]
+}

@@ -303,17 +303,13 @@ subtest 'a session-start that timed out on the lock leaves the project due for t
   is( scalar @{ $m->{calls} }, 1, 'leaves it checked' );
 };
 
-# ---- events not ported or not known; other harnesses ----------------------------------------
+# ---- events not known; other harnesses (the move hooks: t/71-hooks-move.t) ----------------
 
-subtest 'an unknown event, and the move hooks not ported yet: one warning line, never a die' => sub {
+subtest 'an unknown event: one warning line, never a die' => sub {
   my $m = machine();
   is( out( run_hook( 'bogus', {}, $m->{ctx} ) ), '{"systemMessage":"skilletor: unknown hook event: bogus"}', 'unknown' );
   is( out( run_hook( 'bogus', {}, { %{ $m->{ctx} }, project_dir => undef } ) ), '{"systemMessage":"skilletor: unknown hook event: bogus"}',
     'unknown, without a project dir' );
-  for my $event (qw( cwd-changed post-tool-use )) {
-    is( out( run_hook( $event, { cwd => $m->{project} }, $m->{ctx} ) ), qq({"systemMessage":"skilletor: hook $event is not ported to the Perl CLI yet"}),
-      "$event (k182)" );
-  }
 };
 
 subtest '--harness codex and hermes answer as Claude Code for now (k184, k185)' => sub {

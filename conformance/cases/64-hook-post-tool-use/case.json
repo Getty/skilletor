@@ -1,0 +1,104 @@
+{
+  "description": "PostToolUse after a Bash `cd` (spec §8, k147), against the cwd each session's hook last looked at (session-cwd.json, as SessionStart leaves it): s1 looked at the checkout, so its `cd` into a subdirectory asks nothing, though the checkout has no lock; s2 looked at another directory, so the same `cd` syncs the checkout at its git top level – the line naming it, and the model a context whose first line does; s2 there again is silent, and so is a session with no record once the lock matches the config. Every run exits 0.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "gitInit": [
+    "project"
+  ],
+  "steps": [
+    {
+      "id": "within",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "post-tool-use"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${PROJECT}/sub/deep",
+      "stdin": {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cd ${PROJECT}/sub/deep"
+        },
+        "cwd": "${PROJECT}/sub/deep",
+        "session_id": "s1"
+      },
+      "tree": true
+    },
+    {
+      "id": "move",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "post-tool-use"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${PROJECT}/sub/deep",
+      "stdin": {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cd ${PROJECT}/sub/deep"
+        },
+        "cwd": "${PROJECT}/sub/deep",
+        "session_id": "s2"
+      },
+      "tree": true
+    },
+    {
+      "id": "again",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "post-tool-use"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${PROJECT}/sub/deep",
+      "stdin": {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cd ${PROJECT}/sub/deep"
+        },
+        "cwd": "${PROJECT}/sub/deep",
+        "session_id": "s2"
+      }
+    },
+    {
+      "id": "no-record",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "post-tool-use"
+      ],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${TMP}/cwd"
+      },
+      "cwd": "${PROJECT}",
+      "stdin": {
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "cd ${PROJECT}"
+        },
+        "cwd": "${PROJECT}",
+        "session_id": "s3"
+      }
+    }
+  ]
+}
