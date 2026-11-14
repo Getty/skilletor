@@ -1,0 +1,41 @@
+---
+class: standard
+completed: 2026-11-14T01:06:33Z
+created: 2026-11-13T20:42:50Z
+depends_on:
+- 173
+id: 174
+priority: medium
+started: 2026-11-14T00:31:42Z
+status: done
+tags:
+- perl
+- cli
+- conformance
+title: 'Perl CLI: context cases (no harness, home project, partial, renders-empty,
+  briefing, escaping)'
+updated: 2026-11-14T01:06:33Z
+---
+
+Part of the Perl CLI strand (see the strand card).
+
+Shared cases for the CLI's context paths. Each needs Perl CLI behaviour where it lacks it today.
+
+| Path | Source | Notes |
+|---|---|---|
+| No harness detected | cli.test.ts:418 | new case knob `"claude": false`: no marker written |
+| Project dir is the home | :430 | `projectIsHome` |
+| Partial sync | :109 | with a seeded lock |
+| Renders-empty | :325 | |
+| Briefing | :654 | |
+| Config-error streams, k87 escaping | :807, :834, :868 | displaySafe on stderr and stdout |
+
+Done: both runners are green with both CLIs.
+
+2026-11-14 00:53 Cases 65-71 written (one per card path; k87 split into address 70 and config error 71), knob "claude": false in both runners (test/conformance.test.ts, perl/t/60-conformance.t, perl/t/lib/SkilletorTest/Conformance.pm setup_case) and README. Expectations generated with SKILLETOR_CONFORMANCE_UPDATE=1 --test-name-pattern limited to 65-71, hand-reviewed against src/ (engine.ts layoutDrift/declaredDrift/projectDirOf, cli.ts statusText/syncFailed). Finding: every path was already green against the Perl CLI on the first run - k173/k181 brought the behaviour; no Perl CLI or engine change needed. Card line refs drifted after k164 (161f605): the k87 tests are now cli.test.ts:899/:926/:960.
+
+2026-11-14 00:54 Done, tree commit-ready, not committed. Files: conformance/README.md (knob row + env/target text, rows 65-71, not-covered note on partial); test/conformance.test.ts, perl/t/60-conformance.t, perl/t/lib/SkilletorTest/Conformance.pm (knob "claude": false - no .claude.json in HOME nor CLAUDE_CONFIG_DIR); new conformance/cases/65-cli-no-harness, 66-cli-home-project, 67-cli-partial (seeded partial lock), 68-cli-renders-empty, 69-cli-briefing, 70-cli-escaped-address, 71-cli-escaped-error (case.json, inputs, expected/). No src/, dist/ or perl/lib change; no existing expectation changed. Verified: npm run typecheck ok; npm test 1181 tests, 1180 pass, 0 fail, 1 skipped (Hermes install live run, needs SKILLETOR_HERMES_INSTALL=1); Perl prove -lr -j4 t: 37 files, 2345 tests, 36 files ok, t/54-parity-cli.t (k187's untracked in-progress file) failed once under -j4 (its mute-git spew: temp file dir missing) and passed alone (3 tests); t/60-conformance.t 62 ok; cross-run TS runner x Perl CLI 61/61 pass; Perl runner x node dist 62 ok; build + check-dist up to date. Open for the dispatcher: (1) the k87 tests' source list / trust / available / install assertions (cli.test.ts:899, :926 tail, :960) and :431's install --project on a home project belong to the command cards (k175-k179), whose Perl commands are not ported yet; (2) setup_case's knob is not exercised by t/65-report-json.t (no case with the knob has engine steps); (3) t/54 flake under parallel load is k187's to look at.
+
+Review (dispatcher), green: isolated worktree HEAD be0526f + the k174 files (runners, README, cases 65-71). typecheck clean; npm test 1181/1180 pass/1 skip/0 fail; Perl prove -lr -j4 t 36 files 2343 tests PASS; TS runner with perl/bin/skilletor 61/61; Perl t/60 with node dist 62 PASS. The k87 assertions that need unported commands go to k175 (source list, trust: cli.test.ts:899), k178 (install, end of :926; install --project on a home project :431), k177 (available :960).
+
+Committed as 1161b23
