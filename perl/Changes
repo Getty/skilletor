@@ -44,6 +44,10 @@ Revision history for Skilletor
     (check-binary-libs.sh), and runs the shared conformance cases' cli steps
     against it in a container with neither perl nor node (container-proof.sh);
     scripts/ stays out of the CPAN tarball.
+  - scripts/smoke-binary.sh runs a packed binary through a sync, check and
+    status of the t/data/smoke fixture on a clean machine without Perl
+    (t/70-smoke-binary.t); verify-binary.sh now also works with git before
+    2.32.
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's

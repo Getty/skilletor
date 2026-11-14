@@ -1,0 +1,437 @@
+# release-binaries: standalone skilletor binaries for the plugin's GitHub release vX.Y.Z - the
+# Perl port (perl/) packed with PAR::Packer, so a machine without node runs skilletor (the starter
+# bin/skilletor-start downloads them). Shape after skill perl-par-binary-release: build, smoke on
+# clean machines, release; the scripts are perl/scripts/ (k188), the smoke's expectation is kept
+# true by perl/t/70-smoke-binary.t.
+#
+# PREPARED, NOT ACTIVE (k189). The only trigger is workflow_dispatch:
+#   tag empty    a probe: builds the dispatched ref, smokes it, keeps the results as Actions
+#                artifacts only; no release is touched (the release job is skipped).
+#   tag vX.Y.Z   builds that tag (every job checks out refs/tags/<tag>; the tag must equal
+#                v<package.json version>), smokes it, then uploads the assets and one checksums
+#                file to the existing GitHub release vX.Y.Z (--clobber), and keeps the content
+#                for bin/skilletor-binaries.sha256 as the artifact pinned-binary-checksums.
+#   gh workflow run release-binaries.yml                 # probe
+#   gh workflow run release-binaries.yml -f tag=v0.8.0   # attach to the release v0.8.0
+#
+# Switching it on is the maintainer's call. Add this beside workflow_dispatch under `on:`
+#     release:
+#       types: [published]
+# and nothing else: every TAG below reads github.event.release.tag_name first. It fires for the
+# release `gh release create vX.Y.Z` makes with the maintainer's own token (docs/release.md step
+# 5); a release a workflow creates with GITHUB_TOKEN starts no workflow. Not `push: tags`: the
+# release job uploads to a release, which must exist by then. Before switching on: one green
+# probe, then one tag dispatch onto a release.
+#
+# Provisional - the dispatcher's assumption from k167's recommendation, not the maintainer's
+# decision (k167 is open):
+#   - build vehicle: this repository's own workflow (k167 item 2, option b), triggered by the
+#     plugin tag vX.Y.Z, built from the checkout; no CPAN release of Skilletor needed;
+#   - platforms: linux-x86_64, linux-arm64, macos-arm64, windows-x86_64 (k167 item 3);
+#   - version: the binary reports the plugin's version, CLI_VERSION = package.json (item 1a);
+#   - Linux build image perl:5.40-bullseye, as the skill says: glibc 2.31 floor, but Net::SSLeay
+#     links OpenSSL 1.1 (libssl.so.1.1), which Debian 12+ and Ubuntu 22.04+ do not ship (RHEL 9
+#     only as compat-openssl11), so an https url source fails there; the job summary shows
+#     check-binary-libs.sh's verdict and those sonames. The choice is k167's; no smoke cell can
+#     prove TLS (the clean images have nothing to serve https).
+#
+# Windows (the skill has no such leg): Strawberry Perl 5.40, pp with the options from a file, the
+# packed-module check, and a smoke of --version, --help and the error path only - the Perl
+# port's process layer is not Windows-ready yet (k186), so no sync and no hook runs there.
+# A tag run also requires README.md to name every runtime lib check-binary-libs.sh --list prints,
+# in backticks (the skill's gate); a probe skips that step.
+#
+# Assets of a release (the names bin/skilletor-start expects):
+#   skilletor-<V>-<os>-<arch>           bare binary: linux-x86_64, linux-arm64, macos-arm64
+#   skilletor-<V>-<os>-<arch>.tar.gz    <base>/skilletor, LICENSE (perl/LICENSE), README
+#   skilletor-<V>-windows-x86_64.exe    bare binary only (the tarball exists to carry the
+#                                       executable bit, which Windows has not)
+#   skilletor-<V>-checksums.txt         the sha256sum line of every asset above
+# pinned-binary-checksums (Actions artifact) holds skilletor-binaries.sha256: the checksums of the
+# bare binaries, the starter's trust anchor (k168 a) for the maintainer to review and commit as
+# bin/skilletor-binaries.sha256. This workflow never commits.
+#
+# Text::Nunjucks is not on CPAN: every build checks out TEXT_NUNJUCKS_REPO at TEXT_NUNJUCKS_REF
+# and puts its lib/ on PERL5LIB. Assumed public; if it is private, its checkout needs
+# `token: ${{ secrets.<a token that reads it> }}`. The pin lives in this file, so the rebuild of
+# an old tag takes today's pin.
+#
+# What a rebuild picks up: a dispatch with a tag runs this file from the dispatched ref and the
+# scripts and code from the tag.
+
+name: release-binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag vX.Y.Z with a GitHub release to attach the assets to; empty = probe run (Actions artifacts only)
+        required: false
+
+# Least privilege: read by default; only the release job gets write.
+permissions:
+  contents: read
+
+# Two runs for the same tag would race on gh release upload --clobber; they queue instead.
+concurrency:
+  group: release-binaries-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  TEXT_NUNJUCKS_REPO: Getty/p5-text-nunjucks
+  TEXT_NUNJUCKS_REF: 1a9a608ad90270a7ae0d15a92466fc186fda00fd
+  # As perl.yml: the canonical mirror only.
+  PERL_CPANM_OPT: --mirror https://cpan.metacpan.org --mirror-only
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: linux, arch: x86_64, runner: ubuntu-latest, image: 'perl:5.40-bullseye'}
+          - {os: linux, arch: arm64, runner: ubuntu-24.04-arm, image: 'perl:5.40-bullseye'}
+          - {os: macos, arch: arm64, runner: macos-14}
+          - {os: windows, arch: x86_64, runner: windows-latest}
+    runs-on: ${{ matrix.runner }}
+    # The skill's 30 plus room: Windows may compile PAR::Packer's loader with Strawberry's gcc.
+    timeout-minutes: 45
+    # Linux builds run in the pinned bullseye image (its glibc sets the floor of the packed XS
+    # modules; it carries git, unzip, gcc, make, binutils and cpanm, so there is no apt step).
+    # macOS and Windows build on the runner with Perl from actions-setup-perl.
+    container: ${{ matrix.image || null }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: perl
+    # Values that reach a shell go through env, never inline ${{ }} in a run: body.
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      PLATFORM: ${{ matrix.os }}-${{ matrix.arch }}
+    steps:
+      - name: Keep LF line endings (Windows)
+        if: matrix.os == 'windows'
+        working-directory: .
+        # The Text::Nunjucks checkout has no .gitattributes; CRLF would reach the packed sources.
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v6
+        with:
+          # A tag ref, so a branch of the same name is never built; empty on a probe run: the
+          # dispatched ref.
+          ref: ${{ env.TAG && format('refs/tags/{0}', env.TAG) || '' }}
+          persist-credentials: false
+      - name: Check out Text::Nunjucks (not on CPAN) at the pinned commit
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.TEXT_NUNJUCKS_REPO }}
+          ref: ${{ env.TEXT_NUNJUCKS_REF }}
+          path: _deps/p5-text-nunjucks
+          persist-credentials: false
+      - name: Fix safe.directory (Linux)
+        if: matrix.os == 'linux'
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Set up Perl 5.40 (macOS)
+        if: matrix.os == 'macos'
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.40'
+      - name: Set up Strawberry Perl 5.40 (Windows)
+        if: matrix.os == 'windows'
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.40'
+          distribution: strawberry
+      - name: Put Text::Nunjucks on PERL5LIB
+        run: echo "PERL5LIB=$GITHUB_WORKSPACE/_deps/p5-text-nunjucks/lib" >> "$GITHUB_ENV"
+      - name: Install Perl deps and PAR::Packer
+        env:
+          TAR_OPTIONS: --warning=no-unknown-keyword   # quiets GNU tar
+        # Text::Nunjucks' own deps from its cpanfile; perl/cpanfile's Text::Nunjucks is the one on
+        # PERL5LIB. Mozilla::CA: the CA bundle build-binary.sh requires (IO::Socket::SSL's fallback).
+        # perl -S: Git Bash on Windows may not start an extensionless #!perl script.
+        run: |
+          perl -S cpanm --notest --installdeps ../_deps/p5-text-nunjucks
+          perl -S cpanm --notest --installdeps .
+          perl -S cpanm --notest PAR::Packer Mozilla::CA
+      - name: Version and asset names
+        id: v
+        run: |
+          want=$(perl -Ilib -MSkilletor::CLI -e 'print Skilletor::CLI::CLI_VERSION')
+          [ -n "$want" ] || { echo '::error::cannot read Skilletor::CLI::CLI_VERSION' >&2; exit 1; }
+          plugin=$(perl -MJSON::PP -e 'open my $f, "<", "../package.json" or die "$!\n"; local $/; print decode_json(<$f>)->{version}')
+          [ "$want" = "$plugin" ] \
+            || { printf '::error::the Perl CLI reports %s, package.json says %s\n' "$want" "$plugin" >&2; exit 1; }
+          if [ -n "$TAG" ]; then
+            [ "$TAG" = "v$want" ] \
+              || { printf '::error::tag %s does not match the plugin version v%s\n' "$TAG" "$want" >&2; exit 1; }
+            v=$want
+          else
+            v="probe-$(git rev-parse --short=7 HEAD)"
+          fi
+          exe=
+          if [ "$RUNNER_OS" = Windows ]; then exe=.exe; fi
+          {
+            echo "v=$v"
+            echo "base=skilletor-$v-$PLATFORM"
+            echo "bin=skilletor-$v-$PLATFORM$exe"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build binary
+        if: matrix.os != 'windows'
+        env:
+          SKILLETOR_BIN_OUT: ${{ steps.v.outputs.bin }}
+        run: ./scripts/build-binary.sh
+      - name: Build binary (Windows)
+        if: matrix.os == 'windows'
+        env:
+          OUT: ${{ steps.v.outputs.bin }}
+          TMPDIR: ${{ runner.temp }}
+        # build-binary.sh's pp call with the same two lists, read from an options file (pp @file,
+        # Getopt::ArgvFile): its ~1,800 -X options exceed Windows' 32,767-character command line.
+        # Perl prints CRLF on Windows; tr strips the CR off every module name.
+        run: |
+          perl -e 'exit($] >= 5.040 ? 0 : 1)' || { echo '::error::Text::Nunjucks needs Perl 5.40' >&2; exit 1; }
+          perl -Ilib scripts/loaded-modules.pl | tr -d '\r' > "$RUNNER_TEMP/loaded"
+          n=$(wc -l < "$RUNNER_TEMP/loaded" | tr -d ' ')
+          [ "$n" -gt 100 ] || { echo "::error::loaded set suspiciously small ($n modules)" >&2; exit 1; }
+          # shellcheck disable=SC2046  # one argument per module
+          {
+            sed 's/^/-M /' "$RUNNER_TEMP/loaded"
+            perl -Ilib scripts/left-out-modules.pl -- $(cat "$RUNNER_TEMP/loaded") | tr -d '\r' | sed 's/^/-X /'
+          } > "$RUNNER_TEMP/pp-options"
+          PAR_VERBATIM=1 perl -S pp -o "$OUT" -I lib "@$RUNNER_TEMP/pp-options" bin/skilletor
+          echo "Built $OUT ($(du -h "$OUT" | cut -f1), $n modules)"
+      - name: Verify binary
+        if: matrix.os != 'windows'
+        env:
+          BIN: ${{ steps.v.outputs.bin }}
+        run: ./scripts/verify-binary.sh "$BIN"
+      - name: Verify the packed module set (Windows)
+        if: matrix.os == 'windows'
+        env:
+          BIN: ${{ steps.v.outputs.bin }}
+        # verify-binary.sh's archive checks; its output comparison needs the process layer that
+        # is not Windows-ready yet (k186). Archive::Zip comes with PAR.
+        run: |
+          perl -MArchive::Zip=:ERROR_CODES -e 'my ($bin, $dir) = @ARGV;
+            my $z = Archive::Zip->new($bin) or die "cannot read the PAR archive in $bin\n";
+            for my $m (grep { !$_->isDirectory } $z->members) {
+              $z->extractMember($m, "$dir/" . $m->fileName) == AZ_OK or die "cannot unpack " . $m->fileName . "\n";
+            }' "$BIN" "$RUNNER_TEMP/archive"
+          missing=
+          while IFS= read -r m; do
+            f="${m//:://}.pm"
+            [ -f "$RUNNER_TEMP/archive/lib/$f" ] || missing="$missing $f"
+          done < "$RUNNER_TEMP/loaded"
+          [ -z "$missing" ] || { echo "::error::modules missing inside the PAR archive:$missing" >&2; exit 1; }
+          [ -s "$RUNNER_TEMP/archive/lib/Mozilla/CA/cacert.pem" ] || { echo '::error::Mozilla/CA/cacert.pem is not packed' >&2; exit 1; }
+          # shellcheck disable=SC2046  # one argument per module
+          fam=$(perl -Ilib scripts/left-out-modules.pl --inc "$RUNNER_TEMP/archive/lib" -- $(cat "$RUNNER_TEMP/loaded") | head -5)
+          [ -z "$fam" ] || { echo "::error::left-out families packed: $fam" >&2; exit 1; }
+          echo "packed module set: OK ($(wc -l < "$RUNNER_TEMP/loaded" | tr -d ' ') modules, no left-out family)"
+      - name: Check runtime libs and the glibc floor
+        if: matrix.os != 'windows'
+        env:
+          BIN: ${{ steps.v.outputs.bin }}
+        # Its exit code decides the step; the verdict also goes to the job summary, with the
+        # OpenSSL sonames Net::SSLeay links (what an https url source needs; the script names the
+        # lib without its version, and k167 weighs the build image by it).
+        run: |
+          rc=0
+          ./scripts/check-binary-libs.sh "$BIN" > "$RUNNER_TEMP/libs.txt" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/libs.txt"
+          urc=0
+          unzip -qq -o "$BIN" 'lib/auto/Net/SSLeay/*' -d "$RUNNER_TEMP/ssleay" >/dev/null 2>&1 || urc=$?
+          so=$(find "$RUNNER_TEMP/ssleay" \( -name SSLeay.so -o -name SSLeay.bundle \) 2>/dev/null | head -n 1)
+          if [ "$urc" -le 1 ] && [ -n "$so" ]; then
+            if [ "$RUNNER_OS" = macOS ]; then otool -L "$so"; else ldd "$so"; fi \
+              | grep -E 'libssl|libcrypto' > "$RUNNER_TEMP/openssl.txt" || true
+          else
+            echo "Net::SSLeay's shared object is not in the archive" > "$RUNNER_TEMP/openssl.txt"
+          fi
+          cat "$RUNNER_TEMP/openssl.txt"
+          {
+            printf '### %s: runtime libs (check-binary-libs.sh exit %s)\n\n```\n' "$PLATFORM" "$rc"
+            cat "$RUNNER_TEMP/libs.txt"
+            printf '```\n\n'
+            printf 'OpenSSL that Net::SSLeay links (https url sources):\n\n'
+            printf '```\n'
+            cat "$RUNNER_TEMP/openssl.txt"
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+      - name: README names every runtime lib (tag runs)
+        # A probe skips this; a release needs the user docs. A lib is named in backticks.
+        if: matrix.os != 'windows' && env.TAG != ''
+        run: |
+          for lib in $(./scripts/check-binary-libs.sh --list); do
+            grep -qF "\`$lib\`" ../README.md \
+              || { printf '::error::README.md does not name the runtime lib %s\n' "$lib" >&2; exit 1; }
+          done
+      - name: Package
+        if: matrix.os != 'windows'
+        env:
+          BASE: ${{ steps.v.outputs.base }}
+          BIN: ${{ steps.v.outputs.bin }}
+          V: ${{ steps.v.outputs.v }}
+        run: |
+          mkdir -p "pkg/$BASE"
+          cp "$BIN" "pkg/$BASE/skilletor"
+          cp LICENSE "pkg/$BASE/LICENSE"
+          libs=$(./scripts/check-binary-libs.sh --list)
+          {
+            printf 'skilletor %s (%s)\n\n' "$V" "$PLATFORM"
+            printf 'Run it: ./skilletor --help\nIt needs neither Perl nor Node.js.\n\n'
+            if [ -n "$libs" ]; then
+              printf 'Runtime libraries required on the target: %s\n' "$libs"
+              printf 'glibc 2.31 or newer.\n'
+              printf 'Debian and Ubuntu have libcrypt.so.1; on RHEL, Fedora, Amazon Linux and Arch\n'
+              printf 'install libxcrypt-compat.\n'
+            else
+              printf 'Runtime libraries required on the target: none beyond the system.\n'
+            fi
+            if [ "$RUNNER_OS" = macOS ]; then
+              printf '\nAfter a browser download, clear the quarantine flag:\n'
+              printf '  xattr -d com.apple.quarantine skilletor\n'
+            fi
+            printf '\nhttps://github.com/%s\n' "$GITHUB_REPOSITORY"
+          } > "pkg/$BASE/README"
+          tar -C pkg -czf "$BASE.tar.gz" "$BASE"
+      - name: Keep the binary (and tarball) as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.v.outputs.base }}
+          # The bare binary, .exe on Windows, and the tarball elsewhere.
+          path: perl/${{ steps.v.outputs.base }}*
+          if-no-files-found: error
+
+  smoke:
+    # Each artifact runs on a machine that never built it: no setup-perl, no build container, no
+    # Perl modules from the build. Linux cells start the clean image with docker run on the runner
+    # (the image has no git, and checkout without git fetches the REST archive, which can drop
+    # files); macOS and Windows run on the runner.
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: linux, arch: x86_64, runner: ubuntu-latest, image: 'almalinux:9', pkg: dnf}
+          - {os: linux, arch: x86_64, runner: ubuntu-latest, image: 'ubuntu:22.04'}
+          - {os: linux, arch: x86_64, runner: ubuntu-latest, image: 'debian:bullseye-slim'}
+          - {os: linux, arch: arm64, runner: ubuntu-24.04-arm, image: 'almalinux:9', pkg: dnf}
+          - {os: macos, arch: arm64, runner: macos-14}
+          - {os: macos, arch: arm64, runner: macos-15}
+          - {os: windows, arch: x86_64, runner: windows-latest}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      PLATFORM: ${{ matrix.os }}-${{ matrix.arch }}
+    steps:
+      - name: Assert no build Perl on the machine (macOS, Windows)
+        if: matrix.os != 'linux'
+        run: |
+          cache=$RUNNER_TOOL_CACHE
+          if [ "$RUNNER_OS" = Windows ]; then cache=$(cygpath -u "$RUNNER_TOOL_CACHE"); fi
+          for d in "$cache/perl" "$cache/strawberry-perl"; do
+            if [ -e "$d" ]; then
+              printf '::error::%s exists; the smoke test would prove nothing\n' "$d" >&2
+              exit 1
+            fi
+          done
+      - name: Keep LF line endings (Windows)
+        if: matrix.os == 'windows'
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TAG && format('refs/tags/{0}', env.TAG) || '' }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: skilletor-*-${{ env.PLATFORM }}
+          merge-multiple: true
+          path: dl
+      - name: Smoke-test the binary (macOS)
+        if: matrix.os == 'macos'
+        working-directory: perl
+        run: ./scripts/smoke-binary.sh ../dl/skilletor-*-"$PLATFORM" ../dl/skilletor-*-"$PLATFORM".tar.gz
+      - name: Smoke-test the binary (Windows - --version, --help, error path)
+        if: matrix.os == 'windows'
+        working-directory: perl
+        run: ./scripts/smoke-binary.sh ../dl/skilletor-*-"$PLATFORM".exe
+      - name: Smoke-test the binary in a clean image (Linux)
+        if: matrix.os == 'linux'
+        env:
+          IMAGE: ${{ matrix.image }}
+          PKG: ${{ matrix.pkg }}
+        run: |
+          docker run --rm -i -v "$PWD:/w" -w /w/perl -e PLATFORM -e PKG "$IMAGE" sh -s <<'EOF'
+          set -eu
+          if [ "$PKG" = dnf ]; then
+            # A mirror answers badly now and then; three tries keep one bad response from failing the run.
+            ok=
+            for _try in 1 2 3; do
+              if dnf install -y libxcrypt-compat tar gzip diffutils findutils; then ok=1; break; fi
+              sleep 10
+            done
+            [ -n "$ok" ] || { echo '::error::dnf install failed three times' >&2; exit 1; }
+          fi
+          # The build image compiles /usr/local/lib/perl5 into the binary's @INC.
+          if [ -e /usr/local/lib/perl5 ]; then
+            echo '::error::/usr/local/lib/perl5 exists; the smoke test would prove nothing' >&2
+            exit 1
+          fi
+          ./scripts/smoke-binary.sh ../dl/skilletor-*-"$PLATFORM" ../dl/skilletor-*-"$PLATFORM".tar.gz
+          EOF
+
+  release:
+    # Tag runs only: one checksums file over every asset, every asset onto the release, and the
+    # pinned file for the plugin as an artifact.
+    needs: [build, smoke]
+    if: github.event.release.tag_name != '' || inputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The only job that writes: it uploads the assets to the release.
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: skilletor-*
+          merge-multiple: true
+          path: dl
+      - name: Write the checksums and upload every asset
+        run: |
+          v="${TAG#v}"
+          for p in linux-x86_64 linux-arm64 macos-arm64; do
+            for f in "skilletor-$v-$p" "skilletor-$v-$p.tar.gz"; do
+              [ -f "dl/$f" ] || { printf '::error::asset %s is missing\n' "$f" >&2; exit 1; }
+            done
+          done
+          [ -f "dl/skilletor-$v-windows-x86_64.exe" ] \
+            || { printf '::error::asset skilletor-%s-windows-x86_64.exe is missing\n' "$v" >&2; exit 1; }
+          out="skilletor-$v-checksums.txt"
+          ( cd dl && sha256sum -- skilletor-* ) > "$out"
+          cat "$out"
+          # The starter's trust anchor: the bare binaries' lines, as sha256sum writes them.
+          grep -v '\.tar\.gz$' "$out" > skilletor-binaries.sha256
+          gh release upload "$TAG" dl/skilletor-* "$out" --clobber --repo "$GITHUB_REPOSITORY"
+          {
+            printf '### bin/skilletor-binaries.sha256 for %s\n\n' "$TAG"
+            printf 'Review, then commit it as bin/skilletor-binaries.sha256 (artifact pinned-binary-checksums).\n\n```\n'
+            cat skilletor-binaries.sha256
+            printf '```\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep the pinned file for the plugin
+        uses: actions/upload-artifact@v4
+        with:
+          # Not skilletor-*: a re-run's download pattern must not pick it up as an asset.
+          name: pinned-binary-checksums
+          path: skilletor-binaries.sha256
+          if-no-files-found: error
+          overwrite: true

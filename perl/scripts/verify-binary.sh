@@ -58,6 +58,9 @@ printf '{ "vars": { "who": "world", "flag": true } }\n' > "$work/src/skilletor.j
 printf -- '---\nname: remote-skill\ndescription: From git\n---\nGit.\n' > "$work/git/remote/skills/remote-skill/SKILL.md"
 printf -- '---\nname: web-skill\ndescription: From a url\n---\nWeb.\n' > "$work/web/top/skills/web-skill/SKILL.md"
 printf '[url "file://%s"]\n\tinsteadOf = https://skilletor.invalid/remote.git\n' "$work/git/remote" > "$work/gitconfig"
+# git before 2.32 has no GIT_CONFIG_GLOBAL and reads $HOME/.gitconfig instead: the same file
+# there, for the build image's git (perl:5.40-bullseye: 2.30).
+cp "$work/gitconfig" "$work/pristine/home/.gitconfig"
 for c in "init -q -b main" "add -A" "commit -q -m one"; do
   # shellcheck disable=SC2086  # $c is a fixed git argument list
   env "${commit_env[@]}" git -C "$work/git/remote" $c || fail "git $c in the fixture repository"

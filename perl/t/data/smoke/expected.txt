@@ -1,0 +1,239 @@
+=== status before a sync
+--- stdout
+user scope:
+  · skills/web-skill @web
+  · agents/rev @loc
+  · rules/style @loc
+  * skills/* @loc (0 installed)
+project scope:
+--- stderr
+--- exit 0
+=== sync
+--- stdout
+skilletor: user scope
+  + agents/rev (active after /reload-plugins or restart)
+  + rules/style (active after /reload-plugins or restart)
+  + skills/hello (active now)
+  + skills/tpl (active now)
+  warning: source web: url source https://127.0.0.1:1/skills.tar.gz failed: fetch failed
+--- stderr
+--- exit 0
+=== files after the sync
+./.claude.json
+./.claude/agents/.local.rev.md
+./.claude/rules/.local.style.md
+./.claude/skilletor.json
+./.claude/skilletor.lock.json
+./.claude/skills/hello/.gitignore
+./.claude/skills/hello/SKILL.md
+./.claude/skills/hello/docs/ref.md
+./.claude/skills/tpl/.gitignore
+./.claude/skills/tpl/SKILL.md
+./src/agents/rev.md
+./src/rules/style.md
+./src/skilletor.json
+./src/skills/hello/SKILL.md
+./src/skills/hello/docs/ref.md
+./src/skills/tpl/SKILL.md.njk
+=== the rendered template: .claude/skills/tpl/SKILL.md
+---
+name: tpl
+description: Greets world
+---
+Hello WORLD from loc (claude, user).
+=== check after a sync (the url source never synced: changed)
+--- stdout
+changed
+--- stderr
+--- exit 1
+=== check --json
+--- stdout
+{
+  "changed": true,
+  "sources": [
+    {
+      "name": "loc",
+      "scope": "user",
+      "changed": true
+    }
+  ],
+  "warnings": [
+    "source web: fetch failed"
+  ],
+  "declaredChanged": [
+    "user"
+  ],
+  "varsChanged": [
+    "user"
+  ]
+}
+--- stderr
+--- exit 1
+=== status after a sync
+--- stdout
+user scope:
+  · skills/web-skill @web
+  ✓ agents/rev @loc
+  ✓ rules/style @loc
+  ✓ skills/hello @loc via *@loc
+  ✓ skills/tpl @loc via *@loc
+  * skills/* @loc (2 installed)
+project scope:
+--- stderr
+--- exit 0
+=== status --json
+--- stdout
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "targets": [
+        "claude"
+      ],
+      "declared": [
+        {
+          "key": "skills/web-skill",
+          "source": "web",
+          "installed": false
+        },
+        {
+          "key": "agents/rev",
+          "source": "loc",
+          "installed": true
+        },
+        {
+          "key": "rules/style",
+          "source": "loc",
+          "installed": true
+        },
+        {
+          "key": "skills/hello",
+          "source": "loc",
+          "installed": true,
+          "via": "*@loc"
+        },
+        {
+          "key": "skills/tpl",
+          "source": "loc",
+          "installed": true,
+          "via": "*@loc"
+        }
+      ],
+      "orphans": [],
+      "wildcards": [
+        {
+          "type": "skill",
+          "source": "loc",
+          "entry": "*@loc",
+          "installed": 2
+        }
+      ],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {
+        "loc": "local"
+      }
+    },
+    {
+      "scope": "project",
+      "targets": [
+        "claude"
+      ],
+      "declared": [],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {}
+    }
+  ]
+}
+--- stderr
+--- exit 0
+=== sync again
+--- stdout
+skilletor: user scope
+  warning: source web: url source https://127.0.0.1:1/skills.tar.gz failed: fetch failed
+--- stderr
+--- exit 0
+=== sync --json again
+--- stdout
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "added": [],
+      "updated": [],
+      "removed": [],
+      "unchanged": [
+        {
+          "key": "agents/rev",
+          "type": "agent",
+          "name": "rev",
+          "source": "loc"
+        },
+        {
+          "key": "rules/style",
+          "type": "rule",
+          "name": "style",
+          "source": "loc"
+        },
+        {
+          "key": "skills/hello",
+          "type": "skill",
+          "name": "hello",
+          "source": "loc"
+        },
+        {
+          "key": "skills/tpl",
+          "type": "skill",
+          "name": "tpl",
+          "source": "loc"
+        }
+      ],
+      "skipped": [],
+      "conflicts": [],
+      "overwritten": [],
+      "warnings": [
+        "source web: url source https://127.0.0.1:1/skills.tar.gz failed: fetch failed"
+      ],
+      "trustRequests": []
+    },
+    {
+      "scope": "project",
+      "added": [],
+      "updated": [],
+      "removed": [],
+      "unchanged": [],
+      "skipped": [],
+      "conflicts": [],
+      "overwritten": [],
+      "warnings": [],
+      "trustRequests": []
+    }
+  ]
+}
+--- stderr
+--- exit 0
+=== an option sync does not take (exit 2)
+--- stdout
+--- stderr
+skilletor: unknown option for sync: --bogus (run skilletor --help)
+--- exit 2
+=== files at the end
+./.claude.json
+./.claude/agents/.local.rev.md
+./.claude/rules/.local.style.md
+./.claude/skilletor.json
+./.claude/skilletor.lock.json
+./.claude/skills/hello/.gitignore
+./.claude/skills/hello/SKILL.md
+./.claude/skills/hello/docs/ref.md
+./.claude/skills/tpl/.gitignore
+./.claude/skills/tpl/SKILL.md
+./src/agents/rev.md
+./src/rules/style.md
+./src/skilletor.json
+./src/skills/hello/SKILL.md
+./src/skills/hello/docs/ref.md
+./src/skills/tpl/SKILL.md.njk

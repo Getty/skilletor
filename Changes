@@ -1,6 +1,13 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - A release-binaries workflow, prepared and not active (workflow_dispatch
+    only): it packs the Perl port with PAR::Packer for linux-x86_64,
+    linux-arm64, macos-arm64 and windows-x86_64, smokes each binary on clean
+    machines without Perl, and on a tag run attaches the binaries, tarballs and
+    one checksums file to the GitHub release vX.Y.Z, with the checksums for
+    bin/skilletor-binaries.sha256 as an artifact. A run without a tag is a
+    probe that touches no release.
   - bin/skilletor-start, a plugin starter prepared for the Perl binaries and
     not wired yet (hooks and the Hermes adapter still run bin/skilletor): it
     runs the release binary cached under <claudeConfigDir>/skilletor/bin/,
