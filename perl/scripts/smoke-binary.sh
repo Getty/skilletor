@@ -18,9 +18,9 @@
 # the transcript stays what the Perl code writes. A command ported later joins the cases below
 # (and the transcript, SKILLETOR_SMOKE_UPDATE=1 prove -l t/70-smoke-binary.t).
 #
-# Windows (Git Bash): --version, --help and the error path only. The Perl port's process layer
-# is not Windows-ready yet (k186: Skilletor::Process::spawn_detached dies there), so the
-# fixture commands and the hooks are skipped, and the output says so.
+# Windows (Git Bash): the same checks and transcript. The binary takes Windows paths: the home
+# as USERPROFILE and HOME, the hooks' project and inputs in cygpath -m form (C:/Users/...), which
+# the transcript writes as <work> as well. The background sync starts through Win32::Process.
 #
 # SKILLETOR_SMOKE_WAIT: how many seconds the next prompts may wait for the background sync's
 # pending report (default 60).
@@ -76,9 +76,13 @@ if [ -n "$windows" ]; then
   w_tmp=$(cygpath -w "$work/tmp")
   envs=(PATH=/usr/bin:/bin SYSTEMROOT="${SYSTEMROOT:-C:\\Windows}" USERPROFILE="$w_home" HOME="$w_home"
         TEMP="$w_tmp" TMP="$w_tmp")
+  # A path as the binary takes it: Windows' own, with forward slashes (JSON needs no escape).
+  native() { cygpath -m "$1"; }
 else
   envs=(PATH=/usr/bin:/bin HOME="$work/home")
+  native() { printf '%s\n' "$1"; }
 fi
+nwork=$(native "$work")
 bin() { env -i "${envs[@]}" "$BIN" "$@" </dev/null; }
 
 out=$(bin --version) || fail "--version failed"
@@ -97,12 +101,6 @@ bin nope >/dev/null 2>"$work/nope.err" || rc=$?
 [ "$rc" -eq 2 ] || fail "an unknown command exits $rc, want 2"
 [ "$(cat "$work/nope.err")" = "skilletor: unknown command: nope" ] || fail "an unknown command says '$(head -c 400 "$work/nope.err")'"
 echo "smoke error path: OK (unknown command, exit 2)"
-
-if [ -n "$windows" ]; then
-  echo "smoke sync, check, status, hooks: SKIPPED on Windows (k186: the process layer is not Windows-ready)"
-  echo "smoke: OK (Windows: --version, --help, error path)"
-  exit 0
-fi
 
 # The fixture: a home with Claude Code's marker and the user config, its local source at ~/src.
 # Every command runs in an empty cwd outside any git work tree (a clean image has no git), so
@@ -129,7 +127,7 @@ capture() {
 # $work/DIR, CLAUDE_PROJECT_DIR naming it, the event's JSON (the file $work/INPUT) on stdin.
 capture_hook() {
   local rc=0
-  (cd "$work/$2" && env -i "${envs[@]}" CLAUDE_PROJECT_DIR="$work/$2" "$BIN" hook "$1" <"$work/$3") \
+  (cd "$work/$2" && env -i "${envs[@]}" CLAUDE_PROJECT_DIR="$nwork/$2" "$BIN" hook "$1" <"$work/$3") \
     >"$work/out" 2>"$work/err" || rc=$?
   echo "$rc" >"$work/rc"
 }
@@ -173,15 +171,15 @@ run_case "an option sync does not take (exit 2)" sync --bogus
 # The hooks' inputs as Claude Code sends them: the session "smoke" starts in the empty cwd and
 # moves into two checkouts; the session "smoke-prompted" prompts in a checkout never checked.
 printf '{"session_id":"smoke","cwd":"%s","hook_event_name":"SessionStart","source":"startup"}\n' \
-  "$work/cwd" >"$work/start.json"
+  "$nwork/cwd" >"$work/start.json"
 printf '{"session_id":"smoke","cwd":"%s","hook_event_name":"UserPromptSubmit","prompt":"hi"}\n' \
-  "$work/cwd" >"$work/prompt.json"
+  "$nwork/cwd" >"$work/prompt.json"
 printf '{"session_id":"smoke-prompted","cwd":"%s","hook_event_name":"UserPromptSubmit","prompt":"hi"}\n' \
-  "$work/checkouts/prompted" >"$work/prompted.json"
+  "$nwork/checkouts/prompted" >"$work/prompted.json"
 printf '{"session_id":"smoke","cwd":"%s","old_cwd":"%s","new_cwd":"%s","hook_event_name":"CwdChanged"}\n' \
-  "$work/checkouts/cwd-changed" "$work/cwd" "$work/checkouts/cwd-changed" >"$work/moved.json"
+  "$nwork/checkouts/cwd-changed" "$nwork/cwd" "$nwork/checkouts/cwd-changed" >"$work/moved.json"
 printf '{"session_id":"smoke","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"cd %s"}}\n' \
-  "$work/checkouts/post-tool-use" "$work/checkouts/post-tool-use" >"$work/bash-cd.json"
+  "$nwork/checkouts/post-tool-use" "$nwork/checkouts/post-tool-use" >"$work/bash-cd.json"
 
 hook_case "hook session-start (the check says changed: a sync, the url source's warning)" session-start cwd start.json
 hook_case "hook user-prompt-submit (checked at the session start: nothing due)" user-prompt-submit cwd prompt.json
@@ -208,9 +206,11 @@ hook_case "hook post-tool-use again (the session's cwd as recorded: nothing to d
 files "files at the end"
 files "files of the checkouts at the end" checkouts
 
-# This run's temp dir, which the hooks print with a checkout's path, as <work>.
+# This run's temp dir, which the hooks print with a checkout's path (Windows: its native form),
+# as <work>.
 work_re=$(printf '%s' "$work" | sed 's/[]\/$*.^[]/\\&/g')
-sed "s/$work_re/<work>/g" "$work/transcript" >"$work/transcript.txt"
+nwork_re=$(printf '%s' "$nwork" | sed 's/[]\/$*.^[]/\\&/g')
+sed -e "s/$nwork_re/<work>/g" -e "s/$work_re/<work>/g" "$work/transcript" >"$work/transcript.txt"
 
 expected="$fixture/expected.txt"
 if [ -n "${SKILLETOR_SMOKE_UPDATE:-}" ]; then

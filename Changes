@@ -8,7 +8,8 @@ Revision history for skilletor
     machines without Perl, and on a tag run attaches the binaries, tarballs and
     one checksums file to the GitHub release vX.Y.Z, with the checksums for
     bin/skilletor-binaries.sha256 as an artifact. A run without a tag is a
-    probe that touches no release.
+    probe that touches no release. Its Windows leg packs Win32::Process and
+    runs the full smoke, the hooks included (k210).
   - bin/skilletor-start, a plugin starter prepared for the Perl binaries and
     not wired yet (hooks and the Hermes adapter still run bin/skilletor): it
     runs the release binary cached under <claudeConfigDir>/skilletor/bin/,

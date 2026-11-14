@@ -35,9 +35,10 @@
 #     check-binary-libs.sh's verdict and those sonames. The choice is k167's; no smoke cell can
 #     prove TLS (the clean images have nothing to serve https).
 #
-# Windows (the skill has no such leg): Strawberry Perl 5.40, pp with the options from a file, the
-# packed-module check, and a smoke of --version, --help and the error path only - the Perl
-# port's process layer is not Windows-ready yet (k186), so no sync and no hook runs there.
+# Windows (the skill has no such leg): Strawberry Perl 5.40, the module list computed there (never
+# the Linux one), pp with the options from a file, the packed-module check, and the full smoke:
+# sync, check, status and the hooks, the background sync through Win32::Process (k186) included.
+# verify-binary.sh's comparison with perl -Ilib is POSIX-only and does not run there.
 # A tag run also requires README.md to name every runtime lib check-binary-libs.sh --list prints,
 # in backticks (the skill's gate); a probe skips that step.
 #
@@ -187,12 +188,17 @@ jobs:
           TMPDIR: ${{ runner.temp }}
         # build-binary.sh's pp call with the same two lists, read from an options file (pp @file,
         # Getopt::ArgvFile): its ~1,800 -X options exceed Windows' 32,767-character command line.
-        # Perl prints CRLF on Windows; tr strips the CR off every module name.
+        # Perl prints CRLF on Windows; tr strips the CR off every module name. The list is this
+        # machine's: File::Spec::Win32 says so, and Win32::Process (the hooks' background sync,
+        # loaded by name there) must be in it.
         run: |
           perl -e 'exit($] >= 5.040 ? 0 : 1)' || { echo '::error::Text::Nunjucks needs Perl 5.40' >&2; exit 1; }
           perl -Ilib scripts/loaded-modules.pl | tr -d '\r' > "$RUNNER_TEMP/loaded"
           n=$(wc -l < "$RUNNER_TEMP/loaded" | tr -d ' ')
           [ "$n" -gt 100 ] || { echo "::error::loaded set suspiciously small ($n modules)" >&2; exit 1; }
+          for m in File::Spec::Win32 Win32::Process; do
+            grep -qx "$m" "$RUNNER_TEMP/loaded" || { echo "::error::the module list lacks $m" >&2; exit 1; }
+          done
           # shellcheck disable=SC2046  # one argument per module
           {
             sed 's/^/-M /' "$RUNNER_TEMP/loaded"
@@ -209,8 +215,8 @@ jobs:
         if: matrix.os == 'windows'
         env:
           BIN: ${{ steps.v.outputs.bin }}
-        # verify-binary.sh's archive checks; its output comparison needs the process layer that
-        # is not Windows-ready yet (k186). Archive::Zip comes with PAR.
+        # verify-binary.sh's archive checks (its output comparison is POSIX-only), and the shared
+        # object of Win32::Process. Archive::Zip comes with PAR.
         run: |
           perl -MArchive::Zip=:ERROR_CODES -e 'my ($bin, $dir) = @ARGV;
             my $z = Archive::Zip->new($bin) or die "cannot read the PAR archive in $bin\n";
@@ -224,6 +230,8 @@ jobs:
           done < "$RUNNER_TEMP/loaded"
           [ -z "$missing" ] || { echo "::error::modules missing inside the PAR archive:$missing" >&2; exit 1; }
           [ -s "$RUNNER_TEMP/archive/lib/Mozilla/CA/cacert.pem" ] || { echo '::error::Mozilla/CA/cacert.pem is not packed' >&2; exit 1; }
+          dll=$(find "$RUNNER_TEMP/archive/lib/auto/Win32/Process" -name '*.dll' 2>/dev/null | head -n 1)
+          [ -n "$dll" ] || { echo "::error::Win32::Process's shared object is not packed" >&2; exit 1; }
           # shellcheck disable=SC2046  # one argument per module
           fam=$(perl -Ilib scripts/left-out-modules.pl --inc "$RUNNER_TEMP/archive/lib" -- $(cat "$RUNNER_TEMP/loaded") | head -5)
           [ -z "$fam" ] || { echo "::error::left-out families packed: $fam" >&2; exit 1; }
@@ -357,7 +365,7 @@ jobs:
         if: matrix.os == 'macos'
         working-directory: perl
         run: ./scripts/smoke-binary.sh ../dl/skilletor-*-"$PLATFORM" ../dl/skilletor-*-"$PLATFORM".tar.gz
-      - name: Smoke-test the binary (Windows - --version, --help, error path)
+      - name: Smoke-test the binary (Windows)
         if: matrix.os == 'windows'
         working-directory: perl
         run: ./scripts/smoke-binary.sh ../dl/skilletor-*-"$PLATFORM".exe

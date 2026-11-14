@@ -50,7 +50,10 @@ $mods{ s{/}{::}gr } = 1 for pm_under( $tn_dir, 'Text/Nunjucks' );
 #                                 source); the run below reaches it only up to the connect.
 #   Mozilla::CA                   IO::Socket::SSL's CA bundle when the target's OpenSSL dir has
 #                                 none (default_ca falls back to it by name).
+#   Win32::Process                Windows: Skilletor::Process starts the hooks' background sync
+#                                 with it (spawn_detached), which only a due prompt reaches.
 $mods{$_} = 1 for qw( IO::Socket::SSL Net::SSLeay Mozilla::CA );
+$mods{'Win32::Process'} = 1 if $^O eq 'MSWin32';
 
 for my $m ( sort keys %mods ) {
   eval "require $m; 1" or warn "loaded-modules: not loadable: $m (".( split /\n/, $@ )[0].")\n";
@@ -62,6 +65,9 @@ HTTP::Tiny->can_ssl if HTTP::Tiny->can('can_ssl');
 # tree with a template, a git repository reached through insteadOf, an https url nobody serves),
 # a project declaring an untrusted source of its own, and an empty cwd.
 my $base = ( defined $ENV{TMPDIR} && -d $ENV{TMPDIR} ) ? $ENV{TMPDIR} : '/tmp';
+# Windows (TMPDIR D:\a\_temp): forward slashes, since the fixture's JSON and gitconfig take the
+# path as it is.
+$base =~ tr{\\}{/} if $^O eq 'MSWin32';
 my $tmp;
 for my $n ( 0 .. 99 ) {
   my $try = "$base/skilletor-loaded-modules.$$.$n";
@@ -73,8 +79,8 @@ END { local $?; system( 'rm', '-rf', '--', $tmp ) if $$ == $MAIN && defined $tmp
 
 sub spew {
   my ( $file, $content ) = @_;
-  my $dir = '';
-  for my $part ( grep { length } split m{/}, ( $file =~ s{/[^/]+\z}{}r ) ) {
+  my ( $dir, @parts ) = split m{/}, ( $file =~ s{/[^/]+\z}{}r );    # $dir: '' here, D: on Windows
+  for my $part ( grep { length } @parts ) {
     $dir .= "/$part";
     mkdir $dir unless -d $dir;
   }
@@ -102,7 +108,9 @@ spew( "$tmp/src/skilletor.json", qq({\n  "vars": { "who": "world", "flag": true 
 spew( "$tmp/src2/skills/extra/SKILL.md", $skill->( 'extra', 'Extra', 'Extra.' ) );
 spew( "$tmp/git/remote/skills/remote-skill/SKILL.md", $skill->( 'remote-skill', 'From git', 'Git.' ) );
 spew( "$tmp/git/remote/bundles/pack.yaml", "description: A pack\nskills: [remote-skill]\nvars:\n  who: pack\n" );
-my $gitconfig = qq([url "file://$tmp/git/remote"]\n\tinsteadOf = https://skilletor.invalid/remote.git\n);
+# file:///tmp/... here, file:///D:/a/... on Windows.
+my $remote_url = 'file://'.( $tmp =~ m{\A/} ? '' : '/' )."$tmp/git/remote";
+my $gitconfig = qq([url "$remote_url"]\n\tinsteadOf = https://skilletor.invalid/remote.git\n);
 spew( "$tmp/gitconfig", $gitconfig );
 # git before 2.32 has no GIT_CONFIG_GLOBAL and reads $HOME/.gitconfig instead: the same file
 # there, for the build image's git (perl:5.40-bullseye: 2.30).
