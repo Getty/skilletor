@@ -1,0 +1,22 @@
+---
+class: standard
+completed: 2026-11-14T04:31:08Z
+created: 2026-11-13T23:32:13Z
+id: 202
+priority: low
+started: 2026-11-14T03:28:28Z
+status: done
+tags:
+- perl
+- dist
+title: 'Perl dist: MetaProvides lists two packages without a .pm'
+updated: 2026-11-14T04:31:08Z
+---
+
+From k188: `dzil build` warns that MetaProvides lists Skilletor::Frontmatter::Float and Skilletor::TOML::Float, which are inner packages without .pm files of their own. Either hide them from the indexer (package NAME on two lines / no_index) or move them into files; check what [@Author::GETTY] does elsewhere.
+
+2026-11-14 03:57 Reproduced: dzil build (Dist::Zilla::PluginBundle::Author::GETTY 0.328) in perl/ warns twice '[@Author::GETTY/MetaProvides::Package] 2 provide map entries did not map to .pm files and may not be loadable at install time: Skilletor::Frontmatter::Float, Skilletor::TOML::Float'. House survey (99 dists with [@Author::GETTY] under /home/getty/dev): none uses [MetaNoIndex]/no_index; the inner-package fix in use is the two-line package statement – p5-net-async-mikrotik/lib/Net/Async/MikroTik.pm:516 ('package # hide from PAUSE' / '  Net::Async::MikroTik::_Client;') and this dist's own perl/lib/Skilletor/Frontmatter.pm:91 ('package    # hide from PAUSE' / '  Skilletor::Frontmatter::_Parser;'), which is why _Parser is not in the warning (the bundle runs MetaProvides::Package, which skips such packages). Others (p5-text-nunjucks, ansill) leave one-line inner packages unhidden, no model. A file of its own is outside this card's lane. Fix: the two-line form for both Float packages, in Frontmatter.pm's own spelling.
+
+2026-11-14 04:09 Done in worktree /home/getty/dev/skilletor/.claude/worktrees/agent-a4a6c587e81e766e1 (uncommitted). Patch /tmp/k202-only.patch sha256 e19012cf7dfddc90e60519cf621523f6cd0b1a696960c3e33378b416701c1dd9; files: perl/lib/Skilletor/Frontmatter.pm, perl/lib/Skilletor/TOML.pm (dist.ini unchanged). Change: 'package Skilletor::Frontmatter::Float;' and 'package Skilletor::TOML::Float;' written as 'package    # hide from PAUSE' + '  <name>;', the house form (p5-net-async-mikrotik Net/Async/MikroTik.pm:516, this dist's Frontmatter.pm:91 _Parser); same statement to perl, no behaviour change; the POD sections on both classes stay. Proof: dzil build --in /tmp/k202-build-after (Author::GETTY 0.328) prints no MetaProvides::Package warning (before: the warning twice); META.json provides went from 64 to 62 entries, the only difference being the two Float packages gone (diff of the sorted 'package file' lists). prove -l t/00-load.t t/14-toml.t t/15-convert.t t/17-agentsmd.t t/22-targets.t t/24-resolve-oracle.t t/72-engine-codex.t t/50-parity.t: 8 files, 112 tests, PASS. Note: Frontmatter::Float was already one line in tag 0.001, so the next release's META drops a package that 0.001 listed. Before this last handoff, with all three patches (k197, k211, k202) in the worktree: prove -lr -j4 t, 42 files, 2477 tests, PASS, no file skipped; prove -l t/60-conformance.t 92 tests PASS. The three patches apply alone and together to a clean HEAD copy (patch --dry-run), touch disjoint files, and give the worktree's bytes. No conformance expectation changed.
+
+Committed as 30436de
