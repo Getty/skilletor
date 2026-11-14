@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-11-14T01:49:50Z
+id: 214
+priority: low
+status: backlog
+tags:
+- ts
+- cli
+title: 'TS: two quirks of the source commands the Perl port found (array sources,
+  newline in an argv name)'
+updated: 2026-11-14T03:55:58Z
+---
+
+From k175 (Perl trust/source list/source remove). (1) src/config.ts sourceEntry uses Object.hasOwn on `sources`, so a `sources` written as a JSON array counts its indices and `length` as declared names: `source remove 0` / `source remove length` pass the k114 "not declared" check. Config load refuses an array `sources` anyway, so both CLIs exit 1, with different text; the Perl port does not mirror it. Fix in the reference: sourceEntry only for a plain object (typeof object, not null, not Array.isArray), with a test; then a conformance case. (2) A name given on the command line to `trust` or `source remove` that contains a newline is printed raw in the error, so it spans two lines (case 80 pins this as the reference does it today). Decide whether argv names get the k87 escaping too; if the reference changes, regenerate case 80 and follow in Perl.
+
+From k185 review: src/hooks.ts withHermesTrust interpolates `${out.systemMessage}`, so an output without a line would read "undefined — if Hermes does not trust this project yet: …". It cannot happen today (a move that adds a skill always has a line); the Perl port mirrors it (Hooks.pm _with_hermes_trust, `// 'undefined'`). If the reference changes, the Perl port follows.
