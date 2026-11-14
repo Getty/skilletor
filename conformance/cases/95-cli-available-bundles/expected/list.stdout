@@ -1,0 +1,17 @@
+  skill s1@shared — s1 skill
+  rule perl-a@shared — perl a
+  rule perl-b@shared — perl b
+✓ bundle base@shared — Base
+    skill:s1
+  bundle broken@shared
+    error: bundle broken: bundles/broken.yaml: unknown key "nope" (allowed: description, skills, agents, rules, bundles, vars)
+  bundle empty@shared — Nothing yet
+    (no items)
+  bundle loop@shared — Loop
+    error: bundle cycle loop → loop
+✓ bundle perl@shared — Perl
+    rule:p-*@gitlab.com/peter, rule:perl-a, rule:perl-b, skill:s1
+  bundle refused@shared
+    error: bundle refused: bundles/refused.yaml: rules: "x@http://host/x.tar.gz" cannot be added as a source: sources.host.url "http://host/x.tar.gz" must be an https:// URL
+  bundle twice@shared
+    error: bundle twice: both bundles/twice.yaml and bundles/twice.yml exist

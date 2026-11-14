@@ -1,6 +1,17 @@
 Revision history for Skilletor
 
 {{$NEXT}}
+  - `skilletor available [source] [--json]` in the Perl CLI
+    (Skilletor::Commands::available, after cmdAvailable): every trusted
+    source - or the one named - resolved and scanned under the sync lock, the
+    caches swept first; an item marked installed when either scope declares it
+    or either lock holds it for that source (any target, not a skipped entry),
+    a bundle when either config declares it; an item's error, a bundle's
+    sorted members, `(no items)` or its expansion error on a second line;
+    --json the list; an untrusted source skipped. A lock entry that is no
+    object marks nothing installed, where the reference throws a TypeError
+    (k222). Skilletor::Error::Command's POD names add's and available's
+    refusals. Conformance cases 93 to 97, t/76-commands-available.t (k177).
   - The Perl engine now syncs, checks and reports the Hermes target as the
     reference does (spec section 16): skills only, in the Hermes home's
     skills ($HERMES_HOME, else the recorded home, else ~/.hermes) and

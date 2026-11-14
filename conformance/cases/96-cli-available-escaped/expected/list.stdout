@@ -1,0 +1,5 @@
+  skill foo@shared — Grüße 🍳	ok \u001b[31mred\u0007\u202eevil next
+  bundle b@shared — Perl\u001b[31mred\u0007\u202eevil\nnext
+    skill:foo
+  bundle bad@shared
+    error: bundle bad: bundles/bad.yaml: unknown key "key\u001b[31mred\u0007\u202eevil\nnext" (allowed: description, skills, agents, rules, bundles, vars)

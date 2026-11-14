@@ -1,0 +1,5 @@
+description: Perl
+rules: ["perl-*", "p-*@gitlab.com/peter"]
+bundles: [base]
+vars:
+  level: 2

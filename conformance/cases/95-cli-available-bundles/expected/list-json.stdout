@@ -1,0 +1,90 @@
+[
+  {
+    "type": "skill",
+    "name": "s1",
+    "description": "s1 skill",
+    "source": "shared",
+    "installed": false
+  },
+  {
+    "type": "rule",
+    "name": "perl-a",
+    "description": "perl a",
+    "source": "shared",
+    "installed": false
+  },
+  {
+    "type": "rule",
+    "name": "perl-b",
+    "description": "perl b",
+    "source": "shared",
+    "installed": false
+  },
+  {
+    "type": "bundle",
+    "name": "base",
+    "description": "Base",
+    "source": "shared",
+    "installed": true,
+    "members": [
+      "skill:s1"
+    ],
+    "vars": {
+      "style": "short"
+    }
+  },
+  {
+    "type": "bundle",
+    "name": "broken",
+    "source": "shared",
+    "installed": false,
+    "error": "bundle broken: bundles/broken.yaml: unknown key \"nope\" (allowed: description, skills, agents, rules, bundles, vars)"
+  },
+  {
+    "type": "bundle",
+    "name": "empty",
+    "description": "Nothing yet",
+    "source": "shared",
+    "installed": false,
+    "members": [],
+    "vars": {}
+  },
+  {
+    "type": "bundle",
+    "name": "loop",
+    "description": "Loop",
+    "source": "shared",
+    "installed": false,
+    "error": "bundle cycle loop → loop"
+  },
+  {
+    "type": "bundle",
+    "name": "perl",
+    "description": "Perl",
+    "source": "shared",
+    "installed": true,
+    "members": [
+      "rule:p-*@gitlab.com/peter",
+      "rule:perl-a",
+      "rule:perl-b",
+      "skill:s1"
+    ],
+    "vars": {
+      "level": 2
+    }
+  },
+  {
+    "type": "bundle",
+    "name": "refused",
+    "source": "shared",
+    "installed": false,
+    "error": "bundle refused: bundles/refused.yaml: rules: \"x@http://host/x.tar.gz\" cannot be added as a source: sources.host.url \"http://host/x.tar.gz\" must be an https:// URL"
+  },
+  {
+    "type": "bundle",
+    "name": "twice",
+    "source": "shared",
+    "installed": false,
+    "error": "bundle twice: both bundles/twice.yaml and bundles/twice.yml exist"
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "install": {
+    "bundles": [
+      "base@shared"
+    ]
+  }
+}

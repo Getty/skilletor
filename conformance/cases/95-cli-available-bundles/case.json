@@ -1,0 +1,8 @@
+{
+  "description": "available's bundles (spec §15.5): each after the source's items, ✓ when the user or the project config declares it, its line followed by one more – its members, expanded through an included bundle and with an entry of another source as written, sorted, joined by `, `; `(no items)` when none matches; or `error:` and why it does not expand: a key bundle files do not have, an include cycle, an address config load would refuse as a source (k115), both .yaml and .yml. --json gives members and the bundle's own vars, or the error; with --project-dir the home the project's declaration no longer counts.",
+  "steps": [
+    { "id": "list", "op": "cli", "argv": ["available"] },
+    { "id": "list-json", "op": "cli", "argv": ["available", "--json"] },
+    { "id": "home-project", "op": "cli", "argv": ["available", "--project-dir", "${HOME}"], "tree": true }
+  ]
+}

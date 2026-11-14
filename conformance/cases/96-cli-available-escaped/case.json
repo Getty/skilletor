@@ -1,0 +1,8 @@
+{
+  "description": "k87 for available: a source's free text – a skill's description, a bundle's, a bundle file's key in its error – with an escape sequence, a bell, a bidi override and a newline is escaped on its line, ordinary text (umlauts, an emoji, a tab) printed as written; --json with JSON's escapes, parsing back to the text; an unknown source named with those characters exits 1 with it escaped, its newline a line break of the error.",
+  "steps": [
+    { "id": "list", "op": "cli", "argv": ["available", "shared"] },
+    { "id": "list-json", "op": "cli", "argv": ["available", "shared", "--json"] },
+    { "id": "unknown", "op": "cli", "argv": ["available", "team\u001b[31mred\u0007\u202eevil\nnext"], "tree": true }
+  ]
+}

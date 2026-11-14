@@ -527,6 +527,11 @@ show it, its `description` saying which.
 | `90-cli-add-probe` | the probe of a generic host: `git ls-remote` through insteadOf makes it git at `https://<host>/<path>` (a trailing `/` dropped) or `/skills`, named after the host; kept again, refused under the taken name; at 127.0.0.1:1, where nothing listens, neither git nor the HEAD on the tarball answers: exit 1 naming both URLs (the HEAD's 2xx is each engine's own test: no TLS server here) |
 | `91-cli-add-escaped` | k87: an added local path with an escape sequence, a bidi override and a newline is one escaped line in the added message; a refused add naming it escapes it on stderr, its newline a line break |
 | `92-cli-add-claude-config-dir` | `add` under `CLAUDE_CONFIG_DIR` (k145): the user config written there, the decoy in `~/.claude` untouched, the saved file named when the sync stops at a project install of an undeclared source (k103); a project source trusted in the state root there |
+| `93-cli-available` | `available` (text, `--json`): the merged map's trusted sources in order, a source's items then its bundles; `✓` for an item an entry of either scope declares or a lock of either scope holds for that source (a `codex:` key too, a skipped entry not), for a bundle either scope's config declares; a user source read by the user config's definition, a git source fetched; a project-only source skipped until trusted, by name too (an empty line, `[]`), then listed; `--project-dir ~` the user config and lock alone |
+| `94-cli-available-item-errors` | an item that cannot be built (k100, k113, k126): listed once with `error:` on its second line – `x.md` beside `x.md.njk`, `SKILL.md` beside `SKILL.md.njk` (no description), a companion file in both forms, a name a source's `path` finds twice; `--json` carries it |
+| `95-cli-available-bundles` | `available`'s bundles: members expanded through an include and an entry of another source as written, sorted; `(no items)`; `error:` for an unknown key, a cycle, an address config load refuses (k115), `.yaml` beside `.yml`; `--json` members and the bundle's own vars; `✓` from the user or the project config |
+| `96-cli-available-escaped` | k87: a skill's description, a bundle's and a bundle file's key in its error with control and bidi characters escaped on their lines, umlauts, an emoji and a tab as written, `--json` parsing back; an unknown source with them exits 1, escaped |
+| `97-cli-available-refused` | `available` exits 1, nothing on stdout: an unknown name, a missing local directory, a failing scan, any of them among all sources, a config load refuses, a lock that is no object; the source named alone still lists |
 | `100-codex-user` | Codex alone (`"claude": false`, a `~/.codex/config.toml` without hook trust): the user sync installs the skill in `~/.agents/skills`, the agent as `~/.codex/agents/.local.helper.toml`, the rule as its section of `~/.codex/skilletor-rules.md` and the pointer block in `~/.codex/AGENTS.md`; one run warning that Codex has not trusted the SessionStart hook, in status too; check up to date, a resync changes nothing; the CLI's resync (text, `--json`), check and status |
 | `101-codex-project` | Claude Code and Codex (hook trusted) in the project scope: each its own copy of skill, agent and rule, the pointer appended to the project's own `AGENTS.md`, a `.gitignore` block in `.claude` and in `.codex`, `.worktreeinclude` naming every root; no run warning; check, status, a resync changes nothing; the CLI's status names both targets |
 | `102-codex-convert` | what the Codex mapping refuses or warns about: an agent whose `codex` is no mapping installs with a warning, one without a description and a rule holding a skilletor marker line install nothing, a rule that renders empty is skipped and gets no section; the resync says the same; the CLI's resync text |
@@ -559,11 +564,13 @@ paths and the hash covers the project dir, so they differ from one temp dir to t
 Perl port's `t/52-parity-sync.t` has both engines sync one machine and compares them byte for
 byte.
 
-Not covered yet: the CLI's `available`, `install` and `uninstall` (the Perl CLI runs none of
-them yet); of `add`, a generic host whose tarball answers the probe's HEAD (it needs a TLS
-server; the Perl port's `t/31-probe.t` pins the HEAD against a local HTTP server, the reference
-has no test of it yet); the bytes `trust` and `add` write to `trust.json` (state, outside the
-compared trees; each engine's own tests pin them); the Hermes home a user-scope lock serves as
+Not covered yet: the CLI's `install` and `uninstall` (the Perl CLI runs neither yet);
+`available` waiting for the sync lock another run holds (k74; each engine's own tests pin it:
+`test/commands.test.ts`, the Perl port's `t/76-commands-available.t`); of `add`, a generic
+host whose tarball answers the probe's HEAD (it needs a TLS server; the Perl port's
+`t/31-probe.t` pins the HEAD against a local HTTP server, the reference has no test of it yet);
+the bytes `trust` and `add` write to `trust.json` (state, outside the compared trees; each
+engine's own tests pin them); the Hermes home a user-scope lock serves as
 recorded in `hermes-home.json` (state, outside the compared trees; cases 113, 114 and 117 prove
 it through the syncs that follow, each engine's own tests pin the record); of the hooks, a due
 prompt's real background sync, the in-session interval, the sync lock held by another run – a

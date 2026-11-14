@@ -1,0 +1,2 @@
+description: Refused
+rules: [perl-a, "x@http://host/x.tar.gz"]

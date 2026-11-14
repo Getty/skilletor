@@ -1,0 +1,22 @@
+{
+  "codex:skills/lint": {
+    "source": "mine",
+    "version": "local",
+    "files": {
+      "skills/lint/SKILL.md": "sha256:74264698d05681a872fb449d7f080b6b53afbc18252cd06fd0a96fcef64fff42"
+    }
+  },
+  "rules/gated": {
+    "source": "mine",
+    "version": "local",
+    "files": {},
+    "skipped": "renders-empty"
+  },
+  "rules/style": {
+    "source": "shared",
+    "version": "git:82cc830",
+    "files": {
+      "rules/.local.style.md": "sha256:a1d93850e9099e9bc82aafe63a41ed8323e9f70e5065597f47b84f6c4e040e1d"
+    }
+  }
+}

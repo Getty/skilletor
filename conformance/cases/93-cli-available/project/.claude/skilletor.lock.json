@@ -1,0 +1,9 @@
+{
+  "agents/reviewer": {
+    "source": "shared",
+    "version": "git:82cc830",
+    "files": {
+      "agents/.local.reviewer.md": "sha256:23942a6ca4ead3a0d6098d8bcb8e782747474ed8b8e4a8957b2776bb55fbf60e"
+    }
+  }
+}

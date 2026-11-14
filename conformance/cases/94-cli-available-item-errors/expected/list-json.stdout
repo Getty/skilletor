@@ -1,0 +1,52 @@
+[
+  {
+    "type": "skill",
+    "name": "ok",
+    "description": "fine",
+    "source": "shared",
+    "installed": false
+  },
+  {
+    "type": "skill",
+    "name": "x",
+    "source": "shared",
+    "installed": false,
+    "error": "both skills/x/SKILL.md and skills/x/SKILL.md.njk exist"
+  },
+  {
+    "type": "skill",
+    "name": "y",
+    "description": "runs x",
+    "source": "shared",
+    "installed": false,
+    "error": "both skills/y/scripts/x.sh and skills/y/scripts/x.sh.njk exist"
+  },
+  {
+    "type": "rule",
+    "name": "ok",
+    "description": "fine",
+    "source": "shared",
+    "installed": false
+  },
+  {
+    "type": "rule",
+    "name": "x",
+    "source": "shared",
+    "installed": false,
+    "error": "both rules/x.md and rules/x.md.njk exist"
+  },
+  {
+    "type": "skill",
+    "name": "arxiv",
+    "source": "hermes",
+    "installed": false,
+    "error": "found in 2 directories: optional-skills/research/arxiv and skills/research/arxiv"
+  },
+  {
+    "type": "skill",
+    "name": "vault",
+    "description": "vault skill",
+    "source": "hermes",
+    "installed": false
+  }
+]

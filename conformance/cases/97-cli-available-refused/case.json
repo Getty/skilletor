@@ -1,0 +1,12 @@
+{
+  "description": "available exits 1 with `skilletor: <why>` on stderr and nothing on stdout when it cannot list: a name no source has, a source whose local directory is missing, one whose scan fails (a skilletor.json with an array as vars), any such source among all of them (the first one's error, nothing of the others printed), a config file load refuses, a lock that is no JSON object; the source named alone lists while the others would fail. Nothing written.",
+  "steps": [
+    { "id": "one", "op": "cli", "argv": ["available", "shared"] },
+    { "id": "gone", "op": "cli", "argv": ["available", "gone"] },
+    { "id": "bad-meta", "op": "cli", "argv": ["available", "badmeta"] },
+    { "id": "all", "op": "cli", "argv": ["available"] },
+    { "id": "unknown", "op": "cli", "argv": ["available", "nope"] },
+    { "id": "config-error", "op": "cli", "argv": ["available", "shared", "--project-dir", "${PROJECT}/broken"] },
+    { "id": "lock-error", "op": "cli", "argv": ["available", "shared", "--project-dir", "${PROJECT}/badlock"], "tree": true }
+  ]
+}

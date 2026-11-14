@@ -1,0 +1,7 @@
+{
+  "description": "k100, k113, k126: an item that cannot be built is listed once, its error on a second line indented four spaces – a rule with x.md beside x.md.njk, a skill with SKILL.md beside SKILL.md.njk (no description: which one is meant is unknown), a skill whose companion file has both forms (SKILL.md's description kept), a name a source's path finds in two directories – while the intact items show plainly; --json carries the error.",
+  "steps": [
+    { "id": "list", "op": "cli", "argv": ["available"] },
+    { "id": "list-json", "op": "cli", "argv": ["available", "--json"], "tree": true }
+  ]
+}

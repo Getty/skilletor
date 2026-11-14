@@ -1,0 +1,4 @@
+---
+description: foo skill
+---
+body

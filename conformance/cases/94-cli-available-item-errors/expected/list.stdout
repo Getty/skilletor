@@ -1,0 +1,11 @@
+  skill ok@shared — fine
+  skill x@shared
+    error: both skills/x/SKILL.md and skills/x/SKILL.md.njk exist
+  skill y@shared — runs x
+    error: both skills/y/scripts/x.sh and skills/y/scripts/x.sh.njk exist
+  rule ok@shared — fine
+  rule x@shared
+    error: both rules/x.md and rules/x.md.njk exist
+  skill arxiv@hermes
+    error: found in 2 directories: optional-skills/research/arxiv and skills/research/arxiv
+  skill vault@hermes — vault skill

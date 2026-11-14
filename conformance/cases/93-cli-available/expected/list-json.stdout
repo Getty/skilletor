@@ -1,0 +1,68 @@
+[
+  {
+    "type": "skill",
+    "name": "lint",
+    "description": "lint skill",
+    "source": "mine",
+    "installed": true
+  },
+  {
+    "type": "rule",
+    "name": "gated",
+    "source": "mine",
+    "installed": false
+  },
+  {
+    "type": "skill",
+    "name": "bar",
+    "description": "bar skill",
+    "source": "shared",
+    "installed": false
+  },
+  {
+    "type": "skill",
+    "name": "foo",
+    "description": "foo skill",
+    "source": "shared",
+    "installed": true
+  },
+  {
+    "type": "agent",
+    "name": "reviewer",
+    "description": "reviewer agent",
+    "source": "shared",
+    "installed": true
+  },
+  {
+    "type": "rule",
+    "name": "style",
+    "description": "style rule",
+    "source": "shared",
+    "installed": true
+  },
+  {
+    "type": "bundle",
+    "name": "all",
+    "description": "Everything",
+    "source": "shared",
+    "installed": false,
+    "members": [
+      "agent:reviewer",
+      "rule:style",
+      "skill:bar",
+      "skill:foo"
+    ],
+    "vars": {}
+  },
+  {
+    "type": "bundle",
+    "name": "base",
+    "description": "Base",
+    "source": "shared",
+    "installed": true,
+    "members": [
+      "skill:foo"
+    ],
+    "vars": {}
+  }
+]

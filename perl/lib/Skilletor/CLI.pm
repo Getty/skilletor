@@ -251,6 +251,31 @@ sub _source_remove {
   return 0;
 }
 
+# One line per item – installed mark, type, name@source, description – and a second, indented,
+# for an item's error, a bundle's members or why it does not expand; --json the list.
+sub _available {
+  my ( $flags ) = @_;
+  my $engine = _engine($flags);
+  require Skilletor::Commands;
+  my $items = Skilletor::Commands::available( $engine, source => $flags->{rest}[0] );
+  if ( $flags->{json} ) {
+    _print_text( \*STDOUT, js_stringify( $items, 2 ) );
+    return 0;
+  }
+  my @lines = map {
+    my $i = $_;
+    my $line = ( $i->{installed} ? '✓' : ' ' ).' '.$i->{type}.' '.$i->{name}.'@'.$i->{source}
+      .( _truthy( $i->{description} ) ? ' — '.$i->{description} : '' );
+    # An item that cannot be built (spec §4.1) says why on the next line, as a bundle does;
+    # a bundle's members (spec §15.5) go there, or why it cannot be expanded.
+      $i->{type} ne 'bundle' ? ( $line, defined $i->{error} ? '    error: '.$i->{error} : () )
+    : defined $i->{error}    ? ( $line, '    error: '.$i->{error} )
+    :                          ( $line, '    '.( join( ', ', @{ $i->{members} } ) || '(no items)' ) );
+  } @$items;
+  _print_lines( \*STDOUT, @lines );
+  return 0;
+}
+
 sub _trust {
   my ( $flags, $name ) = @_;
   my $engine = _engine($flags);
@@ -402,7 +427,7 @@ sub _dispatch {
   return _sync($flags)   if $cmd eq 'sync';
   return _check($flags)  if $cmd eq 'check';
   return _status($flags) if $cmd eq 'status';
-  return _not_ported($cmd) if $cmd eq 'available';
+  return _available($flags) if $cmd eq 'available';
   if ( $cmd eq 'add' ) {
     return _usage_error('skilletor: add needs a source spec') unless @rest;
     return _add($flags);
@@ -462,8 +487,8 @@ stdout as well, exit 2.
 
 =back
 
-It runs C<add>, C<trust>, C<source list> and C<source remove> through
-L<Skilletor::Commands>:
+It runs C<add>, C<trust>, C<source list>, C<source remove> and C<available>
+through L<Skilletor::Commands>:
 
 =over 4
 
@@ -490,6 +515,15 @@ report, or C<removed source E<lt>nameE<gt>> when it has nothing to say. A sync
 that stops at a config error exits 2 with two lines on stderr naming the saved
 config file (k103).
 
+=item * C<available [E<lt>sourceE<gt>]> lists what the trusted sources offer,
+or that one source, under the sync lock: per item a line of C<✓> when it is
+installed (a blank when not), its type and C<E<lt>nameE<gt>@E<lt>sourceE<gt>>,
+then C< — E<lt>descriptionE<gt>> when it has one; under it, indented four
+spaces, C<error: E<lt>whyE<gt>> for an item that cannot be built. A bundle's
+line is always followed by one: C<error: E<lt>whyE<gt>>, its members joined by
+C<, >, or C<(no items)>. C<--json> prints the list as JSON. A source not
+trusted is skipped, even by name.
+
 =back
 
 A refusal or a config file that does not load is C<skilletor: E<lt>whyE<gt>>
@@ -511,8 +545,8 @@ happens – a failure is that line's C<systemMessage>, its own setup's too. It i
 dispatched before any option check, so no option makes it fail. Its background
 sync re-runs this CLI (L</self_command>).
 
-C<available>, C<install> and C<uninstall> are not ported yet: each says so on
-stderr and exits 1.
+C<install> and C<uninstall> are not ported yet: each says so on stderr and
+exits 1.
 Beside them the CLI has the argument layer: C<--help>, C<--version>, the
 options each command accepts, an unknown option or command, an invalid
 C<--scope> and a missing operand.

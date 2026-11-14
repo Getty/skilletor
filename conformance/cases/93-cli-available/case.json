@@ -1,0 +1,16 @@
+{
+  "description": "available through the CLI: every trusted source of the merged map in its order, each item a line of ✓ (or a blank), type, name@source and ` — <description>` when it has one, its bundles after its items, each with its members on a second line. An item is ✓ when an explicit entry of either scope declares it or a lock of either scope holds it for that source – under any target (a codex: key), not when it rendered empty – a bundle when a scope's config declares it. A user source is read by the user config's definition (the project's local override is not read), a git source fetched into the cache; a project-only source is skipped until trusted, by name too (an empty line, --json []), then listed; one source by name; --json the list; with --project-dir the home only the user config's sources and lock count. Nothing is written but the cache.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    { "id": "list", "op": "cli", "argv": ["available"] },
+    { "id": "list-one", "op": "cli", "argv": ["available", "shared"] },
+    { "id": "list-json", "op": "cli", "argv": ["available", "--json"] },
+    { "id": "untrusted", "op": "cli", "argv": ["available", "team"] },
+    { "id": "untrusted-json", "op": "cli", "argv": ["available", "team", "--json"] },
+    { "id": "trust", "op": "cli", "argv": ["trust", "team"] },
+    { "id": "trusted", "op": "cli", "argv": ["available", "team"] },
+    { "id": "home-project", "op": "cli", "argv": ["available", "--project-dir", "${HOME}"], "tree": true }
+  ]
+}

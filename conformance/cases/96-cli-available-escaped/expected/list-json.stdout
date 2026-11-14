@@ -1,0 +1,27 @@
+[
+  {
+    "type": "skill",
+    "name": "foo",
+    "description": "Grüße 🍳\tok \u001b[31mred\u0007\u202eevil next",
+    "source": "shared",
+    "installed": false
+  },
+  {
+    "type": "bundle",
+    "name": "b",
+    "description": "Perl\u001b[31mred\u0007\u202eevil\nnext",
+    "source": "shared",
+    "installed": false,
+    "members": [
+      "skill:foo"
+    ],
+    "vars": {}
+  },
+  {
+    "type": "bundle",
+    "name": "bad",
+    "source": "shared",
+    "installed": false,
+    "error": "bundle bad: bundles/bad.yaml: unknown key \"key\u001b[31mred\u0007\u202eevil\nnext\" (allowed: description, skills, agents, rules, bundles, vars)"
+  }
+]

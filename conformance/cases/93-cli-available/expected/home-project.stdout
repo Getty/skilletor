@@ -1,0 +1,10 @@
+  skill bar@shared — bar skill
+✓ skill foo@shared — foo skill
+  agent reviewer@shared — reviewer agent
+✓ rule style@shared — style rule
+  bundle all@shared — Everything
+    agent:reviewer, rule:style, skill:bar, skill:foo
+✓ bundle base@shared — Base
+    skill:foo
+✓ skill lint@mine — lint skill
+  rule gated@mine

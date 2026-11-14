@@ -120,12 +120,14 @@ END
   };
   my @quick = ( ['--help'], ['--version'], ['trust'], [ 'trust', '' ], [ 'trust', 'x', '--json' ], ['source'], [ 'source', 'remove' ],
     [ 'source', 'list', '--force' ], [ 'source', 'remove', 'x', '--json' ], [ 'trust', 'x', '--help' ], ['add'], [ 'add', '--project' ],
-    [ 'add', 'x', './y', '--json' ], [ 'add', './y', '--scope', 'user' ], [ 'add', 'x', './y', '-h' ] );
+    [ 'add', 'x', './y', '--json' ], [ 'add', './y', '--scope', 'user' ], [ 'add', 'x', './y', '-h' ], [ 'available', '--project' ],
+    [ 'available', 'x', '--scope', 'user' ], [ 'available', 'x', '--force' ], [ 'available', '--json', '--help' ] );
   for my $argv (@quick) {
     like( $run->(@$argv), qr/\A[02] \z/, "@$argv: answered, nothing of the engine loaded" );
   }
   like( $run->( 'source', 'list', '--project-dir', "$home" ), qr{\A0 .*Skilletor/Commands\.pm}, 'source list: the commands loaded' );
   like( $run->( 'add', 'bad name', './y', '--project-dir', "$home" ), qr{\A1 .*Skilletor/Commands\.pm}, 'add: the commands loaded' );
+  like( $run->( 'available', '--json', '--project-dir', "$home" ), qr{\A0 .*Skilletor/Commands\.pm}, 'available: the commands loaded' );
 };
 
 subtest "an edit's config path: the user config, the project's, no project scope" => sub {

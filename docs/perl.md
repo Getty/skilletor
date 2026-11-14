@@ -148,8 +148,8 @@ other's `sync` and SessionStart wait or time out. It skips without node or the b
   The Perl CLI (`bin/skilletor`) runs `sync`, `check`, `status` (k173), `trust`, `source list`,
   `source remove` (k175), `add` with the probe of a generic host (k176: `git ls-remote`, then a
   HEAD on the tarball through HTTP::Tiny in the process, so a packed binary needs neither Node
-  nor Perl for it) and the hooks; the other commands are being ported one by one under k166,
-  and each one not ported yet says so and exits 1.
+  nor Perl for it), `available` (k177) and the hooks; `install` and `uninstall` are being
+  ported under k166, and each says so and exits 1 until then.
 - Windows is untested. The process layer has a Windows path (k186: `run_command` through
   temp files on a no-wait spawn, `spawn_detached` through Win32::Process, the sync lock
   refreshed by its holder instead of a forked child), exercised on Linux through an injected

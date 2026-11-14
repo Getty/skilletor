@@ -1,0 +1,14 @@
+{
+  "sources": {
+    "shared": {
+      "local": "${HOME}/dev/shared"
+    },
+    "hermes": {
+      "local": "${HOME}/dev/hermes",
+      "path": [
+        "skills/research",
+        "optional-skills"
+      ]
+    }
+  }
+}
