@@ -1,0 +1,37 @@
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "targets": [
+        "claude"
+      ],
+      "declared": [
+        {
+          "key": "skills/tool",
+          "source": "shared",
+          "installed": true,
+          "partial": true
+        }
+      ],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {
+        "shared": "git:72471a8"
+      }
+    },
+    {
+      "scope": "project",
+      "targets": [
+        "claude"
+      ],
+      "declared": [],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {}
+    }
+  ]
+}

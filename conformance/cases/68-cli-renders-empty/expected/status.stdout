@@ -1,0 +1,4 @@
+user scope:
+  ✓ skills/tool @shared
+  - rules/k8s @shared (skipped: renders empty)
+project scope:

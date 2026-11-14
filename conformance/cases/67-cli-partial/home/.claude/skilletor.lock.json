@@ -1,0 +1,10 @@
+{
+  "skills/tool": {
+    "source": "shared",
+    "version": "git:72471a8",
+    "files": {
+      "skills/tool/SKILL.md": "sha256:6cc1ff2a6ce79749d189c638ca9a043e9b3f34cf7712ee42681d76866011a3fe"
+    },
+    "partial": true
+  }
+}

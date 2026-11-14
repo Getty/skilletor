@@ -93,6 +93,7 @@ Cases run in name order, each in a fresh temp dir; none depends on another.
 | `git` | Optional. Git sources, by repository name (below). |
 | `git.<name>.commits[].executable` | Optional. Paths in the commit's tree made executable before it is committed (below). |
 | `env` | Optional. Environment variables set for the whole case – the engine ops' and every `cli` step's – `${HOME}`, `${PROJECT}` and `${TMP}` replaced; only `CLAUDE_CONFIG_DIR` so far. |
+| `claude` | Optional. `false`: the runner writes no Claude Code marker (`.claude.json`, below), so – Codex not in use either – no agent harness is detected. Default `true`. |
 | `gitInit` | Optional. `["home"]`, `["project"]` or both: those directories become git work trees – `git init -q -b main` in each, after its inputs are copied, nothing committed – so a `cli` step's CLI takes git's top level as its project and git answers for them (below). |
 | `steps` | Required, run in order on the same temp dirs: a step sees what the steps before it wrote. |
 | `steps[].id` | Names the expectation: `expected/<id>.json`, `expected/<id>/`. Unique in the case. |
@@ -128,7 +129,7 @@ resolved – macOS `/var` is `/private/var`):
 
 | Path | What |
 |---|---|
-| `${TMP}/home` = `${HOME}` | The home dir. The runner creates `${HOME}/.claude/` and writes `${HOME}/.claude.json` as `{}` + newline – the marker that Claude Code is in use (spec §14.1) – then, when the case sets `CLAUDE_CONFIG_DIR`, creates it with its own `.claude.json` (Claude Code keeps the marker there then), then copies `home/`. |
+| `${TMP}/home` = `${HOME}` | The home dir. The runner creates `${HOME}/.claude/` and writes `${HOME}/.claude.json` as `{}` + newline – the marker that Claude Code is in use (spec §14.1) – then, when the case sets `CLAUDE_CONFIG_DIR`, creates it with its own `.claude.json` (Claude Code keeps the marker there then), then copies `home/`. With `"claude": false` it writes neither `.claude.json`. |
 | `${TMP}/project` = `${PROJECT}` | The project dir, when the case has `project/`: created, then `project/` copied. |
 | `${TMP}/cwd` | An empty directory outside git, a `cli` step's cwd – and so its project – when the case has no project. |
 | `${TMP}/git/<name>` | The git sources (below). |
@@ -143,7 +144,8 @@ The engine ops run with:
 - `CODEX_HOME` = `${HOME}/.codex`, which does not exist, so Codex is not detected;
   `HERMES_HOME` = `${HOME}/.hermes`; `CLAUDE_PLUGIN_ROOT` and `CLAUDE_CONFIG_DIR` unset,
   unless the case's `env` sets them (below). The active target is Claude
-  Code alone, detected from the marker – no case sets `targets` unless it is about them;
+  Code alone, detected from the marker (none without it, `"claude": false`) – no case sets
+  `targets` unless it is about them;
 - `GIT_CONFIG_GLOBAL` = `${TMP}/gitconfig` and `GIT_CONFIG_NOSYSTEM=1`, for the engine's git
   runs and the runner's alike, so no user or system git config is read;
 - neither `${HOME}` nor `${PROJECT}` inside a git work tree, and git tracking none of their
@@ -490,6 +492,13 @@ show it, its `description` saying which.
 | `62-hook-move-untrusted` | a move into a checkout whose own source awaits trust: CwdChanged's line names it and `skilletor trust`, PostToolUse's context says the same; the same `cd` again is silent; nothing fetched or written (`gitInit`) |
 | `63-hook-move-config-error` | a config error in the checkout moved into: `cannot sync <dir>: <error> — run there: skilletor sync`, no context, nothing written |
 | `64-hook-post-tool-use` | PostToolUse against a seeded `session-cwd.json`: a `cd` within the recorded checkout asks nothing, from another one syncs with the line and a context naming the checkout; again, or a session without a record once the lock matches, is silent (`gitInit`) |
+| `65-cli-no-harness` | no agent harness (`"claude": false`, Codex absent, spec §14.1): the CLI's sync, check and status exit 2 naming the markers looked for and the fix – sync's report on stderr (text, `--json`), check's one stderr line, status's report on stdout (text, `--json`); nothing installed |
+| `66-cli-home-project` | the project dir is the home (k44) – `--project-dir ~`, `~/.`, or the cwd `~` outside git: no project scope; the sync names none, status says so in one line after the user scope (alone with `--scope project`, not with `--scope user`), `--json` sets `projectIsHome`; check up to date |
+| `67-cli-partial` | a lock an interrupted sync left (k71), its entry `partial`, the skill's `.gitignore` never written: status marks it (text, `--json`), check exits 1 (`declaredChanged`, `layoutChanged`, `varsChanged`), the sync completes it as updated and drops the mark; status and check then find nothing |
+| `68-cli-renders-empty` | a user rule gated off by the user's vars on the first sync (k35): the CLI's sync installs the skill and names the rule skipped, exit 0, the lock's `skipped` entry and no file; status's `-` mark (text, `--json`); check up to date |
+| `69-cli-briefing` | an agent's briefing as a flow list (k56): the CLI's first sync installs it with one warning naming the missing skill, a `plugin:skill` unchecked; the resync's `--json` `briefingMissing`; status names it (text, `--json`) |
+| `70-cli-escaped-address` | k87: an untrusted project source whose local address holds an escape sequence, a BEL, a bidi override and a newline is escaped on every CLI line naming it – status (text; `--json`, parsing back to the address), the sync's trust request, check `--json` – nothing fetched |
+| `71-cli-escaped-error` | k87: a config error naming a source with those characters: exit 2, the name escaped on every stream – sync's report on stderr (text, `--json`), check's one line (with `--json` too), status's report on stdout (text, `--json`); nothing written |
 
 The state files two engines on one machine share – `render-inputs.json` with its hash,
 `sources-read.json`, `unreached.json` – are not compared here: their keys are absolute lock
@@ -506,5 +515,5 @@ tests pin these, the interval on an injected clock, the deadline injected); a sy
 Hermes gets no copy of – Codex and Hermes targets only); a `url`
 source actually fetched (the engine takes `https://` only, so it needs a local TLS server), a
 source whose fetch fails (the warning quotes git's own message), symbolic links in a target, a
-sync that fails midway (`partial`), and Codex and Hermes targets (the Perl engine refuses a
+sync that fails midway (`partial`; `67` starts from the lock one left), and Codex and Hermes targets (the Perl engine refuses a
 scope that targets them).

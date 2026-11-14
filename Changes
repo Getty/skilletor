@@ -20,6 +20,7 @@ Revision history for skilletor
     checkouts; the Perl port's CLI is held to the reference this way. Cases 41
     to 45 cover the project root, an unused and a dropped project, the status
     target naming and `--force`.
+  - Conformance cases 65 to 71 hold both CLIs to the same bytes on the context paths: no agent harness detected (new case knob `"claude": false`, no Claude Code marker written), the project dir being the home, a lock entry an interrupted sync left partial, a rule that renders empty, an agent's missing briefing skills, and a source's name or address with control and bidi characters escaped on every stream (k87).
   - A sync resolves its sources in parallel, but now reports what became of
     each - a failure, a fall back to the cache, a trust request - in the order
     the sources are declared, the order the Perl port's sequential resolve

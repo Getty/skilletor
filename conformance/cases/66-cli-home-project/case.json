@@ -1,0 +1,14 @@
+{
+  "description": "k44: the project dir is the home dir – given as --project-dir ${HOME}, as ${HOME}/. or taken from the cwd ${HOME} outside git – so there is no project scope: a sync installs the user scope's skill and names no project, status says so in one line after the user scope (alone with --scope project, not with --scope user) and --json sets projectIsHome; check is up to date.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    { "id": "sync", "op": "cli", "argv": ["sync", "--project-dir", "${HOME}"], "tree": true },
+    { "id": "status", "op": "cli", "argv": ["status", "--project-dir", "${HOME}"] },
+    { "id": "status-json", "op": "cli", "argv": ["status", "--json", "--project-dir", "${HOME}/."] },
+    { "id": "status-project", "op": "cli", "argv": ["status", "--scope", "project", "--project-dir", "${HOME}"] },
+    { "id": "status-user-json", "op": "cli", "argv": ["status", "--scope", "user", "--json", "--project-dir", "${HOME}"] },
+    { "id": "check", "op": "cli", "argv": ["check"], "cwd": "${HOME}", "tree": true }
+  ]
+}

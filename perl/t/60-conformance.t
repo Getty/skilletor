@@ -320,10 +320,11 @@ sub run_case {
   $ENV{$_} = concrete( $c->{env}{$_}, $r ) for sort keys %{ $c->{env} // {} };
   build_git( $case_dir, $c, $r );
   path( $r->{home}, '.claude' )->mkpath;
-  path( $r->{home}, '.claude.json' )->spew_raw("{}\n");    # Claude Code is in use (spec §14.1)
+  my $marker = !( exists $c->{claude} && !$c->{claude} );    # "claude": false – no marker, Claude Code is not in use
+  path( $r->{home}, '.claude.json' )->spew_raw("{}\n") if $marker;    # Claude Code is in use (spec §14.1)
   if ( defined $ENV{CLAUDE_CONFIG_DIR} ) {    # Claude Code keeps its .claude.json inside a custom config dir
     path( $ENV{CLAUDE_CONFIG_DIR} )->mkpath;
-    path( $ENV{CLAUDE_CONFIG_DIR}, '.claude.json' )->spew_raw("{}\n");
+    path( $ENV{CLAUDE_CONFIG_DIR}, '.claude.json' )->spew_raw("{}\n") if $marker;
   }
   copy_input( "$case_dir/home", $r->{home}, $r );
   if ( $r->{project} ) {

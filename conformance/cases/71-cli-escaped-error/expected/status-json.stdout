@@ -1,0 +1,4 @@
+{
+  "scopes": [],
+  "error": "${PROJECT}/.claude/skilletor.json: source name \"team\\u001b[31mred\\u0007\u202eevil\\nnext\" is not valid (ASCII letters, digits, \".\", \"_\" and \"-\", starting with a letter or digit)"
+}

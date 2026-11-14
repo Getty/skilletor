@@ -1,0 +1,34 @@
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "added": [],
+      "updated": [],
+      "removed": [],
+      "unchanged": [
+        {
+          "key": "agents/rev",
+          "type": "agent",
+          "name": "rev",
+          "source": "shared"
+        }
+      ],
+      "skipped": [],
+      "conflicts": [],
+      "overwritten": [],
+      "warnings": [
+        "agent rev (claude): briefing skills not installed: gone — install them, or ship the agent and its skills together as a bundle"
+      ],
+      "trustRequests": [],
+      "briefingMissing": [
+        {
+          "key": "agents/rev",
+          "harness": "claude",
+          "missing": [
+            "gone"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+skilletor: user scope
+  + agents/rev (active after /reload-plugins or restart)
+  warning: agent rev (claude): briefing skills not installed: gone — install them, or ship the agent and its skills together as a bundle

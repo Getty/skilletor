@@ -1,0 +1,3 @@
+skilletor: user scope
+  + skills/tool (active now)
+  · rules/k8s skipped (renders empty)

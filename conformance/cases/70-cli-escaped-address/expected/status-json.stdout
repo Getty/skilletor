@@ -1,0 +1,28 @@
+{
+  "scopes": [
+    {
+      "scope": "project",
+      "targets": [
+        "claude"
+      ],
+      "declared": [
+        {
+          "key": "skills/foo",
+          "source": "team",
+          "installed": false
+        }
+      ],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [
+        {
+          "name": "team",
+          "kind": "local",
+          "url": "${TMP}/payload\u001b[31mred\u0007\u202eevil\nnext"
+        }
+      ],
+      "sourceVersions": {}
+    }
+  ]
+}

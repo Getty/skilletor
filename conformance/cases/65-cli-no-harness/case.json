@@ -1,0 +1,14 @@
+{
+  "description": "No agent harness on the machine (spec §14.1): neither Claude Code's marker (\"claude\": false) nor Codex's. Through the CLI, exit 2 each with the markers looked for and the fix named, nothing installed: sync's report on stderr (text, or JSON with --json), check's error one stderr line, status's report on stdout (text, or JSON with --json).",
+  "claude": false,
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    { "id": "sync", "op": "cli", "argv": ["sync"], "tree": true },
+    { "id": "sync-json", "op": "cli", "argv": ["sync", "--json"] },
+    { "id": "check", "op": "cli", "argv": ["check"] },
+    { "id": "status", "op": "cli", "argv": ["status"] },
+    { "id": "status-json", "op": "cli", "argv": ["status", "--json"], "tree": true }
+  ]
+}

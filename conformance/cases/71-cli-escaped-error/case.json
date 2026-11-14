@@ -1,0 +1,11 @@
+{
+  "description": "k87: a config error naming a source whose name holds an escape sequence, a bell, a bidi override and a newline – not valid (k95), found before the source's unknown key. Through the CLI, exit 2 each, the name escaped on every stream, nothing raw, nothing written: sync's report on stderr (text, or JSON with --json), check's one stderr line (with --json too), status's report on stdout (text, or JSON with --json).",
+  "steps": [
+    { "id": "sync", "op": "cli", "argv": ["sync"], "tree": true },
+    { "id": "sync-json", "op": "cli", "argv": ["sync", "--json"] },
+    { "id": "check", "op": "cli", "argv": ["check"] },
+    { "id": "check-json", "op": "cli", "argv": ["check", "--json"] },
+    { "id": "status", "op": "cli", "argv": ["status"] },
+    { "id": "status-json", "op": "cli", "argv": ["status", "--json"], "tree": true }
+  ]
+}

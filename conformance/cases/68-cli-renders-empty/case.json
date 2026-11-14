@@ -1,0 +1,12 @@
+{
+  "description": "k35: a user rule gated off by the user's vars renders empty on the first sync. Through the CLI: the sync installs the skill and names the rule skipped (renders empty), exit 0, no rule file; status marks it skipped (text and --json); check is up to date.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    { "id": "sync", "op": "cli", "argv": ["sync"], "tree": true },
+    { "id": "status", "op": "cli", "argv": ["status"] },
+    { "id": "status-json", "op": "cli", "argv": ["status", "--json", "--scope", "user"] },
+    { "id": "check", "op": "cli", "argv": ["check"] }
+  ]
+}

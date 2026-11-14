@@ -62,6 +62,8 @@ interface Case {
   env?: Record<string, string>;
   /** Directories made git work trees before the steps (README: case.json). */
   gitInit?: ("home" | "project")[];
+  /** `false`: no Claude Code marker is written, so no harness is detected (README: case.json). */
+  claude?: boolean;
   steps: Step[];
   engines?: Record<string, { skip?: string; steps?: Record<string, { skip?: string; expected?: string }> }>;
 }
@@ -376,11 +378,12 @@ async function runCase(name: string): Promise<void> {
     for (const [k, v] of Object.entries(c.env ?? {})) process.env[k] = concrete(v, r);
     buildGit(caseDir, c, r, { ...process.env, ...COMMIT_ENV });
     mkdirSync(join(r.home, ".claude"), { recursive: true });
-    writeFileSync(join(r.home, ".claude.json"), "{}\n"); // Claude Code is in use (spec §14.1)
+    const marker = c.claude !== false; // false: no marker, Claude Code is not in use
+    if (marker) writeFileSync(join(r.home, ".claude.json"), "{}\n"); // Claude Code is in use (spec §14.1)
     const cfgDir = process.env.CLAUDE_CONFIG_DIR; // Claude Code keeps its .claude.json inside a custom config dir
     if (cfgDir) {
       mkdirSync(cfgDir, { recursive: true });
-      writeFileSync(join(cfgDir, ".claude.json"), "{}\n");
+      if (marker) writeFileSync(join(cfgDir, ".claude.json"), "{}\n");
     }
     copyInput(join(caseDir, "home"), r.home, r);
     if (r.project) {

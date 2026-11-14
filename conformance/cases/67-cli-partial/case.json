@@ -1,0 +1,14 @@
+{
+  "description": "k71: a lock an interrupted sync left – the skill's SKILL.md written and owned, its entry marked partial, the skill's .gitignore never written. Through the CLI: status marks the entry (text and --json); check asks for a sync (exit 1, --json: declaredChanged for the mark, layoutChanged for the skill's .gitignore the lock lacks, varsChanged as no sync recorded its render inputs); the sync completes the item, names it updated and drops the mark; status and check afterwards find nothing left.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    { "id": "status", "op": "cli", "argv": ["status"] },
+    { "id": "status-json", "op": "cli", "argv": ["status", "--json"] },
+    { "id": "check-json", "op": "cli", "argv": ["check", "--json"] },
+    { "id": "sync", "op": "cli", "argv": ["sync"], "tree": true },
+    { "id": "status-after", "op": "cli", "argv": ["status"] },
+    { "id": "check-after", "op": "cli", "argv": ["check"] }
+  ]
+}

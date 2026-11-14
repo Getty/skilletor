@@ -1,0 +1,16 @@
+{
+  "rules/k8s": {
+    "source": "shared",
+    "version": "git:f6bb8ad",
+    "files": {},
+    "skipped": "renders-empty"
+  },
+  "skills/tool": {
+    "source": "shared",
+    "version": "git:f6bb8ad",
+    "files": {
+      "skills/tool/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/tool/SKILL.md": "sha256:6cc1ff2a6ce79749d189c638ca9a043e9b3f34cf7712ee42681d76866011a3fe"
+    }
+  }
+}

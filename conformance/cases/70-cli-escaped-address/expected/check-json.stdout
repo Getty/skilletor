@@ -1,0 +1,13 @@
+{
+  "changed": false,
+  "sources": [],
+  "warnings": [],
+  "trustRequests": [
+    {
+      "scope": "project",
+      "name": "team",
+      "kind": "local",
+      "url": "${TMP}/payload\u001b[31mred\u0007\u202eevil\nnext"
+    }
+  ]
+}

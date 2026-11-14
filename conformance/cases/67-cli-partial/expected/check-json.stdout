@@ -1,0 +1,20 @@
+{
+  "changed": true,
+  "sources": [
+    {
+      "name": "shared",
+      "scope": "user",
+      "changed": false
+    }
+  ],
+  "warnings": [],
+  "layoutChanged": [
+    "user"
+  ],
+  "declaredChanged": [
+    "user"
+  ],
+  "varsChanged": [
+    "user"
+  ]
+}

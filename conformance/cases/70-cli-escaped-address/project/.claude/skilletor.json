@@ -1,0 +1,12 @@
+{
+  "sources": {
+    "team": {
+      "local": "${TMP}/payload\u001b[31mred\u0007‮evil\nnext"
+    }
+  },
+  "install": {
+    "skills": [
+      "foo@team"
+    ]
+  }
+}

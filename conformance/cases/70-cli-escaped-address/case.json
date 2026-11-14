@@ -1,0 +1,9 @@
+{
+  "description": "k87: an untrusted project source whose local address holds an escape sequence, a bell, a bidi override and a newline. Through the CLI every line that names it shows each of them escaped, nothing raw: status's trust line (and --json, whose escapes parse back to the address), the sync's trust request – nothing fetched or installed, the project's blocks written – and check --json's.",
+  "steps": [
+    { "id": "status", "op": "cli", "argv": ["status", "--scope", "project"] },
+    { "id": "status-json", "op": "cli", "argv": ["status", "--scope", "project", "--json"] },
+    { "id": "sync", "op": "cli", "argv": ["sync", "--scope", "project"], "tree": true },
+    { "id": "check-json", "op": "cli", "argv": ["check", "--scope", "project", "--json"] }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "targets": [
+        "claude"
+      ],
+      "declared": [
+        {
+          "key": "skills/tool",
+          "source": "shared",
+          "installed": true
+        }
+      ],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {
+        "shared": "git:72471a8"
+      }
+    }
+  ],
+  "projectIsHome": true
+}

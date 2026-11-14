@@ -1,0 +1,30 @@
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "targets": [
+        "claude"
+      ],
+      "declared": [
+        {
+          "key": "skills/tool",
+          "source": "shared",
+          "installed": true
+        },
+        {
+          "key": "rules/k8s",
+          "source": "shared",
+          "installed": false,
+          "skipped": "renders-empty"
+        }
+      ],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {
+        "shared": "git:f6bb8ad"
+      }
+    }
+  ]
+}
