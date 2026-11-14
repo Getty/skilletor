@@ -1,0 +1,17 @@
+{
+  "description": "trust through the CLI: a project-only git source awaiting trust (status's trust line) is trusted for the backend it would use – `trusted source team (git <url>)` – after which status asks for nothing and the sync fetches and installs its skill; a project source whose local directory exists beside its git is trusted as that local path, a user source as its own; an unknown name, a project source with --project-dir the home (no project scope) and a name only Object.prototype knows exit 1 with `unknown source`, nothing written.",
+  "git": {
+    "team": { "url": "https://conformance.invalid/team.git", "commits": [{ "tree": "sources/team" }] }
+  },
+  "steps": [
+    { "id": "status", "op": "cli", "argv": ["status", "--scope", "project"] },
+    { "id": "trust", "op": "cli", "argv": ["trust", "team"] },
+    { "id": "status-trusted", "op": "cli", "argv": ["status", "--scope", "project"] },
+    { "id": "sync", "op": "cli", "argv": ["sync", "--scope", "project"], "tree": true },
+    { "id": "trust-local", "op": "cli", "argv": ["trust", "tools"] },
+    { "id": "trust-user", "op": "cli", "argv": ["trust", "mine"] },
+    { "id": "trust-unknown", "op": "cli", "argv": ["trust", "nope"] },
+    { "id": "trust-home-project", "op": "cli", "argv": ["trust", "team", "--project-dir", "${HOME}"] },
+    { "id": "trust-prototype", "op": "cli", "argv": ["trust", "constructor"], "tree": true }
+  ]
+}

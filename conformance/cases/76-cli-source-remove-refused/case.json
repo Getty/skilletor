@@ -1,0 +1,7 @@
+{
+  "description": "source remove of the one entry config load refuses (k120: an http:// url in the user config), with an install still using it: exit 1 without --force naming the installed items, file byte-identical, no sync; with --force it is removed – the file's other keys kept in their order – and the sync stops at the install left without its source: exit 2, the edit saved and named (k103).",
+  "steps": [
+    { "id": "in-use", "op": "cli", "argv": ["source", "remove", "web"], "tree": true },
+    { "id": "force", "op": "cli", "argv": ["source", "remove", "web", "--force"], "tree": true }
+  ]
+}

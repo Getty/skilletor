@@ -1,9 +1,11 @@
 #!/usr/bin/env perl
 # Skilletor::CLI's pieces no conformance case reaches (../conformance runs the commands
 # themselves, against the reference's bytes): the project root of a cwd, a sync's text with
-# run-level warnings and notes (the Perl engine targets Claude Code alone, so it makes none), and
-# the lines of a sync that failed after a command's config edit (no ported command edits one
-# yet). The expected text is the reference's (cli.ts syncText, syncFailed; report.ts reportText).
+# run-level warnings and notes (the Perl engine targets Claude Code alone, so it makes none), the
+# lines of a sync that failed after a command's config edit with --json asked for (no command
+# takes both), what the argument layer loads, and an edit's config path without any project dir
+# (the CLI always has one). The expected text is the reference's (cli.ts syncText, syncFailed;
+# report.ts reportText; commands.ts projectRoot).
 use strict;
 use warnings;
 use utf8;
@@ -17,6 +19,7 @@ use Encode ();
 use Path::Tiny qw( path tempdir );
 use Skilletor::CLI qw( project_root_of );
 use Skilletor::JSON qw( js_ordered );
+use Skilletor::Process qw( run_command );
 use Skilletor::Report qw( empty_scope_report );
 
 subtest 'project_root_of: the git top level of a directory, else the directory itself' => sub {
@@ -91,6 +94,51 @@ subtest 'a sync that stopped at a config error: exit 2, its report on stderr' =>
     ],
     "after a command's config edit: two lines naming the file that stays, never JSON (k103)"
   );
+};
+
+# --help, --version and a usage error answer before any engine is built (spec §7: they stay
+# quick). Asserted in a fresh perl, whose %INC then holds what the run loaded: never the engine,
+# the commands or the config loader – for the config commands' operands and options too. A
+# command that runs loads the commands.
+subtest 'the argument layer loads neither the engine nor the commands' => sub {
+  my $home = tempdir;
+  my $script = <<'END';
+use Skilletor::CLI;
+my $code;
+{
+  local ( *STDOUT, *STDERR );
+  open( STDOUT, '>', \my $out ) or die;
+  open( STDERR, '>', \my $err ) or die;
+  $code = Skilletor::CLI::run(@ARGV);
+}
+print $code, ' ', join( ',', grep { m{\ASkilletor/(?:Engine|Commands|Config)\.pm\z} } sort keys %INC ), "\n";
+END
+  my $run = sub {
+    my $r = run_command( cmd => [ $^X, ( map { "-I$_" } grep { !ref } @INC ), '-e', $script, '--', @_ ], env => { %ENV, HOME => "$home" } );
+    return $r->{stdout} =~ s/\n\z//r;
+  };
+  my @quick = ( ['--help'], ['--version'], ['trust'], [ 'trust', '' ], [ 'trust', 'x', '--json' ], ['source'], [ 'source', 'remove' ],
+    [ 'source', 'list', '--force' ], [ 'source', 'remove', 'x', '--json' ], [ 'trust', 'x', '--help' ] );
+  for my $argv (@quick) {
+    like( $run->(@$argv), qr/\A[02] \z/, "@$argv: answered, nothing of the engine loaded" );
+  }
+  like( $run->( 'source', 'list', '--project-dir', "$home" ), qr{\A0 .*Skilletor/Commands\.pm}, 'source list: the commands loaded' );
+};
+
+subtest "an edit's config path: the user config, the project's, no project scope" => sub {
+  require Skilletor::Commands;
+  require Skilletor::Engine;
+  my $path = \&Skilletor::Commands::config_path;
+  my $engine = sub { Skilletor::Engine->new( home => '/h', claude_config_dir => '', @_ ) };
+  is( $path->( $engine->( project_dir => '/p' ), 0 ), '/h/.claude/skilletor.json', 'the user config' );
+  is( $path->( $engine->( project_dir => '/p/' ), 1 ), '/p/.claude/skilletor.json', 'the project config' );
+  is( $path->( Skilletor::Engine->new( home => '/h', claude_config_dir => '/cfg' ), 0 ), '/cfg/skilletor.json', 'CLAUDE_CONFIG_DIR' );
+  my $err = eval { $path->( $engine->(), 1 ); 1 } ? undef : $@;
+  isa_ok( $err, 'Skilletor::Error::Command', 'no project dir' );
+  is( $err->message, 'no project scope: no project directory', 'no project dir: says so' );
+  $err = eval { $path->( $engine->( project_dir => '/h' ), 1 ); 1 } ? undef : $@;
+  is( $err->message, 'no project scope: the project directory is the home directory (/h); '
+      .'run from a project, pass --project-dir, or drop --project to edit the user config', 'the home as project dir' );
 };
 
 done_testing;

@@ -1,0 +1,8 @@
+{
+  "description": "source remove beside an entry config load refuses (k120: a ref \"\" in the project config): removing another source first exits 1 with load's own error for that entry, --force or not, file byte-identical, no sync; the refused entry itself is removed with --project (--force changes nothing), exit 0, `removed source tools` once the sync has nothing to say, the project file's other keys kept; then the other source goes as well, leaving `{}`.",
+  "steps": [
+    { "id": "other-first", "op": "cli", "argv": ["source", "remove", "keep", "--force"], "tree": true },
+    { "id": "remove", "op": "cli", "argv": ["source", "remove", "tools", "--project", "--force"], "tree": true },
+    { "id": "remove-other", "op": "cli", "argv": ["source", "remove", "keep"], "tree": true }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "sources": {
+    "shared": { "path": "skills" },
+    "other": { "local": "~/dev/shared" }
+  },
+  "gitignore": false
+}

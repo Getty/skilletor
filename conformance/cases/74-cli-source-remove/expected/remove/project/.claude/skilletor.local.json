@@ -1,0 +1,6 @@
+{
+  "sources": {
+    "solo": { "local": "~/dev/extra" },
+    "dup": { "path": "skills" }
+  }
+}

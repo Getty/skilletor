@@ -1,0 +1,6 @@
+{
+  "sources": {
+    "shared": { "local": "~/dev/shared" },
+    "other": { "path": "skills" }
+  }
+}

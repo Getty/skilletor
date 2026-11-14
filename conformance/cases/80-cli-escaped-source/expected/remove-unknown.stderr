@@ -1,0 +1,2 @@
+skilletor: source "team\u001b[31mred\u0007\u202eevil
+next" is not declared in the user config (${HOME}/.claude/skilletor.json); it is not a configured source

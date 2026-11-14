@@ -10,7 +10,8 @@ command line prints and exits with, byte for byte.
 Runners:
 
 - TypeScript: `test/conformance.test.ts` (part of `npm test`).
-- Perl: `perl/t/60-conformance.t` (every step; the Perl engine syncs for Claude Code only).
+- Perl: `perl/t/60-conformance.t` (every step; the Perl engine syncs for Claude Code and Codex
+  and refuses a scope that targets Hermes).
 
 Both run the `cli` steps against their own CLI by default and against any other on request
 (below), so one set of expectations holds the TS bundle, `perl/bin/skilletor` and, later, a
@@ -141,7 +142,9 @@ The engine ops run with:
 - state root `${HOME}/.claude/skilletor`, cache root `${HOME}/.claude/skilletor/cache` – even
   when the case sets `CLAUDE_CONFIG_DIR`, under which the CLI keeps its state in
   `${CLAUDE_CONFIG_DIR}/skilletor` instead (a `cli` step's CLI runs with its own defaults, below);
-- `CODEX_HOME` = `${HOME}/.codex`, which does not exist, so Codex is not detected;
+- `CODEX_HOME` = `${HOME}/.codex`, which does not exist, so Codex is not detected – a case
+  that seeds `home/.codex/config.toml` (cases 100-108) makes it detected, and that file's
+  `trusted_hash` for skilletor's SessionStart hook decides the untrusted-hook warning;
   `HERMES_HOME` = `${HOME}/.hermes`; `CLAUDE_PLUGIN_ROOT` and `CLAUDE_CONFIG_DIR` unset,
   unless the case's `env` sets them (below). The active target is Claude
   Code alone, detected from the marker (none without it, `"claude": false`) – no case sets
@@ -499,6 +502,26 @@ show it, its `description` saying which.
 | `69-cli-briefing` | an agent's briefing as a flow list (k56): the CLI's first sync installs it with one warning naming the missing skill, a `plugin:skill` unchecked; the resync's `--json` `briefingMissing`; status names it (text, `--json`) |
 | `70-cli-escaped-address` | k87: an untrusted project source whose local address holds an escape sequence, a BEL, a bidi override and a newline is escaped on every CLI line naming it – status (text; `--json`, parsing back to the address), the sync's trust request, check `--json` – nothing fetched |
 | `71-cli-escaped-error` | k87: a config error naming a source with those characters: exit 2, the name escaped on every stream – sync's report on stderr (text, `--json`), check's one line (with `--json` too), status's report on stdout (text, `--json`); nothing written |
+| `72-cli-source-list` | `source list` (text, `--json`): the merged map's order (project, user – an index-like name first, as JSON objects order it – local), each source's origin by author mode, its merged fields in the order `git`, `ref`, `url`, `local`, `path` (a local `ref: null` unsetting the project's); `--project-dir ~` lists the user config's alone |
+| `73-cli-trust` | `trust`: a project-only git source trusted for its address, then status asks for nothing and the sync installs it; a project `local` beside `git` trusted as that path, a user source as its own; an unknown name, the home as project dir and `constructor` exit 1 |
+| `74-cli-source-remove` | `source remove` (k114): a name the target config lacks exits 1 naming where else it is declared (the other scope, `skilletor.local.json`, both, nowhere), nothing written; no project scope with `--project`; installed items without `--force`; an unused source removed and the file rewritten in its key order, the sync's report or `removed source`; `--force` on a used one: exit 2, the edit saved (k103) |
+| `75-cli-source-remove-no-harness` | `source remove` with no harness (`"claude": false`): an undeclared name still exits 1 before any sync (k114); a declared one is removed and the sync's config error exits 2, the edit saved and named (k103) |
+| `76-cli-source-remove-refused` | the one entry config load refuses (k120, an `http://` url) still in use: exit 1 without `--force`; with it removed, other keys kept, the sync's config error exit 2 with the edit saved |
+| `77-cli-source-remove-refused-project` | beside a refused project entry (k120, `ref: ""`) another source's removal exits 1 with load's error; the refused entry goes with `--project`, exit 0, `removed source`; then the other one too |
+| `78-cli-config-refused` | two refused entries, one per file (k120): removing either exits 1 with the other's error, `--force` or not; `source list` (`--json` too) and `trust` exit 1 with load's first error; nothing written |
+| `79-cli-source-remove-stranded` | `source remove` of the entry that gives a source its only backend while other files keep entries without one (k137): exit 1 naming each file and its way out (with or without `--project`, a hand edit of the local file), `--force` or not; overrides removed first, the source goes too |
+| `80-cli-escaped-source` | k87: a project source whose local address holds an escape sequence, a BEL, a bidi override and a newline – escaped in `source list` (text, `--json`) and `trust`; status then asks for no trust; `trust` and `source remove` of such a name exit 1 with it escaped, its newline a line break |
+| `81-cli-escaped-remove` | k87: a source name with those characters is a config error (`source list` exits 1, escaped); `source remove` of it removes the one refused entry (k120), `removed source …` on one escaped line; an empty `source list` is an empty line, `--json` `[]` |
+| `82-cli-source-remove-null` | a source entry written as `null` is declared (the reference's `sourceEntry` tells null from absent): `source list` exits 1 with load's error, `source remove` removes it, exit 0 |
+| `100-codex-user` | Codex alone (`"claude": false`, a `~/.codex/config.toml` without hook trust): the user sync installs the skill in `~/.agents/skills`, the agent as `~/.codex/agents/.local.helper.toml`, the rule as its section of `~/.codex/skilletor-rules.md` and the pointer block in `~/.codex/AGENTS.md`; one run warning that Codex has not trusted the SessionStart hook, in status too; check up to date, a resync changes nothing; the CLI's resync (text, `--json`), check and status |
+| `101-codex-project` | Claude Code and Codex (hook trusted) in the project scope: each its own copy of skill, agent and rule, the pointer appended to the project's own `AGENTS.md`, a `.gitignore` block in `.claude` and in `.codex`, `.worktreeinclude` naming every root; no run warning; check, status, a resync changes nothing; the CLI's status names both targets |
+| `102-codex-convert` | what the Codex mapping refuses or warns about: an agent whose `codex` is no mapping installs with a warning, one without a description and a rule holding a skilletor marker line install nothing, a rule that renders empty is skipped and gets no section; the resync says the same; the CLI's resync text |
+| `103-codex-agents-md` | the pointer's warnings (`project_doc_max_bytes = 200`): a `~/.codex/AGENTS.md` with malformed markers gets no pointer, the rules file still written; a project `AGENTS.md` over the limit gets it and a warning that it may be cut off; an `AGENTS.override.md` beside it, that Codex reads that instead; the resync warns the same |
+| `104-codex-migrate` | a lock entry of the first design (block, keyed `AGENTS.md`) whose source cannot be resolved keeps its section, read from the old block in `~/.codex/AGENTS.md`, now in `~/.codex/skilletor-rules.md`, the entry rewritten silently; a section edited by hand is overwritten and named; the old block becomes the pointer, the user's text kept; check, status, a resync overwrites nothing |
+| `105-codex-off` | Codex no longer in use (its `config.toml` gone): a sync removes the skill in `~/.agents/skills`, the agent's TOML, the rules file and the pointer block, the user's text in `~/.codex/AGENTS.md` kept; Claude Code gets its copies; check and status after |
+| `106-hook-codex-rules` | SessionStart under `--harness codex`: a new session's context starts with the user's rules file, then the project's, the report (its warning too) after them; with nothing to sync, `startup`, `clear`, a missing and a `null` source get exactly the rules, `resume` none; without `--harness codex` no rules, nor on the prompt |
+| `107-hook-codex-prompt-move` | Codex's prompt hook follows a move (k149, `gitInit`): a session started outside any project, then a prompt in a checkout with a config – its project scope synced before the prompt returns, line and context naming it, the pending report waiting there joined to both; the same prompt again and one from a subdirectory are silent |
+| `108-hook-codex-config-error` | SessionStart under Codex with a config that does not load: the line names the error, the context is the last good rules files as they are on disk, nothing written; without `--harness codex` the line alone |
 
 The state files two engines on one machine share – `render-inputs.json` with its hash,
 `sources-read.json`, `unreached.json` – are not compared here: their keys are absolute lock
@@ -506,14 +529,17 @@ paths and the hash covers the project dir, so they differ from one temp dir to t
 Perl port's `t/52-parity-sync.t` has both engines sync one machine and compares them byte for
 byte.
 
-Not covered yet: the CLI's commands but `sync`, `check`, `status` and `hook` (the Perl CLI
-runs no other yet); of the hooks, what `--harness codex` and `--harness hermes` add (Codex's
-rules context, Hermes' opt-in line, the prompt hook following a move), a due prompt's real
+Not covered yet: the CLI's `add`, `available`, `install` and `uninstall` (the Perl CLI runs
+none of them yet), and the bytes `trust` writes to `trust.json` (state, outside the compared
+trees; each engine's own tests pin them); of the hooks, what `--harness hermes` adds (Hermes'
+opt-in line, its prompt hook following a move), a due prompt's real
 background sync, the in-session interval, the sync lock held by another run – a move's wait on
 it and the race of one `cd`'s two hooks too – and a move's 20 s deadline (each engine's own
-tests pin these, the interval on an injected clock, the deadline injected); a sync's run-level warnings and notes (the untrusted Codex hook, what
-Hermes gets no copy of – Codex and Hermes targets only); a `url`
+tests pin these, the interval on an injected clock, the deadline injected); a sync's run-level
+notes (what Hermes gets no copy of – Hermes targets only); a `url`
 source actually fetched (the engine takes `https://` only, so it needs a local TLS server), a
-source whose fetch fails (the warning quotes git's own message), symbolic links in a target, a
-sync that fails midway (`partial`; `67` starts from the lock one left), and Codex and Hermes targets (the Perl engine refuses a
-scope that targets them).
+source whose fetch fails (the warning quotes git's own message), symbolic links in a target –
+a `CLAUDE.md` that is the Codex `AGENTS.md`, an `AGENTS.md` that is a link (the Perl port's
+`t/72-engine-codex.t` syncs those with both engines) –, a
+sync that fails midway (`partial`; `67` starts from the lock one left), and Hermes targets (the
+Perl engine refuses a scope that targets them).

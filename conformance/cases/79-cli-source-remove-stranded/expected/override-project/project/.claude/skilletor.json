@@ -1,0 +1,8 @@
+{
+  "sources": {
+    "other": {
+      "local": "~/dev/shared"
+    }
+  },
+  "gitignore": false
+}

@@ -1,0 +1,19 @@
+{
+  "description": "source remove through the CLI (k114): a name the target config does not declare exits 1 before anything else, --force or not, naming that config and where else the name is declared – the other scope's config, skilletor.local.json, both, or nowhere – nothing written, no sync; --project with the home as project dir has no project scope; a source with installed items exits 1 without --force. An unused source is removed and the sync after it runs (its report, or `removed source <name>` when it has nothing to say); the file is rewritten as 2-space JSON in its own key order. With --force a used source goes too and the sync stops at the install left without it: exit 2, the edit saved and named (k103).",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    { "id": "not-declared", "op": "cli", "argv": ["source", "remove", "nope"], "tree": true },
+    { "id": "not-declared-project", "op": "cli", "argv": ["source", "remove", "nope", "--project", "--force"] },
+    { "id": "in-project", "op": "cli", "argv": ["source", "remove", "team"] },
+    { "id": "in-user", "op": "cli", "argv": ["source", "remove", "shared", "--project"] },
+    { "id": "in-local", "op": "cli", "argv": ["source", "remove", "solo"] },
+    { "id": "in-project-and-local", "op": "cli", "argv": ["source", "remove", "dup"] },
+    { "id": "home-project", "op": "cli", "argv": ["source", "remove", "team", "--project", "--project-dir", "${HOME}"] },
+    { "id": "in-use", "op": "cli", "argv": ["source", "remove", "shared"], "tree": true },
+    { "id": "remove", "op": "cli", "argv": ["source", "remove", "extra"], "tree": true },
+    { "id": "remove-project", "op": "cli", "argv": ["source", "remove", "team", "--project"], "tree": true },
+    { "id": "remove-force", "op": "cli", "argv": ["source", "remove", "shared", "--force"], "tree": true }
+  ]
+}

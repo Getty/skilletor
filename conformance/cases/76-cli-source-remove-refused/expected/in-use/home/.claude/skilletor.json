@@ -1,0 +1,1 @@
+{ "vars": { "x": 1 }, "sources": { "web": { "url": "http://host/x.tar.gz" } }, "install": { "skills": ["foo@web"] } }

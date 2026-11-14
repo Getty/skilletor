@@ -14,6 +14,7 @@ for (qw(
   Skilletor::CLI
   Skilletor::Catalog
   Skilletor::ClaudeSettings
+  Skilletor::Commands
   Skilletor::Config
   Skilletor::Convert
   Skilletor::Engine
@@ -24,6 +25,7 @@ for (qw(
   Skilletor::Error::Bundle
   Skilletor::Error::CacheRejected
   Skilletor::Error::Catalog
+  Skilletor::Error::Command
   Skilletor::Error::Config
   Skilletor::Error::Convert
   Skilletor::Error::Frontmatter

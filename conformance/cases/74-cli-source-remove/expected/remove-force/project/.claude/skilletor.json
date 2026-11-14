@@ -1,0 +1,7 @@
+{
+  "sources": {
+    "dup": {
+      "local": "${HOME}/dev/extra"
+    }
+  }
+}

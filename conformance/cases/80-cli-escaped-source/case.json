@@ -1,0 +1,11 @@
+{
+  "description": "k87 for source list, trust and source remove: a project source whose local address holds an escape sequence, a bell, a bidi override and a newline. source list shows it escaped on its one line (JSON's escapes, then the override's), --json with JSON's escapes, parsing back to the address; trust names it escaped and status then asks for no trust; trust and source remove of a name with those characters exit 1 with the name escaped – its newline a line break of the error, as every error's.",
+  "steps": [
+    { "id": "list", "op": "cli", "argv": ["source", "list"] },
+    { "id": "list-json", "op": "cli", "argv": ["source", "list", "--json"] },
+    { "id": "trust", "op": "cli", "argv": ["trust", "team"] },
+    { "id": "status", "op": "cli", "argv": ["status", "--scope", "project"] },
+    { "id": "trust-unknown", "op": "cli", "argv": ["trust", "team\u001b[31mred\u0007\u202eevil\nnext"] },
+    { "id": "remove-unknown", "op": "cli", "argv": ["source", "remove", "team\u001b[31mred\u0007\u202eevil\nnext"], "tree": true }
+  ]
+}

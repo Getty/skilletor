@@ -1,0 +1,12 @@
+{
+  "description": "source remove of the entry that gives a source its only backend while other files keep entries for it without one (k137): exit 1 before anything else, --force or not, naming every such file and its way out – `skilletor source remove <name>` with or without --project, a hand edit for skilletor.local.json – nothing written, no sync. Once the project's override is gone the local file's alone is named; a backend-less entry goes as any other, and once a source's overrides are gone the source goes too.",
+  "steps": [
+    { "id": "stranded-two", "op": "cli", "argv": ["source", "remove", "shared"], "tree": true },
+    { "id": "stranded-two-force", "op": "cli", "argv": ["source", "remove", "shared", "--force"] },
+    { "id": "stranded-user", "op": "cli", "argv": ["source", "remove", "other", "--project"] },
+    { "id": "override-project", "op": "cli", "argv": ["source", "remove", "shared", "--project"], "tree": true },
+    { "id": "stranded-local", "op": "cli", "argv": ["source", "remove", "shared"] },
+    { "id": "override-user", "op": "cli", "argv": ["source", "remove", "other"] },
+    { "id": "remove-other", "op": "cli", "argv": ["source", "remove", "other", "--project"], "tree": true }
+  ]
+}

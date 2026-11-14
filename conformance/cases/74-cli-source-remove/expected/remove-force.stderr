@@ -1,0 +1,2 @@
+skilletor: config error, nothing synced — ${HOME}/.claude/skilletor.json: user install "foo@shared" references unknown source "shared"
+skilletor: the config edit itself was saved in ${HOME}/.claude/skilletor.json (not rolled back); fix the error, then run skilletor sync

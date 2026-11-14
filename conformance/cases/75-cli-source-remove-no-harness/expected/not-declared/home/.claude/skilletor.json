@@ -1,0 +1,5 @@
+{
+  "sources": {
+    "shared": { "local": "~/dev/shared" }
+  }
+}

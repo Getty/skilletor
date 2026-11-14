@@ -1,0 +1,1 @@
+{"vars": {"level": 1}, "sources": {"shared": {"git": "https://conformance.invalid/shared.git"}, "extra": {"local": "~/dev/extra"}}, "install": {"skills": ["foo@shared"]}}

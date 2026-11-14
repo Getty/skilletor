@@ -1,0 +1,9 @@
+{
+  "sources": {
+    "team": { "git": "https://conformance.invalid/team.git" },
+    "tools": { "git": "https://conformance.invalid/tools.git", "local": "${PROJECT}/vendor/tools" }
+  },
+  "install": {
+    "skills": ["lint@team"]
+  }
+}

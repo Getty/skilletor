@@ -1,0 +1,1 @@
+skilletor: ${PROJECT}/.claude/skilletor.json: sources.tools.ref "" must not be empty (omit "ref" for the remote's HEAD)

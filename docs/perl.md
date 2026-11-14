@@ -136,9 +136,9 @@ other's `sync` and SessionStart wait or time out. It skips without node or the b
   `PAR_PROGNAME`, plain perl re-runs `$^X` with the script), and the checkout-move hooks
   (`hook cwd-changed`, `hook post-tool-use`, k147; ported in k182). `--harness codex|hermes` is
   parsed but answers as Claude Code's hook does until k184/k185.
-  The Perl CLI (`bin/skilletor`) runs `sync`, `check`, `status` (k173) and the hooks; the
-  other commands are being ported one by one under k166, and each one not ported yet says so
-  and exits 1.
+  The Perl CLI (`bin/skilletor`) runs `sync`, `check`, `status` (k173), `trust`, `source list`,
+  `source remove` (k175) and the hooks; the other commands are being ported one by one under
+  k166, and each one not ported yet says so and exits 1.
 - Windows is untested. The process layer has a Windows path (k186: `run_command` through
   temp files on a no-wait spawn, `spawn_detached` through Win32::Process, the sync lock
   refreshed by its holder instead of a forked child), exercised on Linux through an injected

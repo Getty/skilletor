@@ -1,0 +1,7 @@
+{
+  "sources": {
+    "shared": { "path": ["skills", "extra"], "ref": "v1", "git": "https://conformance.invalid/shared.git" },
+    "mine": { "local": "~/dev/mine", "git": "https://conformance.invalid/mine.git" },
+    "7": { "path": "skills", "url": "https://conformance.invalid/seven.tar.gz" }
+  }
+}

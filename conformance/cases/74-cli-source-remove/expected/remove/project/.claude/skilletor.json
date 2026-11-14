@@ -1,0 +1,6 @@
+{
+	"sources": {
+		"team": { "local": "${HOME}/dev/extra" },
+		"dup": { "local": "${HOME}/dev/extra" }
+	}
+}

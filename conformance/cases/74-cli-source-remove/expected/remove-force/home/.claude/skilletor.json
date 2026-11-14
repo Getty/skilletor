@@ -1,0 +1,10 @@
+{
+  "vars": {
+    "level": 1
+  },
+  "install": {
+    "skills": [
+      "foo@shared"
+    ]
+  }
+}

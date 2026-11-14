@@ -652,6 +652,14 @@ sub source_entry {
   return $sources->{$name};
 }
 
+# Does the file declare source $name – the reference's sourceEntry(...) !== undefined, which
+# tells an entry written as null from none at all (source_entry is undef for both)?
+sub has_source_entry {
+  my ( $self, $file, $name ) = @_;
+  my $sources = $self->_load_raw($file)->{sources};
+  return ( js_type($sources) eq 'object' && exists $sources->{$name} ) ? 1 : 0;
+}
+
 sub add_source {
   my ( $self, $file, $name, $def ) = @_;
   my $cfg = $self->_load_raw($file);
@@ -969,6 +977,14 @@ it; returns the fields present. C<$needs_backend> defaults to true.
 =method source_entry
 
   Skilletor::Config->source_entry( $file, $name );
+
+=method has_source_entry
+
+  Skilletor::Config->has_source_entry( $file, $name );
+
+True when the file's C<sources> has the key C<$name>, whatever its value – an
+entry written as C<null> too, for which L</source_entry> is C<undef> as for
+none.
 
 =method add_source
 

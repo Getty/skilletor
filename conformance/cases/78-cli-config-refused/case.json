@@ -1,0 +1,10 @@
+{
+  "description": "Two entries config load refuses, one per file (k120): source remove of either exits 1 with load's error for the other, --force or not – nothing edited, no sync; source list (with --json too, still the one stderr line) and trust exit 1 with load's first error.",
+  "steps": [
+    { "id": "remove-user", "op": "cli", "argv": ["source", "remove", "web", "--force"], "tree": true },
+    { "id": "remove-project", "op": "cli", "argv": ["source", "remove", "tools", "--project"], "tree": true },
+    { "id": "list", "op": "cli", "argv": ["source", "list"] },
+    { "id": "list-json", "op": "cli", "argv": ["source", "list", "--json"] },
+    { "id": "trust", "op": "cli", "argv": ["trust", "tools"], "tree": true }
+  ]
+}

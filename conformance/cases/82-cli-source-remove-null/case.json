@@ -1,0 +1,7 @@
+{
+  "description": "A source entry written as null is declared all the same (the reference's sourceEntry tells a null value from an absent key): source list exits 1 with load's error for it; source remove takes it for the one entry load refuses (k120) and removes it, exit 0, `removed source gone`, the file left `{}`.",
+  "steps": [
+    { "id": "list", "op": "cli", "argv": ["source", "list"] },
+    { "id": "remove", "op": "cli", "argv": ["source", "remove", "gone"], "tree": true }
+  ]
+}

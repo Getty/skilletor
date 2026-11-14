@@ -1,0 +1,53 @@
+[
+  {
+    "name": "team",
+    "def": {
+      "git": "https://conformance.invalid/team.git",
+      "path": "rules"
+    },
+    "origin": "project"
+  },
+  {
+    "name": "shared",
+    "def": {
+      "git": "https://conformance.invalid/shared.git",
+      "ref": "v1",
+      "local": "${HOME}/dev/missing",
+      "path": [
+        "skills",
+        "extra"
+      ]
+    },
+    "origin": "user"
+  },
+  {
+    "name": "vendored",
+    "def": {
+      "local": "${PROJECT}/vendor/tools"
+    },
+    "origin": "project"
+  },
+  {
+    "name": "7",
+    "def": {
+      "url": "https://conformance.invalid/seven.tar.gz",
+      "path": "skills"
+    },
+    "origin": "user"
+  },
+  {
+    "name": "mine",
+    "def": {
+      "git": "https://conformance.invalid/mine.git",
+      "local": "~/dev/mine"
+    },
+    "origin": "user"
+  },
+  {
+    "name": "own",
+    "def": {
+      "local": "~/dev/mine"
+    },
+    "origin": "user"
+  }
+]

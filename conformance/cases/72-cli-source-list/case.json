@@ -1,0 +1,8 @@
+{
+  "description": "source list through the CLI: every source of the merged map in its order (the project config's names first, then the user config's – an index-like name such as 7 ahead of the rest, as JSON objects order it – then skilletor.local.json's), each with the origin of the backend author mode picks and its fields as merged, written in the order git, ref, url, local, path whatever order the files use (a ref null in the local file unsets the project's, a path stays a string or a list as written); --json the same as a list of {name, def, origin}; with --project-dir the home only the user config's sources. Nothing is fetched or written.",
+  "steps": [
+    { "id": "list", "op": "cli", "argv": ["source", "list"] },
+    { "id": "list-json", "op": "cli", "argv": ["source", "list", "--json"] },
+    { "id": "list-home", "op": "cli", "argv": ["source", "list", "--project-dir", "${HOME}"], "tree": true }
+  ]
+}

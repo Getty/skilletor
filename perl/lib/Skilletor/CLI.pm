@@ -12,7 +12,7 @@ use Scalar::Util qw( blessed );
 use Skilletor::FSUtil qw( decode_utf8_lossy path_join );
 use Skilletor::Hooks qw( project_root_of );
 use Skilletor::JSON qw( js_ordered js_parse js_stringify js_type );
-use Skilletor::Report qw( display_safe report_json report_text status_text );
+use Skilletor::Report qw( backend_label display_safe report_json report_text status_text );
 
 our $VERSION = '0.002';
 
@@ -206,6 +206,42 @@ sub _status {
   return _truthy( $r->{error} ) ? 2 : 0;
 }
 
+# The config commands; Skilletor::Commands is loaded for them alone, as the engine is.
+sub _source_list {
+  my ( $flags ) = @_;
+  my $engine = _engine($flags);
+  require Skilletor::Commands;
+  my $list = Skilletor::Commands::source_list($engine);
+  if ( $flags->{json} ) {
+    _print_text( \*STDOUT, js_stringify( $list, 2 ) );
+  }
+  else {
+    _print_lines( \*STDOUT, map { $_->{name}.' ['.$_->{origin}.'] '.js_stringify( $_->{def} ) } @$list );
+  }
+  return 0;
+}
+
+# The sync's report after the edit, or `removed source <name>` when it has nothing to say.
+sub _source_remove {
+  my ( $flags, $name ) = @_;
+  my $engine = _engine($flags);
+  require Skilletor::Commands;
+  my $r = Skilletor::Commands::source_remove( $engine, name => $name, project => $flags->{project}, force => $flags->{force} );
+  return _sync_failed( $r, saved => Skilletor::Commands::config_path( $engine, $flags->{project} ) ) if _truthy( $r->{error} );
+  my $text = report_text($r);
+  _print_text( \*STDOUT, length $text ? $text : display_safe("removed source $name") );
+  return 0;
+}
+
+sub _trust {
+  my ( $flags, $name ) = @_;
+  my $engine = _engine($flags);
+  require Skilletor::Commands;
+  my $r = Skilletor::Commands::trust( $engine, $name );
+  _print_lines( \*STDOUT, 'trusted source '.$r->{name}.' ('.backend_label($r).')' );
+  return 0;
+}
+
 # A usage error (spec §7): its line on stderr, exit 2.
 sub _usage_error {
   my ( $line ) = @_;
@@ -355,10 +391,10 @@ sub _dispatch {
   }
   if ( $cmd eq 'source' ) {
     my $sub = $rest[0] // '';
-    return _not_ported('source list') if $sub eq 'list';
+    return _source_list($flags) if $sub eq 'list';
     if ( $sub eq 'remove' ) {
       return _usage_error('skilletor: source remove needs a name') unless $given->( $rest[1] );
-      return _not_ported('source remove');
+      return _source_remove( $flags, $rest[1] );
     }
     return _usage_error('skilletor: usage: source list | source remove <name>');
   }
@@ -368,7 +404,7 @@ sub _dispatch {
   }
   if ( $cmd eq 'trust' ) {
     return _usage_error('skilletor: trust needs a source name') unless $given->( $rest[0] );
-    return _not_ported('trust');
+    return _trust( $flags, $rest[0] );
   }
   _print_lines( \*STDERR, "skilletor: unknown command: $cmd" );
   return 2;
@@ -408,11 +444,36 @@ stdout as well, exit 2.
 
 =back
 
+It runs C<trust>, C<source list> and C<source remove> through
+L<Skilletor::Commands>:
+
+=over 4
+
+=item * C<trust E<lt>sourceE<gt>> trusts the source for the backend it would
+use now and prints C<trusted source E<lt>nameE<gt> (E<lt>kindE<gt>
+E<lt>addressE<gt>)>.
+
+=item * C<source list> prints one line per source, C<E<lt>nameE<gt>
+[E<lt>originE<gt>] E<lt>fields as JSONE<gt>>; C<--json> prints the list as
+JSON.
+
+=item * C<source remove E<lt>nameE<gt> [--project] [--force]> removes the
+source from the user config, or the project config, then syncs: the sync's
+report, or C<removed source E<lt>nameE<gt>> when it has nothing to say. A sync
+that stops at a config error exits 2 with two lines on stderr naming the saved
+config file (k103).
+
+=back
+
+A refusal or a config file that does not load is C<skilletor: E<lt>whyE<gt>>
+on stderr, exit 1, nothing changed.
+
 The engine runs on this machine: the home from C<$HOME>, the project from
 C<--project-dir> or the git top level of the working directory
 (L</project_root_of>), state under C<$CLAUDE_CONFIG_DIR> or F<~/.claude>, in
-F<skilletor/>, and the real host and user for templates. The engine is loaded
-only for these commands, so C<--help> and a usage error stay quick.
+F<skilletor/>, and the real host and user for templates. The engine and the
+commands are loaded only for the commands that run, so C<--help> and a usage
+error stay quick.
 
 C<hook E<lt>eventE<gt> [--harness codex|hermes]> runs a hook
 (L<Skilletor::Hooks>): the input is stdin's JSON (none on a terminal; malformed
@@ -423,7 +484,8 @@ happens – a failure is that line's C<systemMessage>, its own setup's too. It i
 dispatched before any option check, so no option makes it fail. Its background
 sync re-runs this CLI (L</self_command>).
 
-Every other command is not ported yet: it says so on stderr and exits 1.
+C<add>, C<available>, C<install> and C<uninstall> are not ported yet: each
+says so on stderr and exits 1.
 Beside them the CLI has the argument layer: C<--help>, C<--version>, the
 options each command accepts, an unknown option or command, an invalid
 C<--scope> and a missing operand.

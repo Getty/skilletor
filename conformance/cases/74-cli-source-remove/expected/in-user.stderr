@@ -1,0 +1,1 @@
+skilletor: source "shared" is not declared in the project config (${PROJECT}/.claude/skilletor.json); the user config declares it (run without --project)

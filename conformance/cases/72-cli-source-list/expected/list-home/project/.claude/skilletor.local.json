@@ -1,0 +1,6 @@
+{
+  "sources": {
+    "team": { "path": "rules", "ref": null },
+    "own": { "local": "~/dev/mine" }
+  }
+}

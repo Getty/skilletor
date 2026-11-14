@@ -1,0 +1,10 @@
+{
+  "vars": {
+    "x": 1
+  },
+  "install": {
+    "skills": [
+      "foo@web"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "description": "k87: a source whose name holds an escape sequence, a bell, a bidi override and a newline is a config error (k95): source list exits 1 with the name escaped on one stderr line; source remove of that name still removes it – the one entry load refuses (k120) – and says `removed source <name>` on one line, everything escaped; source list of the config left prints an empty line, --json `[]`.",
+  "steps": [
+    { "id": "list", "op": "cli", "argv": ["source", "list"] },
+    { "id": "remove", "op": "cli", "argv": ["source", "remove", "team\u001b[31mred\u0007\u202eevil\nnext"], "tree": true },
+    { "id": "list-empty", "op": "cli", "argv": ["source", "list"] },
+    { "id": "list-empty-json", "op": "cli", "argv": ["source", "list", "--json"] }
+  ]
+}

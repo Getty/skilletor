@@ -1,0 +1,10 @@
+{
+  "skills/foo": {
+    "source": "shared",
+    "version": "git:7e8bca5",
+    "files": {
+      "skills/foo/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/foo/SKILL.md": "sha256:9cb4433a5343620e69fff8221e5d9705d909a6b2a2813606e6c66fe41e16b342"
+    }
+  }
+}

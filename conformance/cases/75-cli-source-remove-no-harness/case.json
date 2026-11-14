@@ -1,0 +1,8 @@
+{
+  "description": "source remove on a machine with no agent harness (\"claude\": false), so every sync stops at a config error: a name the user config does not declare still exits 1 before any sync, never saying the edit was saved (k114); a declared one is removed, and the sync after it stops – exit 2, the error and the saved config file on stderr, nothing on stdout, the file keeping the edit (k103).",
+  "claude": false,
+  "steps": [
+    { "id": "not-declared", "op": "cli", "argv": ["source", "remove", "nope"], "tree": true },
+    { "id": "remove", "op": "cli", "argv": ["source", "remove", "shared"], "tree": true }
+  ]
+}

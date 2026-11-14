@@ -1,0 +1,7 @@
+{
+  "sources": {
+    "team": { "ref": "main", "git": "https://conformance.invalid/team.git" },
+    "shared": { "ref": "v2", "local": "${HOME}/dev/missing" },
+    "vendored": { "local": "${PROJECT}/vendor/tools" }
+  }
+}

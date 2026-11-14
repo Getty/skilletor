@@ -1,0 +1,3 @@
+7 [user] {"url":"https://conformance.invalid/seven.tar.gz","path":"skills"}
+shared [user] {"git":"https://conformance.invalid/shared.git","ref":"v1","path":["skills","extra"]}
+mine [user] {"git":"https://conformance.invalid/mine.git","local":"~/dev/mine"}
