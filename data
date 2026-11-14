@@ -1,0 +1,31 @@
+---
+class: standard
+completed: 2026-11-14T02:15:15Z
+created: 2026-11-14T00:16:37Z
+depends_on:
+- 182
+id: 205
+priority: low
+started: 2026-11-14T00:51:56Z
+status: done
+tags:
+- perl
+- binary
+- ci
+title: Smoke the hooks in smoke-binary.sh
+updated: 2026-11-14T02:15:15Z
+---
+
+From k189: perl/scripts/smoke-binary.sh (release-binaries smoke job, transcript t/data/smoke/expected.txt kept true by t/70-smoke-binary.t) covers --version, --help, an error path and sync/check/status, not the hooks. The hooks are what the plugin runs at every session start and prompt: add hook session-start and hook user-prompt-submit (fast path and a due prompt with its background sync and the next prompt's pending report), and the move hooks once k182 is in. Windows keeps its reduced smoke until k186.
+
+2026-11-14 01:11 Progress (worker): smoke-binary.sh now runs the Claude hooks after the sync/check/status cases: session-start (check changed -> sync, the url warning), user-prompt-submit with nothing due, user-prompt-submit in a checkout never checked (due: detached background sync), then the next prompts there until one hands out the pending report (bounded by SKILLETOR_SMOKE_WAIT, default 60 s, 0.2 s between prompts; every prompt before it must be silent with exit 0), cwd-changed and post-tool-use into checkouts with t/data/smoke/project-config.json (new fixture), post-tool-use again (same cwd: nothing). The hooks print the checkout's absolute path; the transcript writes this run's temp dir as <work> (work is now its physical path, pwd -P, for macOS). Transcript regenerated with SKILLETOR_SMOKE_UPDATE=1 from the Perl CLI and hand-checked; node dist/skilletor.js gives the byte-identical transcript (smoke OK with a node stand-in). Negative: a CLI whose hook __sync-background exits at once fails 'no pending report within 3 s' (rc 1).
+
+2026-11-14 01:45 Done (worker), commit-ready, not committed.
+FILES: perl/scripts/smoke-binary.sh, perl/t/70-smoke-binary.t, perl/t/data/smoke/expected.txt, perl/t/data/smoke/project-config.json (new). Nothing else.
+CHANGES: smoke-binary.sh runs, after the sync/check/status cases: hook session-start; user-prompt-submit with nothing due; user-prompt-submit in a checkout never checked (due: detached background sync); the next prompts there until one hands out the pending report (bounded: SKILLETOR_SMOKE_WAIT, default 60 s, 0.2 s between prompts; each prompt before it must exit 0 and say nothing); cwd-changed and post-tool-use into checkouts holding project-config.json; post-tool-use again (same cwd: nothing). Each hook runs as Claude Code runs it: CLAUDE_PROJECT_DIR set, its JSON input on stdin. Refactor needed for that: the wiped environment is an array envs (bin() unchanged in effect, Windows' too), run_case split into capture/capture_hook/record, files() takes a dir. work is its physical path (pwd -P, macOS /private/var); the transcript writes it as <work> (one sed over the whole transcript at the end). Windows still skips the fixture commands and now the hooks too (message says so); k210 lifts that. 70-smoke-binary.t: the new OK line and three checks that expected.txt holds the pending report, the cwd-changed line and the post-tool-use answer.
+CHECKS: shellcheck (koalaman/shellcheck:stable) smoke-binary.sh rc 0; bash 3.2 (bash:3.2 image) bash -n OK. SKILLETOR_SMOKE_UPDATE=1 prove -lv t/70-smoke-binary.t wrote the transcript (+54 lines, hand-checked: every hook exits 0 with empty stderr; session-start '1 warning(s)'; the pending report 'skill hello@loc: active now' under UserPromptSubmit; both moves 'in <work>/checkouts/...'); prove t/70-smoke-binary.t 11 PASS; 3 repeat runs identical; node dist/skilletor.js as stand-in: smoke OK, byte-identical transcript. Negative: a CLI whose 'hook __sync-background' exits at once -> 'FAIL: no pending report within 3 s' rc 1. On a snapshot of HEAD 79264fb + these files (the live tree holds another worker's perl/lib WIP and untracked cases 72-82, which fail t/62-engine.t and t/60-conformance.t there): prove -lr -j4 t Files=37 Tests=2349 PASS; SKILLETOR_BIN_OUT=/tmp/k205-host2/skilletor build-binary.sh 9.1M/177 modules; verify-binary.sh 'verify: OK'; smoke-binary.sh 'smoke: OK'; container-proof.sh 'cli steps in the container: 197 passed, 0 failed, 0 skipped', 'container proof: OK'. In k189-build2:deps (bullseye): build 8.3M/171, verify OK, smoke OK; that binary's smoke in ubuntu:22.04, debian:bullseye-slim, almalinux:9 (dnf libxcrypt-compat tar gzip diffutils findutils) and skilletor-noperl:probe (git, no perl): smoke OK in all four.
+UNTESTED: macOS (bash 3.2 at run time, BSD sed for <work>, /private/var paths, fractional sleep), linux-arm64, Windows (skipped by design until k210), every leg on GitHub.
+
+2026-11-14 02:00 For the commit (worker): k210 has since edited perl/scripts/smoke-binary.sh in the same tree, so the working file holds both cards' hunks. The k205-only change is /tmp/k205-only.patch (smoke-binary.sh, 70-smoke-binary.t, expected.txt, project-config.json against HEAD 79264fb); 'git apply --cached --check' against the index passes. 'git apply --cached /tmp/k205-only.patch' stages exactly k205; k210's hunks then stay unstaged.
+
+Committed as 70e9747
