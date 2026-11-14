@@ -1,0 +1,75 @@
+---
+class: standard
+completed: 2026-11-14T04:30:25Z
+created: 2026-11-13T20:43:13Z
+depends_on:
+- 173
+id: 177
+priority: medium
+started: 2026-11-14T03:05:58Z
+status: done
+tags:
+- perl
+- cli
+- commands
+title: 'Perl CLI: available'
+updated: 2026-11-14T04:30:25Z
+---
+
+Part of the Perl CLI strand (see the strand card).
+
+Port listAvailable (commands.ts:325-377). It runs under the sync lock.
+
+Output format:
+- line one: a check mark (`✓`) or a blank, then type, name@source, then ` — desc`;
+- a second line indented four spaces: an error, the bundle members, or `(no items)`;
+- --json.
+
+Cases: k100, k113, and k87 escaping.
+
+Done: both runners are green with both CLIs.
+
+From k174: carry cli.test.ts:960 (available, k87 escaping) as a cli case here.
+
+While in Commands.pm (from k176): the POD of perl/lib/Skilletor/Error/Command.pm should also name add's refusals – a source name or spec add refuses, a taken name with another address, ref or path, a kept entry config load refuses.
+
+2026-11-14 03:17 Progress: Skilletor::Commands::available (+ _list_available, _installed_set, _with_sync_lock: State->with_lock with the url/git cache sweep, as TS withSyncLock) and CLI _available (text and --json) ported; untrusted sources skipped silently as in TS (by name too: an empty line, --json []). missingSources/checkBundle are install's helpers, not used by cmdAvailable – left for the install card. Cases 93-97 drafted (listing+marks+trust, item errors k100/k113/k126, bundles incl. k115, k87 escaping, refusals); generating TS expectations next.
+
+2026-11-14 Progress: TS expectations for cases 93-97 generated and reviewed by hand; no existing expectation changed. Green: npm typecheck+test, the Perl prove -lr -j4 t, both cross-runs, check-dist, and the isolated worktree (HEAD plus only k177's files). Handing off to review.
+
+k177 ready for review. Nothing committed.
+
+FILES (all mine unless marked shared):
+- perl/lib/Skilletor/Commands.pm: available, _list_available, _installed_set, _with_sync_lock and _bool. This is State->with_lock with the url/git cache sweep, as TS withSyncLock does. New imports, %TYPE_DIR, POD (synopsis, description, =func available).
+- perl/lib/Skilletor/CLI.pm: _available (text, and --json through _print_text), dispatch, POD. install and uninstall are still not ported.
+- perl/lib/Skilletor/Error/Command.pm (POD only): names add's refusals (from k176) and available's unknown source.
+- perl/bin/skilletor (POD only): SYNOPSIS and DESCRIPTION gain available.
+- perl/t/76-commands-available.t (new): waits for a held lock, then sweeps and lists; LockTimeout; null and string lock entries mark nothing.
+- perl/t/68-cli.t (SHARED): only the hunk @@ -120 is mine (4 quick argvs, 1 'available: the commands loaded' line). The header-comment hunk @@ -1,8 is k185's.
+- conformance/cases/93-cli-available, 94-cli-available-item-errors, 95-cli-available-bundles, 96-cli-available-escaped, 97-cli-available-refused (new). Expectations come from the TS UPDATE run (--test-name-pattern 9[3-7]), and I reviewed them by hand. 96 carries over cli.test.ts "k87: available shows a source's descriptions escaped".
+- conformance/README.md (SHARED): only the five table rows 93-97, before 100-codex-user.
+- Untouched: src/, dist/, k185's files, nytprof.out, and the README "Not covered yet" paragraph. No existing expectation changed.
+
+TESTS:
+- main tree, `npm run typecheck && npm test`: exit 0; 1232 tests, 1231 pass, 0 fail, 1 skipped. The skip is the "hermes plugins install" test, which needs SKILLETOR_HERMES_INSTALL=1; it was already skipped before this card.
+- main tree, `prove -lr -j4 t`: Files=45, Tests=2547, PASS. 54-parity-cli.t and 70-smoke-binary.t are ok.
+- cross-run, the TS runner with the Perl CLI: 112 tests, 112 pass.
+- cross-run, the Perl t/60-conformance.t with dist/skilletor.js: Tests=113, PASS.
+- `npm run build && npm run check-dist` (main tree): up to date.
+- isolated worktree (HEAD plus only these files): `npm run typecheck && npm test` 1216 tests, 1215 pass, 0 fail, 1 skip (the same Hermes skip; 16 fewer, which are k185 cases 110-125, and 93-97 all pass); `prove -lr -j4 t` Files=43, Tests=2490, PASS (without k185 t/74 and t/75). The worktree is removed.
+- mutation check of t/76: dropping the lock fails (a) and (b); dropping the url sweep fails (a).
+
+README "Not covered yet" (for the dispatcher). Replace "the CLI's `available`, `install` and `uninstall` (the Perl CLI runs none of them yet);" with:
+"the CLI's `install` and `uninstall` (the Perl CLI runs neither yet); `available` waiting for the sync lock another run holds (k74; each engine's own tests pin it: `test/commands.test.ts`, the Perl port's `t/76-commands-available.t`);"
+
+docs/perl.md Known gaps (for the dispatcher). Replace "and the hooks; the other commands are being ported one by one under k166, and each one not ported yet says so and exits 1." with:
+"`available` (k177) and the hooks; `install` and `uninstall` are being ported under k166, and each says so and exits 1 until then."
+
+DRIFT and OPEN (notes only; the dispatcher files any tickets):
+1. TS installedSet (src/commands.ts) reads `entry.skipped` on every lock entry. A `null` entry in a lock object therefore throws a TypeError, while the Perl port skips entries that are not objects (pinned in t/76). Ticket candidate for the skilletor board: TS robustness. src/ was not touched.
+2. TS installedSet matches item names exactly, not through nameKey(). Ported as is; it may need a look against the case-insensitivity invariant.
+3. The Perl port now has three copies of the sync lock plus sweep: Engine::sync, Resolver::resolve and Commands::_with_sync_lock. A shared helper would be a refactor, outside this card.
+4. missingSources and checkBundle are install's helpers; cmdAvailable does not use them, so they are left for the install card.
+5. Case numbers 98-99 are still free.
+
+Committed as 4ece045
