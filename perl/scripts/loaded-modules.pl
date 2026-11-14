@@ -68,7 +68,8 @@ for my $n ( 0 .. 99 ) {
   if ( mkdir $try, 0700 ) { $tmp = $try; last }
 }
 defined $tmp or die "loaded-modules: cannot make a temp dir below $base: $!\n";
-END { system( 'rm', '-rf', '--', $tmp ) if $$ == $MAIN && defined $tmp && $tmp =~ m{/skilletor-loaded-modules\.\d+\.\d+\z} }
+# local $?: the system() would otherwise set the script's exit code, a die's included.
+END { local $?; system( 'rm', '-rf', '--', $tmp ) if $$ == $MAIN && defined $tmp && $tmp =~ m{/skilletor-loaded-modules\.\d+\.\d+\z} }
 
 sub spew {
   my ( $file, $content ) = @_;
@@ -101,7 +102,11 @@ spew( "$tmp/src/skilletor.json", qq({\n  "vars": { "who": "world", "flag": true 
 spew( "$tmp/src2/skills/extra/SKILL.md", $skill->( 'extra', 'Extra', 'Extra.' ) );
 spew( "$tmp/git/remote/skills/remote-skill/SKILL.md", $skill->( 'remote-skill', 'From git', 'Git.' ) );
 spew( "$tmp/git/remote/bundles/pack.yaml", "description: A pack\nskills: [remote-skill]\nvars:\n  who: pack\n" );
-spew( "$tmp/gitconfig", qq([url "file://$tmp/git/remote"]\n\tinsteadOf = https://skilletor.invalid/remote.git\n) );
+my $gitconfig = qq([url "file://$tmp/git/remote"]\n\tinsteadOf = https://skilletor.invalid/remote.git\n);
+spew( "$tmp/gitconfig", $gitconfig );
+# git before 2.32 has no GIT_CONFIG_GLOBAL and reads $HOME/.gitconfig instead: the same file
+# there, for the build image's git (perl:5.40-bullseye: 2.30).
+spew( "$home/.gitconfig", $gitconfig );
 {
   local @ENV{ keys %git_env } = values %git_env;
   for my $cmd ( [qw( init -q -b main )], [qw( add -A )], [qw( commit -q -m one )], [qw( tag v1 )] ) {
@@ -193,6 +198,10 @@ spew( "$tmp/stdin.json", $stdin );
     warn "loaded-modules: skilletor @argv died: $died" if defined $died;
   };
   for my $argv (@runs) { $run->( $project, @$argv ) }
+  # A source that never resolves runs no path of its own and drops its modules from the list
+  # without a word: the git source's sync must have installed its skill.
+  -f "$home/.claude/skills/remote-skill/SKILL.md"
+    or die "loaded-modules: the git source did not resolve (no skills/remote-skill installed)\n";
   for my $argv ( ['sync'], ['status'], ['check'] ) { $run->( "$tmp/cwd", @$argv ) }    # no project
   {
     local $ENV{CLAUDE_PROJECT_DIR} = $project;                                      # as Claude Code runs the hooks

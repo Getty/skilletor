@@ -11,7 +11,8 @@ set -euo pipefail
 #              extraction. Either way a bundled copy (pp -l) cannot help: the target must have it.
 #              Debian and Ubuntu always do; install libxcrypt-compat on RHEL/Fedora/Amazon Linux
 #              and Arch.
-#   libssl, libcrypto  Net::SSLeay, for an https:// url source (OpenSSL 3).
+#   libssl, libcrypto  Net::SSLeay, for an https:// url source, in the build host's OpenSSL
+#              version: 1.1 in the release build image (perl:5.40-bullseye), 3 on Debian 12+.
 #   libz, libzstd      what the build host's libcrypto and Compress::Raw::Zlib link (a system
 #              perl's Compress::Raw::Zlib uses the system zlib).
 #
