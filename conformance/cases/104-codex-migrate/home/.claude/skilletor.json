@@ -1,0 +1,16 @@
+{
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    },
+    "gone": {
+      "local": "${TMP}/nowhere"
+    }
+  },
+  "install": {
+    "rules": [
+      "legacy@gone",
+      "edited@shared"
+    ]
+  }
+}

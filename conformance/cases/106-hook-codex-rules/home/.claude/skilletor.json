@@ -1,0 +1,14 @@
+{
+  "sources": {
+    "shared": {
+      "git": "https://conformance.invalid/shared.git"
+    }
+  },
+  "install": {
+    "rules": [
+      "style@shared",
+      "nope@shared"
+    ]
+  },
+  "checkInterval": 0
+}

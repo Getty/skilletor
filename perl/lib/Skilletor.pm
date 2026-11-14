@@ -331,14 +331,13 @@ files of the source tree, and an unrendered template is never served as if it
 were the item. A L</sync> renders and installs it as the reference does
 (L<Skilletor::Engine/Templates>).
 
-=head2 Claude Code only
+=head2 Claude Code and Codex
 
-L</sync>, L</check> and L</status> serve Claude Code alone. A scope that
-targets Codex or Hermes – by C<"targets">, or by Codex detected on the machine
-without C<"targets"> – is refused with an C<error> in the report, and a sync
-is refused where the reference left Codex or Hermes state behind; nothing is
-written then (L<Skilletor::Engine/Claude Code only>). Unlike the lookups, they
-need an agent harness, as the reference does.
+L</sync>, L</check> and L</status> serve Claude Code and Codex, as the
+reference does. A scope that targets Hermes is refused with an C<error> in the
+report, and a sync is refused where the reference left Hermes entries in a
+lock; nothing is written then (L<Skilletor::Engine/Claude Code and Codex>).
+Unlike the lookups, they need an agent harness, as the reference does.
 
 =head2 Modules
 

@@ -312,14 +312,21 @@ subtest 'an unknown event: one warning line, never a die' => sub {
     'unknown, without a project dir' );
 };
 
-subtest '--harness codex and hermes answer as Claude Code for now (k184, k185)' => sub {
+# Codex's rules context and prompt move: t/73-hooks-codex.t.
+subtest '--harness codex without Codex as a target, and hermes for now (k185): answered as Claude Code' => sub {
   my $m = machine();
   user_config( $m, { sources => { mine => { local => local_source( $m, 'foo' ) } }, install => { skills => ['foo@mine'] }, checkInterval => 0 } );
   my $claude = run_hook( 'session-start', { source => 'startup' }, $m->{ctx} );
-  path("$m->{home}/.claude/skills")->remove_tree;
-  unlink "$m->{home}/.claude/skilletor.lock.json";
+  my $reset = sub {
+    path("$m->{home}/.claude/skills")->remove_tree;
+    unlink "$m->{home}/.claude/skilletor.lock.json";
+  };
+  $reset->();
   my $codex = run_hook( 'session-start', { source => 'startup' }, { %{ $m->{ctx} }, harness => 'codex' } );
   is( out($codex), out($claude), 'codex: the same answer, no rules context' );
+  $reset->();
+  my $hermes = run_hook( 'session-start', { source => 'startup' }, { %{ $m->{ctx} }, harness => 'hermes' } );
+  is( out($hermes), out($claude), 'hermes: the same answer' );
   is( out( run_hook( 'user-prompt-submit', { cwd => "$m->{root}/elsewhere", session_id => 's' }, { %{ $m->{ctx} }, harness => 'hermes' } ) ), '{}',
     'hermes: no move followed' );
 };

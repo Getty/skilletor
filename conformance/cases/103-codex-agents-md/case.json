@@ -1,0 +1,31 @@
+{
+  "description": "The AGENTS.md pointer's warnings (Claude Code and Codex, hook trusted, project_doc_max_bytes = 200): a ~/.codex/AGENTS.md with malformed markers gets no pointer – a warning naming the marker, the rules file still written; a project AGENTS.md over the limit gets the pointer and a warning that it may be cut off; an AGENTS.override.md beside it, that Codex reads it instead. The resync warns the same; the CLI's resync text.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "resync",
+      "op": "sync"
+    },
+    {
+      "id": "cli-resync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ]
+    }
+  ]
+}

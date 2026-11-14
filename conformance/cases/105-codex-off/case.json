@@ -1,0 +1,28 @@
+{
+  "description": "Codex no longer in use (its config.toml gone, Claude Code alone): a sync removes what Codex had – the skill in ~/.agents/skills, the agent's TOML, the rules file – and the pointer block, the user's text in ~/.codex/AGENTS.md kept; Claude Code gets its copies; no run warning. check and status after.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "status",
+      "op": "status"
+    }
+  ]
+}

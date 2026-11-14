@@ -1,0 +1,30 @@
+{
+  "scopes": [
+    {
+      "bundles": [],
+      "declared": [
+        {
+          "installed": true,
+          "key": "codex:rules/edited",
+          "source": "shared"
+        },
+        {
+          "installed": true,
+          "key": "codex:rules/legacy",
+          "source": "gone"
+        }
+      ],
+      "orphans": [],
+      "scope": "user",
+      "sourceVersions": {
+        "gone": "local",
+        "shared": "git:f28ad0c"
+      },
+      "targets": [
+        "codex"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    }
+  ]
+}

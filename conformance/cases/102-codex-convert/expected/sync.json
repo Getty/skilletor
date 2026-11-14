@@ -1,0 +1,40 @@
+{
+  "scopes": [
+    {
+      "added": [
+        {
+          "key": "codex:agents/helper",
+          "name": "helper",
+          "source": "shared",
+          "type": "agent"
+        },
+        {
+          "key": "codex:rules/style",
+          "name": "style",
+          "source": "shared",
+          "type": "rule"
+        }
+      ],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [
+        {
+          "key": "codex:rules/blank",
+          "name": "blank",
+          "source": "shared",
+          "type": "rule"
+        }
+      ],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": [
+        "agent helper (codex): codex: must be a mapping; ignored",
+        "agent nodesc (codex): has no description (Codex rejects an agent role without one)",
+        "rule marked (codex): rule marked contains a skilletor marker line; it would break the rules file"
+      ]
+    }
+  ]
+}

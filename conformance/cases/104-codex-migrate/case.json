@@ -1,0 +1,34 @@
+{
+  "description": "Codex alone (hook trusted): a lock entry of the first design (#41: block, keyed AGENTS.md) whose source cannot be resolved keeps its section, read from the old rules block in ~/.codex/AGENTS.md, now in ~/.codex/skilletor-rules.md – the entry rewritten under that file name, silently; a section edited by hand in the rules file is overwritten from its source and named; the old block in AGENTS.md becomes the pointer, the user's text kept. check and status after; a resync keeps the migrated section and overwrites nothing.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "claude": false,
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "status",
+      "op": "status"
+    },
+    {
+      "id": "resync",
+      "op": "sync",
+      "tree": true
+    }
+  ]
+}

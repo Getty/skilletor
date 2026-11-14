@@ -1,0 +1,125 @@
+{
+  "description": "SessionStart under Codex (--harness codex, Codex alone, hook trusted): a new session's sync installs a user and a project rule, and its context starts with the user's rules file, then the project's, the report after them (its warning too); nothing left to sync, startup, clear, a missing and a null source get exactly the rules, resume none; without --harness codex no rules, nor on the prompt.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "claude": false,
+  "steps": [
+    {
+      "id": "start",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "codex"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${PROJECT}"
+      },
+      "tree": true
+    },
+    {
+      "id": "resume",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "codex"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "resume",
+        "session_id": "s1",
+        "cwd": "${PROJECT}"
+      }
+    },
+    {
+      "id": "clear",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "codex"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "clear",
+        "session_id": "s1",
+        "cwd": "${PROJECT}"
+      }
+    },
+    {
+      "id": "no-source",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "codex"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "session_id": "s1",
+        "cwd": "${PROJECT}"
+      }
+    },
+    {
+      "id": "null-source",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start",
+        "--harness",
+        "codex"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": null,
+        "session_id": "s1",
+        "cwd": "${PROJECT}"
+      }
+    },
+    {
+      "id": "claude",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "session-start"
+      ],
+      "stdin": {
+        "hook_event_name": "SessionStart",
+        "source": "startup",
+        "session_id": "s1",
+        "cwd": "${PROJECT}"
+      }
+    },
+    {
+      "id": "prompt",
+      "op": "cli",
+      "argv": [
+        "hook",
+        "user-prompt-submit",
+        "--harness",
+        "codex"
+      ],
+      "stdin": {
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "s1",
+        "cwd": "${PROJECT}"
+      }
+    }
+  ]
+}

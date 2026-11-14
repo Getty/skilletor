@@ -1,0 +1,5 @@
+skilletor: user scope
+  warning: .codex/AGENTS.md: malformed skilletor markers: "<!-- skilletor:end -->" without "<!-- skilletor:begin -->"; pointer to the Codex rules not written
+skilletor: project scope
+  warning: AGENTS.override.md exists; Codex reads it instead of AGENTS.md, so the pointer to the skilletor rules is not seen
+  warning: AGENTS.md is 651 bytes; Codex reads at most 200 bytes of project instructions (project_doc_max_bytes), so the pointer to the rules at its end may be cut off

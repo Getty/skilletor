@@ -1,5 +1,5 @@
 package Skilletor::Hooks;
-# ABSTRACT: The Claude Code hooks – SessionStart, UserPromptSubmit, the background sync and the checkout moves (spec §8)
+# ABSTRACT: The session hooks – SessionStart, UserPromptSubmit, the background sync and the checkout moves (spec §8)
 
 use strict;
 use warnings;
@@ -9,7 +9,7 @@ use Cwd ();
 use Exporter qw( import );
 use Scalar::Util qw( blessed );
 use Time::HiRes ();
-use Skilletor::FSUtil qw( decode_utf8_lossy encode_text path_join path_resolve same_path );
+use Skilletor::FSUtil qw( decode_utf8_lossy encode_text node_fs_error path_join path_resolve same_path );
 use Skilletor::GitEnv qw( git_env );
 use Skilletor::JSON qw( js_ordered js_type );
 use Skilletor::Process qw( run_command spawn_detached );
@@ -152,14 +152,50 @@ sub _dispatch {
   return _warn("unknown hook event: $event");
 }
 
-# Codex's rules context and Hermes' opt-in line (`--harness codex|hermes`) come with k184 and
-# k185; until then such a SessionStart answers as Claude Code's.
+# Under Codex a new session (no source, `startup` or `clear`) gets the rules context; a resumed
+# one still has the first copy in its history (spec §14.8). Hermes' opt-in line comes with k185;
+# until then `--harness hermes` answers as Claude Code's.
 sub _session_start {
   my ( $input, $ctx ) = @_;
   my $out;
   $out = _warn( _message($@) ) unless eval { $out = _check_and_sync( $input, $ctx ); 1 };
   _record_session_cwd( $input, $ctx );
+  my $source = $input->{source};
+  if ( ( $ctx->{harness} // '' ) eq 'codex'
+    && ( !defined $source || ( js_type($source) eq 'string' && ( $source eq 'startup' || $source eq 'clear' ) ) ) ) {
+    $out = _with_codex_rules( $out, $ctx );
+  }
   return $out;
+}
+
+# The Codex rules files, read from disk, at the start of the output's additionalContext, so the
+# message begins with the rules marker the pointer names; a file that cannot be read is one more
+# warning.
+sub _with_codex_rules {
+  my ( $out, $ctx ) = @_;
+  my ( @texts, @problems );
+  for my $file ( _engine($ctx)->codex_rules_files ) {
+    my $text = _read_rules($file);
+    if   ( ref $text ) { push @problems, "cannot read $file ($$text)" }
+    else               { push @texts, $text }
+  }
+  my $result = js_ordered( map { ( $_ => $out->{$_} ) } keys %$out );
+  $result->{systemMessage} = join '; ', grep { _truthy($_) } $out->{systemMessage}, _warn( join '; ', @problems )->{systemMessage} if @problems;
+  if (@texts) {
+    my $rules  = join "\n", @texts;
+    my $report = ( $out->{hookSpecificOutput} // {} )->{additionalContext};
+    $result->{hookSpecificOutput} = js_ordered( hookEventName => 'SessionStart', additionalContext => _truthy($report) ? "$rules\n$report" : $rules );
+  }
+  return $result;
+}
+
+# A file's text as readFileSync(file, "utf8") gives it, or a reference to Node's message.
+sub _read_rules {
+  my ( $file ) = @_;
+  open( my $fh, '<:raw', encode_text($file) ) or return \node_fs_error( 0 + $!, 'open', $file );
+  my $raw = do { local $/; <$fh> };
+  return \node_fs_error( 0 + $!, 'read' ) unless defined $raw;
+  return decode_utf8_lossy($raw);
 }
 
 sub _check_and_sync {
@@ -317,8 +353,10 @@ sub _post_tool_use {
   return _session_move( $input, $ctx, _state($ctx), { event => 'PostToolUse', lock_until_deadline => 1 } );
 }
 
-# A move a hook sees only as the session's cwd (the reference's sessionMove): Claude Code's
-# PostToolUse on a Bash `cd` – and, with k184 and k185, Codex's and Hermes' prompt hook (k149).
+# A move a hook sees only as the session's cwd (the reference's sessionMove): Codex's prompt hook –
+# a session there moves only between turns, and that hook is the first to see the new cwd, awaited,
+# before the model's request (k149; Hermes' comes with k185) – and Claude Code's PostToolUse on a
+# Bash `cd`.
 # The cwd the session's hook last looked at is kept per session id (written at SessionStart): the
 # same cwd again asks nothing; another goes to the move core, which tells a move within one
 # checkout from one into another. A move that answered for its checkout marks it checked, so the
@@ -338,11 +376,32 @@ sub _session_move {
   return $out;
 }
 
-# Codex's and Hermes' prompt hook follows a move first (k149); that comes with k184 and k185.
+# A pending report and a move's answer as one (k149): both lines, and – when either has a context –
+# both in it, a line standing in for an answer without one. Without a move's answer, the report as
+# is.
+sub _joined {
+  my ( $pending, $moved ) = @_;
+  my $context_of = sub { ( ref $_[0]{hookSpecificOutput} eq 'HASH' ? $_[0]{hookSpecificOutput} : {} )->{additionalContext} };
+  my $says = sub { $_[0] && ( _truthy( $_[0]{systemMessage} ) || _truthy( $context_of->( $_[0] ) ) ) };
+  return $pending // js_ordered() unless $says->($moved);
+  return $moved unless $says->($pending);
+  my @parts = ( $pending, $moved );
+  my $out   = js_ordered();
+  my @lines = grep { _truthy($_) } map { $_->{systemMessage} } @parts;
+  $out->{systemMessage} = join '; ', @lines if @lines;
+  if ( grep { _truthy( $context_of->($_) ) } @parts ) {
+    my @context = grep { _truthy($_) } map { _truthy( $context_of->($_) ) ? $context_of->($_) : $_->{systemMessage} } @parts;
+    $out->{hookSpecificOutput} = js_ordered( hookEventName => 'UserPromptSubmit', additionalContext => join "\n", @context );
+  }
+  return $out;
+}
+
+# Codex's prompt hook follows a move first (k149); Hermes' comes with k185.
 sub _user_prompt_submit {
   my ( $input, $ctx ) = @_;
   my $state = _state($ctx);
   my $key = _project_key( $ctx, $input );
+  my $moved = ( $ctx->{harness} // '' ) eq 'codex' ? _session_move( $input, $ctx, $state, { event => 'UserPromptSubmit' } ) : js_ordered();
   my $pending = $state->take_pending_report($key);
 
   my $interval = DEFAULT_INTERVAL;
@@ -358,7 +417,7 @@ sub _user_prompt_submit {
     $state->mark_checked($key);
     ( $ctx->{background} // \&default_background )->($ctx);
   }
-  return $pending // js_ordered();
+  return _joined( $pending, $moved );
 }
 
 # Runs in the detached child: sync, then leave the result as a pending report – its stdout
@@ -406,7 +465,7 @@ sub default_background {
 
 =description
 
-The reference's F<src/hooks.ts> for Claude Code: a black box from a hook's
+The reference's F<src/hooks.ts> for Claude Code and Codex: a black box from a hook's
 input to its output, which never disturbs the session – every path catches and
 says what went wrong in one warning line (C<skilletor: …>, display-safe).
 L<Skilletor::CLI> runs it as C<skilletor hook E<lt>eventE<gt>>.
@@ -418,12 +477,20 @@ each, marks the project checked; when it says changed, a sync, whose report
 (L<Skilletor::Report/report_hook>) is the answer. Nothing changed: the check's
 warnings in one line, or the trust requests as a sync would report them. A
 sync that timed out on the sync lock leaves the project due again. The input's
-C<cwd> is recorded for its session (C<session-cwd.json>).
+C<cwd> is recorded for its session (C<session-cwd.json>). Under Codex
+(C<< harness => 'codex' >>) a new session – C<source> missing, null,
+C<startup> or C<clear> – also gets the Codex rules files
+(L<Skilletor::Engine/codex_rules_files>) at the start of its context; a
+resumed one has them in its history already (spec §14.8). A rules file that
+cannot be read is a warning.
 
 =item * C<user-prompt-submit>: hands out the project's pending report; when
 the project is due (C<checkInterval> of the config, 600 s when it cannot be
 loaded; 0 or less never), marks it checked and starts the background sync. No
-engine is loaded on this path.
+engine is loaded on this path. Under Codex the prompt hook first follows a
+move, as C<post-tool-use> does below (a Codex session moves only between
+turns): its answer and the pending report come as one, both lines, and both
+in the context when either has one.
 
 =item * C<__sync-background>: a sync whose answer becomes the project's pending
 report; a lock timeout leaves none, and the project due again.
@@ -456,9 +523,8 @@ Without C<project_dir> the project is the git top level of the input's C<cwd>,
 else of the process's (L</project_root_of>). The project dir is also the key of
 the check mark and the pending report.
 
-Not ported yet: C<harness> C<codex> or C<hermes> changes nothing yet (Codex's
-rules context, Hermes' opt-in line and their prompt hook's move, k184 and
-k185) – such a hook answers as Claude Code's.
+Not ported yet: C<harness> C<hermes> changes nothing yet (Hermes' opt-in
+line and its prompt hook's move, k185) – such a hook answers as Claude Code's.
 
 =func run_hook
 

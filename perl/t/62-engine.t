@@ -1,8 +1,9 @@
 #!/usr/bin/env perl
 # What the shared cases cannot show: templates in a sync – the render context, a template error,
-# an empty render, an executable template; the port's own rules – a scope of another harness, or
-# one the reference left Codex state in, is refused before anything is written – a sync that
-# fails midway (partial entries, records cleared), the facade, and the report text.
+# an empty render, an executable template; the port's own rules – a scope of Hermes, or one the
+# reference left Hermes entries in, is refused before anything is written – a sync that fails
+# midway (partial entries, records cleared), the facade, and the report text. The Codex target:
+# t/72-engine-codex.t.
 use strict;
 use warnings;
 use utf8;
@@ -153,15 +154,16 @@ subtest 'an executable template passes its bit to what it renders' => sub {
   ok( !( ( stat "$m->{home}/.claude/skills/tool/SKILL.md" )[2] & 0100 ), 'the main file is not' );
 };
 
-subtest 'another harness: refused before anything is written' => sub {
+subtest 'Hermes: refused before anything is written' => sub {
   my $m = machine( 'skills/a/SKILL.md' => skill('a') );
   write_json( "$m->{home}/.claude/skilletor.json",
-    { sources => { s => { local => $m->{src} } }, install => { skills => ['a@s'] }, targets => [ 'claude', 'codex' ] } );
+    { sources => { s => { local => $m->{src} } }, install => { skills => ['a@s'] }, targets => [ 'claude', 'codex', 'hermes' ] } );
   my $e = $m->{engine}->();
-  my $want = 'the user scope targets codex; the Perl port of skilletor installs for Claude Code only (set "targets": ["claude"] in ~/.claude/skilletor.json, or use the skilletor CLI)';
+  my $want = 'the user scope targets hermes; the Perl port of skilletor installs for Claude Code and Codex only (leave "hermes" out of "targets" in ~/.claude/skilletor.json, or use the skilletor CLI)';
   is_deeply( $e->sync, { scopes => [], error => $want }, 'sync: an error' );
   ok( !-e "$m->{home}/.claude/skills", 'nothing installed' );
   ok( !-e "$m->{home}/.agents", 'nothing for Codex either' );
+  ok( !-e "$m->{home}/.hermes", 'nor for Hermes' );
   is( $e->check->{error}, $want, 'check refuses too' );
   is( $e->status->{error}, $want, 'and status' );
 
@@ -172,25 +174,22 @@ subtest 'another harness: refused before anything is written' => sub {
   like( $r->{scopes}[1]{warnings}[0], qr/\Aproject targets \(codex\) are not in use on this machine/, 'the reference\'s warning' );
 };
 
-subtest 'Codex state the reference left: refused, untouched' => sub {
+subtest 'Hermes entries the reference left: refused, untouched' => sub {
   my $m = machine( 'skills/a/SKILL.md' => skill('a') );
   write_json( "$m->{home}/.claude/skilletor.json", { sources => { s => { local => $m->{src} } }, install => { skills => ['a@s'] } } );
-  files( "$m->{home}/.agents", 'skills/a/SKILL.md' => skill('a') );
+  files( "$m->{home}/.hermes", 'skills/a/SKILL.md' => skill('a') );
   write_json( "$m->{home}/.claude/skilletor.lock.json",
-    { 'codex:skills/a' => { source => 's', version => 'local', files => { 'skills/a/SKILL.md' => hash_bytes( encode_text( skill('a') ) ) } } } );
+    { 'hermes:skills/a' => { source => 's', version => 'local', files => { 'skills/a/SKILL.md' => hash_bytes( encode_text( skill('a') ) ) } } } );
   my $r = $m->{engine}->()->sync;
-  like( $r->{error}, qr{\Q$m->{home}\E/\.claude/skilletor\.lock\.json holds items of another harness \(codex:skills/a\); the Perl port}, 'a lock with Codex entries' );
-  ok( -e "$m->{home}/.agents/skills/a/SKILL.md", 'the Codex copy stays' );
+  is( $r->{error}, "$m->{home}/.claude/skilletor.lock.json holds items of another harness (hermes:skills/a); the Perl port of skilletor "
+      .'installs for Claude Code and Codex only and leaves them to the skilletor CLI (run skilletor sync)', 'a lock with Hermes entries' );
+  ok( -e "$m->{home}/.hermes/skills/a/SKILL.md", 'the Hermes copy stays' );
   ok( !-e "$m->{home}/.claude/skills/a", 'and nothing was installed' );
   my $status = $m->{engine}->()->status( scope => 'user' );
-  is_deeply( $status->{scopes}[0]{orphans}, ['codex:skills/a'], 'status reads it: an entry of an inactive target' );
+  is_deeply( $status->{scopes}[0]{orphans}, ['hermes:skills/a'], 'status reads it: an entry of an inactive target' );
   ok( $m->{engine}->()->check( scope => 'user' )->{targetsChanged}, 'check: target drift, as the reference says' );
 
   path( $m->{home}, '.claude', 'skilletor.lock.json' )->remove;
-  files( "$m->{home}/.codex", 'skilletor-rules.md' => "# rules\n" );
-  like( $m->{engine}->()->sync->{error}, qr{\Q$m->{home}\E/\.codex/skilletor-rules\.md exists; the Perl port}, 'a Codex rules file' );
-
-  path( $m->{home}, '.codex', 'skilletor-rules.md' )->remove;
   write_json( "$m->{home}/.claude/skilletor.lock.json", { 'future:skills/x' => { source => 's', version => 'local', files => {} } } );
   my $ok = $m->{engine}->()->sync( scope => 'user' );
   is( $ok->{error}, undef, 'an entry of an unknown harness is no refusal' );

@@ -1,5 +1,5 @@
 package Skilletor::Engine;
-# ABSTRACT: sync, check and status for Claude Code – the reference's engine pipeline after the resolve
+# ABSTRACT: sync, check and status for Claude Code and Codex – the reference's engine pipeline after the resolve
 
 use Moo;
 use utf8;
@@ -7,21 +7,27 @@ use Carp qw( croak );
 use Encode ();
 use JSON::MaybeXS ();
 use Scalar::Util qw( blessed refaddr );
+use Skilletor::AgentsMD qw(
+  RULES_FILE codex_hook_trusted inspect_agents_md parse_rules_file pointer_lines project_doc_limit rules_file_text with_block
+);
 use Skilletor::Apply qw( apply );
 use Skilletor::Backend;
 use Skilletor::Briefing qw( briefing_warning missing_skills skill_roots );
 use Skilletor::Bundles qw( matches_pattern );
 use Skilletor::ClaudeSettings qw( plan_claude_settings );
 use Skilletor::Config;
+use Skilletor::Convert qw( convert_for_target );
 use Skilletor::Entry qw( HARNESSES ITEM_TYPES );
-use Skilletor::FSUtil qw( encode_text hash_bytes is_absolute path_join path_resolve same_path to_posix write_text );
+use Skilletor::FSUtil qw(
+  decode_utf8_lossy encode_text hash_bytes is_absolute node_fs_error path_join path_resolve read_text same_file same_path to_posix write_text
+);
 use Skilletor::Gitignore qw(
   CODEX_ENTRIES LOCAL_ENTRIES PROJECT_CLAUDE_ENTRIES SKILL_GITIGNORE WORKTREE_INCLUDE
   block_entries has_block skill_gitignore_path update_gitignore update_worktree_include with_skill_gitignore
 );
 use Skilletor::GitEnv qw( git_env );
 use Skilletor::JSON qw( js_ordered js_sort_keys js_stringify js_type );
-use Skilletor::Lock qw( key_to_type_name parse_lock_key read_lock );
+use Skilletor::Lock qw( key_to_type_name parse_lock_key read_lock write_lock );
 use Skilletor::Process qw( run_command );
 use Skilletor::Render qw( build executables renders_empty );
 use Skilletor::Report qw( empty_scope_report );
@@ -30,7 +36,7 @@ use Skilletor::Source::Url;
 use Skilletor::State;
 use Skilletor::Targets qw(
   all_roots default_hermes_home detect_harnesses is_block_type is_local_type lacks_local_prefix lock_key
-  place_output receivers root_of root_of_key select_targets supports target_gaps
+  place_output receivers root_of root_of_key select_targets served_via supports target_gaps
 );
 use Sys::Hostname ();
 use Time::HiRes ();
@@ -43,8 +49,6 @@ our $VERSION = '0.002';
 # What a sync makes of unchanged sources and inputs (the reference's RENDER_FORMAT, k107): part
 # of the render-inputs hash, so both implementations record and compare the same one.
 use constant RENDER_FORMAT => 2;
-
-use constant RULES_FILE => 'skilletor-rules.md';
 
 my %TYPE_DIR = ( skill => 'skills', agent => 'agents', rule => 'rules' );
 
@@ -116,6 +120,12 @@ sub _now_ms { int( Time::HiRes::time() * 1000 ) }
 
 sub _true  { JSON::MaybeXS::true() }
 sub _false { JSON::MaybeXS::false() }
+
+# Do two texts, either one undef (no file), differ?
+sub _differs {
+  my ( $x, $y ) = @_;
+  return defined $x ? !defined $y || $x ne $y : defined $y;
+}
 
 sub _uniq {
   my %seen;
@@ -192,22 +202,25 @@ sub _scopes_of {
   return @scopes;
 }
 
-# The Perl port installs for Claude Code alone: a scope that targets another harness is refused
-# whole, before anything is read or written.
+# The harnesses the Perl port installs for (Hermes comes with k185).
+my %PORTED = ( claude => 1, codex => 1 );
+
+# A scope that targets a harness the port does not install for is refused whole, before anything
+# is read or written.
 sub _unsupported_targets {
   my ( $self, $targets, @scopes ) = @_;
   for my $s (@scopes) {
-    my @other = grep { $_ ne 'claude' } @{ $targets->{ $s->[0] } };
+    my @other = grep { !$PORTED{$_} } @{ $targets->{ $s->[0] } };
     next unless @other;
     my $where = $s->[0] eq 'user' ? '~/.claude/skilletor.json' : q{the project's .claude/skilletor.json or skilletor.local.json};
-    return 'the '.$s->[0].' scope targets '.join( ', ', @other ).'; the Perl port of skilletor installs for Claude Code only '
-      .'(set "targets": ["claude"] in '.$where.', or use the skilletor CLI)';
+    return 'the '.$s->[0].' scope targets '.join( ', ', @other ).'; the Perl port of skilletor installs for Claude Code and Codex only '
+      .'(leave '.join( ' and ', map {"\"$_\""} @other ).' out of "targets" in '.$where.', or use the skilletor CLI)';
   }
   return undef;
 }
 
-# What a Claude-only sync would have to leave half done: lock entries of another harness (the
-# reference removes them from their roots), sections of the Codex rules file, the rules file.
+# What a sync would have to leave half done: lock entries of a harness the port does not install
+# for (the reference removes them from their roots).
 sub _foreign_state {
   my ( $self, @scopes ) = @_;
   for my $s (@scopes) {
@@ -217,19 +230,66 @@ sub _foreign_state {
     my $lock  = eval { read_lock($lock_path) } or next;    # unreadable: the scope's sync reports it
     my @keys  = grep {
       my $k = parse_lock_key($_);
-      $lock->{$_}{block} || ( defined $k->{harness} && $k->{harness} ne 'claude' && defined root_of_key( $rc, $_ ) );
+      defined $k->{harness} && !$PORTED{ $k->{harness} } && defined root_of_key( $rc, $_ );
     } keys %$lock;
     if (@keys) {
       return $lock_path.' holds items of another harness ('.join( ', ', js_sort_keys(@keys) ).'); the Perl port of skilletor '
-        .'installs for Claude Code only and leaves them to the skilletor CLI (run skilletor sync)';
-    }
-    my $rules = path_join( root_of( $rc, 'codex', 'rule' ), RULES_FILE );
-    if ( -e encode_text($rules) ) {
-      return $rules.' exists; the Perl port of skilletor does not maintain the Codex rules file and leaves it to the '
-        .'skilletor CLI (run skilletor sync)';
+        .'installs for Claude Code and Codex only and leaves them to the skilletor CLI (run skilletor sync)';
     }
   }
   return undef;
+}
+
+# The CLAUDE.md files Claude Code reads for a scope (spec §14.8).
+sub _claude_memory_files {
+  my ( $self, $scope ) = @_;
+  return path_join( $self->claude_dir, 'CLAUDE.md' ) if $scope eq 'user';
+  my $base = $self->_base_of($scope);
+  return ( path_join( $base, 'CLAUDE.md' ), path_join( $base, '.claude', 'CLAUDE.md' ) );
+}
+
+#### Run notes and warnings (spec §14.8, §16.3) ##############################
+
+my %HARNESS_LABEL = ( claude => 'Claude Code', codex => 'Codex', hermes => 'Hermes' );
+
+# Why a harness has no place for the types it lacks, in a note's words.
+my %NO_COUNTERPART = ( hermes => 'Hermes has no agent files and no rules directory' );
+
+# Where a harness reads the copy of another, in a note's words.
+my %SERVED_FROM = ( codex => '.agents/skills' );
+
+# The run's notes (spec §16.3) of what an active harness got no copy of ({ harness, type, scope,
+# via? } each): one line per harness for the types it has no counterpart of, one per harness and
+# scope for what another harness's copy serves, each with a count per type.
+sub _run_notes {
+  my ( $no_copy ) = @_;
+  my ( %groups, @order );
+  for my $n (@$no_copy) {
+    my $id = defined $n->{via} ? "$n->{harness} $n->{scope} $n->{via}" : $n->{harness};
+    push @order, $id unless $groups{$id};
+    $groups{$id} //= { first => $n, counts => {} };
+    $groups{$id}{counts}{ $n->{type} }++;
+  }
+  return map {
+    my ( $first, $counts ) = @{ $groups{$_} }{qw( first counts )};
+    my $label = $HARNESS_LABEL{ $first->{harness} };
+    my $what  = join ' and ', map { $counts->{$_}.' '.$_.'(s)' } grep { $counts->{$_} } qw( skill agent rule );
+    defined $first->{via}
+      ? $what.' not installed for '.$label.' in the '.$first->{scope}.' scope ('.$label.' reads the '.$HARNESS_LABEL{ $first->{via} }
+        .' copy in '.( $SERVED_FROM{ $first->{via} } // 'its own root' ).')'
+      : $what.' not installed for '.$label.' ('.( $NO_COUNTERPART{ $first->{harness} } // $label.' has no counterpart' ).')';
+  } @order;
+}
+
+# Codex skips plugin hooks the user has not trusted, silently (spec §14.8): when Codex is a
+# machine target and its config.toml has no trusted SessionStart hook for skilletor, one warning.
+sub _hook_trust_warning {
+  my ( $self, $targets ) = @_;
+  return undef unless grep { $_ eq 'codex' } @{ $targets->{user} };
+  my $codex_home = $self->_codex_home_of // path_join( $self->home, '.codex' );
+  return undef if codex_hook_trusted($codex_home);
+  return q{Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in }.path_join( $codex_home, 'config.toml' ).'); '
+    .'until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules';
 }
 
 #### Render inputs (spec §5, §14.3, k76) #####################################
@@ -334,15 +394,20 @@ sub sync {
         return js_ordered( scopes => [], error => $why );
       }
       my $run = {};
+      my $no_copy = [];    # what an active harness got no copy of, named once per run
       my $out = js_ordered( scopes => [] );
       for my $s (@scopes) {
         my ( $scope, $scope_cfg ) = @$s;
-        my $rep = $self->_sync_scope( $config, $scope_cfg, $scope, $targets->{$scope}, \%opts, $state, $run );
+        my $rep = $self->_sync_scope( $config, $scope_cfg, $scope, $targets->{$scope}, \%opts, $state, $run, $no_copy );
         # The Hermes home record lives while Hermes is a target; it never is here.
         $state->put_hermes_home(undef) if $scope eq 'user';
         unshift @{ $rep->{warnings} }, @{ $targets->{warnings} } if $scope eq 'project';
         push @{ $out->{scopes} }, $rep;
       }
+      my $trust = $self->_hook_trust_warning($targets);
+      $out->{warnings} = [$trust] if defined $trust;
+      my @notes = _run_notes($no_copy);
+      $out->{notes} = \@notes if @notes;
       return $out;
     },
     timeout_ms => $opts{lock_timeout_ms} // $self->lock_timeout_ms,
@@ -369,7 +434,7 @@ sub _sync_scope {
 }
 
 sub _sync_scope_run {
-  my ( $self, $config, $scope_cfg, $scope, $harnesses, $opts, $state, $run ) = @_;
+  my ( $self, $config, $scope_cfg, $scope, $harnesses, $opts, $state, $run, $no_copy ) = @_;
   my $target_dir = $self->_target_dir($scope);
   my $base       = $self->_base_of($scope);
   my $rc         = $self->_root_context($scope);
@@ -395,6 +460,11 @@ sub _sync_scope_run {
     declare => sub {
       my ( $item ) = @_;
       my @targets = $receivers_of->( $item->{type} );
+      for my $h (@$harnesses) {
+        next if grep { $_ eq $h } @targets;
+        my $via = served_via( $harnesses, $h, $item->{type}, $scope );
+        push @$no_copy, { harness => $h, type => $item->{type}, scope => $scope, ( defined $via ? ( via => $via ) : () ) };
+      }
       return 0 unless @targets;
       for my $h (@targets) {
         my $key = lock_key( $h, $item->{target} );
@@ -433,6 +503,22 @@ sub _sync_scope_run {
           push @plan, $p;
           next;
         }
+        # Per-target output mapping (spec §14.7): a Codex agent becomes TOML, a Codex rule a
+        # section of the rules file. A conversion error leaves the target's copy as it was.
+        my $conv = eval { convert_for_target( $h, $item->{type}, $item->{name}, $output ) };
+        unless ($conv) {
+          push @$warnings, $item->{type}.' '.$item->{name}.' ('.$h.'): '._message($@);
+          push @keep, $key if exists $old_lock->{$key};
+          next;
+        }
+        push @$warnings, map { $item->{type}.' '.$item->{name}.' ('.$h.'): '.$_ } @{ $conv->{warnings} };
+        $p->{output} = $conv->{output};
+        if ( $conv->{skipped} ) {
+          $p->{skipped} = 'renders-empty';
+          push @plan, $p;
+          next;
+        }
+        $output = $p->{output};
         # Layout names (spec §6.3, §6.4): `.local.` agents and rules claiming their plain path; a
         # skill carries its own `.gitignore` while the scope's switch is on.
         my $placed = place_output( $h, $item->{type}, $output );
@@ -470,6 +556,15 @@ sub _sync_scope_run {
     root_of    => sub { root_of_key( $rc, $_[0] ) // $target_dir },
   );
 
+  # Codex rules (spec §14.8): the rules file and the AGENTS.md pointer, from the new lock.
+  my $rules = ( grep { $_->{block} } values %$old_lock ) || ( grep { $_->{inBlock} } @plan )
+      || -e encode_text( path_join( root_of( $rc, 'codex', 'rule' ), RULES_FILE ) )
+    ? $self->_sync_codex_rules(
+      scope => $scope, harnesses => $harnesses, rc => $rc, old_lock => $old_lock, plan => \@plan,
+      lock_path => $lock_path, label_of => $label_of, warnings => $warnings,
+    )
+    : { overwritten => [], exists => 0, written => 0 };
+
   {
     # One block of fixed entries per target root (spec §6.4): `.claude/.gitignore` while the
     # scope is in use; a block found in another root goes. User roots get one only inside a git
@@ -489,7 +584,7 @@ sub _sync_scope_run {
       if ( $in_use && $root eq $target_dir ) {
         @entries = $scope eq 'project' ? PROJECT_CLAUDE_ENTRIES : $self->_user_claude_entries($target_dir);
       }
-      elsif ( $in_use && $root eq $codex_root && $holds_managed->($root) ) {
+      elsif ( $in_use && $root eq $codex_root && ( $rules->{exists} || $holds_managed->($root) ) ) {
         @entries = CODEX_ENTRIES;
       }
       my $enabled = $gitignore_on && @entries && ( $scope eq 'project' || $self->_in_work_tree($root) );
@@ -529,6 +624,7 @@ sub _sync_scope_run {
   # Managed paths git still tracks (spec §6.4): only what this run wrote or adopted.
   if ($gitignore_on) {
     my @written = map { { root => root_of_key( $rc, $_->{key} ) // $target_dir, key => $_->{key}, path => $_->{path} } } @{ $result->{written} };
+    push @written, { root => root_of( $rc, 'codex', 'rule' ), path => RULES_FILE } if $rules->{written};
     push @$warnings, $self->_tracked_warnings( $scope, $base, \@written );
   }
 
@@ -552,7 +648,7 @@ sub _sync_scope_run {
       $c;
     } @{ $result->{conflicts} }
   ];
-  $out->{overwritten} = [ map { js_ordered( path => $shown->($_) ) } @{ $result->{overwritten} } ];
+  $out->{overwritten} = [ ( map { js_ordered( path => $shown->($_) ) } @{ $result->{overwritten} } ), map { js_ordered( path => $_ ) } @{ $rules->{overwritten} } ];
   for my $l ( @{ $result->{leftInPlace} } ) {
     push @$warnings, $shown->($l).' is a symbolic link: files of '.$l->{key}.' behind it left in place (never deleted through a link)';
   }
@@ -591,6 +687,111 @@ sub _sync_scope_run {
     $state->put_render_inputs( $lock_path, _render_inputs_hash( $inputs_of->() ) );
   }
   return $out;
+}
+
+# Rebuild a scope's Codex rules file from the new lock, then its AGENTS.md pointer (spec §14.8).
+# Planned rules take their rendered section; kept ones (source unreachable) their text from the
+# file – or, for an entry of the first design (#41, keyed `AGENTS.md`), from the old rules block
+# in AGENTS.md, and the entry is rewritten under the new file name. A pointer refusal is a warning
+# and touches neither the rules file nor the lock. Returns the overwritten local changes
+# (`<file>#rules/<name>`), whether the rules file exists now, and whether this run wrote it.
+sub _sync_codex_rules {
+  my ( $self, %a ) = @_;
+  my ( $scope, $rc, $old_lock, $label_of, $warnings ) = @a{qw( scope rc old_lock label_of warnings )};
+  my $codex_root  = root_of( $rc, 'codex', 'rule' );
+  my $rules_file  = path_join( $codex_root, RULES_FILE );
+  my $rules_label = $label_of->($rules_file);
+  my $agents_file = path_join( $scope eq 'user' ? $codex_root : $rc->{base}, 'AGENTS.md' );
+  my $agents_label = $label_of->($agents_file);
+  my $legacy_key  = 'AGENTS.md';    # the files key of a first-design entry
+
+  my $file_text = eval { read_text($rules_file) };    # missing (or unreadable: rewritten below)
+  my $current = defined $file_text ? parse_rules_file($file_text) : {};
+  my $agents  = inspect_agents_md($agents_file);
+  my $legacy  = $agents->{ok} && $agents->{parsed} ? $agents->{parsed}{sections} : undef;
+  my %planned;
+  for my $p ( grep { $_->{inBlock} && !$_->{skipped} } @{ $a{plan} } ) {
+    my ($pair) = grep { $_->[0] eq RULES_FILE } @{ $p->{output} };
+    $planned{ $p->{key} } = decode_utf8_lossy( $pair->[1] );
+  }
+
+  my $new_lock = read_lock( $a{lock_path} );
+  my $migrated = 0;
+  my ( %sections, @overwritten );
+  for my $key ( keys %$new_lock ) {
+    my $entry = $new_lock->{$key};
+    next if !$entry->{block} || $entry->{skipped};
+    my $name  = parse_lock_key($key)->{name};
+    my $old   = $old_lock->{$key};
+    my $old_files = $old ? $old->{files} // {} : {};
+    my $prev_hash = $old && !$old->{skipped} ? $old_files->{ RULES_FILE() } : undef;
+    my $on_disk = $current->{$name} // ( defined $old_files->{$legacy_key} && $legacy ? $legacy->{$name} : undef );
+    my $files = $entry->{files} // {};
+    if ( defined $files->{$legacy_key} && !defined $files->{ RULES_FILE() } ) {
+      $entry->{files} = js_ordered( RULES_FILE() => $files->{$legacy_key} );    # kept first-design entry: same section, new file
+      $migrated = 1;
+    }
+    my $text = $planned{$key} // ( $on_disk ? $on_disk->{text} : undef );
+    next unless defined $text;
+    # Edited or deleted by hand; a first-design entry (no hash for this file) moves silently.
+    if ( defined $prev_hash && ( !$on_disk || hash_bytes( encode_text( $on_disk->{text} ) ) ne $prev_hash ) ) {
+      push @overwritten, $rules_label.'#rules/'.$name;
+    }
+    $sections{$name} = { name => $name, source => $entry->{source}, text => $text };
+  }
+  write_lock( $a{lock_path}, $new_lock ) if $migrated;
+  my @sections = map { $sections{$_} } js_sort_keys( keys %sections );
+
+  my $next = rules_file_text( $scope, \@sections );
+  my $exists  = defined $file_text ? 1 : 0;
+  my $written = 0;
+  my $ok = eval {
+    if ( _differs( $next, $file_text ) ) {
+      if ( defined $next ) { write_text( $rules_file, $next ) }
+      else                 { unlink encode_text($rules_file) or $!{ENOENT} or die node_fs_error( 0 + $!, 'rm', $rules_file )."\n" }
+      $written = defined $next ? 1 : 0;
+    }
+    $exists = defined $next ? 1 : 0;
+    1;
+  };
+  push @$warnings, $rules_label.': cannot write the Codex rules file ('._message($@).')' unless $ok;
+
+  # The pointer: present exactly when the rules file is.
+  my $want  = $exists;
+  my $state = $agents;
+  # Claude Code reads CLAUDE.md: when that is this AGENTS.md, Claude would be sent to the Codex rules.
+  my ($memory) = $want && grep( { $_ eq 'claude' } @{ $a{harnesses} } )
+    ? grep { same_file( $_, $agents_file ) } $self->_claude_memory_files($scope)
+    : ();
+  $state = { ok => 0, reason => 'is the same file as '.$label_of->($memory).' (Claude Code would read it)' } if $state->{ok} && defined $memory;
+  unless ( $state->{ok} ) {
+    my $why = $state->{reason};
+    if ( $want || index( $why, 'malformed' ) == 0 ) {
+      push @$warnings, $agents_label.( index( $why, 'is ' ) == 0 ? ' ' : ': ' ).$why.'; pointer to the Codex rules not written';
+    }
+    return { overwritten => \@overwritten, exists => $exists, written => $written };
+  }
+  my $shown_rules = $scope eq 'user' ? $rules_file : '.codex/'.RULES_FILE;
+  my $agents_next = with_block( $state->{text}, $want ? [ pointer_lines( $scope, $shown_rules ) ] : undef );
+  if ( _differs( $agents_next, $state->{text} ) ) {
+    if ( defined $agents_next ) { write_text( $agents_file, $agents_next ) }
+    else                        { unlink encode_text($agents_file) or $!{ENOENT} or die node_fs_error( 0 + $!, 'rm', $agents_file )."\n" }
+  }
+  if ($want) {
+    my $override = path_join( $scope eq 'user' ? $codex_root : $rc->{base}, 'AGENTS.override.md' );
+    if ( -e encode_text($override) ) {
+      push @$warnings, $label_of->($override).' exists; Codex reads it instead of AGENTS.md, so the pointer to the skilletor rules is not seen';
+    }
+    if ( $scope eq 'project' && defined $agents_next ) {
+      my $limit = project_doc_limit( $self->_codex_home_of // path_join( $self->home, '.codex' ) );
+      my $bytes = length encode_text($agents_next);
+      if ( $bytes > $limit ) {
+        push @$warnings, $agents_label.' is '.$bytes.' bytes; Codex reads at most '.$limit.' bytes of project instructions '
+          .'(project_doc_max_bytes), so the pointer to the rules at its end may be cut off';
+      }
+    }
+  }
+  return { overwritten => \@overwritten, exists => $exists, written => $written };
 }
 
 sub _in_work_tree {
@@ -962,7 +1163,27 @@ sub status {
       sourceVersions => $versions,
     );
   }
+  my $trust = $self->_hook_trust_warning($targets);
+  $out->{warnings} = [$trust] if defined $trust;
   return $out;
+}
+
+#### The Codex rules context (spec §14.8) #####################################
+
+# The Codex rules files the SessionStart hook injects: the user scope's, then the project's, each
+# when it exists and Codex is a target of that scope. When the config or the targets cannot be
+# loaded, every existing file (the last good state). Reads no source and never throws.
+sub codex_rules_files {
+  my ( $self ) = @_;
+  my ( $config, $targets );
+  my $loaded = eval { ( $config, $targets ) = $self->_load_strict; 1 };
+  my @out;
+  for my $scope ( 'user', ( defined $self->project_dir_of ? 'project' : () ) ) {
+    next if $loaded && !grep { $_ eq 'codex' } @{ $targets->{$scope} };
+    my $file = path_join( root_of( $self->_root_context($scope), 'codex', 'rule' ), RULES_FILE );
+    push @out, $file if -e encode_text($file);
+  }
+  return @out;
 }
 
 1;
@@ -980,7 +1201,7 @@ sub status {
 =description
 
 The reference's engine (C<engine.ts>) after the resolve: C<sync>, C<check>
-and C<status> for Claude Code. It extends L<Skilletor::Resolver> – a sync runs
+and C<status> for Claude Code and Codex. It extends L<Skilletor::Resolver> – a sync runs
 the very resolve that class reports, then builds every declared item in memory,
 applies it (L<Skilletor::Apply>), writes the managed blocks
 (L<Skilletor::Gitignore>) and the project's plugin requirement
@@ -1002,19 +1223,29 @@ cases, F<t/52-parity-sync.t> and F<t/65-report-json.t> hold both to that. Like
 the reference, a sync holds the sync lock (L<Skilletor::State/with_lock>);
 C<check> and C<status> read without it.
 
-=head2 Claude Code only
+=head2 Claude Code and Codex
 
-The port installs for Claude Code alone. A scope whose targets name another
-harness – C<"targets"> with C<codex> or C<hermes>, or Codex detected on the
-machine without C<"targets"> – is refused whole: C<sync>, C<check> and
-C<status> return the report with an C<error> and touch nothing. A project
-narrowed to no harness in use is no error (the reference's warning). A C<sync>
-is also refused, before anything is written, when a scope holds state of
-another harness the reference would change: lock entries of Codex or Hermes
-(the reference removes them from their roots), C<block> entries (sections of
-the Codex rules file) or a Codex rules file (C<skilletor-rules.md>). Lock
-entries of a harness neither knows are kept untouched, as the reference keeps
-them. Run the skilletor CLI once on such a machine.
+The port installs for Claude Code and Codex, as the reference does (spec
+§14): skills of both in C<.agents/skills> when Codex alone is a target, each
+agent converted to Codex's TOML (L<Skilletor::Convert>), the rules as
+sections of one C<skilletor-rules.md> under C<$CODEX_HOME> or the project's
+C<.codex>, with a pointer block in the scope's C<AGENTS.md>
+(L<Skilletor::AgentsMD>). The pointer is refused – a warning, nothing written
+– when that C<AGENTS.md> is a link, malformed, or the very file Claude Code
+reads as C<CLAUDE.md>; an C<AGENTS.override.md> beside it and a project
+C<AGENTS.md> over C<project_doc_max_bytes> are warnings. A sync's report
+carries the run's C<notes> (the items an active harness gets no copy of) and,
+like C<status>, the run's C<warnings> (Codex has not trusted skilletor's
+SessionStart hook). The SessionStart hook injects the rules files
+(L</codex_rules_files>).
+
+Hermes is not ported yet. A scope whose targets name C<hermes> is refused
+whole: C<sync>, C<check> and C<status> return the report with an C<error> and
+touch nothing. A project narrowed to no harness in use is no error (the
+reference's warning). A C<sync> is also refused, before anything is written,
+when a scope's lock holds Hermes entries (the reference removes them from
+their roots). Lock entries of a harness neither knows are kept untouched, as
+the reference keeps them. Run the skilletor CLI once on such a machine.
 
 =head2 Templates
 
@@ -1099,6 +1330,8 @@ reference's does.
       settingsUpdated?  => { path, enabled => [...], declared => [...] },
       briefingMissing?  => [ { key, harness, missing => [...] } ],
     } ],
+    warnings? => [...],     # the run's: Codex has not trusted the SessionStart hook
+    notes?    => [...],     # what an active harness got no copy of (spec §16.3)
     error? => $message,
   }
 
@@ -1146,9 +1379,18 @@ alone. Untrusted sources are named either way.
   my $status = $engine->status( scope => 'all' );
   # { scopes => [ { scope, targets, declared => [ { key, source, installed, via?, skipped?,
   #   partial?, briefingMissing? } ], orphans, wildcards, bundles, trustRequests,
-  #   sourceVersions } ], projectIsHome?, error? }
+  #   sourceVersions } ], projectIsHome?, warnings?, error? }
 
 Offline and read-only: the lock and the config.
+
+=method codex_rules_files
+
+  my @files = $engine->codex_rules_files;
+
+The Codex rules files the SessionStart hook injects (spec §14.8): the user
+scope's, then the project's, each when it exists and Codex is a target of that
+scope. When the config or the targets cannot be loaded, every existing file
+(the last good state). Reads no source and never throws.
 
 =method RENDER_FORMAT
 

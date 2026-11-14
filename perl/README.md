@@ -78,7 +78,7 @@ dir the item lies in.
 - Like the reference, a resolve holds the sync lock
   (`~/.claude/skilletor/sync.lock/`), so the two never work one cache at once.
 
-### Sync, check, status – for Claude Code
+### Sync, check, status – for Claude Code and Codex
 
 ```perl
 use Skilletor::Report qw( report_text status_text exit_code );
@@ -91,7 +91,7 @@ print status_text( $sk->status ), "\n";
 exit exit_code( check => $check );   # 2 error, 1 a sync is due, 0 up to date
 ```
 
-The CLI's commands for the Claude Code target, ported whole: the same
+The CLI's commands for the Claude Code and Codex targets, ported whole: the same
 installed files and executable bits, the same lock, `.gitignore` blocks,
 `.worktreeinclude` and `.claude/settings.json` plugin requirement, conflicts and
 `force`, removal of what is no longer declared, `partial` entries after a
@@ -100,11 +100,16 @@ records (`render-inputs.json`, `sources-read.json`, `unreached.json`), so the
 CLI's `check` and its session hooks accept what the port synced and the other
 way round.
 
-- **Claude Code only:** a scope that targets Codex or Hermes (`"targets"`, or
-  Codex detected without `"targets"`) is refused – the report's `error`,
-  nothing touched – and so is a sync where the CLI left Codex or Hermes state
-  behind (their lock entries, the Codex rules file). Set
-  `"targets": ["claude"]`, or run the CLI.
+- **Codex:** skills in `.agents/skills`, agents converted to TOML, rules as
+  sections of one `skilletor-rules.md` with the pointer block in the Codex
+  `AGENTS.md` – its warnings (malformed markers, a link or a `CLAUDE.md` in its
+  place, `AGENTS.override.md`, `project_doc_max_bytes`) and the migration of a
+  first-design rules block as the CLI has them – and the run's warning while
+  Codex has not trusted skilletor's SessionStart hook.
+- **No Hermes yet:** a scope that targets Hermes (`"targets"`) is refused –
+  the report's `error`, nothing touched – and so is a sync where the CLI left
+  Hermes state behind (its lock entries). Leave `"hermes"` out of
+  `"targets"`, or run the CLI.
 - **Templates:** a `.njk` file is rendered as the CLI renders it – the same
   context (`vars`, `project`, `scope`, `harness`, `target`, `host`, `user`,
   `item`), includes confined to the source root, the same bytes. An item

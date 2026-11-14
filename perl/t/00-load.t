@@ -22,6 +22,7 @@ for (qw(
   Skilletor::Error
   Skilletor::Error::Ambiguous
   Skilletor::Error::Apply
+  Skilletor::Error::Block
   Skilletor::Error::Bundle
   Skilletor::Error::CacheRejected
   Skilletor::Error::Catalog

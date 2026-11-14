@@ -1,0 +1,50 @@
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "added": [],
+      "updated": [],
+      "removed": [],
+      "unchanged": [
+        {
+          "key": "codex:skills/greet",
+          "type": "skill",
+          "name": "greet",
+          "source": "shared"
+        },
+        {
+          "key": "codex:agents/helper",
+          "type": "agent",
+          "name": "helper",
+          "source": "shared"
+        },
+        {
+          "key": "codex:rules/style",
+          "type": "rule",
+          "name": "style",
+          "source": "shared"
+        }
+      ],
+      "skipped": [],
+      "conflicts": [],
+      "overwritten": [],
+      "warnings": [],
+      "trustRequests": []
+    },
+    {
+      "scope": "project",
+      "added": [],
+      "updated": [],
+      "removed": [],
+      "unchanged": [],
+      "skipped": [],
+      "conflicts": [],
+      "overwritten": [],
+      "warnings": [],
+      "trustRequests": []
+    }
+  ],
+  "warnings": [
+    "Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${HOME}/.codex/config.toml); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules"
+  ]
+}

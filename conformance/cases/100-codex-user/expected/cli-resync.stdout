@@ -1,0 +1,2 @@
+skilletor: up to date
+skilletor: warning: Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${HOME}/.codex/config.toml); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules

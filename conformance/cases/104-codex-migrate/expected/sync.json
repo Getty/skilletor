@@ -1,0 +1,29 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [
+        {
+          "path": ".codex/skilletor-rules.md#rules/edited"
+        }
+      ],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [
+        {
+          "key": "codex:rules/edited",
+          "name": "edited",
+          "source": "shared",
+          "type": "rule"
+        }
+      ],
+      "updated": [],
+      "warnings": [
+        "source gone: local source directory does not exist: ${TMP}/nowhere"
+      ]
+    }
+  ]
+}

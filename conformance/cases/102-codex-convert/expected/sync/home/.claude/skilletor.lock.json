@@ -1,0 +1,24 @@
+{
+  "codex:agents/helper": {
+    "source": "shared",
+    "version": "git:d40a2cd",
+    "files": {
+      "agents/.local.helper.toml": "sha256:036253df610ffb9820ed3eb5a4c0fe6808e5a5c7ae578e0fc5f4de4a12457f38"
+    }
+  },
+  "codex:rules/blank": {
+    "source": "shared",
+    "version": "git:d40a2cd",
+    "files": {},
+    "skipped": "renders-empty",
+    "block": true
+  },
+  "codex:rules/style": {
+    "source": "shared",
+    "version": "git:d40a2cd",
+    "files": {
+      "skilletor-rules.md": "sha256:9f49db6a6eb18309e5901708a44b347aa61fe824dd4c6e65e3a1f3e8c75c1423"
+    },
+    "block": true
+  }
+}

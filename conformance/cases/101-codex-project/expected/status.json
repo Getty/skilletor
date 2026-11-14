@@ -1,0 +1,63 @@
+{
+  "scopes": [
+    {
+      "bundles": [],
+      "declared": [],
+      "orphans": [],
+      "scope": "user",
+      "sourceVersions": {},
+      "targets": [
+        "claude",
+        "codex"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    },
+    {
+      "bundles": [],
+      "declared": [
+        {
+          "installed": true,
+          "key": "agents/helper",
+          "source": "shared"
+        },
+        {
+          "installed": true,
+          "key": "codex:agents/helper",
+          "source": "shared"
+        },
+        {
+          "installed": true,
+          "key": "codex:rules/style",
+          "source": "shared"
+        },
+        {
+          "installed": true,
+          "key": "codex:skills/greet",
+          "source": "shared"
+        },
+        {
+          "installed": true,
+          "key": "rules/style",
+          "source": "shared"
+        },
+        {
+          "installed": true,
+          "key": "skills/greet",
+          "source": "shared"
+        }
+      ],
+      "orphans": [],
+      "scope": "project",
+      "sourceVersions": {
+        "shared": "git:1f8a43c"
+      },
+      "targets": [
+        "claude",
+        "codex"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    }
+  ]
+}

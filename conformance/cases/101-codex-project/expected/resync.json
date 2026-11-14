@@ -1,0 +1,65 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [
+        {
+          "key": "agents/helper",
+          "name": "helper",
+          "source": "shared",
+          "type": "agent"
+        },
+        {
+          "key": "codex:agents/helper",
+          "name": "helper",
+          "source": "shared",
+          "type": "agent"
+        },
+        {
+          "key": "codex:rules/style",
+          "name": "style",
+          "source": "shared",
+          "type": "rule"
+        },
+        {
+          "key": "codex:skills/greet",
+          "name": "greet",
+          "source": "shared",
+          "type": "skill"
+        },
+        {
+          "key": "rules/style",
+          "name": "style",
+          "source": "shared",
+          "type": "rule"
+        },
+        {
+          "key": "skills/greet",
+          "name": "greet",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "updated": [],
+      "warnings": []
+    },
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

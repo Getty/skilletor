@@ -1,6 +1,7 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - Conformance cases 100-108: the Codex target in sync, check and status, and the Codex hooks (k184).
   - Conformance cases 72-82: the CLI's trust, source list and source remove (k175).
   - A release-binaries workflow, prepared and not active (workflow_dispatch
     only): it packs the Perl port with PAR::Packer for linux-x86_64,

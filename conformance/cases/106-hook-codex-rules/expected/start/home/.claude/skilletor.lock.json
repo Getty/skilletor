@@ -1,0 +1,10 @@
+{
+  "codex:rules/style": {
+    "source": "shared",
+    "version": "git:7aa20b3",
+    "files": {
+      "skilletor-rules.md": "sha256:9f49db6a6eb18309e5901708a44b347aa61fe824dd4c6e65e3a1f3e8c75c1423"
+    },
+    "block": true
+  }
+}

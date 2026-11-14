@@ -1,0 +1,13 @@
+{
+  "install": {
+    "skills": [
+      "greet@shared"
+    ],
+    "agents": [
+      "helper@shared"
+    ],
+    "rules": [
+      "style@shared"
+    ]
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "description": "Codex alone (\"claude\": false, a ~/.codex/config.toml without hook trust): a user sync installs the skill in ~/.agents/skills, the agent as ~/.codex/agents/.local.helper.toml, the rule as its section of ~/.codex/skilletor-rules.md and the pointer block in ~/.codex/AGENTS.md naming that file; the run warns once that Codex has not trusted the SessionStart hook, status too; check finds nothing; a second sync changes nothing. The CLI's resync (text, --json), check and status (text, its targets named).",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "claude": false,
+  "steps": [
+    {
+      "id": "sync",
+      "op": "sync",
+      "tree": true
+    },
+    {
+      "id": "check",
+      "op": "check"
+    },
+    {
+      "id": "status",
+      "op": "status"
+    },
+    {
+      "id": "resync",
+      "op": "sync"
+    },
+    {
+      "id": "cli-resync",
+      "op": "cli",
+      "argv": [
+        "sync"
+      ]
+    },
+    {
+      "id": "cli-resync-json",
+      "op": "cli",
+      "argv": [
+        "sync",
+        "--json"
+      ]
+    },
+    {
+      "id": "cli-check",
+      "op": "cli",
+      "argv": [
+        "check"
+      ]
+    },
+    {
+      "id": "cli-status",
+      "op": "cli",
+      "argv": [
+        "status"
+      ],
+      "tree": true
+    }
+  ]
+}

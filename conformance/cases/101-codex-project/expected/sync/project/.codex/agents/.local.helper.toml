@@ -1,0 +1,5 @@
+name = "helper"
+description = "Helps with the code"
+developer_instructions = '''
+You are helper. Read before you write.
+'''

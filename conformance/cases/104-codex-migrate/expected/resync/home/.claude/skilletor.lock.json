@@ -1,0 +1,18 @@
+{
+  "codex:rules/edited": {
+    "source": "shared",
+    "version": "git:f28ad0c",
+    "files": {
+      "skilletor-rules.md": "sha256:2d812d6fdf8ecb4d6d131cf2d3f289294aa941e08ff5776bfab097cae4a099ac"
+    },
+    "block": true
+  },
+  "codex:rules/legacy": {
+    "source": "gone",
+    "version": "local",
+    "files": {
+      "skilletor-rules.md": "sha256:e749645317145aa9c528d8d3d17be8db07d60977df60f3683fa1f54ab9735016"
+    },
+    "block": true
+  }
+}

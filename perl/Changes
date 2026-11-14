@@ -1,6 +1,18 @@
 Revision history for Skilletor
 
 {{$NEXT}}
+  - The Codex target in the Perl engine: sync, check and status install
+    skills in .agents/skills, agents as TOML and rules as sections of one
+    skilletor-rules.md with the pointer block in the Codex AGENTS.md - its
+    warnings (malformed markers, a link, a directory or Claude Code's
+    CLAUDE.md in its place, AGENTS.override.md, project_doc_max_bytes) and the
+    migration of a first-design rules block as the reference has them - and
+    warn while Codex has not trusted skilletor's SessionStart hook
+    (Skilletor::AgentsMD, after agentsmd.ts; Skilletor::Error::Block). A
+    scope that targets Hermes is still refused. The hooks under --harness
+    codex: a new session's context starts with the rules files, and the
+    prompt hook syncs the checkout a session moved into, its answer joined
+    with a pending report (k184).
   - `skilletor trust`, `skilletor source list [--json]` and `skilletor source
     remove <name> [--project] [--force]` in the Perl CLI (Skilletor::Commands,
     after the reference's commands.ts): the same checks in the same order (an

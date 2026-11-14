@@ -1,0 +1,4 @@
+project_doc_max_bytes = 200
+
+[hooks.state."skilletor@getty:hooks/codex-hooks.json:session_start:0:0"]
+trusted_hash = "sha256:00"

@@ -78,7 +78,7 @@ sub select_targets {
 
 #### The layout table (spec §14.2, §16.2) ##############################
 #
-# Where each harness reads each item type. The Perl port writes for Claude Code alone, but the
+# Where each harness reads each item type. The Perl port writes for Claude Code and Codex, but the
 # table is whole: the managed blocks list every harness's roots (spec §6.4), and lock keys of
 # every harness are parsed, kept or reported as the reference does.
 
@@ -262,7 +262,7 @@ C<~/.claude> alone.
 It also holds the reference's layout table (C<LAYOUTS>, spec §14.2, §16.2):
 where each harness reads each item type in each scope, how a lock key names its
 harness, which types install as C<.local.> files. The Perl port writes for
-Claude Code alone; the table is whole because the managed blocks list every
+Claude Code and Codex; the table is whole because the managed blocks list every
 harness's roots and lock keys of every harness are parsed, kept and reported as
 the reference does.
 

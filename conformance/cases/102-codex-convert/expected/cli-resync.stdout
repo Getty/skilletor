@@ -1,0 +1,5 @@
+skilletor: user scope
+  · codex:rules/blank skipped (renders empty)
+  warning: agent helper (codex): codex: must be a mapping; ignored
+  warning: agent nodesc (codex): has no description (Codex rejects an agent role without one)
+  warning: rule marked (codex): rule marked contains a skilletor marker line; it would break the rules file

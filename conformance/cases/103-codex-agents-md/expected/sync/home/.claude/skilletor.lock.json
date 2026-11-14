@@ -1,0 +1,17 @@
+{
+  "codex:rules/style": {
+    "source": "shared",
+    "version": "git:4f991b8",
+    "files": {
+      "skilletor-rules.md": "sha256:9f49db6a6eb18309e5901708a44b347aa61fe824dd4c6e65e3a1f3e8c75c1423"
+    },
+    "block": true
+  },
+  "rules/style": {
+    "source": "shared",
+    "version": "git:4f991b8",
+    "files": {
+      "rules/.local.style.md": "sha256:2967200d5685b7f92fdd9a890cc7fcce61097c6e360b61058e1a5501ce53aed9"
+    }
+  }
+}
