@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-11-14T04:13:15Z
+created: 2026-11-14T03:55:40Z
+id: 221
+priority: low
+started: 2026-11-14T04:13:15Z
+status: archived
+tags:
+- perl
+- drift
+title: 'perl: CODEX_HOME and CLAUDE_CONFIG_DIR read from the environment undecoded'
+updated: 2026-11-14T04:13:15Z
+---
+
+Found while reviewing k185. Skilletor::Resolver builds codex_home from $ENV{CODEX_HOME} and claude_config_dir from $ENV{CLAUDE_CONFIG_DIR} as raw bytes (perl/lib/Skilletor/Resolver.pm:40, :56), while HOME (CLI.pm:135) and HERMES_HOME (Engine.pm hermes_home) go through decode_utf8_lossy. A non-ASCII CODEX_HOME or CLAUDE_CONFIG_DIR may then be encoded twice on the way to the file system, or compare unequal to a decoded path. Not reproduced.
+
+Done: both builders decode as HOME and HERMES_HOME do, with a test that syncs under a non-ASCII CODEX_HOME and CLAUDE_CONFIG_DIR (and, if the reference agrees, a conformance case).
