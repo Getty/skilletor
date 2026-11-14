@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-11-14T00:31:37Z
+id: 206
+priority: low
+status: backlog
+tags:
+- ts
+- hooks
+- wording
+title: 'TS: a move line puts '' in <dir>'' after the commit hint'
+updated: 2026-11-14T00:31:37Z
+---
+
+From k182 (Perl move hooks, daa5686), src/ untouched. When a sync after a checkout move also writes the gitignore hint, the reference's move line reads `skilletor: 1 item(s) updated, .claude/.gitignore, .worktreeinclude updated — commit them in <dir>`: the " in <dir>" is appended after the commit hint, so it reads as "commit them in <dir>". Spec §8 shows `N item(s) updated in <dir>`. Cases 60 and 64 pin today's text in both CLIs.
+
+Decide the wording (e.g. `1 item(s) updated in <dir>, .claude/.gitignore, .worktreeinclude updated — commit them`), change hooks.ts and the Perl port together, regenerate cases 60/64.
