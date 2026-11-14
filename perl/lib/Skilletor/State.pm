@@ -9,6 +9,7 @@ use Path::Tiny qw( path );
 use Sys::Hostname ();
 use Time::HiRes ();
 use Skilletor::Error::LockTimeout;
+use Skilletor::Process ();
 use Skilletor::FSUtil qw( read_text write_text path_join );
 use Skilletor::JSON qw( js_parse js_stringify js_ordered js_sort_keys js_type );
 use namespace::clean;
@@ -289,6 +290,7 @@ sub with_lock {
   $refresh_ms = 1 if $refresh_ms < 1;
   my $grace_ms = $opts{grace_ms} // 2_000;
   my $poll_ms  = $opts{poll_ms}  // 25;
+  my $win32    = $opts{win32}    // $^O eq 'MSWin32';
   my $lock_dir = $self->_file(LOCK_NAME);
   my $owner    = path_join( $lock_dir, 'owner.json' );
   my $token    = join '', map { sprintf '%02x', int rand 256 } 1 .. 8;
@@ -303,10 +305,11 @@ sub with_lock {
     Time::HiRes::sleep( $poll_ms / 1000 );
   }
 
-  my $heartbeat = $self->_heartbeat( $owner, $refresh_ms );
+  my $heartbeat = $self->_heartbeat( $owner, $refresh_ms, $win32 );
   my $want = wantarray;
   my @result;
   my $ok = eval {
+    local $Skilletor::Process::ON_WAIT = $heartbeat if ref $heartbeat eq 'CODE';
     $self->_sweep_leftovers($stale_ms);
     if    ($want)         { @result = $code->() }
     elsif ( defined $want ) { $result[0] = $code->() }
@@ -412,17 +415,24 @@ sub _sweep_leftovers {
   }
 }
 
+# Stamp a path's times with now. Time::HiRes has no utime on Windows (it dies there): the core's,
+# which takes now from the system when given no times.
 sub _touch {
-  my ( $path ) = @_;
+  my ( $path, $hires ) = @_;
+  return utime undef, undef, $path unless $hires // Time::HiRes::d_hires_utime();
   my $now = Time::HiRes::time();
   Time::HiRes::utime( $now, $now, $path );
 }
 
 # The refreshes: Perl runs a resolve synchronously, so a child process stamps the owner record
-# while the holder works, and stops when told or when the holder is gone. None on Windows.
+# while the holder works, and stops when told or when the holder is gone. Windows has no fork to
+# spare – Perl emulates one, as threads, with a clone of the interpreter whose end runs every
+# object's DESTROY once more – so there the holder stamps the record itself, at most once a
+# refresh, each time it waits on a program: a code ref for Skilletor::Process's ON_WAIT, which
+# the caller installs while its code runs (a resolve's git runs; not an HTTP download).
 sub _heartbeat {
-  my ( $self, $owner, $refresh_ms ) = @_;
-  return undef if $^O eq 'MSWin32';
+  my ( $self, $owner, $refresh_ms, $win32 ) = @_;
+  return _wait_tick( $owner, $refresh_ms ) if $win32;
   my $parent = $$;
   my $pid = fork;
   return undef unless defined $pid;
@@ -435,9 +445,23 @@ sub _heartbeat {
   POSIX::_exit(0);
 }
 
+sub _wait_tick {
+  my ( $owner, $refresh_ms ) = @_;
+  my $outer = $Skilletor::Process::ON_WAIT;    # a lock held inside another's: refresh that one too
+  my $last  = Time::HiRes::time();
+  return sub {
+    my $now = Time::HiRes::time();
+    if ( ( $now - $last ) * 1000 >= $refresh_ms ) {
+      $last = $now;
+      _touch($owner);
+    }
+    $outer->() if $outer;
+  };
+}
+
 sub _stop_heartbeat {
   my ( $self, $pid ) = @_;
-  return unless $pid;
+  return if !$pid || ref $pid;    # none, or the Windows tick (gone with the code's scope)
   kill 'TERM', $pid;
   waitpid $pid, 0;
 }
@@ -590,8 +614,11 @@ for another holder up to C<timeout_ms> (default 5000), breaking a lock a dead
 run left (no refresh for C<stale_ms>, default 300000; an owner-less directory
 after C<grace_ms>, default 2000), then throws
 L<Skilletor::Error::LockTimeout>. While the code runs, a forked child refreshes
-the owner record every C<refresh_ms> (default 10000; none on Windows). The
-lock is released however the code ends; its result (in the caller's context)
-is returned and its exception rethrown.
+the owner record every C<refresh_ms> (default 10000). On Windows, which has no
+fork to spare, the holder refreshes it itself, at most every C<refresh_ms>,
+each time it waits on a program through L<Skilletor::Process> – a resolve's git
+runs, not an HTTP download; C<< win32 => 1 >> takes this way on any system,
+for a test. The lock is released however the code ends; its result (in the
+caller's context) is returned and its exception rethrown.
 
 =cut

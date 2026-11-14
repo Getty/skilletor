@@ -1,6 +1,17 @@
 Revision history for Skilletor
 
 {{$NEXT}}
+  - Skilletor::Process runs programs on Windows: stdin, stdout and stderr as
+    temp files on the standard handles of a P_NOWAIT spawn, the program found
+    on PATH as Node finds it (never in the cwd first, never a .bat or .cmd),
+    its arguments quoted for the C runtime, a timeout terminating it
+    (reported as signal 15, as Node does there); spawn_detached starts the
+    hooks' background through Win32::Process (new Windows-only dependency)
+    with no inherited handle and a console without a window.
+    Skilletor::State refreshes the sync lock on Windows while it waits on a
+    program, and stamps times with the core utime there (Time::HiRes has
+    none). Untested on real Windows (exercised on Linux through an injected
+    seam).
   - `skilletor hook cwd-changed|post-tool-use` for Claude Code: a session
     that moves into another checkout gets that checkout's project scope
     synced – its git top level, never CLAUDE_PROJECT_DIR – when its lock no

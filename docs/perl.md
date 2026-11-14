@@ -131,7 +131,11 @@ It also requires each engine's `check` to accept the other engine's sync.
   The Perl CLI (`bin/skilletor`) runs `sync`, `check`, `status` (k173) and the hooks; the
   other commands are being ported one by one under k166, and each one not ported yet says so
   and exits 1.
-- Windows is untested.
+- Windows is untested. The process layer has a Windows path (k186: `run_command` through
+  temp files on a no-wait spawn, `spawn_detached` through Win32::Process, the sync lock
+  refreshed by its holder instead of a forked child), exercised on Linux through an injected
+  seam; nothing has run on real Windows yet. Known open points: k207 (a dead lock owner),
+  k209 (non-ASCII paths), k210 (the Windows binary's modules and smoke).
 - There are no conformance cases for a `url` fetch (it needs TLS), for symlink
   conflicts, or for partial syncs. `perl/t/62-engine.t` covers partial syncs.
 
