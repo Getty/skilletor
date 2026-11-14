@@ -1,0 +1,97 @@
+---
+class: standard
+completed: 2026-11-14T02:33:04Z
+created: 2026-11-13T20:43:49Z
+depends_on:
+- 183
+- 181
+- 182
+id: 184
+priority: medium
+started: 2026-11-14T01:17:38Z
+status: done
+tags:
+- perl
+- codex
+- hooks
+title: 'Perl: Codex target in sync/check/status and --harness codex'
+updated: 2026-11-14T02:33:04Z
+---
+
+Part of the Perl CLI strand (see the strand card). After this card the Perl engine serves the Codex target as TS does.
+
+syncCodexRules (engine.ts:1311-1418) covers:
+- the rules file;
+- migration of a legacy AGENTS.md;
+- the pointer;
+- refusing a CLAUDE.md identity;
+- the AGENTS.override.md warning and the project_doc_max_bytes warning.
+
+Also port:
+- agentsmd.ts;
+- codexRulesFiles, CODEX_ENTRIES and noCopy;
+- runNotes (HARNESS_LABEL, NO_COUNTERPART, SERVED_FROM);
+- hookTrustWarning / codexHookTrusted, and its part in status.
+
+Hooks:
+- session-start with the Codex rules context (source undefined, null, startup or clear);
+- the prompt-move for codex.
+
+Remove Engine.pm's refusal of the codex target (_unsupported_targets, _foreign_state). docs/perl.md must say what is true afterwards.
+
+Cases:
+- new conformance cases for a Codex target (README: "not covered");
+- cli and hook cases for cli.test.ts:349, hooks.test.ts:723-815 and prompt-move.test.ts.
+
+Done: both runners are green with both CLIs.
+
+Progress: Engine (syncCodexRules, the CLAUDE.md identity, run notes, hook trust warning in sync/status, codex_rules_files, the codex refusal removed: Hermes alone is refused now), AgentsMD (whole agentsmd.ts, oracle-checked), Hooks (Codex rules context on session-start, the Codex prompt move joined with the pending report) done. Cases 100-108 generated from TS and hand-reviewed; no existing expectation changed; no runner change (a seeded home/.codex/config.toml makes Codex detected). New tests: t/17-agentsmd.t, t/72-engine-codex.t (both engines on one machine: CLAUDE.md as the AGENTS.md, a link or directory AGENTS.md, an unreadable or a directory rules file), t/73-hooks-codex.t (hooks.test.ts k50/k87 and prompt-move.test.ts k149 for codex). All suites green; handoff follows.
+
+Ready for review. Not committed.
+
+Changed:
+- perl/lib/Skilletor/Engine.pm
+- perl/lib/Skilletor/AgentsMD.pm
+- perl/lib/Skilletor/Hooks.pm
+- perl/lib/Skilletor/Targets.pm (POD, comment)
+- perl/lib/Skilletor.pm (POD)
+- perl/README.md (the "Claude Code only" bullet becomes a Codex bullet and "No Hermes yet")
+- perl/t/62-engine.t: the refusal is now Hermes-only, plus Hermes entries the reference left
+- perl/t/69-hooks.t: codex without Codex as a target, and hermes, are answered as Claude
+- perl/t/00-load.t: the Skilletor::Error::Block line only. The Skilletor::Probe line there belongs to another worker.
+
+New:
+- perl/lib/Skilletor/Error/Block.pm
+- perl/maint/oracle-agentsmd.mjs
+- perl/t/data/agentsmd-oracle.json (generated)
+- perl/t/17-agentsmd.t
+- perl/t/72-engine-codex.t
+- perl/t/73-hooks-codex.t
+- conformance/cases/100-codex-user .. 108-hook-codex-config-error
+
+conformance/README.md: my rows 100-108 and the runners, CODEX_HOME and "Not covered yet" edits are already in HEAD. 441d8d3 (k175) swept them in from the shared tree. The cases themselves are still untracked, so HEAD names cases 100-108 and t/72-engine-codex.t without having them until this card lands. Nothing to undo.
+
+Tests:
+- npm run typecheck && npm test: 1201 tests, 1200 pass, 0 fail, 1 skip. The skip is the live Hermes plugin install; SKILLETOR_HERMES_INSTALL is unset.
+- build + check-dist: up to date. src/ and dist/ are untouched.
+- Perl prove -lr -j4 t: 40 files, 2425 tests, PASS, run on the live tree.
+- TS runner with the Perl CLI: 81/81 pass.
+- Perl runner (t/60) with the node CLI: 82 tests, PASS.
+- t/54-parity-cli.t: PASS.
+
+Proposed docs/perl.md text:
+(a) Line 40: "- **Claude Code and Codex targets** for sync/check/status (Codex: k184). Hermes stays TS-only (k185)."
+(b) Line 71: "- `sync`, `check` and `status` work for the Claude Code and Codex targets."
+(c) Lines 95-98: "- **Hermes is refused, not half-written.** A scope that targets Hermes is refused with an error, and nothing is touched. The same goes for a sync that would change Hermes state (its lock entries)."
+(d) Known gaps, first bullet: "The Hermes target is not ported to sync, check and status yet (k185). The Codex target is (k184): skills, TOML agents, and the rules file with its AGENTS.md pointer, warnings and first-design migration, plus the untrusted-hook warning. Its conversion came in k183 (`Skilletor::Convert`, `Skilletor::TOML`)." Keep the hooks sentence, then: "`--harness codex` gives a new session the Codex rules context and makes the prompt hook follow a move (k184); `--harness hermes` is parsed but answers as Claude Code's hook does until k185."
+
+Open items / drift (for the dispatcher):
+1. Divergence, for k143. Perl's message for a failed atomic_write is "rename <tmp>: Is a directory"; Node's is "EISDIR: illegal operation on a directory, rename '<tmp>' -> '<file>'". It reaches a report in the warning ".codex/skilletor-rules.md: cannot write the Codex rules file (...)". The temp name is random in both, so the two can never match byte for byte; t/72 blurs that part. Possible perl-board ticket: word atomic_write's errors through node_fs_error.
+2. The header comment of perl/t/68-cli.t is stale: "the Perl engine targets Claude Code alone, so it makes none". The untrusted Codex hook now gives a run-level warning. That file is k175's and committed.
+3. perl/bin/skilletor POD still says "the Claude Code hooks so far" (should be Claude Code and Codex). Its SYNOPSIS hook line lacks [--harness codex|hermes]. k176 is editing that file, so I left it alone.
+4. Run notes only arise with Hermes. _run_notes is unit-tested in t/72 with strings worked out from engine.ts; conformance cases for them come with k185.
+5. No CLI.pm change was needed.
+
+Proposed commit subject: perl: Codex target in sync, check, status and the hooks (k184)
+
+Committed as 03cb5d3
