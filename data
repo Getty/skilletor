@@ -1,0 +1,28 @@
+---
+class: standard
+completed: 2026-11-14T03:27:04Z
+created: 2026-11-14T01:49:42Z
+id: 213
+priority: medium
+started: 2026-11-14T02:34:11Z
+status: done
+tags:
+- perl
+- bug
+title: 'Perl: Skilletor::Error stringifies as HASH(...), its "" overload is lost'
+updated: 2026-11-14T03:27:04Z
+---
+
+Found by the k175 worker, confirmed by the dispatcher: `perl -Ilib -e 'use Skilletor::Error::Config; eval { Skilletor::Error::Config->throw("boom") }; print "$@\n"'` prints `Skilletor::Error::Config=HASH(0x...)`, not `boom`. lib/Skilletor/Error.pm declares `use overload q("") => sub { $_[0]->message }, bool => ..., fallback => 1;` followed by `use namespace::clean;`, and its POD says the object stringifies to its message. Likely namespace::clean (or Moo) loses the overload. Every caller that prints "$@" (raider, die without a handler) shows the HASH. Done when: an error object stringifies to its message (a test in t/ that fails today), the CLI output unchanged (the CLI uses ->message), conformance green.
+
+Cause found (worktree agent-aa1f4512e9d68047e): namespace::clean, not Moo. overload.pm keeps its table as CODE entries in the package stash ('((', '()', '(""', '(bool'); namespace::clean records every CODE symbol present when it is used and deletes them at end of compile, so 'use overload' before it is wiped (a bare package without Moo shows the same; without namespace::clean, or with overload after it, it works). Fix: Error.pm uses overload after namespace::clean. New perl/t/01-error.t: 22/24 red on HEAD, green with the fix. Running full suites next.
+
+Drift, not in scope (for the skilletor board, dispatcher to decide): npm run check-dist is a false red in a worktree whose node_modules is a symlink to the main checkout's. esbuild follows the link and names bundled modules '../../../node_modules/...' instead of 'node_modules/...'. With that prefix normalised, the fresh build is byte-identical to the committed dist/skilletor.js. Worktree-isolated workers cannot use check-dist as advertised.
+
+Ready for review, uncommitted in worktree /home/getty/dev/skilletor/.claude/worktrees/agent-aa1f4512e9d68047e (branch worktree-agent-aa1f4512e9d68047e, base 03cb5d3).
+Files: M perl/lib/Skilletor/Error.pm (use overload moved below use namespace::clean, with a comment saying why); A perl/t/01-error.t (new).
+Cause: namespace::clean removes every CODE symbol that exists when it is used. overload.pm stores its table as CODE entries ((, (), ("", (bool). Not Moo: a plain blessed package shows the same.
+Tests: t/01-error.t 24 tests (21 classes: base plus each Error/*.pm found on disk, each checking "$err", concatenation, eq and throw(message=>...); bool true for '' and '0'; an uncaught throw prints exactly its message on stderr). HEAD: 22/24 fail. With the fix: 24/24 pass. Full Perl prove -lr -j4 t: Files=41 Tests=2449 PASS, parity 50-53 run with node_modules symlinked. 57 structural skips in t/65-report-json.t (cases with no sync/check/status step). TS conformance vs Perl CLI: 81/81 pass, 0 skipped. Perl t/60-conformance.t vs node dist: 82 tests PASS. No conformance case changed.
+Callers: no Skilletor::Error reaches an unguarded "$err" today. Every listed site (worktree lines CLI 264, Hooks 83, Engine 115, Render 83, Resolver 92, ClaudeSettings 111, Lock 56, Catalog 32, Source/Url 114, Bundles 77, plus Source/Git 101, Config 200/631) sits behind blessed/ref && can('message'), so a Skilletor::Error takes ->message. Every other my $err=$@ site rethrows, checks isa then calls ->message, or calls a guarded helper. Url 234/238 concatenate $!. Git 140/146/149 concatenate an already-stringified _msg. Text::Nunjucks wraps only Error::Render, which has name(), so the wrap uses ->message. No Skilletor code runs inside HTTP::Tiny. CLI::run and the hook entry point catch everything via _message. So CLI and hook output are unchanged and no caller test can fail today. The fix changes only uncaught errors (library or perl -e use) and code printing "$@" itself. TS has no uncaught-Error output to compare against. No caller needs a change.
+
+Committed as 00d300a
