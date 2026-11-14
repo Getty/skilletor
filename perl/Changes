@@ -1,6 +1,14 @@
 Revision history for Skilletor
 
 {{$NEXT}}
+  - t/54-parity-cli.t runs the reference CLI (node dist/skilletor.js) and
+    bin/skilletor on one machine, in the same paths, and holds the port to the
+    same bytes: exit codes, both streams, installed trees, the lock and the
+    state files (render-inputs, sources-read, unreached, the hooks' marks and
+    records), over five conformance cases, git's failure wording, the real
+    host and user in templates, and one sync lock that either CLI holds while
+    the other's sync and SessionStart wait or time out. It skips without node
+    or the bundle.
   - Skilletor::Process runs programs on Windows: stdin, stdout and stderr as
     temp files on the standard handles of a P_NOWAIT spawn, the program found
     on PATH as Node finds it (never in the cwd first, never a .bat or .cmd),

@@ -119,6 +119,14 @@ Perl, and requires the following to come out byte-identical:
 
 It also requires each engine's `check` to accept the other engine's sync.
 
+`perl/t/54-parity-cli.t` does the same for the two command lines (`node dist/skilletor.js`
+and `bin/skilletor`): it restores one saved machine before each CLI runs, so both run in the
+same paths, and compares exit codes, both streams and every file under the temp dir as raw
+bytes – the lock, `render-inputs.json`, `sources-read.json`, `unreached.json`, trust and the
+hooks' records included. It drives five conformance cases, git's failure wording, a template
+rendered with the real host and user, and one sync lock that either CLI holds while the
+other's `sync` and SessionStart wait or time out. It skips without node or the bundle.
+
 ## Known gaps
 
 - Codex and Hermes targets are not ported to sync, check and status yet (the Codex
