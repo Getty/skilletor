@@ -1,0 +1,79 @@
+---
+class: standard
+completed: 2026-11-14T00:51:26Z
+created: 2026-11-13T20:43:59Z
+depends_on:
+- 181
+id: 186
+priority: medium
+started: 2026-11-13T23:51:39Z
+status: done
+tags:
+- perl
+- windows
+title: 'Perl: process layer that works on Windows'
+updated: 2026-11-14T00:51:26Z
+---
+
+Part of the Perl CLI strand (see the strand card). The Windows binary needs a Perl process layer that works there.
+
+What does not work on Windows today:
+- Process.pm: fork, IO::Select on pipes, /dev/null, SIGTERM;
+- State.pm: the lock heartbeat fork;
+- the hook's detached background self-spawn.
+
+Replace these with what works on Strawberry Perl and inside a PAR binary there, for example IPC::Run3 or Win32::Process, threads or alarm-free timeouts, File::Spec->devnull.
+
+Constraints:
+- Linux and macOS behave as they do now.
+- Tests cover the portable path on Linux. Windows itself stays untested until the Windows leg of the release workflow runs.
+
+Also on Windows: Node's readdirSync returns NTFS order. That is case-insensitive, not libuv's strcmp sort, while catalog.ts:230 relies on readdir order. Confirm that Perl's bytewise sort matches node on Windows, or record the divergence.
+
+2026-11-14 00:11 Started (worker). Design: POSIX path of run_command/spawn_detached and the fork heartbeat stay byte-for-byte; a Windows path beside them, selected by $^O (and drivable on Linux through a 'win32' argument of injected primitives, for tests). No single portable implementation keeps POSIX's timeouts/TERM/chdir+exec stages (IPC::Open3 has no cwd, no chdir stage; select() on pipes does not exist on Windows), so two paths. Windows run_command: stdin/stdout/stderr as anonymous temp files (open '+>', undef; DELETE_ON_CLOSE on Win32) swapped in at fd level (POSIX::dup2 -> SetStdHandle) around a P_NOWAIT spawn (system { $resolved } 1, @args: STARTF_USESTDHANDLES, core only), chdir around the spawn, local %ENV, own libuv-style program search (PATH; literal-if-extension, .com, .exe; no cwd-first) and own MSVCRT argument quoting (libuv quote_cmd_arg), waitpid WNOHANG polling to the deadline, kill KILL (TerminateProcess) on timeout, reported as Node reports it there (code undef, signal 15). spawn_detached: Win32::Process::Create, no handle inheritance (the hook's stdout pipe must not leak into the background child), CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW. Heartbeat on Windows: no fork/threads (both clone the interpreter, DESTROY runs in the clone); the holder stamps the record from the Windows wait loop of run_command (a tick, at most once per refresh).
+
+Verified (2026-11-14): npm run typecheck && npm test 1174 tests, 1173 pass, 0 fail, 1 skipped (the live hermes plugins install, needs SKILLETOR_HERMES_INSTALL=1). Perl prove -lr -j4 t: 36 files, 2329 tests, PASS; skips: only t/60-conformance.t's 43 cases with no sync/check/status step to compare (by design). New t/16-process.t 22/22 tests; t/25-sync-lock.t 9/9 (7 before). Conformance with the Perl CLI: 54/54 (needs Text::Nunjucks on PERL5LIB; without it 3 cases fail on 'Can't locate Text/Nunjucks/Environment.pm', which is the environment, not this change). Perl t/60-conformance.t against dist/skilletor.js: 55/55.
+
+Done, to review. Commit-ready, not committed.
+
+FILES (all under perl/):
+- lib/Skilletor/Process.pm: Windows path beside the POSIX path, picked by $^O; or by a 'win32' argument of injected primitives, which is how the tests drive it on Linux. run_command: stdin, stdout and stderr go through anonymous temp files, put on fds 0-2 at fd level (POSIX::dup2, which is SetStdHandle) around a P_NOWAIT spawn (system { $program } 1, ...). Then chdir and local %ENV; the program search Node uses (PATH only, never the cwd first; the literal name if it has an extension, then .com, then .exe; .bat/.cmd refused with EINVAL); libuv's MSVCRT quoting; a waitpid WNOHANG poll; kill KILL at the deadline, reported as Node reports it there (code undef, signal 15). New hook $Skilletor::Process::ON_WAIT, called while it waits. spawn_detached: Win32::Process::Create, no handle inheritance, CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW (not DETACHED_PROCESS: the PAR stub runs the inner perl with _wspawnvp, so DETACHED_PROCESS would flash a console); false when the program is missing or .bat/.cmd. The POSIX code is unchanged.
+- lib/Skilletor/State.pm: on Windows the lock heartbeat is a tick through ON_WAIT: the holder stamps its record at most once per refresh_ms while it waits on a program, nested locks chain. Not fork or threads, which clone the interpreter and run DESTROY in the clone. _touch uses the core utime when Time::HiRes has none (Win32: Time::HiRes::utime croaks, so _acquire died on every sync). That is one step past "heartbeat only", because the heartbeat needs it. The POSIX fork heartbeat is unchanged.
+- cpanfile: requires File::Spec and IO::Handle (core); Win32::Process under if ($^O eq 'MSWin32') (ships with Strawberry).
+- t/16-process.t (new, 22 tests): every run_command case on both paths (posix and win32-driven), plus a program search table, a quote table with a parse-back roundtrip, closed fds 0-2, and spawn_detached with a fake. On real Windows the same cases run natively (row 'native'); the fork-only ones skip.
+- t/lib/SkilletorTest/Win32.pm (new): parse_cmdline (MSVCRT rules) and win32_os (spawn by fork+exec of the parsed line, detach recorded).
+- t/25-sync-lock.t (7 -> 9 subtests): the win32 tick refresh (none outside a wait, nested, outer alone after), and _touch via the core utime.
+
+WHY TWO PATHS: no portable implementation keeps POSIX's timeouts with TERM, the chdir/exec spawn_error stages and the select-fed stdin. IPC::Open3 has no cwd and no chdir stage; select on pipes does not exist on Windows; IPC::Run3 has no timeout.
+
+READDIR: Perl's Catalog::_readdir sorts bytewise. On Linux and macOS that matches Node (libuv scandir sorts with strcmp). On Windows it diverges: libuv's fs__scandir (NtQueryDirectoryFile) does not sort and Node adds no sort, so catalog.ts:230 sees NTFS index order (upcase table, case-insensitive ordinal; FAT, exFAT and shares give arbitrary order). The divergence covers names that differ in case, names with [ \ ] ^ _ or a backtick, and non-ASCII names. It shows in the item order of 'available', in the 'unknown item ... (available: ...)' list and in wildcard expansion. Suggested TS ticket (this board): sort at catalog.ts:230 by bytes (Buffer.compare). Linux and macOS would not change and Windows becomes deterministic, matching Perl. Perl's Linux order is not touched. The other unsorted TS readdirs do not depend on order (catalog.ts:108 walkFiles sorts at the end; git.ts:280/313 and state.ts:386 are sweeps).
+
+WINDOWS BUILD (k189): pack Win32::Process. It is a lazy require in _win32_detach that pp's scanner can see, but loaded-modules.pl reaches it only when a due 'hook user-prompt-submit' starts the background. So add it to the by-name list on MSWin32, or have verify-binary.sh require it. Compute the module list on Windows (File::Spec::Win32 and friends), not from Linux. Win32::SetChildShowWindow is built into perl, so nothing to pack for it. smoke-binary.sh lines 18-19 and 95-97 still skip sync, check and status on Windows 'k186'; they can be enabled.
+
+UNTESTED (Windows itself):
+- the real system { } 1 spawn with fd-level SetStdHandle and STARTF_USESTDHANDLES;
+- pre-quoted arguments through perl's create_command_line;
+- SetChildShowWindow(0);
+- waitpid WNOHANG and kill KILL on real pids;
+- Win32::Process::Create with CREATE_NO_WINDOW|CREATE_NEW_PROCESS_GROUP and inherit 0: the child's std handles, surviving the hook's exit, job objects without breakaway;
+- the anonymous tmpfile's DELETE_ON_CLOSE;
+- case-insensitive PATH and real git.exe resolution;
+- local %ENV reaching the child;
+- core utime on files and dirs;
+- the tick heartbeat in a real sync;
+- exit codes over 255 (perl truncates them to 8 bits, Node does not);
+- Ctrl+C not reaching git (own process group);
+- terminating a PAR stub on timeout leaves its inner perl running;
+- no heartbeat during HTTP downloads or CPU phases (if one outlasts the 300 s stale age, a waiter may break the lock).
+
+DRIFT (for the dispatcher):
+(1) State.pm _dead_owner tests for ESRCH, but kill 0 on a gone pid gives EINVAL on Windows, so a dead owner is only broken after the stale age. Outside the heartbeat lane.
+(2) TS: the git execFile calls in the detached background node may each pop a console on Windows (windowsHide). Ticket for this board.
+(3) TS: the catalog.ts:230 sort above.
+(4) Perl on Windows uses the ANSI APIs: non-ASCII paths and readdir names get mangled. A UTF-8 activeCodePage manifest for the binary may be a k189/k166 concern.
+(5) docs/perl.md:134 'Windows is untested' needs an update by the docs owner.
+No change needed in Hooks.pm or CLI.pm: self_command is fine on Windows, and the PAR env the child inherits is harmless (par_init_env clears it).
+
+Review (dispatcher), green: isolated worktree HEAD daa5686 + the six k186 files. typecheck clean; npm test 1174/1173 pass/1 skip/0 fail; Perl prove -lr -j4 t 36 files 2329 tests PASS (t/16-process.t, t/25-sync-lock.t ok); TS runner with perl/bin/skilletor 54/54; Perl t/60 with node dist 55 PASS. POSIX path unchanged (fork heartbeat; _touch keeps Time::HiRes::utime where d_hires_utime). The k190 starter's Perl check reads the new cpanfile (MSWin32 block) correctly: exit 0 with Text::Nunjucks, 'Text::Nunjucks is missing' without. Drift filed: k207 (dead owner EINVAL), k208 (TS windowsHide, readdir order), k209 (non-ASCII paths), k210 (Windows leg modules and smoke). docs/perl.md (dispatcher) updated: goes into this commit.
+
+Committed as be0526f
