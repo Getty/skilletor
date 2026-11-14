@@ -219,9 +219,10 @@ for my $c (@cases) {
 my $runner = path( $FindBin::Bin, '..', 'maint', 'ts-run.mjs' );
 my $src_ts = path( $FindBin::Bin, '..', '..', 'src', 'report.ts' );
 my $why_not =
-    !$runner->exists || !$src_ts->exists                               ? 'needs the skilletor checkout (../src) and maint/ts-run.mjs'
-  : !grep( { -x path( $_, 'node' ) } split /:/, $ENV{PATH} // '' )    ? 'needs node'
-  :                                                                    undef;
+    !$runner->exists || !$src_ts->exists                                   ? 'needs the skilletor checkout (../src) and maint/ts-run.mjs'
+  : !grep( { -x path( $_, 'node' ) } split /:/, $ENV{PATH} // '' )         ? 'needs node'
+  : !path( $FindBin::Bin, '..', '..', 'node_modules', 'nunjucks' )->exists ? "needs the reference's node_modules"
+  :                                                                          undef;
 
 SKIP: {
   skip $why_not, scalar @cases if defined $why_not;
