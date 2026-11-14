@@ -1,6 +1,9 @@
 Revision history for Skilletor
 
 {{$NEXT}}
+  - Skilletor::Frontmatter::Float and Skilletor::TOML::Float are hidden from
+    the PAUSE indexer: inner value classes without a .pm of their own, no
+    longer listed in META's provides (k202).
   - `skilletor available [source] [--json]` in the Perl CLI
     (Skilletor::Commands::available, after cmdAvailable): every trusted
     source - or the one named - resolved and scanned under the sync lock, the

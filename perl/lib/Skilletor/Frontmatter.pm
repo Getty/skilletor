@@ -414,7 +414,8 @@ sub _inline {
   return _typed_plain( _strip_comment($s) );
 }
 
-package Skilletor::Frontmatter::Float;
+package    # hide from PAUSE
+  Skilletor::Frontmatter::Float;
 
 # A YAML float: JavaScript cannot tell 1 from 1.0, TOML can (Codex agents).
 sub new   { my ( $class, $value ) = @_; return bless { value => $value }, $class }

@@ -144,7 +144,8 @@ sub stringify_toml {
   return join( "\n", @lines )."\n";
 }
 
-package Skilletor::TOML::Float;
+package    # hide from PAUSE
+  Skilletor::TOML::Float;
 
 # A TOML float: Perl, like JavaScript, cannot tell 1 from 1.0 by the value alone.
 sub new   { my ( $class, $value ) = @_; return bless { value => $value }, $class }
