@@ -3,11 +3,13 @@ package Skilletor::Error;
 
 use Moo;
 use Carp qw( croak );
+use namespace::clean;
+# After namespace::clean, not before: overload keeps its table as subs in this package ("((",
+# "()", "(\"\"", "(bool"), and namespace::clean removes every sub that exists when it is used.
 use overload
   '""'     => sub { $_[0]->message },
   'bool'   => sub { 1 },
   fallback => 1;
-use namespace::clean;
 
 our $VERSION = '0.002';
 

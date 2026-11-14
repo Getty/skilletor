@@ -1,6 +1,12 @@
 Revision history for Skilletor
 
 {{$NEXT}}
+  - A Skilletor::Error stringifies to its message, as its documentation says:
+    an error no one catches prints the message, not
+    Skilletor::Error::Config=HASH(0x...). namespace::clean removed the subs
+    that hold Error.pm's overload table; the overload is now declared after
+    it. The CLI and the hooks print what they did before - they ask an error
+    for its message (k213).
   - `skilletor add [name] <spec> [--project]` in the Perl CLI
     (Skilletor::Commands::add, after cmdAdd): the same checks in the same
     order - the k95 name, no project scope, the spec, the k110 definition, the
