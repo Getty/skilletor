@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-14T02:52:08Z
+id: 218
+priority: low
+status: backlog
+tags:
+- ts
+- test
+title: 'TS: makeProbe''s HEAD on the tarball has no test'
+updated: 2026-11-14T02:52:08Z
+---
+
+From k176. src/probe.ts makeProbe falls back to a HEAD on <url>.tar.gz through a short-lived node child (headOk) when git ls-remote finds nothing; test/gitenv.test.ts covers only the ls-remote half. The Perl port pins its HEAD in perl/t/31-probe.t against a local HTTP server. Done when: a TS test drives headOk (2xx counts, a 404 and a refused connect do not, the timeout ends it) against a local http server, no network.
