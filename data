@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-15T06:35:19Z
+id: 233
+priority: low
+started: 2026-11-15T06:37:10Z
+status: done
+tags:
+- perl
+- docs
+title: Refresh the Perl README target and CLI capability summary
+updated: 2026-11-15T19:28:14Z
+---
+
+Follow-up found while fixing k227: perl/README.md still headings/describes sync/check/status as for Claude Code and Codex only, while Hermes is implemented and root README/docs/perl.md now state it. Review the short library README against current Skilletor.pm/CLI POD, include Hermes skills-only and actual CLI coverage, retain lookup-template limitations and pending binary activation. Plain documentation only; do not claim a published Perl-primary runtime.
+
+Refreshed Perl README intro and sync/check/status heading for Claude/Codex/Hermes (skills-only Hermes), added source CLI coverage including verified install/uninstall, and documented shared cli conformance steps. Kept template lookup refusal and explicit pending binary/default-launcher activation. Checked against current API/POD and independently verified CLI cases; documentation diff-check clean. No behavior edit or commit.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
