@@ -1,0 +1,38 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-15T04:45:00Z
+id: 229
+priority: high
+started: 2026-11-15T19:28:14Z
+status: done
+tags:
+- targets
+- config
+- perl
+- ts
+- design
+title: Default project targets to existing harness usage instead of every machine
+  target
+updated: 2026-11-15T19:28:14Z
+---
+
+Maintainer request 2026-11-15: stop installing assets for every detected agent framework into each project (Codex files currently appear in Claude projects). Default to the harness layout already used by the project (.claude or .agents), while retaining explicit targets configuration. First define detection, precedence, both/no-layout cases and safe migration; do not treat .claude/skilletor.json alone or skilletor-generated files as user opt-in. Match TS and Perl with shared conformance cases. Current task is read-only design analysis; behavior changes require a concrete agreed contract. Coordinate with k166 Perl-first runtime work. No automatic destructive cleanup of existing projects or publication.
+
+Maintainer selected project decides: explicit user targets is the machine allowlist, not an opt-in for all projects. Maintainer then requested autonomous work without further questions. Design/plan written in integration worktree docs/superpowers/{specs,plans}/2026-11-15-project-targets*. Coordinator conservative choices: exclude own artifacts, preserve ambiguous multi-harness projects with a warning, permit sole-machine-target bootstrap, no real-home cleanup. Sol implementation will keep TS/Perl and conformance aligned.
+
+Task1 is now independently reviewed and fully verified: reviewer reproduced 3 defects (generated-settings oscillation, user-only project-lock access, reverse leftover-skill reactivation), fixes passed scoped re-review in both engines. Main full integration: typecheck; npm1290 pass/1 opt-in Hermes install skip; build/check-dist/diff-check PASS; Perl48 files/2643 tests PASS, existing t53 syntax-error TODO and t65 no-engine-step skip annotations remain. Public docs/core skill update in final review, then handoff. No live-home cleanup, commit, or release.
+
+Task1+Task2 complete for review, uncommitted. Main full integration: typecheck, npm1290 pass/1 opt-in Hermes install skip, build/check-dist/diff-check PASS; Perl48 files/2643 tests PASS (existing t53 TODO, t65 no-engine-step skips). Fresh independent code review found 3 defects, all corrected and reproduced as fixed in both engines; scoped final verdict Spec/Quality PASS. Main and skill-author aligned README, primary spec, Perl docs, bundled skill/references and core briefing; static0 errors, only inherited core163-line budget warning; links and full case index checked. No live-home cleanup, no default binary activation, no commit/publication.
+
+Final whole-batch review found two reproduced P2 issues after earlier full-green checkpoint: unrelated marketplace-only Claude settings were excluded as if generated, and explicit enabledPlugins:null diverged between TS (evidence) and Perl (treated absent), causing alternating-engine removal/reinstallation. Returned to worker for one scoped TS/Perl settings-classifier fix wave and shared regression coverage. User-only scope/leftover-skill fixes remain verified. No live user data touched; no commits/publication.
+
+The two last classifier findings were addressed, but final scoped review reproduced an information-loss interaction: enabling skilletor in genuine marketplace-only settings changes their inferred provenance and a later sync removes Claude. Coordinator selected an evidence-preserving settings-plan guard, not more classifier heuristics or new state. k234 is the explicit integration follow-up; no rollout until it passes. v2 suites were green (Node1291 pass/1 skip; Perl2649 PASS), showing missing coverage rather than a suite failure.
+
+k234 evidence-preserving settings guard is independently approved and the final v3 integration is green: typecheck,1307 Node passes/1 opt-in skip, build/check-dist/diff-check; Perl2661 PASS with documented existing TODO/skips. k235 hypothesis was withdrawn and fully reverted, preserving the valid kept-offer collision contract; exact pre-k235 Engine/Resolver comparison passed. Source Perl also passed real install/render/available/check/status/uninstall/hooks with only Perl and Git on PATH. No packed-binary/platform-release claim, commit or actual user-home sync.
+
+Code, shared cases, source-Perl parity and user/agent documentation independently reviewed and verified; ready for eventual commit, not published. Explicit project selection/evidence is stable and safe under settings updates.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
