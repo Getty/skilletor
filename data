@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-10T20:23:54Z
+id: 157
+priority: low
+started: 2026-11-15T06:58:28Z
+status: done
+tags:
+- docs
+- spec
+title: Spec §14.5 still says .claude-plugin/plugin.json carries the version
+updated: 2026-11-15T19:28:14Z
+---
+
+Found during the k147/k152 docs pass (dispatcher). docs/superpowers/specs/2026-09-22-skilletor-design.md §14.5 says `.codex-plugin/plugin.json` has the "same version as `package.json` and `.claude-plugin/plugin.json`, enforced by a test". Since 09b6642 the Claude plugin manifest carries no version (it follows the commit). Done when: §14.5 names package.json and hermes/skilletor/plugin.yaml as the versions that must agree, and says the Claude manifest has none; grep the rest of the spec and docs/ for the same stale claim.
+
+Corrected spec14.5: Codex/package/Hermes carry the same version; Claude plugin manifest has no version. Independently parsed current manifests and asserted all three versions are 0.7.0 and Claude has no version key. Documentation diff-check clean. No manifest changes, commit or release.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
