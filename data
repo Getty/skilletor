@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-11-15T19:29:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:29:14Z
+created: 2026-11-15T04:17:49Z
+id: 225
+priority: medium
+started: 2026-11-15T05:08:21Z
+status: done
+tags:
+- agents
+- skills
+- coordination
+title: Resolve worker instructions for drift cards and bundled skill ownership
+updated: 2026-11-15T19:29:14Z
+---
+
+Static audit of .claude/agents/skilletor-worker.md:20-24 says never create cards, but lines 28-29 say record drift as a new ticket. Its description also claims the bundled skilletor skill, while the lane table and skilletor-skill-author own all skill text. Route to skilletor-skill-author. Done: one unambiguous rule (worker reports drift to coordinator), bundled skill text owned by skill-author, CLI parity needs routed rather than edited by worker; static checks pass. No new agent roles or blanket instruction rewrite.
+
+Main independently reviewed the single-file diff and ran static check (0 errors, 0 warnings), ack-team check (agents/skills/hook resolve; unchanged optional scout/test-writer/reviewer role warnings), and scoped diff --check. Worker now reports drift for main to file and routes all skill text through skill-author. No strength/A-B evaluation run; no commit.
+
+Committed as 6ea1931. Main independently ran ack-team check successfully: all four agents, referenced skills, rules, settings, karr, CLAUDE.md, git and the worker briefing hook resolve. Only the existing optional-role warnings for absent scout, test-writer and reviewer remain. Scoped diff-check passed; no team expansion or publication.
