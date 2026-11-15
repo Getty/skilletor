@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-15T04:18:00Z
+id: 227
+priority: medium
+started: 2026-11-15T06:18:48Z
+status: done
+tags:
+- perl
+- docs
+title: Update README Perl capabilities to match the implemented port
+updated: 2026-11-15T19:28:14Z
+---
+
+README.md:1091-1093 still says the Perl port cannot render .njk and supports only Claude. docs/perl.md:34-41 and the implementation document template rendering and Claude, Codex and Hermes targets. Done: update the README capability section against the current committed implementation, retaining TypeScript as reference and explicit remaining limitations. Do not imply the pending k178 install work, k179 uninstall, or k191 binary activation has shipped. Related delivery work remains k159/k166/k219.
+
+Updated root README Perl section against current implementation: sync supports Claude/Codex/Hermes (Hermes skills only) and renders through Text::Nunjucks; source-file lookup helpers still refuse unrendered templates (k162 remains open). Documents source Perl>=5.40 and CLI path without claiming binary/default-launcher activation. Verified against Skilletor.pm _refuse_template/POD and current target tests, link targets exist, README diff-check clean. No behavior change or commit.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
