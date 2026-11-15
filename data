@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-11-15T19:28:35Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:35Z
+created: 2026-11-15T05:02:34Z
+id: 232
+priority: medium
+started: 2026-11-15T19:28:35Z
+status: done
+tags:
+- perl
+- binary
+- ci
+- reproducibility
+title: Resolve the binary template dependency pin from the selected source revision
+updated: 2026-11-15T19:28:35Z
+---
+
+Read-only readiness audit: release-binaries.yml selects the application ref/tag but the Text::Nunjucks checkout pin is supplied by the workflow revision. Rebuilding an old tag through a newer workflow can therefore change its dependency input. Verify the mismatch first, then bind the dependency revision to the selected source revision with a regression/contract test. Preserve plugin versioning, no remote workflow dispatch or release/publication. k159 owns the regular Perl CI fix separately; coordinate shared workflow changes if necessary.
+
+Independent review plus two scoped test-portability corrections completed. Binary dependency checkout now consumes the immutable repository/SHA from the selected app source workflow rather than dispatcher env. Main reran combined CI contracts: 5 pass/0 skip with Bash; without Bash, 1 static pass and 2 explicit resolver skips. Duplicate/missing/invalid pin cases covered; both workflow YAML files parse; scoped diff-check clean. Actual GitHub Actions and Windows execution remain unrun. No commit/publication.
+
+Committed as a58940b. Final independent local gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, check-dist and diff-check all passed; full Perl 49 files/2692 tests passed with only the existing documented TODO/skips and no dependency skips. Remote GitHub Actions, cross-platform binary execution, release dispatch and publication were not run; existing platform and activation gates remain.
