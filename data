@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-11-15T19:27:48Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:27:48Z
+created: 2026-11-14T02:58:20Z
+id: 220
+priority: low
+started: 2026-11-15T04:16:05Z
+status: done
+tags:
+- build
+- tooling
+title: check-dist fails falsely in a worktree whose node_modules is a symlink
+updated: 2026-11-15T19:27:48Z
+---
+
+Seen in every isolated review worktree of the k166 strand (and by the k213 and k176 workers): with node_modules symlinked to the main checkout, esbuild resolves the real path and labels bundled modules ../../../node_modules/... in dist/skilletor.js, so npm run check-dist reports "out of date" although src/ is unchanged; with that prefix normalised the build is byte-identical. Options: build with esbuild preserveSymlinks, or have scripts/check-dist compare with the module path comments normalised, or document "copy node_modules" for worktrees. Done when: check-dist is green in a worktree with a symlinked node_modules and still catches a real src/ change.
+
+2026-11-15: First implementation batch selected in the coordination dialog. Terra worker in an isolated worktree. Reconcile with k148 explicitly: an intentionally present node_modules symlink must work; accidental ancestor fallback is a different case. Do not broaden into implementing k148 without authorization. Main serializes board writes; no commits/publication.
+
+Implemented in isolated worktree agent-a92033bf60afe6d73: preserveSymlinks:true in shared esbuild config, two build regressions (normal vs explicit linked dependencies, stale source remains rejected). Main independently read the diff and ran typecheck, both regression tests, build, check-dist and diff --check: all passed, no targeted skips. Worker full suite: 1233 passed, 1 opt-in Hermes install skip. Exact dist comparison preserved; k148 absent-dependency guard remains backlog. Integrating the two reviewed files next; no commit, not done.
+
+Combined independent verification with k200 passed in integration worktree agent-a85525da908a37a2a: npm 1236 passed/1 opt-in Hermes install skip, typecheck/build/check-dist, Perl 45 files/2549 tests PASS. Existing t/53 render TODO and t/65 no-engine-step case skips reported on k200. The two k220 files are also verified in the original checkout; no commit.
+
+Committed as 72d77c6. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 TODO and t65 no-engine-step skips, with no dependency skips. No push, tag, release or publication.
