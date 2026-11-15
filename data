@@ -1,0 +1,34 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-14T04:01:19Z
+id: 222
+priority: low
+started: 2026-11-15T10:35:50Z
+status: done
+tags:
+- ts
+- bug
+title: 'TS: available throws a TypeError on a lock entry that is no object'
+updated: 2026-11-15T19:28:14Z
+---
+
+Found by k177 (Perl CLI available). src/lock.ts readLock accepts a lock whose entries are not objects (it only checks `via` of object entries), and src/commands.ts installedSet then reads `entry.skipped` of a `null` entry: `skilletor available` dies with a TypeError instead of listing. The Perl port counts such an entry as nothing installed (perl/t/76-commands-available.t, "a lock entry that is no object marks nothing"); the divergence is noted on k177.
+
+Also to look at while there: installedSet matches item names exactly (`<typedir>/<name>@<source>`), not through nameKey(); check that against the case-insensitive name invariant before changing anything, and the Perl port follows whatever the reference decides.
+
+Done: readLock refuses a non-object entry (or installedSet skips it, as the port does), with a test; then a conformance case both CLIs pass.
+
+2026-11-15 read-only audit additionally reproduced acceptance of an entry with files:null, then a serializeLock TypeError (src/lock.ts). Consider required lock-entry field validation when this card is scheduled, not only installedSet null skipping; preserve compatibility and test the intended LockError/skip contract. No implementation in the k200/k220 batch.
+
+k179 review: TS covering() in src/commands.ts also dereferences e.source for matching lock entries without a shape guard. New Perl uninstall covering skips non-object entries, consistent with Perl available. Include this caller in the existing malformed-lock validation work; do not broaden the uninstall port itself.
+
+Read-only scout reproduced null-entry crash and case-sensitive installed marker. Coordinator chooses bounded central object-only validation in both readers (reject null/scalar/array entries with existing LockError wrapper), not broad required-field validation or silent inventory filtering. This intentionally replaces the Perl-only invalid-record leniency assertion from k177; valid locked-offer/collision behavior and unknown-harness OBJECT records remain unchanged. Normalize only item identity for available markers, preserve source alias case. files:null serializer validation is tracked separately.
+
+Implemented central object-only lock-entry validation in TS and Perl, preserving lenient fields and unknown-prefix object records. Normalized available item names with nameKey/name_key while preserving target-directory and source-alias case. Red: new TS lock/available regressions failed before the fix (null accepted; mixed-case explicit identity unmarked). Green: focused TS tests (87/87), Perl t/76 (4/4), TS and Perl-CLI conformance cases 151-152 (2/2 each), typecheck, build, and check-dist passed. Changed src/lock.ts, src/commands.ts, Perl Lock/Commands, focused tests, dist/skilletor.js, and cases 151-152. Deliberately changed Perl t/76 malformed-entry leniency to the reference LockError. Open: files:null remains separately tracked as k236; no engine/resolver/targets or collision behavior changed. No full suites run by instruction.
+
+Main independently reviewed bounded object-only reader validation and source-case-preserving identity normalization. TS lock/commands87/87 pass; Perl t51/t65/t76 combined148 tests PASS including unchanged kept-offer contract; shared151–152 pass against each CLI2/2, no skips in those runs. The changed t76 malformed-entry leniency is explicit; valid/unknown-prefix object entries remain accepted. Cases indexed and spec updated. files:null stays k236. No commit.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
