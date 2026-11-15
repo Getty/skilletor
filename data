@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-13T23:32:02Z
+id: 200
+priority: low
+started: 2026-11-15T04:15:51Z
+status: done
+tags:
+- ts
+- hooks
+- bug
+title: 'TS: a hook whose stdin JSON is not an object crashes on input.cwd'
+updated: 2026-11-15T19:28:14Z
+---
+
+Found by the k181 worker (Perl hooks), src/ untouched. When a hook gets stdin that is valid JSON but not an object (e.g. `null`), `skilletor hook session-start` answers `skilletor: Cannot read properties of null (reading 'cwd')`. A non-string `input.cwd` (a number, an object) is passed on to projectRootOf as is.
+
+The Perl port treats JSON that is no object as no input and only takes a non-empty string cwd (Skilletor::CLI::_hook_input, Skilletor::Hooks::_text).
+
+Reproduce with a TS test, fix in hooks.ts/cli.ts (input that is not an object = {}; cwd only when a non-empty string), then pin it with a conformance hook case so both CLIs agree. Exit stays 0 either way (spec §8).
+
+2026-11-15: First implementation batch selected in the coordination dialog. Sol worker in an isolated worktree. Main coordinates all board mutations serially; no commits or publication in this batch. Preserve in-progress Perl work k178/k198.
+
+Independent review completed: source/test diff read; typecheck, 83 hook/CLI tests (0 skips), build, check-dist, diff --check, and corrected shared case 140 passed. Review found a null-stdin transport mismatch in the Perl runner; k228 tracks that separately, and case 140 now uses raw stdin string null so both CLIs receive identical bytes. Worker reran corrected TS and Perl conformance successfully; full Perl suite 45 files/2549 tests PASS. Combining with reviewed k220 in isolated worktree agent-a85525da908a37a2a for final full verification; k200 not yet copied into the original checkout. No commit, not done.
+
+Final combined verification with k220 in isolated integration worktree agent-a85525da908a37a2a: typecheck, npm test (1236 passed, 1 opt-in Hermes install skip), build, check-dist, diff --check passed. Full Perl prove -lrv -j4 t: 45 files/2549 tests PASS; 168 skip annotations for no engine step to compare in t/65; existing t/53 include-syntax-error TODO remains. No dependency skip. Uncommitted; original checkout does not yet contain k200.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
