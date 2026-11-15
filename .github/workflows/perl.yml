@@ -13,23 +13,37 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        perl-version: ["5.36", "5.38", "5.40"]
+        perl-version: ["5.40"]
     runs-on: ubuntu-latest
     container:
       image: perl:${{ matrix.perl-version }}-bookworm
     env:
+      # Text::Nunjucks is not on CPAN, so CI checks out this immutable revision and adds its lib/.
+      TEXT_NUNJUCKS_REPO: Getty/p5-text-nunjucks
+      TEXT_NUNJUCKS_REF: 1a9a608ad90270a7ae0d15a92466fc186fda00fd
       PERL_CPANM_OPT: --mirror https://cpan.metacpan.org --mirror-only
     steps:
       - uses: actions/checkout@v6
+      - name: Check out Text::Nunjucks (not on CPAN) at the pinned commit
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.TEXT_NUNJUCKS_REPO }}
+          ref: ${{ env.TEXT_NUNJUCKS_REF }}
+          path: _deps/p5-text-nunjucks
+          persist-credentials: false
       - name: Fix safe.directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
       - run: npm ci
+      - name: Put Text::Nunjucks on PERL5LIB
+        run: echo "PERL5LIB=$GITHUB_WORKSPACE/_deps/p5-text-nunjucks/lib" >> "$GITHUB_ENV"
       - name: Install dependencies
         working-directory: perl
-        run: cpanm -nq --installdeps .
+        run: |
+          cpanm -nq --installdeps ../_deps/p5-text-nunjucks
+          cpanm -nq --installdeps .
       - name: prove
         working-directory: perl
         run: prove -lr -j4 t

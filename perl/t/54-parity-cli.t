@@ -152,6 +152,47 @@ my $HOST = Sys::Hostname::hostname();
 my $OS   = { linux => 'linux', darwin => 'darwin', MSWin32 => 'win32' }->{$^O} // $^O;
 my $USER = $^O eq 'MSWin32' ? $ENV{USERNAME} : scalar getpwuid $>;
 
+subtest 'add and trust write byte-identical trust state' => sub {
+  my $m = machine();
+  my $tmp = $m->{tmp};
+  my $added = path( $tmp, 'added-source' );
+  my $project_source = path( $tmp, 'project-source' );
+  $added->mkpath;
+  $project_source->mkpath;
+  $added = $added->realpath;
+  $project_source = $project_source->realpath;
+  $m->{project} = "$tmp/project";
+  path( $m->{project}, '.claude' )->mkpath;
+  write_json( "$m->{project}/.claude/skilletor.json", {
+    sources => { project_local => { local => "$project_source" } },
+  } );
+
+  my $runs = both( $m, [
+    { id => 'add local source', argv => [ 'add', 'extra', '${TMP}/added-source' ] },
+    { id => 'trust project source', argv => [ 'trust', 'project_local' ] },
+  ] );
+  same_runs($runs);
+
+  my $trust = 'home/.claude/skilletor/trust.json';
+  for my $i ( 0, 1 ) {
+    my $step = $runs->{ts}[$i]{id};
+    my $want = $runs->{ts}[$i]{snap}{files}{$trust};
+    my $got  = $runs->{perl}[$i]{snap}{files}{$trust};
+    ok( defined $want, "$step: the reference wrote trust.json" );
+    ok( defined $got,  "$step: the port wrote trust.json" );
+    is( $got, $want, "$step: trust.json is byte-identical" ) if defined $want && defined $got;
+  }
+
+  my $after_add = js_parse( decode_utf8_lossy( $runs->{ts}[0]{snap}{files}{$trust} ) );
+  is_deeply( $after_add, { extra => { kind => 'local', address => "$added" } },
+    'add trusted exactly the canonical local backend' );
+  my $after_trust = js_parse( decode_utf8_lossy( $runs->{ts}[1]{snap}{files}{$trust} ) );
+  is_deeply( $after_trust, {
+    extra         => { kind => 'local', address => "$added" },
+    project_local => { kind => 'local', address => "$project_source" },
+  }, 'trust appended exactly the project source backend' );
+};
+
 subtest 'git failures, real host and user, the state files' => sub {
   my $m = machine();
   my $tmp = $m->{tmp};

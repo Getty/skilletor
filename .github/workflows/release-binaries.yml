@@ -52,13 +52,14 @@
 # bare binaries, the starter's trust anchor (k168 a) for the maintainer to review and commit as
 # bin/skilletor-binaries.sha256. This workflow never commits.
 #
-# Text::Nunjucks is not on CPAN: every build checks out TEXT_NUNJUCKS_REPO at TEXT_NUNJUCKS_REF
-# and puts its lib/ on PERL5LIB. Assumed public; if it is private, its checkout needs
-# `token: ${{ secrets.<a token that reads it> }}`. The pin lives in this file, so the rebuild of
-# an old tag takes today's pin.
+# Text::Nunjucks is not on CPAN. After the application checkout, each build reads its immutable
+# TEXT_NUNJUCKS_REPO and TEXT_NUNJUCKS_REF from that selected source's workflow, checks it out,
+# and puts its lib/ on PERL5LIB. This avoids a newer dispatcher changing an old tag's dependency.
+# Missing or malformed source pins fail before the dependency checkout. Assumed public; if it is
+# private, its checkout needs `token: ${{ secrets.<a token that reads it> }}`.
 #
 # What a rebuild picks up: a dispatch with a tag runs this file from the dispatched ref and the
-# scripts and code from the tag.
+# scripts, code and Text::Nunjucks pin from the tag.
 
 name: release-binaries
 
@@ -121,11 +122,38 @@ jobs:
           # dispatched ref.
           ref: ${{ env.TAG && format('refs/tags/{0}', env.TAG) || '' }}
           persist-credentials: false
-      - name: Check out Text::Nunjucks (not on CPAN) at the pinned commit
+      - name: Read Text::Nunjucks pin from selected source
+        id: text-nunjucks-pin
+        working-directory: .
+        run: |
+          # BEGIN text-nunjucks-pin resolver
+          pin_file=.github/workflows/release-binaries.yml
+          [ -r "$pin_file" ] || {
+            printf '::error::selected source lacks %s\n' "$pin_file" >&2
+            exit 1
+          }
+          pin_value() {
+            key=$1
+            count=$(grep -Ec "^  $key: [^[:space:]#]+[[:space:]]*$" "$pin_file" || true)
+            [ "$count" = 1 ] || {
+              printf '::error::selected source must declare exactly one %s\n' "$key" >&2
+              exit 1
+            }
+            sed -n "s/^  $key: \\([^[:space:]#]*\\)[[:space:]]*$/\\1/p" "$pin_file"
+          }
+          repository=$(pin_value TEXT_NUNJUCKS_REPO)
+          ref=$(pin_value TEXT_NUNJUCKS_REF)
+          printf '%s\n' "$repository" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$' \
+            || { printf '::error::selected source has an invalid Text::Nunjucks repository\n' >&2; exit 1; }
+          printf '%s\n' "$ref" | grep -Eq '^[0-9a-f]{40}$' \
+            || { printf '::error::selected source Text::Nunjucks ref must be an immutable 40-character lowercase Git commit SHA\n' >&2; exit 1; }
+          printf 'repository=%s\nref=%s\n' "$repository" "$ref" >> "$GITHUB_OUTPUT"
+          # END text-nunjucks-pin resolver
+      - name: Check out Text::Nunjucks (not on CPAN) at the selected source's pinned commit
         uses: actions/checkout@v6
         with:
-          repository: ${{ env.TEXT_NUNJUCKS_REPO }}
-          ref: ${{ env.TEXT_NUNJUCKS_REF }}
+          repository: ${{ steps.text-nunjucks-pin.outputs.repository }}
+          ref: ${{ steps.text-nunjucks-pin.outputs.ref }}
           path: _deps/p5-text-nunjucks
           persist-credentials: false
       - name: Fix safe.directory (Linux)

@@ -38,6 +38,45 @@ $pkg->child('README')->spew_raw("skilletor smoke stand-in\n");
 my $tarball = $tmp->child("$base.tar.gz");
 is( system( 'tar', '-C', $tmp->child('pkg'), '-czf', $tarball, $base ), 0, 'the stand-in tarball is packed' );
 
+# The smoke's shell keeps its own tools, but the CLI sees an empty PATH. The stand-in names this
+# perl absolutely; a real packed binary therefore gets the same no-system-Perl/no-Node proof.
+my $runtime_path = $tmp->child('runtime-path');
+my $smoke_tmp = $tmp->child('tmp');
+$runtime_path->mkpath;
+$smoke_tmp->mkpath;
+is_deeply( [ $runtime_path->children ], [], 'the runtime PATH is empty' );
+local $ENV{SKILLETOR_SMOKE_PATH} = "$runtime_path";
+local $ENV{TMPDIR} = "$smoke_tmp";    # the smoke shell's own mktemp; the runtime gets its child
+
+# Poison every ambient root the CLI could otherwise consult. smoke-binary.sh's env -i must replace
+# HOME, harness homes, git and temporary paths, and drop config/project/plugin roots and PERL5LIB.
+my $ambient = $tmp->child('ambient');
+$ambient->child('claude')->mkpath;
+$ambient->child( 'claude', 'skilletor.json' )->spew_raw('{ broken ambient config');
+$ambient->child('gitconfig')->spew_raw("[broken\n");
+my %ambient = (
+  HOME                  => $ambient->child('home')."",
+  CLAUDE_CONFIG_DIR     => $ambient->child('claude')."",
+  CODEX_HOME            => $ambient->child('codex')."",
+  HERMES_HOME           => $ambient->child('hermes')."",
+  CLAUDE_PROJECT_DIR    => $ambient->child('claude-project')."",
+  SKILLETOR_PROJECT_DIR => $ambient->child('skilletor-project')."",
+  CLAUDE_PLUGIN_ROOT    => $ambient->child('plugin')."",
+  SKILLETOR_BIN         => $ambient->child('bin')."",
+  GIT_CONFIG_GLOBAL     => $ambient->child('gitconfig')."",
+  GIT_CONFIG_SYSTEM     => $ambient->child('gitconfig')."",
+  GIT_CONFIG_NOSYSTEM   => 0,
+  GIT_DIR               => $ambient->child('git-dir')."",
+  GIT_WORK_TREE         => $ambient->child('git-work-tree')."",
+  GIT_INDEX_FILE        => $ambient->child('git-index')."",
+  TMP                   => $ambient->child('tmp')."",
+  TEMP                  => $ambient->child('temp')."",
+  PAR_GLOBAL_TEMP       => $ambient->child('par')."",
+  PERL5LIB              => $ambient->child('perl5lib')."",
+);
+my @ambient_keys = sort keys %ambient;
+local @ENV{@ambient_keys} = @ambient{@ambient_keys};
+
 my $cwd = Cwd::getcwd();
 chdir $dist or die "chdir $dist: $!";
 my $out = qx{bash scripts/smoke-binary.sh @{[ sq($bin) ]} @{[ sq($tarball) ]} 2>&1};
@@ -51,15 +90,38 @@ if ( $ENV{SKILLETOR_SMOKE_UPDATE} ) {
   like( $out, qr/^smoke: transcript written/m, 'the expectation is written' );
 }
 else {
-  like( $out, qr/^smoke sync, check, status, hooks: OK/m, 'the transcript equals t/data/smoke/expected.txt' );
+  like( $out, qr/^smoke all ported commands and hooks: OK/m, 'the transcript equals t/data/smoke/expected.txt' );
   like( $out, qr/^smoke: OK$/m, 'every smoke stage passes' );
 }
 
-# The expectation covers what the smoke claims: the rendered template, the url source's warning,
-# the background sync's report handed out by the next prompt, both moves into a checkout.
+# The expectation covers what the smoke claims: every ported command really ran, the rendered
+# template, the url source's warning, the background sync's report handed out by the next prompt,
+# and both moves into a checkout.
 my $expected = $dist->child( 't', 'data', 'smoke', 'expected.txt' );
 ok( $expected->is_file, 't/data/smoke/expected.txt exists' );
 my $text = $expected->is_file ? $expected->slurp_raw : '';
+like( $text, qr/^=== add a local source\n--- stdout\nadded source extra \(\{"local":"<work>\/home\/extra-src"\}\)\n.*?^--- exit 0$/ms,
+  'the expectation proves add ran successfully' );
+like( $text, qr/^=== trust an existing source\n--- stdout\ntrusted source loc \(local <work>\/home\/src\)\n--- stderr\n--- exit 0$/m,
+  'the expectation proves trust ran successfully' );
+like( $text, qr/^=== trust state after add and trust\n\{\n  "extra": \{\n    "kind": "local",\n    "address": "<work>\/home\/extra-src"\n  \},\n  "loc": \{\n    "kind": "local",\n    "address": "<work>\/home\/src"\n  \}\n\}$/m,
+  'the expectation holds the trust state written by add and trust' );
+like( $text, qr/^=== source list after add\n--- stdout\n(?:(?!^=== ).)*^extra \[user\] \{"local":"<work>\/home\/extra-src"\}\n(?:(?!^=== ).)*^--- exit 0$/ms,
+  'the expectation proves source list saw the added source' );
+like( $text, qr/^=== available from the added source\n--- stdout\n  skill extra\@extra — Extra smoke skill\n--- stderr\n--- exit 0$/m,
+  'the expectation proves available read the added source' );
+like( $text, qr/^=== install from the added source\n--- stdout\n(?:(?!^=== ).)*^  \+ skills\/extra \(active now\)\n(?:(?!^=== ).)*^--- exit 0$/ms,
+  'the expectation proves install added the item' );
+like( $text, qr/^=== installed extra skill: \.claude\/skills\/extra\/SKILL\.md\n---\nname: extra\ndescription: Extra smoke skill\n---\nExtra smoke body\.$/m,
+  'the expectation holds the item installed by the command' );
+like( $text, qr/^=== uninstall from the added source\n--- stdout\n(?:(?!^=== ).)*^  - skills\/extra \(removed\)\n(?:(?!^=== ).)*^--- exit 0$/ms,
+  'the expectation proves uninstall removed the item' );
+like( $text, qr/^=== extra skill after uninstall\n\(absent\)$/m,
+  'the expectation proves the installed file is gone' );
+like( $text, qr/^=== remove the added source\n--- stdout\n(?:(?!^=== ).)*^--- exit 0$/ms,
+  'the expectation proves source remove ran successfully' );
+like( $text, qr/^=== source extra after removal\n\(absent\)$/m,
+  'the expectation proves source remove edited the config' );
 like( $text, qr/^Hello WORLD from loc \(claude, user\)\.$/m, 'the expectation holds the rendered template' );
 like( $text, qr/^  warning: source web: url source https:\/\/127\.0\.0\.1:1\/skills\.tar\.gz failed: /m,
   "the expectation holds the url source's warning" );

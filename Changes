@@ -1,6 +1,12 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - The source Perl port now requires Perl 5.40. Perl CI tests that version and
+    reproducibly provisions its pinned Text::Nunjucks dependency (k159).
+  - The prepared binary workflow resolves its template dependency repository
+    and revision from the selected skilletor source revision. Its isolated
+    smoke covers every ported command without widening platform or activation
+    claims (k219, k232).
   - Project scopes now select explicit project targets or genuine harness
     evidence in that project instead of every machine target. Skilletor-owned
     artifacts do not count as evidence; an ambiguous multi-harness project is

@@ -29,6 +29,7 @@ skilletor: user scope
 ./.claude/skills/hello/docs/ref.md
 ./.claude/skills/tpl/.gitignore
 ./.claude/skills/tpl/SKILL.md
+./extra-src/skills/extra/SKILL.md
 ./src/agents/rev.md
 ./src/rules/style.md
 ./src/skilletor.json
@@ -220,6 +221,71 @@ skilletor: user scope
 --- stderr
 skilletor: unknown option for sync: --bogus (run skilletor --help)
 --- exit 2
+=== add a local source
+--- stdout
+added source extra ({"local":"<work>/home/extra-src"})
+skilletor: user scope
+  warning: source web: url source https://127.0.0.1:1/skills.tar.gz failed: fetch failed
+--- stderr
+--- exit 0
+=== trust an existing source
+--- stdout
+trusted source loc (local <work>/home/src)
+--- stderr
+--- exit 0
+=== trust state after add and trust
+{
+  "extra": {
+    "kind": "local",
+    "address": "<work>/home/extra-src"
+  },
+  "loc": {
+    "kind": "local",
+    "address": "<work>/home/src"
+  }
+}
+=== source list after add
+--- stdout
+loc [user] {"local":"~/src"}
+web [user] {"url":"https://127.0.0.1:1/skills.tar.gz"}
+extra [user] {"local":"<work>/home/extra-src"}
+--- stderr
+--- exit 0
+=== available from the added source
+--- stdout
+  skill extra@extra — Extra smoke skill
+--- stderr
+--- exit 0
+=== install from the added source
+--- stdout
+skilletor: user scope
+  + skills/extra (active now)
+  warning: source web: url source https://127.0.0.1:1/skills.tar.gz failed: fetch failed
+--- stderr
+--- exit 0
+=== installed extra skill: .claude/skills/extra/SKILL.md
+---
+name: extra
+description: Extra smoke skill
+---
+Extra smoke body.
+=== uninstall from the added source
+--- stdout
+skilletor: user scope
+  - skills/extra (removed)
+  warning: source web: url source https://127.0.0.1:1/skills.tar.gz failed: fetch failed
+--- stderr
+--- exit 0
+=== extra skill after uninstall
+(absent)
+=== remove the added source
+--- stdout
+skilletor: user scope
+  warning: source web: url source https://127.0.0.1:1/skills.tar.gz failed: fetch failed
+--- stderr
+--- exit 0
+=== source extra after removal
+(absent)
 === hook session-start (the check says changed: a sync, the url source's warning)
 --- stdout
 {"systemMessage":"skilletor: 1 warning(s)","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"- warning: source web: url source https://127.0.0.1:1/skills.tar.gz failed: fetch failed"}}
@@ -263,6 +329,7 @@ skilletor: unknown option for sync: --bogus (run skilletor --help)
 ./.claude/skills/hello/docs/ref.md
 ./.claude/skills/tpl/.gitignore
 ./.claude/skills/tpl/SKILL.md
+./extra-src/skills/extra/SKILL.md
 ./src/agents/rev.md
 ./src/rules/style.md
 ./src/skilletor.json

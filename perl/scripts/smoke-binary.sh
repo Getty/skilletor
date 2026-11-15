@@ -7,13 +7,14 @@
 # LICENSE and README; the checks then run against the extracted binary.
 #
 # Checks: --version prints the plugin's version (../package.json, which the binary reports,
-# provisional k167); --help starts with the usage header; an unknown command exits 2; the ported
-# commands (sync, check, status) on the fixture t/data/smoke/ - a local source with a template,
-# an agent and a rule, and an https url source nobody serves - and the Claude Code hooks
-# (session-start; user-prompt-submit with nothing due, then due: its detached background sync,
-# and the next prompt's pending report; cwd-changed and post-tool-use moving into checkouts with
-# a project config) write stdout, stderr, exit codes and files equal byte for byte to the
-# transcript t/data/smoke/expected.txt, this run's temp dir written as <work>.
+# provisional k167); --help starts with the usage header; an unknown command exits 2; every
+# ported command (sync, check, status, add, trust, source list/remove, available, install,
+# uninstall) on the fixture t/data/smoke/ - local sources with templates, skills, an agent and a
+# rule, and an https url source nobody serves - and the Claude Code hooks (session-start;
+# user-prompt-submit with nothing due, then due: its detached background sync, and the next
+# prompt's pending report; cwd-changed and post-tool-use moving into checkouts with a project
+# config) write stdout, stderr, exit codes and files equal byte for byte to the transcript
+# t/data/smoke/expected.txt, this run's temp dir written as <work>.
 # t/70-smoke-binary.t runs this script with the Perl CLI from lib/ in place of the binary, so
 # the transcript stays what the Perl code writes. A command ported later joins the cases below
 # (and the transcript, SKILLETOR_SMOKE_UPDATE=1 prove -l t/70-smoke-binary.t).
@@ -24,6 +25,8 @@
 #
 # SKILLETOR_SMOKE_WAIT: how many seconds the next prompts may wait for the background sync's
 # pending report (default 60).
+# SKILLETOR_SMOKE_PATH: PATH visible to the binary (default /usr/bin:/bin). Set it to an empty
+# directory to prove the packed runtime calls neither a system Perl nor Node.js.
 #
 # SKILLETOR_SMOKE_UPDATE=1 writes the transcript to t/data/smoke/expected.txt instead of
 # comparing it - for the Perl CLI from lib/ only, never for a binary under test.
@@ -52,7 +55,8 @@ want=$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' ../package.json | head -n 1)
 # Its physical path (macOS: /private/var/...), the one the hooks print for a checkout in it.
 work=$(cd "$(mktemp -d)" && pwd -P)
 trap 'rm -rf "$work"' EXIT
-mkdir -p "$work/home" "$work/cwd" "$work/tmp"
+mkdir -p "$work/home/.claude" "$work/home/.codex" "$work/home/.hermes" "$work/cwd" "$work/tmp/par"
+: >"$work/gitconfig"
 
 if [ -n "$TARBALL" ]; then
   name=$(basename "$TARBALL" .tar.gz)
@@ -68,18 +72,26 @@ if [ -n "$TARBALL" ]; then
   echo "smoke tarball: OK ($name)"
 fi
 
-# The binary under a wiped environment, as a user without perl starts it; PAR unpacks into the
-# default cache under the temp dir. Windows needs SYSTEMROOT (Winsock, the crypto RNG), a TEMP
-# for that cache and USERPROFILE as the home, all as Windows paths.
+# The binary under a wiped environment, as a user without perl starts it. Every home, harness,
+# git and temporary path is inside the work dir; env -i drops the caller's config, project/plugin
+# roots, credentials, PERL5LIB and every other ambient value. PAR extracts only below work/tmp.
+# Windows needs SYSTEMROOT (Winsock, the crypto RNG), with its paths in native form.
+runtime_path=${SKILLETOR_SMOKE_PATH:-/usr/bin:/bin}
 if [ -n "$windows" ]; then
   w_home=$(cygpath -w "$work/home")
   w_tmp=$(cygpath -w "$work/tmp")
-  envs=(PATH=/usr/bin:/bin SYSTEMROOT="${SYSTEMROOT:-C:\\Windows}" USERPROFILE="$w_home" HOME="$w_home"
-        TEMP="$w_tmp" TMP="$w_tmp")
+  w_gitconfig=$(cygpath -w "$work/gitconfig")
+  envs=(PATH="$runtime_path" SYSTEMROOT="${SYSTEMROOT:-C:\\Windows}" USERPROFILE="$w_home" HOME="$w_home"
+        CODEX_HOME="$w_home/.codex" HERMES_HOME="$w_home/.hermes"
+        TEMP="$w_tmp" TMP="$w_tmp" TMPDIR="$w_tmp" PAR_GLOBAL_TEMP="$w_tmp/par"
+        GIT_CONFIG_GLOBAL="$w_gitconfig" GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 LC_ALL=C)
   # A path as the binary takes it: Windows' own, with forward slashes (JSON needs no escape).
   native() { cygpath -m "$1"; }
 else
-  envs=(PATH=/usr/bin:/bin HOME="$work/home")
+  envs=(PATH="$runtime_path" HOME="$work/home" CODEX_HOME="$work/home/.codex"
+        HERMES_HOME="$work/home/.hermes"
+        TMPDIR="$work/tmp" TMP="$work/tmp" TEMP="$work/tmp" PAR_GLOBAL_TEMP="$work/tmp/par"
+        GIT_CONFIG_GLOBAL="$work/gitconfig" GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 LC_ALL=C)
   native() { printf '%s\n' "$1"; }
 fi
 nwork=$(native "$work")
@@ -107,6 +119,7 @@ echo "smoke error path: OK (unknown command, exit 2)"
 # its project scope is empty. The hooks' checkouts beside it (no git either) hold the project
 # config t/data/smoke/project-config.json, which installs a skill of the user's source.
 cp -R "$fixture/src" "$work/home/src"
+cp -R "$fixture/extra-src" "$work/home/extra-src"
 mkdir -p "$work/home/.claude"
 cp "$fixture/user-config.json" "$work/home/.claude/skilletor.json"
 printf '{}\n' >"$work/home/.claude.json"
@@ -144,6 +157,11 @@ record() {
 # run_case LABEL ARGS...: a command into the transcript; hook_case LABEL EVENT DIR INPUT: a hook.
 run_case() { local label=$1; shift; capture "$@"; record "$label"; }
 hook_case() { local label=$1; shift; capture_hook "$@"; record "$label"; }
+last_ok() {
+  local label=$1 rc
+  rc=$(cat "$work/rc")
+  [ "$rc" -eq 0 ] || fail "$label exits $rc: $(head -c 400 "$work/err")"
+}
 # files LABEL [DIR]: every file of $work/DIR (default: the home) but skilletor's state dir (it
 # holds times), sorted.
 files() {
@@ -167,6 +185,50 @@ run_case "status --json" status --json
 run_case "sync again" sync
 run_case "sync --json again" sync --json
 run_case "an option sync does not take (exit 2)" sync --bogus
+
+# Every config command ported after the first binary smoke: a local add (no probe reaches the
+# network), explicit trust, listing and reading that source, installing and uninstalling its one
+# item, then removing the now-unused source. Guards make update mode refuse a transcript in which
+# a command merely printed a plausible error or skipped its edit.
+extra_src=$(native "$work/home/extra-src")
+run_case "add a local source" add extra "$extra_src"
+last_ok "add"
+grep -q '^added source extra ' "$work/out" || fail "add did not report the added source"
+run_case "trust an existing source" trust loc
+last_ok "trust"
+grep -q '^trusted source loc (local ' "$work/out" || fail "trust did not report the local backend"
+trust_file="$work/home/.claude/skilletor/trust.json"
+[ -f "$trust_file" ] || fail "add and trust wrote no trust.json"
+grep -q '"extra"' "$trust_file" && grep -q '"loc"' "$trust_file" \
+  || fail "trust.json lacks the sources written by add and trust"
+{
+  printf '=== trust state after add and trust\n'
+  cat "$trust_file"
+} >>"$work/transcript"
+run_case "source list after add" source list
+last_ok "source list"
+grep -q '^extra \[user\] ' "$work/out" || fail "source list did not show extra"
+run_case "available from the added source" available extra
+last_ok "available"
+grep -q 'skill extra@extra' "$work/out" || fail "available did not show skill extra@extra"
+run_case "install from the added source" install skill:extra@extra
+last_ok "install"
+extra_skill="$work/home/.claude/skills/extra/SKILL.md"
+[ -f "$extra_skill" ] || fail "install wrote no .claude/skills/extra/SKILL.md"
+{
+  printf '=== installed extra skill: .claude/skills/extra/SKILL.md\n'
+  cat "$extra_skill"
+} >>"$work/transcript"
+run_case "uninstall from the added source" uninstall skill:extra@extra
+last_ok "uninstall"
+[ ! -e "$extra_skill" ] || fail "uninstall left .claude/skills/extra/SKILL.md"
+printf '=== extra skill after uninstall\n(absent)\n' >>"$work/transcript"
+run_case "remove the added source" source remove extra
+last_ok "source remove"
+if grep -q '"extra"' "$work/home/.claude/skilletor.json"; then
+  fail "source remove left extra in the user config"
+fi
+printf '=== source extra after removal\n(absent)\n' >>"$work/transcript"
 
 # The hooks' inputs as Claude Code sends them: the session "smoke" starts in the empty cwd and
 # moves into two checkouts; the session "smoke-prompted" prompts in a checkout never checked.
@@ -221,7 +283,7 @@ fi
 [ -f "$expected" ] || fail "no expectation t/data/smoke/expected.txt"
 if ! cmp -s "$work/transcript.txt" "$expected"; then
   if command -v diff >/dev/null 2>&1; then diff -u "$expected" "$work/transcript.txt" | head -n 60 >&2 || true; fi
-  fail "sync, check, status, hooks: the transcript differs from t/data/smoke/expected.txt"
+  fail "ported commands and hooks: the transcript differs from t/data/smoke/expected.txt"
 fi
-echo "smoke sync, check, status, hooks: OK (byte-identical to t/data/smoke/expected.txt)"
+echo "smoke all ported commands and hooks: OK (byte-identical to t/data/smoke/expected.txt)"
 echo "smoke: OK"
