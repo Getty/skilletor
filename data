@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-15T04:17:54Z
+id: 226
+priority: low
+started: 2026-11-15T05:12:25Z
+status: done
+tags:
+- skills
+- docs
+title: Qualify the bundled skill statement about Claude settings updates
+updated: 2026-11-15T19:28:14Z
+---
+
+skills/skilletor/SKILL.md:84-87 says a project using skilletor gets the plugin requirement at its next sync. README.md:594-604 documents conditions: project skilletor.json rather than local-only config, Claude among targets, claudeSettings not false; plugin marketplace must also be identifiable. Route to skilletor-skill-author. Done: concise conditional wording and link to the full behavior, no promise of automatic plugin setup for Codex-only or opted-out projects; no behavior change.
+
+Independent review and re-review completed. Bundled skill now conditions plugin-settings updates on project config, active Claude target, claudeSettings and identifiable/declarable marketplace, while retaining the unrelated worktree/manual-sync guidance. Main reran static check (0 errors/0 warnings) and scoped diff check; reference link exists. No strength evaluation, no commit.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
