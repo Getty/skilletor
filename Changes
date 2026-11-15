@@ -1,6 +1,9 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - Builds support explicitly linked local dependencies in worktrees, while
+    refusing tools or bundled inputs resolved from another checkout (k148,
+    k220).
   - Conformance cases 93-97: the CLI's available – listing and installed marks, items that cannot be built, bundles, escaping, refusals (k177).
   - Conformance cases 110-125: the Hermes target in sync, check and status, its home move and upgrade, and the Hermes hooks (k185).
   - Conformance cases 83-92: the CLI's add, its refusals and the probe of a generic host (k176).
