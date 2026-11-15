@@ -1,0 +1,39 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-13T22:35:52Z
+id: 198
+priority: low
+started: 2026-11-14T04:13:31Z
+status: done
+tags:
+- perl
+- bug
+- unverified
+title: 'Perl: CLAUDE_CONFIG_DIR, CODEX_HOME, CLAUDE_PLUGIN_ROOT read as raw bytes'
+updated: 2026-11-15T19:28:14Z
+---
+
+Found by the k173 worker, unverified. Skilletor::Resolver and Skilletor::Engine read CLAUDE_CONFIG_DIR, CODEX_HOME and CLAUDE_PLUGIN_ROOT from %ENV as raw bytes, while every other path in the port is decoded characters. A non-ASCII value may then come out double-encoded in a path, the lock or a report.
+
+Reproduce first: a conformance cli case (or a t/ test) with CLAUDE_CONFIG_DIR=<tmp>/conf-ü and a sync; compare the installed tree and the report bytes with the reference. If it reproduces, decode at the one place the env is read.
+
+Seen again in the k185 review (filed as k221, now folded in here): HERMES_HOME, new with k185, is decoded (Engine.pm hermes_home builder, decode_utf8_lossy), as HOME is (CLI.pm:135) – the three named here are not (Resolver.pm:40 CLAUDE_CONFIG_DIR, :56 CODEX_HOME).
+
+2026-11-14 04:19 Reproduced all three against node dist/skilletor.js (hand runs, temp HOME, LC_ALL=C). CLAUDE_CONFIG_DIR=<tmp>/conf-ü: Perl sync writes skills/bar under <tmp>/conf-Ã¼/ (double-encoded) while the lock and state land in conf-ü; status then shows '· skills/bar' (node: '✓'); a config error names conf-Ã¼. CODEX_HOME=<tmp>/codex-ü: the Codex agent lands in codex-Ã¼/agents/, the untrusted-hook warning names codex-Ã¼/config.toml. CLAUDE_PLUGIN_ROOT=<tmp>/plug-ü with skilletor installed from marketplaces a and b: node enables skilletor@a, Perl warns 'installed from several marketplaces (a, b)' and writes no settings.json. ClaudeSettings.pm:229 is POD (synopsis), not a read. Fix: decode_utf8_lossy at the three builders (Resolver claude_config_dir, codex_home; Engine plugin_root). Tests: conformance 126 (CLAUDE_CONFIG_DIR) and 127 (CODEX_HOME + CLAUDE_PLUGIN_ROOT).
+
+2026-11-14 04:32 Cases written, expectations from the TS runner (SKILLETOR_CONFORMANCE_UPDATE=1, one case at a time, reviewed): 126-cli-claude-config-dir-non-ascii (CLAUDE_CONFIG_DIR=${TMP}/conf-ü: add, install, cli status, add under the taken name, engine status), 127-cli-codex-home-plugin-root-non-ascii (CODEX_HOME=${TMP}/codex-ü, CLAUDE_PLUGIN_ROOT=${TMP}/plug-ü, skilletor installed from two marketplaces: cli sync with tree, cli status). The non-ASCII dirs lie under ${TMP}, outside the compared trees, so no case file has a non-ASCII name; the report bytes and status pin them. Before the fix, Perl runner (perl -Ilib t/60-conformance.t): 1..110, not ok 40 (126: add fails 'no agent harness detected', markers looked up under conf-Ã¼; status installed false) and not ok 41 (127: 'installed from several marketplaces (getty, other)', no settings.json, warning names codex-Ã¼); every other case ok.
+
+Resuming the genuine ENV decoding bug. Old cases126/127 are present in the retained agent-af04531cc6cfca31d worktree; read/recover only those fixtures, never copy old Engine/Resolver over current k229/k234. Reproduce current raw ENV byte handling before minimal builder decode, preserve unset values and explicit constructor arguments. Current target defaults may require explicit fixture targets to retain the ENV test intent; document such input adjustments and regenerate only these expectations from TS. Main will independently verify.
+
+Resumed in current integration worktree. Will recover only cases 126/127 fixtures after comparison, reproduce against current Perl, then apply focused builder-boundary decoding while preserving k229 targets and k234 settings behavior.
+
+Implemented minimal UTF-8 decoding in Resolver defaults for CLAUDE_CONFIG_DIR/CODEX_HOME and Engine default for CLAUDE_PLUGIN_ROOT; explicit/unset/empty values remain unchanged. Recovered cases 126/127 inputs only, added explicit project targets (claude) for current k229 policy/k234 settings guard, regenerated only their expectations from TS, and hand-reviewed against the retained fixtures. Updated the Perl conformance setup to place case ENV values into %ENV as UTF-8 bytes. Red: new builder test failed all 3 defaults; focused Perl 126 failed install/status and 127 failed marketplace selection/Codex path. Green: t/80 PASS; focused Perl 126 (20/20) and 127 (19/19) PASS; focused TS conformance 2/2 PASS; changed Perl files syntax OK; diff --check clean; npm run check-dist up to date. Whole suite intentionally not run per coordination request.
+
+Addressed review finding: with_case_env now encodes defined character values at the %ENV boundary while preserving undef/empty and leaving r->{env} unchanged for other drivers. Added a real helper -> %ENV -> Engine/child regression in t/80. Red before helper fix: %ENV/child ended in fc instead of c3bc and the builder returned U+FFFD (3/8 boundary assertions failed). Green: t/80 PASS (4 subtests); focused t/65 with only cases 126/127 PASS, case 126 status JSON compared and case 127 explicitly skipped because it has no engine sync/check/status step; helper and t/80 syntax OK; focused diff --check clean. Did not edit t/60 again.
+
+Main independent review verified all3 builder boundaries, unset/empty/explicit semantics and both CLI cases126/127. Review found common with_case_env also needed UTF-8 byte encoding; added helper-to-ENV/child regression, preserving character inputs. Final combined v4:Node1313 passed/1 opt-in Hermes install skip; Perl49 files/2674 PASS,118 report-JSON comparisons, existing t53 TODO and t65 no-engine-step skips. Real source-Perl no-Node PATH smoke also passed. Linux only; no Windows claim, commit or publication.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
