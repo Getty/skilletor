@@ -1,0 +1,35 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-15T08:06:00Z
+id: 234
+priority: high
+started: 2026-11-15T19:28:14Z
+status: done
+tags:
+- targets
+- settings
+- safety
+- perl
+- ts
+title: Preserve inferred targets when adding the Claude plugin requirement
+updated: 2026-11-15T19:28:14Z
+---
+
+Load-bearing follow-up from final k229 review: genuine marketplace-only Claude settings for team plus a user-installed skilletor@team first selects Claude+Codex; the automatic settings writer then adds enabledPlugins.skilletor@team=true, making the file indistinguishable from generated-only settings, and the next sync removes Claude. More classifier tweaks cannot recover origin from identical final bytes. Coordinator ruling under autonomous authorization: keep read-only/no-provenance target inference; do not apply an automatic project settings plan that would change an implicitly selected project target set. Warn to set explicit project targets; never write targets/provenance implicitly. Explicit project targets, sole-machine bootstrap and settings updates with other stable evidence continue normally. Compare a virtual proposed settings state without writing it; use correct current/new lock ownership so newly generated skills cannot masquerade as evidence. check must not report perpetual layout drift for the intentionally skipped settings update. Match TS/Perl and cover installed-plugin marketplace-only repeated sync, gitignore=false, explicit-target escape hatch, other genuine evidence, and existing null/parity regressions. This changes the settings writer integration, not only the classifier; document the guard in spec/README/skill. No real-home sync, commits or publication. Implement after main confirms current full verification jobs have ended.
+
+Integration work started in the assigned worktree: reproducing the installed-plugin marketplace-only target loss, then guarding the existing settings plan with virtual target selection and current lock ownership in both engines.
+
+Red reproduced in TS and Perl: first sync adds skilletor@team, second removes skills/sample, with gitignore both true and false. Guard now wraps the existing settings plan, projects settings through the normal target selector, and uses post-apply ownership in sync/current ownership in check. TS focused+conformance: 365 passed, no skips; typecheck/build/check-dist pass. Shared case149 reviewed: settings unchanged, both copies retained, repeated hooks silent/exit 0. Perl focused+conformance verification still running. Main should add docs guidance and the conformance index entry; no prose/skill files edited.
+
+Implementation ready for independent review. TS/Perl reproduce the exact pre-fix second-sync Claude removal, then pass with a virtual settings projection through the existing target selector. Sync uses the post-apply lock; check uses current ownership and treats a guarded plan as no settings drift, without recording new provenance or suppressing a later explicit-target escape hatch. Added matching engine tests plus shared case149 (only new shared ID), including gitignore=false, stable-own-evidence and sole-machine exceptions, unchanged settings bytes/inode, repeated sync and hook stability. npm test: 1303 passed, 1 opt-in Hermes-install skip, 0 failed; focused Node+conformance 365 passed; Perl focused+all conformance Files=8 Tests=261 PASS; case149 also passed with the Perl CLI override. typecheck/build/check-dist and git diff --check pass. No dependency, prose/skill, original-checkout or commit changes. Main remains responsible for docs wording and conformance index: automatic project plugin requirements are skipped with an explicit-targets-then-sync warning when they would change inferred targets; skipped writes are not check drift. Full Perl suite was not rerun here; main independently reviews before release-manager commit. Proposed subject: Preserve inferred project targets across Claude settings writes (k234). Proposed Changes: Skip automatic Claude plugin requirements that would change inferred project targets, preserving settings and managed files without perpetual check drift in both engines.
+
+Main independent review complete:101 focused Node+77 Perl checks pass; separate Astra Spec/Quality PASS with cross-engine probes, byte/inode/mtime preservation, gitignore=false and no check drift. Final combined v3:1307 Node passed/1 opt-in Hermes install skip; Perl48 files/2661 PASS, existing t53 TODO and t65 no-engine-step skips. Docs/core skill/conformance index updated; settings-only skip clearly distinguished from whole-scope ambiguity. No commit or activation.
+
+Final skill review found one inaccurate core-skill sentence: only an actionable SettingsPlan.next is check layout drift; warning-only and guarded plans are not. Runtime review has no blocker. Routed sentence correction to skill-author; final local integration checks pending.
+
+Corrected only the core-skill settings drift sentence. Skill auditor rechecked and cleared the blocker; main independently checked the one-sentence delta and scoped diff-check. Runtime review has no blocker. Main full integration: Node1318 pass/1 opt-in Hermes download skip; typecheck/build/check-dist/diff-check PASS; Perl49 files2692 tests PASS with existing t53 include-syntax TODO and t65 no-engine-step comparison skips. Ready for local commit; no activation/publication.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
