@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-13T20:13:59Z
+id: 163
+priority: low
+started: 2026-11-15T05:37:39Z
+status: done
+tags:
+- perl
+- bug
+title: 'Perl: Ambiguous message carries a raw en dash without use utf8'
+updated: 2026-11-15T19:28:14Z
+---
+
+Found on k158. perl/lib/Skilletor.pm:192 builds the Skilletor::Error::Ambiguous message with a literal en dash, but the file has no use utf8, so the message is a byte string (three bytes), not the character. Check the other perl/lib modules for literal non-ASCII in strings too.
+
+Main reviewed use utf8 change and public-API Ambiguous error regression. Independent perl/t/15-convert.t + t/78-unicode.t PASS (6 top-level subtests, no skips); character and UTF-8 bytes are pinned. Scoped diff-check clean. Read-only scan found no other executable non-ASCII literal lacking utf8. No commit.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
