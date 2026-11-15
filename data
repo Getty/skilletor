@@ -1,0 +1,74 @@
+{"action":"handoff","agent":"skilletor-terra-k220","detail":"review","task_id":220,"ts":"2026-11-15T04:33:24Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":228,"ts":"2026-11-15T04:39:57Z"}
+{"action":"create","agent":"skilletor-0v9","detail":"in-progress","task_id":229,"ts":"2026-11-15T04:45:00Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":166,"ts":"2026-11-15T04:45:11Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":191,"ts":"2026-11-15T04:45:16Z"}
+{"action":"handoff","agent":"skilletor-sol-k200","detail":"review","task_id":200,"ts":"2026-11-15T04:46:56Z"}
+{"action":"edit","agent":"skilletor-0v9","detail":"in-progress","task_id":229,"ts":"2026-11-15T04:57:09Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":159,"ts":"2026-11-15T04:57:17Z"}
+{"action":"move","agent":"skilletor-terra-k159","detail":"in-progress","task_id":159,"ts":"2026-11-15T04:57:23Z"}
+{"action":"edit","agent":"skilletor-terra-k159","detail":"in-progress","task_id":159,"ts":"2026-11-15T04:57:28Z"}
+{"action":"edit","agent":"skilletor-sol-k200","detail":"review","task_id":200,"ts":"2026-11-15T04:57:47Z"}
+{"action":"edit","agent":"skilletor-terra-k220","detail":"review","task_id":220,"ts":"2026-11-15T04:57:52Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"todo","task_id":230,"ts":"2026-11-15T05:02:21Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"todo","task_id":231,"ts":"2026-11-15T05:02:29Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"todo","task_id":232,"ts":"2026-11-15T05:02:34Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":166,"ts":"2026-11-15T05:02:39Z"}
+{"action":"handoff","agent":"skilletor-terra-k159","detail":"review","task_id":159,"ts":"2026-11-15T05:07:01Z"}
+{"action":"move","agent":"skilletor-terra-k232","detail":"in-progress","task_id":232,"ts":"2026-11-15T05:07:10Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":225,"ts":"2026-11-15T05:08:21Z"}
+{"action":"move","agent":"skilletor-terra-k225","detail":"in-progress","task_id":225,"ts":"2026-11-15T05:08:26Z"}
+{"action":"handoff","agent":"skilletor-terra-k225","detail":"review","task_id":225,"ts":"2026-11-15T05:12:15Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":226,"ts":"2026-11-15T05:12:25Z"}
+{"action":"move","agent":"skilletor-terra-k226","detail":"in-progress","task_id":226,"ts":"2026-11-15T05:12:32Z"}
+{"action":"handoff","agent":"skilletor-terra-k226","detail":"review","task_id":226,"ts":"2026-11-15T05:18:48Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":154,"ts":"2026-11-15T05:19:52Z"}
+{"action":"move","agent":"skilletor-terra-k154","detail":"in-progress","task_id":154,"ts":"2026-11-15T05:19:59Z"}
+{"action":"handoff","agent":"skilletor-terra-k232","detail":"review","task_id":232,"ts":"2026-11-15T05:24:24Z"}
+{"action":"move","agent":"skilletor-terra-k231","detail":"in-progress","task_id":231,"ts":"2026-11-15T05:24:31Z"}
+{"action":"edit","agent":"skilletor-terra-k231","detail":"in-progress","task_id":231,"ts":"2026-11-15T05:24:46Z"}
+{"action":"move","agent":"skilletor-sol-k178","detail":"in-progress","task_id":178,"ts":"2026-11-15T05:26:58Z"}
+{"action":"edit","agent":"skilletor-sol-k178","detail":"in-progress","task_id":178,"ts":"2026-11-15T05:27:05Z"}
+{"action":"handoff","agent":"skilletor-terra-k154","detail":"review","task_id":154,"ts":"2026-11-15T05:35:44Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":163,"ts":"2026-11-15T05:37:39Z"}
+{"action":"move","agent":"skilletor-terra-unicode","detail":"in-progress","task_id":163,"ts":"2026-11-15T05:37:55Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":195,"ts":"2026-11-15T05:38:08Z"}
+{"action":"move","agent":"skilletor-terra-unicode","detail":"in-progress","task_id":195,"ts":"2026-11-15T05:38:19Z"}
+{"action":"handoff","agent":"skilletor-sol-k178","detail":"review","task_id":178,"ts":"2026-11-15T05:46:50Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":179,"ts":"2026-11-15T05:47:02Z"}
+{"action":"move","agent":"skilletor-sol-k179","detail":"in-progress","task_id":179,"ts":"2026-11-15T05:47:08Z"}
+{"action":"move","agent":"skilletor-terra-k230","detail":"in-progress","task_id":230,"ts":"2026-11-15T05:47:15Z"}
+{"action":"edit","agent":"skilletor-terra-k230","detail":"in-progress","task_id":230,"ts":"2026-11-15T05:47:22Z"}
+{"action":"handoff","agent":"skilletor-terra-k231","detail":"review","task_id":231,"ts":"2026-11-15T05:51:31Z"}
+{"action":"handoff","agent":"skilletor-terra-unicode","detail":"review","task_id":163,"ts":"2026-11-15T06:02:17Z"}
+{"action":"handoff","agent":"skilletor-terra-unicode","detail":"review","task_id":195,"ts":"2026-11-15T06:02:34Z"}
+{"action":"handoff","agent":"skilletor-sol-k179","detail":"review","task_id":179,"ts":"2026-11-15T06:17:09Z"}
+{"action":"edit","agent":"Torsten Raudssus","detail":"backlog","task_id":222,"ts":"2026-11-15T06:17:16Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":227,"ts":"2026-11-15T06:18:48Z"}
+{"action":"move","agent":"skilletor-0v9","detail":"in-progress","task_id":227,"ts":"2026-11-15T06:18:56Z"}
+{"action":"handoff","agent":"skilletor-0v9","detail":"review","task_id":227,"ts":"2026-11-15T06:20:07Z"}
+{"action":"handoff","agent":"skilletor-terra-k230","detail":"review","task_id":230,"ts":"2026-11-15T06:30:54Z"}
+{"action":"edit","agent":"skilletor-terra-k230","detail":"review","task_id":230,"ts":"2026-11-15T06:35:09Z"}
+{"action":"create","agent":"Torsten Raudssus","detail":"backlog","task_id":233,"ts":"2026-11-15T06:35:19Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":233,"ts":"2026-11-15T06:37:10Z"}
+{"action":"move","agent":"skilletor-0v9","detail":"in-progress","task_id":233,"ts":"2026-11-15T06:37:16Z"}
+{"action":"handoff","agent":"skilletor-0v9","detail":"review","task_id":233,"ts":"2026-11-15T06:41:01Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":157,"ts":"2026-11-15T06:58:28Z"}
+{"action":"move","agent":"skilletor-0v9","detail":"in-progress","task_id":157,"ts":"2026-11-15T06:58:34Z"}
+{"action":"handoff","agent":"skilletor-0v9","detail":"review","task_id":157,"ts":"2026-11-15T07:07:11Z"}
+{"action":"edit","agent":"skilletor-0v9","detail":"in-progress","task_id":229,"ts":"2026-11-15T07:07:18Z"}
+{"action":"handoff","agent":"skilletor-0v9","detail":"review","task_id":229,"ts":"2026-11-15T07:23:02Z"}
+{"action":"move","agent":"skilletor-0v9","detail":"in-progress","task_id":229,"ts":"2026-11-15T07:47:11Z"}
+{"action":"edit","agent":"skilletor-0v9","detail":"in-progress","task_id":229,"ts":"2026-11-15T07:47:17Z"}
+{"action":"create","agent":"skilletor-sol-evidence-guard","detail":"in-progress","task_id":234,"ts":"2026-11-15T08:06:00Z"}
+{"action":"edit","agent":"skilletor-0v9","detail":"in-progress","task_id":229,"ts":"2026-11-15T08:11:01Z"}
+{"action":"edit","agent":"skilletor-sol-evidence-guard","detail":"in-progress","task_id":234,"ts":"2026-11-15T08:13:55Z"}
+{"action":"edit","agent":"skilletor-sol-evidence-guard","detail":"in-progress","task_id":234,"ts":"2026-11-15T08:27:05Z"}
+{"action":"handoff","agent":"skilletor-sol-evidence-guard","detail":"review","task_id":234,"ts":"2026-11-15T08:31:07Z"}
+{"action":"move","agent":"Torsten Raudssus","detail":"todo","task_id":148,"ts":"2026-11-15T08:43:04Z"}
+{"action":"move","agent":"skilletor-terra-k148","detail":"in-progress","task_id":148,"ts":"2026-11-15T08:43:11Z"}
+{"action":"edit","agent":"skilletor-terra-k148","detail":"in-progress","task_id":148,"ts":"2026-11-15T08:43:17Z"}
+{"action":"handoff","agent":"skilletor-terra-k148","detail":"review","task_id":148,"ts":"2026-11-15T09:26:57Z"}
+{"action":"create","agent":"skilletor-astra-resolve","detail":"in-progress","task_id":235,"ts":"2026-11-15T09:27:04Z"}
+{"action":"edit","agent":"skilletor-astra-resolve","detail":"in-progress","task_id":235,"ts":"2026-11-15T09:30:43Z"}
+{"action":"edit","agent":"skilletor-astra-resolve","detail":"in-progress","task_id":235,"ts":"2026-11-15T09:39:09Z"}
