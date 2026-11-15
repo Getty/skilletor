@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-10T18:50:35Z
+id: 154
+priority: high
+started: 2026-11-15T05:19:52Z
+status: done
+tags:
+- test
+- security
+- hermes
+title: hermes-real test passes developer API keys into the Hermes processes it starts
+updated: 2026-11-15T19:28:14Z
+---
+
+Found in k149. `test/hermes-real.test.ts` starts real Hermes processes with the developer's environment, API-key variables included. `npm test` runs it whenever the default Hermes Python exists. In k149 the full suite had to run with the shell's API-key variables unset to stay clean.
+
+## Done when
+
+The test starts Hermes with an allowlisted environment: PATH, the temp HOME/HERMES_HOME/TMPDIR, and whatever the test itself needs. No inherited `*_API_KEY`/`*_TOKEN`. A test asserts that a key set in the parent env does not reach the child.
+
+Main independently reviewed full Hermes-real test file and reran synthetic parent-secret isolation, actual local Hermes skill listing/loading, and actual Hermes chat turn against local mock endpoint: 3 pass/0 fail/0 skip. Scoped diff-check passes. Child environments now use explicit execution essentials plus disposable paths and test overrides, not inherited keys/tokens/passwords. Remote plugin install/provider calls were not run. Full integration suite waits for k229; its intentional dual-target Hermes fixture will receive explicit project targets separately. No commit.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
