@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-13T20:43:23Z
+depends_on:
+- 178
+id: 179
+priority: medium
+started: 2026-11-15T05:47:02Z
+status: done
+tags:
+- perl
+- cli
+- commands
+title: 'Perl CLI: uninstall'
+updated: 2026-11-15T19:28:14Z
+---
+
+Part of the Perl CLI strand (see the strand card).
+
+Port cmdUninstall (commands.ts:554-620): covering, coverText, wayOut, bundleElsewhere and declaredElsewhere. Its hints go to stderr as `skilletor: warning: …`.
+
+Cases: cli.test.ts:295, and the uninstall halves of :81-:219.
+
+Done: both runners are green with both CLIs.
+
+Main independently reviewed the delta from the verified k178 snapshot against cmdUninstall/covering/scope diagnostics, then ran Perl68/77/79 (3 files/21 top-level subtests PASS) and new shared cases200–205 against each CLI (6/6 each), no skips. Scoped diff-check clean. Includes warnings on stderr, all-before-write validation and saved edits after sync errors. Broader final integration suites pending k230/k229 review, no commit. Known malformed-lock reference issue remains k222; Perl covering safely skips non-object entries, as available already does.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
