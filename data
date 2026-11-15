@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-15T04:39:57Z
+id: 228
+priority: low
+started: 2026-11-15T10:52:57Z
+status: done
+tags:
+- perl
+- test
+- conformance
+title: Perl conformance runner drops explicit null stdin instead of sending JSON
+updated: 2026-11-15T19:28:14Z
+---
+
+Found during independent review of k200. conformance/README.md:253 requires a non-string stdin value to be sent as compact JSON; test/conformance.test.ts:291 distinguishes undefined from null and sends the bytes null. perl/t/60-conformance.t:252-255 uses !defined and turns both omitted stdin and explicit JSON null into empty input. A cross-language case can therefore pass while testing different bytes. Done: distinguish absent stdin from explicit null, add a runner transport regression comparing stdin bytes for omitted/null/string/object cases, preserve the documented contract. Keep this separate from k200: its new null-input case uses the raw string null so both runners test identical input without broadening the hook fix.
+
+Read the card, stdin contract, t/60 runner, and ParityCLI. Adding byte-level transport coverage for both drivers before changing the absent-vs-null boundary.
+
+TDD regression proved pre-fix both runners sent explicit JSON null as zero bytes instead of null. Changed only the stdin presence boundary in t/60 and ParityCLI, restored case140 to JSON null, and preserved k198’s UTF-8 environment-byte correction in t/60. Focused checks are running.
+
+Ready for review. TDD pre-fix capture: t/60 and ParityCLI both delivered explicit JSON null as zero bytes, expected four bytes null. Fix distinguishes absent stdin by key presence in both drivers; regression captures exact bytes for absent, JSON null, empty/literal-null strings, scalar, array, object, and placeholder text. case140 now uses JSON null. Preserved k198’s UTF-8 environment-byte correction in t/60 (no ENV semantic change). Verified: focused TS case140 PASS; prove -lv t/60-conformance.t PASS (143 tests; case140 and both byte checks pass); prove -lv t/65-report-json.t PASS (141 tests; CLI-only cases intentionally skip); npm run check-dist PASS.
+
+Main independently reviewed both exists-vs-null driver fixes and byte-capture tests; k198 ENV line remains intact. Full v4 Node1313 pass/1 opt-in skip; Perl49 files/2674 PASS including both transport drivers and case140 actual JSON null. Known t53 TODO and legitimate t65 no-comparison skips unchanged; no missing-dependency skips. No commit.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
