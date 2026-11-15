@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-15T19:28:55Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:55Z
+created: 2026-11-15T05:02:29Z
+id: 231
+priority: high
+started: 2026-11-15T19:28:55Z
+status: done
+tags:
+- perl
+- binary
+- hooks
+title: Keep per-prompt starter hooks offline and back off failed provisioning
+updated: 2026-11-15T19:28:55Z
+---
+
+Read-only audit of bin/skilletor-start found that absent binaries can trigger provisioning on UserPromptSubmit, with retries on later prompts. The 10-second hook budget conflicts with download plus PAR cold start. Before k191 activation: no download for per-prompt hooks; bounded setup/session-start provisioning, verified cached binary fast path, and a tested retry/backoff policy after failed downloads. Preserve hook exit-0 behavior and checksum verification. Tests must use local fixtures/fake transport and temp HOME, not public downloads. Keep broad cache cleanup and platform activation separate if not required for the fix.
+
+Coordinator implementation choices for autonomous work: only explicit CLI/setup and hook session-start may provision; high-frequency/non-start hooks must not download. Retain verified cache and existing fallback order. Session-start failed-provision backoff is per version/platform; explicit CLI invocation may retry immediately. Choose a small documented constant with fake-clock/temp-state tests, not sleeps. Do not activate the starter or edit active launcher/hook wiring; k191 remains gated.
+
+Main independently reviewed starter/test diff and ran all 33 starter tests (0 failures/skips), sh -n and scoped diff check. Non-start hooks never provision; SessionStart has per-version/platform 900s failure backoff, explicit CLI retry bypasses it, cached binaries are re-hashed. Review caught a fatal leading-zero timestamp/octal-arithmetic bug (08 -> exit2), now fixed with canonical decimal validation and regression. Final header correction is comment-only and rechecked. Prepared starter not activated; real cache-rehash performance, Windows and release platform gates remain open under k203/k169/k191. Global check-dist remains pending while k229 changes source; no unrelated bundle rebuild or commit.
+
+Committed as 4f5a187. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, check-dist and diff-check all passed; installer and starter regressions are included in that run. No public asset download, real-home install, platform activation or default-hook switch was performed; the prepared rollout remains gated.
