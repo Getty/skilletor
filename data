@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-13T20:13:46Z
+id: 161
+priority: medium
+started: 2026-11-15T12:18:19Z
+status: done
+tags:
+- render
+- bug
+title: Render context calls os.userInfo() for every item, templated or not
+updated: 2026-11-15T19:28:14Z
+---
+
+Found on k158. src/engine.ts makeContext (line ~453) evaluates userInfo().username for every built item. On a host where the effective user has no passwd entry (containers, unshare), userInfo throws ENOENT and every item fails as a template error, plain files included. The Perl port mirrors it for parity (Skilletor::Engine _user_name). Done: the context (or at least user) is only computed when the item has a .njk file, or a missing passwd entry degrades to a fallback; both engines alike, with a regression test.
+
+Read-only diagnosis reproduced plain-rule failure in both engines via safe username-lookup mocks. Choose lazy context supplier at render boundary, cached once only when a .njk file is actually rendered; existing context objects remain accepted. No invented fallback username; template/companion errors retain existing semantics. Existing conformance injects a valid user and cannot express OS lookup failure: keep shared cases green and prove the boundary with matching TS/Perl mocked regressions rather than dummy expectation churn.
+
+Implemented lazy render contexts in TypeScript and Perl. Suppliers are evaluated once only at the first .njk; engine callers pass thunks. Added safe mocked missing-passwd integration regressions plus direct supplier tests. Verified focused TS render/engine tests, Perl t/62 and t/53 parity, typecheck, build, and check-dist.
+
+Added concise =func build POD for the additive lazy CODE context API: hash context remains valid; supplier waits for first .njk (companions included), caches per build, plain items do not invoke it, supplier exceptions propagate directly. perl -c and scoped git diff --check pass.
+
+Main independently reviewed thunk API/callers and valid-object compatibility, including companion templates/whole-item preservation. Joint Node render/engine/modes/lock/apply152 tests PASS, no skips; Perl53/62/64/51 combined61 top-level tests PASS with existing syntax-error TODO only. Renderer POD documents cached lazy supplier and direct supplier exceptions; spec/Perl design updated. Full v6 integration now running. No fallback identity, UID change, commit or publication.
+
+Main full v6 integration independently PASS: Node1318 passed/1 opt-in Hermes install skip; typecheck/build/check-dist/diff-check green; Perl49 files2692 tests PASS. Existing t53 include-syntax TODO and t65 no-engine-step skips remain. Native binary from prior checkpoint predates this runtime change and is not claimed as its proof.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
