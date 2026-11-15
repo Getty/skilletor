@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-15T10:36:10Z
+id: 236
+priority: medium
+started: 2026-11-15T12:12:29Z
+status: done
+tags:
+- lock
+- bug
+- ts
+- perl
+title: Define safe handling of malformed lock files maps before serialization
+updated: 2026-11-15T19:28:14Z
+---
+
+Read-only audit reproduced readLock accepting an object entry with files:null, followed by serializeLock crashing in Object.keys. k222 is deliberately limited to non-object entry rejection plus available name identity, preserving valid records and unknown-harness entries. Separately decide the narrow files-map validation/error contract in TS+Perl after inspecting legacy fixtures; never silently drop ownership or weaken kept-offer collision rules. Reproduce a real caller path, add byte-level/error conformance where applicable, and give an actionable LockError rather than an internal TypeError. No implementation bundled into k222.
+
+Read-only evidence supports narrow ingress validation: all270 valid fixture entries use object maps of string hashes; malformed maps/hashes can crash or change ownership. Require files as a non-null non-array object with string values in both readers, retain arbitrary string hashes/unknown-harness valid records and existing via-error precedence. Do not normalize corrupt maps or validate unrelated fields/paths. Shared153 will pin CLI refusal plus tree preservation; kept-offer collision contract unchanged.
+
+Implemented strict ownership-map validation in the TS and Perl lock readers: files is required, object/non-array/non-null, and string-valued; via still wins when both fields are invalid. Added ownership-preserving caller regressions and shared case 153. Focused TS/Perl tests, TS+Perl case 153, typecheck, build, and check-dist pass. Full suite intentionally left to coordinated review.
+
+Main independently reviewed ownership-map validation/error precedence, ran49 lock/apply tests and9 Perl strictness/collision subtests, then joint152 Node/61 Perl checks (known render TODO), plus shared153 against TS and Perl CLI1/1 each; all pass. Existing files/lock remain byte-identical on corrupt map refusal; unknown-harness valid maps and arbitrary string hashes preserved. Case indexed/spec updated. Full v6 integration running. No commit.
+
+Main full v6 integration independently PASS with k161: Node1318 passed/1 opt-in skip, all build gates green; Perl49 files2692 tests PASS with existing TODO/legitimate report-case skips. No ownership-map normalization, valid collision behavior retained, no commit/publication.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
