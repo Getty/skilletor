@@ -1,0 +1,187 @@
+{
+  "description": "install refuses before any edit, exit 1, nothing on stdout, `skilletor: <why>` on stderr, in the reference's order: an item that is not name@source (no `@`, nothing after or before it), an unknown type prefix, an empty name, a pattern over bundle names, a pattern without a type prefix; an unknown source, one only the project declares (naming --project), a project source not trusted (a wildcard of it too); an unknown item with the source's first eight items as suggestions (a typed name of another type too), one of a source with none; a name two types share, a name an item and a bundle share; an unknown bundle with the source's bundles, one of a source with none; a broken bundle; a local source whose directory is missing; a config file load refuses; a valid item before a failing one edits nothing. Every file byte-identical.",
+  "steps": [
+    {
+      "id": "no-at",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo"
+      ]
+    },
+    {
+      "id": "at-end",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@"
+      ]
+    },
+    {
+      "id": "at-start",
+      "op": "cli",
+      "argv": [
+        "install",
+        "@shared"
+      ]
+    },
+    {
+      "id": "prefix",
+      "op": "cli",
+      "argv": [
+        "install",
+        "tool:foo@shared"
+      ]
+    },
+    {
+      "id": "empty-name",
+      "op": "cli",
+      "argv": [
+        "install",
+        "skill:@shared"
+      ]
+    },
+    {
+      "id": "bundle-pattern",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:p-*@shared"
+      ]
+    },
+    {
+      "id": "pattern-no-type",
+      "op": "cli",
+      "argv": [
+        "install",
+        "perl-*@shared"
+      ]
+    },
+    {
+      "id": "unknown-source",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@ghost"
+      ]
+    },
+    {
+      "id": "project-source",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@team"
+      ]
+    },
+    {
+      "id": "untrusted",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@team",
+        "--project"
+      ]
+    },
+    {
+      "id": "untrusted-wildcard",
+      "op": "cli",
+      "argv": [
+        "install",
+        "rule:*@team",
+        "--project"
+      ]
+    },
+    {
+      "id": "unknown-item",
+      "op": "cli",
+      "argv": [
+        "install",
+        "nope@shared"
+      ]
+    },
+    {
+      "id": "unknown-typed",
+      "op": "cli",
+      "argv": [
+        "install",
+        "rule:s1@shared"
+      ]
+    },
+    {
+      "id": "unknown-item-empty",
+      "op": "cli",
+      "argv": [
+        "install",
+        "x@empty"
+      ]
+    },
+    {
+      "id": "ambiguous",
+      "op": "cli",
+      "argv": [
+        "install",
+        "dup@shared"
+      ]
+    },
+    {
+      "id": "ambiguous-bundle",
+      "op": "cli",
+      "argv": [
+        "install",
+        "both@shared"
+      ]
+    },
+    {
+      "id": "unknown-bundle",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:ghost@shared"
+      ]
+    },
+    {
+      "id": "unknown-bundle-empty",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:x@empty"
+      ]
+    },
+    {
+      "id": "broken-bundle",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:broken@shared"
+      ]
+    },
+    {
+      "id": "missing-dir",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@gone"
+      ]
+    },
+    {
+      "id": "config-error",
+      "op": "cli",
+      "argv": [
+        "install",
+        "s1@shared",
+        "--project-dir",
+        "${PROJECT}/broken"
+      ]
+    },
+    {
+      "id": "later-fails",
+      "op": "cli",
+      "argv": [
+        "install",
+        "s1@shared",
+        "nope@shared"
+      ],
+      "tree": true
+    }
+  ]
+}

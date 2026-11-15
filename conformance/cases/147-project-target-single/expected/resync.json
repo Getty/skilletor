@@ -1,0 +1,23 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [
+        {
+          "key": "codex:skills/greet",
+          "name": "greet",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

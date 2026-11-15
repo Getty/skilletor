@@ -7,15 +7,15 @@ description: "skilletor CLI — installs and updates skills, agents and rules fr
 
 ## Running the CLI
 
-- **Claude Code:** `skilletor` is on the Bash tool's `PATH`.
-- **Codex:** the plugin's `bin/` is **not** on `PATH` — a bare `skilletor` fails. Run
-  `<plugin root>/bin/skilletor`; the plugin root is two directories above this SKILL.md,
-  whose path Codex listed with the skill (`…/skilletor/<version>/skills/skilletor/SKILL.md`
-  → `…/skilletor/<version>/bin/skilletor`). Take `<version>` from that listed path, never
-  from memory — it changes on every plugin update. Codex runs skilletor's hooks only once
-  trusted in `/hooks` (again after an update changes them); until then `sync` by hand.
-- **Hermes Agent:** `hermes skilletor <command>` runs the CLI the plugin uses. Setting
-  skilletor up for Hermes (targets, plugin, CLI): [references/hermes.md](references/hermes.md).
+- **Claude Code:** the plugin's `bin/` is on the Bash tool's `PATH`; a separately installed CLI also works.
+- **Codex:** the plugin adds no `PATH` entry. A separately installed `skilletor` on `PATH`
+  works; otherwise use its Node-based fallback, `<plugin root>/bin/skilletor`, two directories
+  above this SKILL.md (`…/skilletor/<version>/skills/skilletor/SKILL.md` → `…/skilletor/<version>/bin/skilletor`).
+  Take `<version>` from that listed path, never from memory. Codex runs skilletor's hooks only
+  once trusted in `/hooks` (again after an update changes them); until then `sync` by hand.
+- **No Node:** `install.sh` can install a separately verified `skilletor` on `PATH` without changing
+  plugin state. Production binaries and non-Node hook activation are not ready; the plugin's Node `bin/` is a fallback, not an enforced no-Node path.
+- **Hermes Agent:** `hermes skilletor <command>` runs the CLI the plugin uses; setup: [references/hermes.md](references/hermes.md).
 
 ## Do not hand-edit a managed file — change it in the source
 
@@ -81,10 +81,10 @@ The declaring file sets the scope: `~/.claude/skilletor.json` (user, installs un
 `<project>/.claude/skilletor.json` (project, committed), `<project>/.claude/skilletor.local.json`
 (machine-local, not committed; installs like project).
 
-**A project using skilletor** gets the plugin required in its committed `.claude/settings.json`
-by the next sync (`… updated — commit it`): tell the user to commit it with `skilletor.json`,
-or a fresh checkout lacks the (gitignored) items. A worktree the session moves into syncs
-itself; before a hand `sync` there, and for details: [references/sync.md](references/sync.md).
+A project with committed `skilletor.json`, Claude among its targets, no `"claudeSettings": false`, and an identifiable, declarable skilletor marketplace may get the plugin requirement in committed `.claude/settings.json` at sync.
+Commit an `… updated — commit it` result with `skilletor.json`; `skilletor.local.json` alone and Codex-only projects do not trigger this.
+Unlike an unresolved project scope, a plugin addition that would change implicit targets skips only settings; items sync normally, and it writes neither `targets` nor provenance. Set explicit project `targets` and sync; it is not `check` drift.
+A worktree move triggers a sync attempt; ambiguous project targets leave that scope untouched — check its move context and targets before a hand `sync` there. Details: [references/sync.md](references/sync.md).
 
 ```json
 {
@@ -104,11 +104,12 @@ itself; before a hand `sync` there, and for details: [references/sync.md](refere
   HEAD; `url` is `https://` only. `ref` and `path` merge project < user < local, replaced whole.
 - `gitignore` (default true: commit `skilletor.json` and each `.gitignore` the report names)
   and `checkInterval` (user file only): [references/sync.md](references/sync.md).
-- `targets` (any of `claude`, `codex`, `hermes`; unset = auto-detected, `hermes` never is):
-  it **replaces** detection — list every harness wanted, `["claude", "codex", "hermes"]`
-  to add Hermes (`["hermes"]` alone drops the others). The user file sets the machine's set,
-  a project or local file only narrows it (`["claude"]` keeps a project's `AGENTS.md` and
-  `.codex/` untouched). Details: [references/codex.md](references/codex.md).
+- `targets` (any of `claude`, `codex`, `hermes`) in the user file is the machine allowlist
+  and user-scope set; unset detects Claude/Codex as machine targets (`hermes` still needs explicit user opt-in). Projects
+  use local `targets` > committed `targets` > actual local harness evidence, inside that allowlist.
+  Skilletor-owned generated files and empty settings or settings with only skilletor-generated plugin/marketplace declarations are not evidence. No evidence
+  bootstraps a sole machine target; several stay untouched and warn. Explicit project `targets`
+  can choose both harnesses in a fresh checkout; an invoking hook never changes them. Details: [references/codex.md](references/codex.md).
 
 ### Wildcards and name patterns — `*@source`, `perl-*@source`
 

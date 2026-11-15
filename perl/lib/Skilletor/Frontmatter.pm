@@ -287,6 +287,21 @@ sub _unescape_double {
       my $cp = hex $hex;
       # Above U+10FFFF the reference refuses the escape like any other bad one.
       _fail( $line, 'bad \\'.$e.' escape' ) if $cp > 0x10FFFF;
+      # JavaScript strings are UTF-16: adjoining escapes that make a high and low half are one
+      # scalar when Node later encodes the string. Keep that character joined in Perl too.
+      my $next = $i + $hex_len + 1;
+      my $next_e = $next < $n ? substr( $s, $next + 1, 1 ) : '';
+      my $next_len = $next_e eq 'u' ? 4 : $next_e eq 'U' ? 8 : 0;
+      my $next_hex = $next_len ? substr( $s, $next + 2, $next_len ) : '';
+      if ( $cp >= 0xD800 && $cp <= 0xDBFF && substr( $s, $next, 1 ) eq '\\'
+        && $next_hex =~ /\A[0-9a-fA-F]{$next_len}\z/ ) {
+        my $low = hex $next_hex;
+        if ( $low >= 0xDC00 && $low <= 0xDFFF ) {
+          $out .= chr( 0x10000 + ( ( $cp - 0xD800 ) << 10 ) + ( $low - 0xDC00 ) );
+          $i = $next + 1 + $next_len;
+          next;
+        }
+      }
       no warnings qw( surrogate nonchar non_unicode );
       $out .= chr $cp;
       $i += $hex_len;

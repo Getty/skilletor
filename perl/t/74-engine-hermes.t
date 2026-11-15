@@ -57,9 +57,11 @@ sub env_of {
 sub engine { my ( $e, %more ) = @_; Skilletor::Engine->new( %{ $e->{args} }, %more ) }
 
 sub write_cfg {
-  my ( $e, $which, $obj ) = @_;
+  my ( $e, $which, $obj, $declare_project_targets ) = @_;
+  $declare_project_targets //= 1;
   my $opt_in = $which eq 'user' && ( grep { $_ eq 'hermes' } @{ $e->{harnesses} } ) && !exists $obj->{targets};
-  write_json( ( $which eq 'user' ? $e->{home} : $e->{project} ).'/.claude/skilletor.json', $opt_in ? { targets => $e->{harnesses}, %$obj } : $obj );
+  my $config = $which eq 'project' && $declare_project_targets ? { targets => $e->{harnesses}, %$obj } : $obj;
+  write_json( ( $which eq 'user' ? $e->{home} : $e->{project} ).'/.claude/skilletor.json', $opt_in ? { targets => $e->{harnesses}, %$obj } : $config );
 }
 
 sub source {
@@ -121,6 +123,22 @@ subtest 'a project skill goes to <repo>/.hermes/skills; the .hermes root gets no
   like( slurp("$e->{project}/.claude/skills/foo/SKILL.md"), qr/for claude in /, 'and for Claude Code' );
   is_deeply( project_lock($e), [ 'hermes:skills/foo', 'skills/foo' ], 'the lock' );
   is_deeply( keys_in( $r->{scopes}[1]{added} ), [ 'skills/foo', 'hermes:skills/foo' ], 'added, in order' );
+};
+
+subtest 'project-local Hermes evidence selects Hermes inside the machine allowlist' => sub {
+  my $e = env_of( 'claude', 'hermes' );
+  my $src = source( $e, 's', 'skills/foo/SKILL.md' => skill('foo') );
+  write_cfg( $e, user => { sources => { mine => { local => $src } } } );
+  write_cfg( $e, project => { install => { skills => ['foo@mine'] } }, 0 );
+  path("$e->{project}/.hermes")->mkpath;
+  path("$e->{project}/.hermes/config.yaml")->spew("model: test\n");
+  my $engine = engine($e);
+  my $r = $engine->sync( scope => 'project' );
+  is( $r->{error}, undef, 'no error' );
+  is_deeply( project_lock($e), ['hermes:skills/foo'], 'only the Hermes copy is locked' );
+  ok( -e "$e->{project}/.hermes/skills/foo/SKILL.md", 'the Hermes copy exists' );
+  ok( !-e "$e->{project}/.claude/skills/foo", 'there is no Claude copy' );
+  is_deeply( $engine->status( scope => 'project' )->{scopes}[0]{targets}, ['hermes'], 'status names Hermes' );
 };
 
 subtest 'a .gitignore of the user\'s in a Hermes root is left byte for byte' => sub {
@@ -235,6 +253,7 @@ subtest 'Codex becomes active in a project: check reports it, the sync removes H
   ok( -e "$e->{project}/.hermes/skills/foo/SKILL.md", 'Hermes\' own copy' );
 
   write_cfg( $e, user => { targets => [ 'codex', 'hermes' ], sources => { mine => { local => $src } } } );
+  write_cfg( $e, project => { targets => [ 'codex', 'hermes' ], install => { skills => ['foo@mine'] } } );
   my $chk = engine($e)->check;
   ok( $chk->{changed}, 'changed' );
   is_deeply( $chk->{targetsChanged}, ['project'], 'the project\'s targets' );

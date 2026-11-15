@@ -17,6 +17,7 @@ use Skilletor;
 use Skilletor::Apply qw( apply );
 use Skilletor::Engine;
 use Skilletor::FSUtil qw( encode_text hash_bytes );
+use Skilletor::Render qw( build );
 use Skilletor::JSON qw( js_parse );
 use Skilletor::Lock qw( read_lock );
 use Skilletor::Report qw( check_text display_safe exit_code report_text status_text );
@@ -55,6 +56,60 @@ sub state_json {
   my $f = "$m->{home}/.claude/skilletor/$name";
   return -f $f ? js_parse( path($f)->slurp_utf8 ) : {};
 }
+
+subtest 'k161: the renderer evaluates a lazy context once for templates and never for plain files' => sub {
+  my $root = tempdir->realpath;
+  files( $root,
+    'skills/plain/SKILL.md'               => "plain\n",
+    'skills/templ/SKILL.md.njk'           => '{{ vars.value }} main',
+    'skills/templ/references/extra.md.njk' => '{{ vars.value }} extra',
+  );
+  my $calls = 0;
+  my $plain = build(
+    { type => 'skill', name => 'plain', files => ['skills/plain/SKILL.md'] }, $root,
+    sub { ++$calls; die "plain items must not construct a context\n" },
+  );
+  is( $calls, 0, 'the supplier is not called for a plain item' );
+  is( $plain->[0][1], "plain\n", 'the plain output is copied' );
+
+  $calls = 0;
+  my $templ = build(
+    { type => 'skill', name => 'templ', files => ['skills/templ/SKILL.md.njk', 'skills/templ/references/extra.md.njk'] }, $root,
+    sub { ++$calls; return { vars => { value => 'rendered' } } },
+  );
+  is( $calls, 1, 'one context serves every template of an item' );
+  is_deeply( [ map { $_->[1] } @$templ ], [ 'rendered main', 'rendered extra' ], 'both templates render from it' );
+};
+
+subtest 'k161: a missing passwd entry leaves a plain item alone but preserves a companion template error' => sub {
+  my $m = machine(
+    'rules/plain.md'                          => "PLAIN\n",
+    'skills/mixed/SKILL.md'                   => skill('mixed'),
+    'skills/mixed/references/context.md.njk'  => '{{ user.name }}',
+  );
+  my $calls = 0;
+  no warnings 'redefine';
+  local *Skilletor::Engine::_user_name = sub { ++$calls; die "mock passwd ENOENT\n" };
+
+  write_json( "$m->{home}/.claude/skilletor.json",
+    { sources => { s => { local => $m->{src} } }, install => { rules => ['plain@s'] } } );
+  my $plain = $m->{engine}->()->sync( scope => 'user' )->{scopes}[0];
+  is( $calls, 0, 'a plain item does not look up the user' );
+  is_deeply( $plain->{warnings}, [], 'no plain-item warning' );
+  is( path( $m->{home}, '.claude', 'rules', '.local.plain.md' )->slurp_utf8, "PLAIN\n", 'the plain rule is installed' );
+
+  write_json( "$m->{home}/.claude/skilletor.json",
+    { sources => { s => { local => $m->{src} } }, install => { skills => ['mixed@s'] } } );
+  $m->{engine}->( user => { name => 'getty', home => $m->{home} } )->sync( scope => 'user' );
+  my $companion = path( $m->{home}, '.claude', 'skills', 'mixed', 'references', 'context.md' );
+  my $before = $companion->slurp_utf8;
+
+  $calls = 0;
+  my $templated = $m->{engine}->()->sync( scope => 'user' )->{scopes}[0];
+  is( $calls, 1, 'the companion template looks up the user once' );
+  is_deeply( $templated->{warnings}, ['template error in skill mixed: mock passwd ENOENT'], 'the template remains an error' );
+  is( $companion->slurp_utf8, $before, 'the installed whole item stays' );
+};
 
 subtest 'a template renders with the reference context; the scope records are complete' => sub {
   my $m = machine(
@@ -262,6 +317,98 @@ subtest 'the facade: sync, check, status, and the lookups after a sync' => sub {
 subtest 'display_safe' => sub {
   my $want = join '', 'a', "\\", 'nb', "\t", 'c', "\\", 'u001b[31m', "\\", 'u202ed', "\x{200d}";
   is( display_safe("a\nb\tc\x{1b}[31m\x{202e}d\x{200d}"), $want, 'controls and bidi escaped; tab and ZWJ stay' );
+};
+
+# k234: the installed plugin must not erase marketplace-only evidence on the next sync.
+sub marketplace_project {
+  my ( $gitignore, $sole ) = @_;
+  my $m = machine( 'skills/sample/SKILL.md' => skill('sample') );
+  write_json( "$m->{home}/.claude/skilletor.json", { sources => { s => { local => $m->{src} } } } );
+  write_json( "$m->{project}/.claude/skilletor.json", { install => { skills => ['sample@s'] }, gitignore => $gitignore } );
+  write_json( "$m->{home}/.claude/plugins/installed_plugins.json",
+    { version => 2, plugins => { 'skilletor@team' => [ { scope => 'user' } ] } } );
+  write_json( "$m->{home}/.claude/plugins/known_marketplaces.json",
+    { team => { source => { source => 'github', repo => 'example/marketplace' } } } );
+  $m->{original} = "{\r\n\t\"extraKnownMarketplaces\": {\"team\": {\"source\": {\"source\": \"github\", \"repo\": \"example/marketplace\"}}}\r\n}";
+  $m->{settings} = path( $m->{project}, '.claude', 'settings.json' );
+  $m->{settings}->spew_raw( $m->{original} );
+  unless ($sole) {
+    files( $m->{home}, '.codex/config.toml' => '' );
+    files( $m->{project}, '.codex/config.toml' => "model = \"own\"\n" );
+  }
+  $m->{e} = $m->{engine}->( claude_config_dir => "$m->{home}/.claude", plugin_root => '',
+    markers => { claude => ["$m->{home}/.claude.json"], codex => ["$m->{home}/.codex/config.toml"] } );
+  return $m;
+}
+
+for my $gitignore ( JSON::MaybeXS::true(), JSON::MaybeXS::false() ) {
+  subtest 'k234: marketplace-only settings preserve targets across syncs (gitignore='.( $gitignore ? 'true' : 'false' ).')' => sub {
+    my $m = marketplace_project($gitignore);
+    my $e = $m->{e};
+    my @before = stat $m->{settings};
+    is_deeply( $e->status( scope => 'project' )->{scopes}[0]{targets}, [qw( claude codex )], 'both selected initially' );
+    my $first = $e->sync( scope => 'project' )->{scopes}[0];
+    my $bytes = $m->{settings}->slurp_raw;
+    my $second = $e->sync( scope => 'project' )->{scopes}[0];
+    is_deeply( $second->{removed}, [], 'the next sync must not remove Claude' );
+    is( $bytes, $m->{original}, 'first sync preserves settings bytes' );
+    is( $m->{settings}->slurp_raw, $m->{original}, 'second sync preserves settings bytes' );
+    my @after = stat $m->{settings};
+    is_deeply( [ @after[1,9] ], [ @before[1,9] ], 'inode and mtime unchanged: no write-and-rollback probe' );
+    ok( !exists $first->{settingsUpdated}, 'no settings update reported' );
+    like( join( "\n", @{ $first->{settingsSkipped} // [] } ),
+      qr/settings\.json.*implicitly selected project targets.*set "targets".*skilletor\.json.*sync/, 'actionable skip warning' );
+    is_deeply( $second->{settingsSkipped}, $first->{settingsSkipped}, 'same intentional skip on repeat' );
+    ok( -f "$m->{project}/.claude/skills/sample/SKILL.md", 'Claude copy stays' );
+    ok( -f "$m->{project}/.agents/skills/sample/SKILL.md", 'Codex copy stays' );
+    is_deeply( $e->status( scope => 'project' )->{scopes}[0]{targets}, [qw( claude codex )], 'targets stay selected' );
+    ok( !$e->check( scope => 'project', local => 1 )->{changed}, 'no local drift after intentional skip' );
+    ok( !exists $e->check( scope => 'project' )->{layoutChanged}, 'no settings layout drift' );
+    is_deeply( $e->sync( scope => 'project', if_changed => 1 )->{scopes}, [], 'no perpetual resync' );
+    write_json( "$m->{project}/.claude/skilletor.local.json", { targets => [qw( claude codex )] } );
+    is_deeply( $e->check( scope => 'project' )->{layoutChanged}, ['project'], 'explicit escape hatch is not suppressed as unreached drift' );
+    my $explicit = $e->sync( scope => 'project' )->{scopes}[0];
+    is_deeply( $explicit->{settingsUpdated}{enabled}, ['skilletor@team'], 'explicit targets permit the update' );
+    ok( !exists $explicit->{settingsSkipped}, 'no skip with explicit targets' );
+  };
+}
+
+for my $stable ( 'project targets', 'local targets', 'CLAUDE.md', 'own skill', 'permissions', 'other marketplace', 'sole machine' ) {
+  subtest "k234: $stable permits the ordinary add-only settings update" => sub {
+    my $m = marketplace_project( JSON::MaybeXS::false(), $stable eq 'sole machine' );
+    my $e = $m->{e};
+    write_json( "$m->{project}/.claude/skilletor.json",
+      { targets => [qw( claude codex )], install => { skills => ['sample@s'] }, gitignore => JSON::MaybeXS::false() } ) if $stable eq 'project targets';
+    write_json( "$m->{project}/.claude/skilletor.local.json", { targets => [qw( claude codex )] } ) if $stable eq 'local targets';
+    files( $m->{project}, 'CLAUDE.md' => "Own instructions.\n" ) if $stable eq 'CLAUDE.md';
+    files( $m->{project}, '.claude/skills/own/SKILL.md' => "Own skill.\n" ) if $stable eq 'own skill';
+    my $original = js_parse( $m->{original} );
+    $original->{permissions} = { allow => ['Read'] } if $stable eq 'permissions';
+    $original->{extraKnownMarketplaces}{other} = { source => { source => 'github', repo => 'example/other' } } if $stable eq 'other marketplace';
+    write_json( "$m->{settings}", $original );
+    my $before = $e->status( scope => 'project' )->{scopes}[0]{targets};
+    my $first = $e->sync( scope => 'project' )->{scopes}[0];
+    is_deeply( $first->{settingsUpdated}{enabled}, ['skilletor@team'], 'plugin requirement added' );
+    ok( !exists $first->{settingsSkipped}, 'no skip' );
+    is_deeply( js_parse( $m->{settings}->slurp_utf8 ), { %$original, enabledPlugins => { 'skilletor@team' => JSON::MaybeXS::true() } }, 'only adds the plugin entry' );
+    is_deeply( $e->status( scope => 'project' )->{scopes}[0]{targets}, $before, 'same targets after writing' );
+    my $second = $e->sync( scope => 'project' )->{scopes}[0];
+    is_deeply( $second->{removed}, [], 'no removals on repeat' );
+    ok( !exists $second->{settingsUpdated}, 'no second settings update' );
+    ok( !$e->check( scope => 'project', local => 1 )->{changed}, 'no local drift' );
+  };
+}
+
+subtest 'k234: losing the sole project evidence on a multi-target machine is guarded, not made ambiguous' => sub {
+  my $m = marketplace_project( JSON::MaybeXS::false() );
+  path( $m->{project}, '.codex' )->remove_tree;
+  my $e = $m->{e};
+  my $first = $e->sync( scope => 'project' )->{scopes}[0];
+  is( $m->{settings}->slurp_raw, $m->{original}, 'settings unchanged' );
+  ok( @{ $first->{settingsSkipped} // [] }, 'skip reported' );
+  is_deeply( $e->status( scope => 'project' )->{scopes}[0]{targets}, ['claude'], 'Claude stays the resolved target' );
+  is_deeply( $e->sync( scope => 'project' )->{scopes}[0]{removed}, [], 'no removals on repeat' );
+  ok( !$e->check( scope => 'project', local => 1 )->{changed}, 'no local drift' );
 };
 
 done_testing;

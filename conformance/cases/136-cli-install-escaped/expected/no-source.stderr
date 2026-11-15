@@ -1,0 +1,2 @@
+skilletor: item "foo\u001b[31mred\u0007\u202eevil
+next" must be name@source (or type:name@source)

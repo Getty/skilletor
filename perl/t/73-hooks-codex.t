@@ -208,7 +208,7 @@ sub local_source {
 sub main_with_worktree {
   my ( $m ) = @_;
   local_source($m);
-  write_json( "$m->{project}/.claude/skilletor.json", { install => { skills => ['foo@mine'] } } );
+  write_json( "$m->{project}/.claude/skilletor.json", { targets => ['codex'], install => { skills => ['foo@mine'] } } );
   git_ok( $m->{project}, 'init', '-q', '-b', 'main' );
   my $started = run_hook( 'session-start', { source => 'startup', cwd => $m->{project}, session_id => 's1' }, ctx_with( $m, project_dir => undef ) );
   like( $started->{systemMessage} // '', qr/item\(s\) updated/, "main's SessionStart syncs it" );
@@ -252,7 +252,7 @@ subtest 'prompts within the same checkout sync nothing' => sub {
   my $m = machine();
   local $ENV{GIT_CEILING_DIRECTORIES} = $m->{dir};
   local_source($m);
-  write_json( "$m->{project}/.claude/skilletor.json", { install => { skills => ['foo@mine'] } } );
+  write_json( "$m->{project}/.claude/skilletor.json", { targets => ['codex'], install => { skills => ['foo@mine'] } } );
   git_ok( $m->{project}, 'init', '-q', '-b', 'main' );
   state($m)->put_session_cwd( 's1', $m->{project} );
   my $sub = "$m->{project}/src/deep";

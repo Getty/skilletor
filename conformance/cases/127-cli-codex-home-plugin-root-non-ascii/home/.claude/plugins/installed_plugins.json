@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "plugins": {
+    "skilletor@getty": [
+      {
+        "scope": "user",
+        "installPath": "${TMP}/plug-ü"
+      }
+    ],
+    "skilletor@other": [
+      {
+        "scope": "user",
+        "installPath": "${TMP}/plug-other"
+      }
+    ]
+  }
+}

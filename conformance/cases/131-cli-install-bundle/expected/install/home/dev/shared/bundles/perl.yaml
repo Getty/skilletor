@@ -1,0 +1,4 @@
+description: Perl things
+rules: ["perl-*"]
+vars:
+  v: 1

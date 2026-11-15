@@ -1,0 +1,18 @@
+{
+  "codex:skills/greet": {
+    "source": "shared",
+    "version": "git:old",
+    "files": {
+      "skills/greet/.gitignore": "sha256:generated",
+      "skills/greet/SKILL.md": "sha256:generated"
+    }
+  },
+  "skills/greet": {
+    "source": "shared",
+    "version": "git:old",
+    "files": {
+      "skills/greet/.gitignore": "sha256:generated",
+      "skills/greet/SKILL.md": "sha256:generated"
+    }
+  }
+}

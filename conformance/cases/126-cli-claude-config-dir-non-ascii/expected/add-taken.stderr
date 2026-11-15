@@ -1,0 +1,1 @@
+skilletor: source "mine" in ${TMP}/conf-ü/skilletor.json is local ${HOME}/dev/tools, not local ${HOME}/dev; nothing was changed. Add it under another name (skilletor add <name> ${HOME}/dev) or remove the source first (skilletor source remove mine).

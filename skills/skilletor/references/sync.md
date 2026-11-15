@@ -45,6 +45,8 @@ could not install although its source was there counts once.
 - **Hermes plugin:** `on_session_start`. `pre_llm_call`: first a move (`/worktree new`, the TUI
   gateway moving the session into a worktree), awaited, then the throttled check.
 - A shell `cd` moves no Codex or Hermes session and syncs nothing.
+- Hooks trigger a sync but never select targets: project selection is config/evidence based, so
+  alternating invoking harnesses does not change it.
 
 `checkInterval` (user file only, seconds, default 1800) throttles the check; `≤ 0` turns it
 off, while session start and moves still sync. In a project file it is a config error
@@ -89,6 +91,9 @@ every marketplace an enabled plugin there needs. The report says
 - A marketplace on a local path, or unknown to Claude Code, is not written (a warning); a
   `settings.json` that does not parse is left alone (a warning).
 - `"claudeSettings": false` (project, local, or user file for every project) turns it off.
+- If its proposed plugin addition would change implicit project targets, it skips only settings
+  (unlike an unresolved project scope): items sync normally, and it writes neither targets nor
+  provenance. Set explicit project `targets`, then sync; this intentional skip is not `check` drift.
 - Standalone CLI without the plugin: no marketplace is known — merge by hand:
   `{ "extraKnownMarketplaces": { "getty": { "source": { "source": "github", "repo": "Getty/marketplace" } } }, "enabledPlugins": { "skilletor@getty": true } }`.
 - Codex has no such file: Codex users install the plugin themselves.

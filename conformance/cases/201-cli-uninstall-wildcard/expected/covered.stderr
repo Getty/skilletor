@@ -1,0 +1,1 @@
+skilletor: r1@shared is not declared explicitly; it is installed by the wildcard rule:*@shared in the user config. To drop it, uninstall the wildcard (skilletor uninstall 'rule:*@shared'), or keep it and gate the item via vars if its template renders empty for some value (an empty render is skipped).

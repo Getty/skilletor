@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
-import { check, sync, type EngineContext } from "../src/engine.ts";
+import { check, status, sync, type EngineContext } from "../src/engine.ts";
 import { reportHook, reportText } from "../src/report.ts";
 import { runHook, type HookContext } from "../src/hooks.ts";
 import { loadConfig } from "../src/config.ts";
@@ -64,6 +64,125 @@ function env(harnesses: Harness[] = ["claude"]) {
 const projectOf = (r: Awaited<ReturnType<typeof sync>>) => r.scopes.find((s) => s.scope === "project")!;
 const layoutOf = async (ctx: EngineContext) => (await check(ctx, { scope: "project" })).layoutChanged;
 const json = (obj: unknown) => JSON.stringify(obj, null, 2) + "\n";
+
+function marketplaceProject(gitignore = true, machine: Harness[] = ["claude", "codex"]) {
+  const e = env(machine);
+  e.ctx.claudeConfigDir = join(e.home, ".claude");
+  e.ctx.pluginRoot = "";
+  e.plugins({ team: { source: "github", repo: "example/marketplace" } }, [["team", "user"]]);
+  const source = join(e.tmp.dir, "source");
+  mkdirSync(join(source, "skills", "sample"), { recursive: true });
+  writeFileSync(join(source, "skills", "sample", "SKILL.md"), "---\ndescription: Sample\n---\nSample.\n");
+  e.writeCfg("user", { sources: { local: { local: source } } });
+  e.writeCfg("project", { install: { skills: ["sample@local"] }, gitignore });
+  const original = '{\r\n\t"extraKnownMarketplaces": {"team": {"source": {"source": "github", "repo": "example/marketplace"}}}\r\n}';
+  writeFileSync(e.settings, original);
+  if (machine.includes("codex")) {
+    mkdirSync(join(e.projectDir, ".codex"), { recursive: true });
+    writeFileSync(join(e.projectDir, ".codex", "config.toml"), 'model = "own"\n');
+  }
+  return { ...e, original };
+}
+
+for (const gitignore of [true, false]) {
+  test(`k234: marketplace-only settings preserve targets across syncs (gitignore=${gitignore})`, async () => {
+    const e = marketplaceProject(gitignore);
+    try {
+      const before = statSync(e.settings);
+      assert.deepEqual(status(e.ctx, { scope: "project" }).scopes[0]!.targets, ["claude", "codex"]);
+      const first = projectOf(await sync(e.ctx));
+      const firstBytes = readFileSync(e.settings, "utf8");
+      const second = projectOf(await sync(e.ctx));
+      assert.deepEqual(second.removed, [], "the automatic plugin requirement must not make the next sync remove Claude");
+      assert.equal(firstBytes, e.original);
+      assert.equal(readFileSync(e.settings, "utf8"), e.original);
+      assert.equal(statSync(e.settings).mtimeMs, before.mtimeMs, "not even a write-and-rollback probe");
+      assert.equal(statSync(e.settings).ino, before.ino);
+      assert.equal(first.settingsUpdated, undefined);
+      assert.match(first.settingsSkipped?.join("\n") ?? "", /settings\.json.*implicitly selected project targets.*set "targets".*skilletor\.json.*sync/);
+      assert.deepEqual(second.settingsSkipped, first.settingsSkipped);
+      assert.equal(existsSync(join(e.projectDir, ".claude", "skills", "sample", "SKILL.md")), true);
+      assert.equal(existsSync(join(e.projectDir, ".agents", "skills", "sample", "SKILL.md")), true);
+      assert.deepEqual(status(e.ctx, { scope: "project" }).scopes[0]!.targets, ["claude", "codex"]);
+      assert.equal((await check(e.ctx, { scope: "project", local: true })).changed, false);
+      assert.equal(await layoutOf(e.ctx), undefined);
+      assert.deepEqual((await sync(e.ctx, { scope: "project", ifChanged: true })).scopes, []);
+      // An intentional skip must not suppress a later, now-safe settings update as unreached drift.
+      e.writeCfg("local", { targets: ["claude", "codex"] });
+      assert.deepEqual(await layoutOf(e.ctx), ["project"]);
+      const explicit = projectOf(await sync(e.ctx));
+      assert.deepEqual(explicit.settingsUpdated?.enabled, ["skilletor@team"]);
+      assert.equal(explicit.settingsSkipped, undefined);
+    } finally {
+      e.cleanup();
+    }
+  });
+}
+
+
+for (const stable of ["project targets", "local targets", "CLAUDE.md", "own skill", "permissions", "other marketplace", "sole machine"] as const) {
+  test(`k234: ${stable} permits the ordinary add-only settings update`, async () => {
+    const e = marketplaceProject(false, stable === "sole machine" ? ["claude"] : ["claude", "codex"]);
+    try {
+      if (stable === "project targets") e.writeCfg("project", { targets: ["claude", "codex"], install: { skills: ["sample@local"] }, gitignore: false });
+      if (stable === "local targets") e.writeCfg("local", { targets: ["claude", "codex"] });
+      if (stable === "CLAUDE.md") writeFileSync(join(e.projectDir, "CLAUDE.md"), "Own instructions.\n");
+      if (stable === "own skill") {
+        mkdirSync(join(e.projectDir, ".claude", "skills", "own"), { recursive: true });
+        writeFileSync(join(e.projectDir, ".claude", "skills", "own", "SKILL.md"), "Own skill.\n");
+      }
+      const original = JSON.parse(e.original);
+      if (stable === "permissions") original.permissions = { allow: ["Read"] };
+      if (stable === "other marketplace") original.extraKnownMarketplaces.other = { source: { source: "github", repo: "example/other" } };
+      writeFileSync(e.settings, json(original));
+      const before = status(e.ctx, { scope: "project" }).scopes[0]!.targets;
+      const first = projectOf(await sync(e.ctx));
+      assert.deepEqual(first.settingsUpdated?.enabled, ["skilletor@team"]);
+      assert.equal(first.settingsSkipped, undefined);
+      assert.deepEqual(JSON.parse(readFileSync(e.settings, "utf8")), { ...original, enabledPlugins: { "skilletor@team": true } });
+      assert.deepEqual(status(e.ctx, { scope: "project" }).scopes[0]!.targets, before);
+      const second = projectOf(await sync(e.ctx));
+      assert.deepEqual(second.removed, []);
+      assert.equal(second.settingsUpdated, undefined);
+      assert.equal((await check(e.ctx, { scope: "project", local: true })).changed, false);
+    } finally {
+      e.cleanup();
+    }
+  });
+}
+
+test("k234: losing the sole project evidence on a multi-target machine is guarded, not made ambiguous", async () => {
+  const e = marketplaceProject(false);
+  try {
+    rmSync(join(e.projectDir, ".codex"), { recursive: true });
+    const first = projectOf(await sync(e.ctx));
+    assert.equal(readFileSync(e.settings, "utf8"), e.original);
+    assert.ok(first.settingsSkipped?.length);
+    assert.deepEqual(status(e.ctx, { scope: "project" }).scopes[0]!.targets, ["claude"]);
+    assert.deepEqual(projectOf(await sync(e.ctx)).removed, []);
+    assert.equal((await check(e.ctx, { scope: "project", local: true })).changed, false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("k234: runHook preserves marketplace evidence, repeats silently and tolerates invalid settings", async () => {
+  const e = marketplaceProject(false);
+  try {
+    const first = await runHook("session-start", { source: "startup" }, e.ctx);
+    assert.match(first.hookSpecificOutput?.additionalContext ?? "", /implicitly selected project targets.*set "targets"/);
+    assert.equal(readFileSync(e.settings, "utf8"), e.original);
+    for (const harness of ["codex", "claude", "codex"] as const) {
+      assert.deepEqual(await runHook("session-start", { source: "startup" }, { ...e.ctx, harness }), {});
+      assert.equal(existsSync(join(e.projectDir, ".claude", "skills", "sample", "SKILL.md")), true);
+    }
+    writeFileSync(e.settings, '{"enabledPlugins":null}');
+    assert.deepEqual(await runHook("session-start", { source: "startup" }, e.ctx), {});
+    assert.equal(readFileSync(e.settings, "utf8"), '{"enabledPlugins":null}');
+  } finally {
+    e.cleanup();
+  }
+});
 
 // Asserts: a fresh skilletor project gets a settings.json enabling skilletor from the
 // marketplace it is installed from, with that marketplace's source copied; the report asks for

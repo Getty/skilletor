@@ -1,0 +1,7 @@
+{
+  "changed": false,
+  "sources": [],
+  "warnings": [
+    "project targets are ambiguous: no project-local harness evidence for machine targets (claude, codex); set \"targets\" in the project's .claude/skilletor.json or .claude/skilletor.local.json; project scope is left unchanged"
+  ]
+}

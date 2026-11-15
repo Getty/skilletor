@@ -2,7 +2,7 @@
 # Skilletor::Commands::available's pieces no conformance case reaches (cases 93 to 97 hold its
 # listing, marks, errors and refusals to the reference's bytes): the sync lock another run holds
 # (k74, spec §6.5) – available waits for it before it fetches or sweeps the cache, then sweeps,
-# lists and frees it, or gives up with the lock's own error – and a lock entry that is no object.
+# lists and frees it, or gives up with the lock's own error – and invalid lock entries.
 use strict;
 use warnings;
 use Test::More;
@@ -81,13 +81,21 @@ subtest 'a holder that keeps it: the lock timeout, nothing fetched or swept' => 
   is( $lock->child('owner.json')->slurp_raw, $record, "the holder's lock untouched" );
 };
 
-# Where the reference reads `entry.skipped` of a null entry and throws a TypeError, the port
-# counts an entry that is no object as nothing installed (noted on k177).
-subtest 'a lock entry that is no object marks nothing' => sub {
+subtest 'a lock entry that is no object is refused' => sub {
   my $m = machine();
-  write_json( path( $m->{engine}->claude_dir, 'skilletor.lock.json' ), qq({\n  "rules/p-one": null,\n  "rules/p-two": "x"\n}\n) );
+  my $file = path( $m->{engine}->claude_dir, 'skilletor.lock.json' );
+  write_json( $file, qq({\n  "rules/p-one": null,\n  "rules/p-two": "x"\n}\n) );
+  my $err = eval { Skilletor::Commands::available( $m->{engine}, source => 'peter' ); 1 } ? undef : $@;
+  isa_ok( $err, 'Skilletor::Error::Lock' );
+  is( $err && $err->message, $file.': invalid lock JSON (rules/p-one: expected an object)', 'the invalid entry and key named' );
+};
+
+subtest 'a lock entry name matches available ignoring case' => sub {
+  my $m = machine();
+  write_json( path( $m->{engine}->claude_dir, 'skilletor.lock.json' ),
+    qq({\n  "rules/P-ONE": { "source": "peter", "version": "v", "files": {} }\n}\n) );
   my $items = Skilletor::Commands::available( $m->{engine}, source => 'peter' );
-  is_deeply( [ map { [ $_->{name}, $_->{installed} ? 1 : 0 ] } @$items ], [ [ 'p-one', 0 ] ], 'listed, not installed' );
+  is_deeply( [ map { [ $_->{name}, $_->{installed} ? 1 : 0 ] } @$items ], [ [ 'p-one', 1 ] ], 'listed as installed' );
 };
 
 done_testing;

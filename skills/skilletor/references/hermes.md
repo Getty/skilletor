@@ -2,18 +2,21 @@
 
 ## Setup
 
-Hermes is never detected; all three steps are needed:
+Hermes is never machine-detected; all three steps are needed:
 
 1. `hermes` in the **user** `targets` (`~/.claude/skilletor.json`), together with every other
-   harness wanted — `targets` replaces detection: `["claude", "codex", "hermes"]`
-   (`["hermes"]` alone drops the others). A project's `targets` can leave Hermes out, never
-   add it.
+   harness wanted — user targets are the machine allowlist and replace detection:
+   `["claude", "codex", "hermes"]` (`["hermes"]` alone drops the others). Project targets can
+   select only from that list: local config, then committed config, then local evidence.
 2. The plugin: `hermes plugins install Getty/skilletor/hermes/skilletor --enable` (installed
    without `--enable`: `hermes plugins enable skilletor`). It updates only with
    `hermes plugins update skilletor`, apart from the CLI and the Claude Code or Codex plugin
    (`hermes plugins check-updates` cannot tell whether this install is behind).
-3. The CLI, which the plugin does not bring (Node.js >= 18) — `SKILLETOR_BIN=<clone>/bin/skilletor`
-   in `$HERMES_HOME/.env`, else `skilletor` on `PATH`. Without one the plugin does nothing.
+3. The CLI, which the plugin does not bring — `SKILLETOR_BIN=<clone>/bin/skilletor` in
+   `$HERMES_HOME/.env`, else `skilletor` on `PATH`. A separately verified installer CLI can
+   provide the latter without changing plugin state; the Node launcher is a fallback, not a
+   required no-Node path. Production binaries and non-Node hook activation are not ready.
+   Without a CLI the plugin does nothing.
 
 Check: `hermes skilletor status` (any CLI command after `hermes skilletor`) runs the CLI
 with that Hermes' home as `HERMES_HOME`.

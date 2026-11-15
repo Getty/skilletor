@@ -1,0 +1,24 @@
+{
+  "description": "uninstall on a machine with no agent harness: an undeclared item is refused before any edit or sync; a valid user or --project removal is saved, then the sync config error exits 2 on stderr and names the config file whose edit stays.",
+  "claude": false,
+  "steps": [
+    {
+      "id": "refused",
+      "op": "cli",
+      "argv": ["uninstall", "nope@shared"],
+      "tree": true
+    },
+    {
+      "id": "user",
+      "op": "cli",
+      "argv": ["uninstall", "foo@shared"],
+      "tree": true
+    },
+    {
+      "id": "project",
+      "op": "cli",
+      "argv": ["uninstall", "r2@shared", "--project"],
+      "tree": true
+    }
+  ]
+}

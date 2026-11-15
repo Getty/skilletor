@@ -34,6 +34,9 @@ export interface RenderContext {
   item: { name: string; type: ItemType; source: string };
 }
 
+/** A render context, or a supplier evaluated only if the item has a template. */
+export type RenderContextSource = RenderContext | (() => RenderContext);
+
 /** A Nunjucks loader confined to `root`; includes may not escape it. */
 function makeLoader(root: string): nunjucks.ILoaderAny {
   const base = resolvePath(root);
@@ -66,16 +69,19 @@ function makeEnv(sourceDir: string): nunjucks.Environment {
 export function build(
   item: CatalogItem,
   sourceDir: string,
-  context: RenderContext,
+  context: RenderContextSource,
 ): Map<string, Buffer> {
   const env = makeEnv(sourceDir);
+  const contextOf = typeof context === "function" ? context : () => context;
+  let templateContext: RenderContext | undefined;
   const out = new Map<string, Buffer>();
 
   for (const file of item.files) {
     if (file.endsWith(".njk")) {
+      templateContext ??= contextOf();
       let rendered: string;
       try {
-        rendered = env.render(file, context as unknown as Record<string, unknown>);
+        rendered = env.render(file, templateContext as unknown as Record<string, unknown>);
       } catch (err) {
         if (err instanceof RenderError) throw err;
         throw new RenderError(`${file}: ${(err as Error).message}`);

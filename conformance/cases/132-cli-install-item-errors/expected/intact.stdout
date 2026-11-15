@@ -1,0 +1,3 @@
+skilletor: user scope
+  + skills/fine (active now)
+  + rules/ok (active after /reload-plugins or restart)

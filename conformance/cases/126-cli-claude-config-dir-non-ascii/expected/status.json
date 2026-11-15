@@ -1,0 +1,36 @@
+{
+  "scopes": [
+    {
+      "bundles": [],
+      "declared": [],
+      "orphans": [],
+      "scope": "user",
+      "sourceVersions": {},
+      "targets": [
+        "claude"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    },
+    {
+      "bundles": [],
+      "declared": [
+        {
+          "installed": true,
+          "key": "skills/bar",
+          "source": "mine"
+        }
+      ],
+      "orphans": [],
+      "scope": "project",
+      "sourceVersions": {
+        "mine": "local"
+      },
+      "targets": [
+        "claude"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    }
+  ]
+}

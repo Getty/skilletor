@@ -1,0 +1,60 @@
+{
+  "description": "install of bundles (cli.test.ts :135): `bundle:perl@shared` beside the pattern `rule:go-*@shared` stores `perl@shared` under `install.bundles` (no prefix) and the pattern under `install.rules`, in that order, and the sync installs the bundle's rules and the pattern's; status marks them `via` the bundle and the wildcard and counts both; available marks the bundle installed; a bare `tools@shared` that only a bundle is named is that bundle; the same bundle again adds no second entry (up to date); `--project` writes the bundle into the project config, whose sync installs its rules in the project.",
+  "steps": [
+    {
+      "id": "install",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:perl@shared",
+        "rule:go-*@shared"
+      ],
+      "tree": true
+    },
+    {
+      "id": "status",
+      "op": "cli",
+      "argv": [
+        "status",
+        "--scope",
+        "user"
+      ]
+    },
+    {
+      "id": "available",
+      "op": "cli",
+      "argv": [
+        "available",
+        "shared"
+      ]
+    },
+    {
+      "id": "bare",
+      "op": "cli",
+      "argv": [
+        "install",
+        "tools@shared"
+      ],
+      "tree": true
+    },
+    {
+      "id": "again",
+      "op": "cli",
+      "argv": [
+        "install",
+        "perl@shared"
+      ],
+      "tree": true
+    },
+    {
+      "id": "project",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:perl@shared",
+        "--project"
+      ],
+      "tree": true
+    }
+  ]
+}

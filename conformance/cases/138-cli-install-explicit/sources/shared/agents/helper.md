@@ -1,0 +1,4 @@
+---
+description: helper agent
+---
+prompt

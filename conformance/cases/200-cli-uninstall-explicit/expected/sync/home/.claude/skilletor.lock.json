@@ -1,0 +1,24 @@
+{
+  "agents/dup": {
+    "source": "shared",
+    "version": "local",
+    "files": {
+      "agents/.local.dup.md": "sha256:46d0229b84217692c5b9b20386fe5427e66ad00335556e9bc875bb30835f59b4"
+    }
+  },
+  "rules/r1": {
+    "source": "shared",
+    "version": "local",
+    "files": {
+      "rules/.local.r1.md": "sha256:42441f56923bcd7df8f2e14052a3281479a587be996dfb2cc06abbdca864ed8e"
+    }
+  },
+  "skills/dup": {
+    "source": "shared",
+    "version": "local",
+    "files": {
+      "skills/dup/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/dup/SKILL.md": "sha256:870f094abf3f216e49bfd451e348927e0e62fef6580de78498600e5349c6720c"
+    }
+  }
+}

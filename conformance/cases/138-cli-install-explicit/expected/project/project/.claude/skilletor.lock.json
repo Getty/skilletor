@@ -1,0 +1,10 @@
+{
+  "skills/dup": {
+    "source": "shared",
+    "version": "git:aeadbb3",
+    "files": {
+      "skills/dup/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/dup/SKILL.md": "sha256:b2842bdac47d4aeb7bc1a0228ddc63a46eb03ab990ee243f2993e62b55f8bacd"
+    }
+  }
+}

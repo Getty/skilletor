@@ -3,6 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import os from "node:os";
 import { basename, join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import { makeTmpDir } from "./helpers/tmp.ts";
@@ -60,6 +62,47 @@ test("sync installs a user-scope skill from a local source", async () => {
     assert.equal("skills/foo" in readLock(join(e.home, ".claude/skilletor.lock.json")), true);
     assert.deepEqual(report.scopes[0]!.added.map((i) => i.key), ["skills/foo"]);
   } finally {
+    e.cleanup();
+  }
+});
+
+test("k161: a missing passwd entry leaves plain items alone but still fails a template companion", async () => {
+  const e = env();
+  const originalUserInfo = os.userInfo;
+  let userInfoCalls = 0;
+  try {
+    os.userInfo = () => {
+      userInfoCalls += 1;
+      throw new Error("mock passwd ENOENT");
+    };
+    syncBuiltinESMExports();
+
+    const src = join(e.tmp.dir, "k161");
+    mkdirSync(join(src, "rules"), { recursive: true });
+    writeFileSync(join(src, "rules", "plain.md"), "PLAIN\n");
+    e.writeCfg("user", { sources: { s: { local: src } }, install: { rules: ["plain@s"] } });
+    const plain = await sync({ ...e.ctx, user: undefined }, { scope: "user" });
+    assert.equal(userInfoCalls, 0, "a plain item does not construct a render context");
+    assert.deepEqual(plain.scopes[0]!.warnings, []);
+    assert.equal(readFileSync(join(e.home, ".claude/rules/.local.plain.md"), "utf8"), "PLAIN\n");
+
+    mkdirSync(join(src, "skills", "mixed", "references"), { recursive: true });
+    writeFileSync(join(src, "skills", "mixed", "SKILL.md"), "---\ndescription: mixed\n---\nPLAIN MAIN\n");
+    writeFileSync(join(src, "skills", "mixed", "references", "context.md.njk"), "{{ user.name }}\n");
+    e.writeCfg("user", { sources: { s: { local: src } }, install: { skills: ["mixed@s"] } });
+    await sync(e.ctx, { scope: "user" }); // injected user: establish the whole item to preserve
+    const skillPath = join(e.home, ".claude/skills/mixed");
+    const before = readFileSync(join(skillPath, "references/context.md"), "utf8");
+
+    userInfoCalls = 0;
+    const templated = await sync({ ...e.ctx, user: undefined }, { scope: "user" });
+    assert.equal(userInfoCalls, 1, "a companion template constructs the context once");
+    assert.deepEqual(templated.scopes[0]!.updated, []);
+    assert.deepEqual(templated.scopes[0]!.warnings, ["template error in skill mixed: mock passwd ENOENT"]);
+    assert.equal(readFileSync(join(skillPath, "references/context.md"), "utf8"), before, "a template error keeps the whole installed item");
+  } finally {
+    os.userInfo = originalUserInfo;
+    syncBuiltinESMExports();
     e.cleanup();
   }
 });

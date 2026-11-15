@@ -1,0 +1,4 @@
+{
+  "skills/foo": { "source": "Mine", "version": "v", "files": {} },
+  "skills/bar": { "source": "mine", "version": "v", "files": {} }
+}

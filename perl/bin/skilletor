@@ -20,6 +20,8 @@ __END__
   skilletor source list [--json]
   skilletor source remove <name> [--project] [--force]
   skilletor available [source] [--json]
+  skilletor install <item>... [--project]
+  skilletor uninstall <item>... [--project]
   skilletor hook session-start|user-prompt-submit|cwd-changed|post-tool-use [--harness codex|hermes] < input.json
   skilletor --help
   skilletor --version
@@ -29,7 +31,7 @@ __END__
 The command line of L<Skilletor>, the Perl port of skilletor; see
 L<Skilletor::CLI>. It mirrors the reference CLI byte for byte, command by
 command as each is ported (C<sync>, C<check>, C<status>, C<add>, C<trust>,
-C<source list>, C<source remove>, C<available> and the hooks); a command
-not ported yet says so and exits 1.
+C<source list>, C<source remove>, C<available>, C<install>, C<uninstall> and
+the hooks).
 
 =cut

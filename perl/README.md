@@ -8,7 +8,8 @@ distribution is its Perl port, for Perl programs that must resolve skills,
 agents and rules exactly as skilletor does – the same config files, the same
 source cache (`~/.claude/skilletor/cache`, one fetch serves both), the same
 `trust.json`, the same bytes in every JSON file, the same error messages –
-and sync them into Claude Code's directories as the CLI does, without Node.
+and sync them into Claude Code, Codex and Hermes Agent directories without Node
+(Hermes receives skills only).
 
 ## Installation
 
@@ -21,6 +22,14 @@ the Perl port of the Nunjucks the reference uses. It needs Perl 5.40 and is not
 on CPAN yet: install it from its repository first.
 
 ## Usage
+
+### Command line
+
+With the dependencies installed, `perl/bin/skilletor` (from the repository root)
+provides `sync`, `check`, `status`, `add`, `trust`, `source list/remove`, `available`,
+`install`, `uninstall`, and the session hooks. Shared CLI cases compare both engines'
+output, exit codes and files. This source CLI is separate from the current Node plugin
+launcher; standalone-binary verification and default-runtime activation are still pending.
 
 ### Skilletor – where is skill X?
 
@@ -78,7 +87,7 @@ dir the item lies in.
 - Like the reference, a resolve holds the sync lock
   (`~/.claude/skilletor/sync.lock/`), so the two never work one cache at once.
 
-### Sync, check, status – for Claude Code and Codex
+### Sync, check, status – for Claude Code, Codex and Hermes
 
 ```perl
 use Skilletor::Report qw( report_text status_text exit_code );
@@ -91,7 +100,7 @@ print status_text( $sk->status ), "\n";
 exit exit_code( check => $check );   # 2 error, 1 a sync is due, 0 up to date
 ```
 
-The CLI's commands for the Claude Code and Codex targets, ported whole: the same
+The CLI's sync, check and status operations for all three targets: the same
 installed files and executable bits, the same lock, `.gitignore` blocks,
 `.worktreeinclude` and `.claude/settings.json` plugin requirement, conflicts and
 `force`, removal of what is no longer declared, `partial` entries after a
@@ -204,8 +213,9 @@ dzil test
 ```
 
 `t/60-conformance.t` runs the shared cases of `../conformance` (see its
-README), every step: `resolve`, `sync`, `check`, `status`. Where the port
-differs on purpose a case holds its own `expected.perl/`; no case does today.
+README), including `resolve`, `sync`, `check`, `status`, and `cli` steps. CLI steps
+can run either implementation and compare streams, exit codes and resulting files.
+Where the port differs on purpose a case can hold its own `expected.perl/`.
 It skips outside a checkout of the repository. `t/52-parity-sync.t` has the
 reference and the port sync one machine and compares every byte they leave,
 the state records included; `t/53-parity-render.t` renders templates with

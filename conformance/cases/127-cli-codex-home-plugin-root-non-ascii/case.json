@@ -1,0 +1,11 @@
+{
+  "description": "CODEX_HOME and CLAUDE_PLUGIN_ROOT with non-ASCII names, outside the home (${TMP}/codex-ü, ${TMP}/plug-ü, k198): the CLI's sync installs the user agent for Claude Code and Codex, the untrusted-hook warning naming ${TMP}/codex-ü/config.toml with ü as its UTF-8 bytes; the explicit project Claude target permits settings management, skilletor is installed from two marketplaces, and the one whose install path is CLAUDE_PLUGIN_ROOT wins – .claude/settings.json enables skilletor@getty and declares getty, no ambiguity warning. status names the same config.toml.",
+  "env": {
+    "CODEX_HOME": "${TMP}/codex-ü",
+    "CLAUDE_PLUGIN_ROOT": "${TMP}/plug-ü"
+  },
+  "steps": [
+    { "id": "sync", "op": "cli", "argv": ["sync"], "tree": true },
+    { "id": "status", "op": "cli", "argv": ["status"] }
+  ]
+}

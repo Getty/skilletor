@@ -1,0 +1,33 @@
+{
+  "description": "install on a machine with no agent harness (\"claude\": false), so the sync after its edit stops at a config error (k103, cli.test.ts :1027's install): the entry is written, then exit 2 with the error and the saved config file – the user's, or the project's with --project – on stderr, nothing on stdout, the edit kept; an item install refuses still exits 1 before any edit, no harness needed to plan it.",
+  "claude": false,
+  "steps": [
+    {
+      "id": "user",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@shared"
+      ],
+      "tree": true
+    },
+    {
+      "id": "project",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@shared",
+        "--project"
+      ],
+      "tree": true
+    },
+    {
+      "id": "refused",
+      "op": "cli",
+      "argv": [
+        "install",
+        "nope@shared"
+      ]
+    }
+  ]
+}

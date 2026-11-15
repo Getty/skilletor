@@ -35,10 +35,23 @@ drift away from what the TypeScript engine does.
   Text::Nunjucks, a 1:1 Perl port of the Nunjucks 3.2.4 the reference uses, through a
   loader confined to the source root as the reference's is (`Skilletor::Render::Loader`).
   The port converts its JSON values at the boundary (null, booleans, key order), and
-  `t/53-parity-render.t` renders the same templates with both engines. Text::Nunjucks
-  needs Perl 5.40 and is not on CPAN yet.
+  `t/53-parity-render.t` renders the same templates with both engines. Render context is
+  constructed only when an item actually renders a `.njk` file, companions included, and
+  reused within that build; plain copies do not require an OS passwd entry (k161).
+  Text::Nunjucks needs Perl 5.40 and is not on CPAN yet.
 - **Claude Code, Codex and Hermes targets** for sync/check/status (Codex since k184, Hermes
   since k185).
+- **Project-local target defaults** (k229) match the reference: user `targets` sets the
+  machine allowlist and user-scope targets; explicit project/local targets select a subset.
+  Otherwise genuine project-owned harness files choose it, never skilletor's own artifacts.
+  A sole machine target bootstraps a new project; an ambiguous multi-target project is left
+  unchanged with a warning. User-only operations do not read project evidence or its lock.
+  See [`superpowers/specs/2026-11-15-project-targets-design.md`](superpowers/specs/2026-11-15-project-targets-design.md).
+  Automatic Claude plugin settings are also guarded: a proposed write that would change
+  inferred targets is skipped, with an explicit-targets-then-sync warning (k234). Both
+  engines keep settings and inferred targets stable while synchronizing items normally;
+  they record no provenance and do not turn the skipped settings update into perpetual
+  `check` drift.
 
 ## Against divergence: `conformance/`
 
@@ -95,8 +108,10 @@ Decisions that differ from the TS engine on purpose:
   match.
 - **Hermes as the CLI has it.** Skills only, in the Hermes home's `skills` (`$HERMES_HOME`,
   else the recorded home, else `~/.hermes`) and `<repo>/.hermes/skills`, with no managed
-  `.gitignore` block; never detected, a target only through the user config's `"targets"`;
-  in a project with Codex active, the Codex copy serves Hermes. One home per user-scope lock,
+  `.gitignore` block; never auto-detected as a machine target, enabled there only through the
+  user config's `"targets"`. Project selection follows the evidence, override and bootstrap
+  rules above; in a project with Codex active, the Codex copy serves Hermes.
+  One home per user-scope lock,
   recorded in `hermes-home.json`; a sync under another home moves the items first and warns.
   `Skilletor::Engine` takes `hermes_home` as the CLI takes `HERMES_HOME`.
 - **Report text.** `Skilletor::Report` ports the CLI's sync, status and check text and
@@ -148,8 +163,10 @@ other's `sync` and SessionStart wait or time out. It skips without node or the b
   The Perl CLI (`bin/skilletor`) runs `sync`, `check`, `status` (k173), `trust`, `source list`,
   `source remove` (k175), `add` with the probe of a generic host (k176: `git ls-remote`, then a
   HEAD on the tarball through HTTP::Tiny in the process, so a packed binary needs neither Node
-  nor Perl for it), `available` (k177) and the hooks; `install` and `uninstall` are being
-  ported under k166, and each says so and exits 1 until then.
+  nor Perl for it), `available` (k177), `install` (k178), `uninstall` (k179), and the hooks.
+  Shared cases 130–139 and 200–205 cover the two config-edit commands against both CLIs.
+  The default plugin launchers still use Node: packed-binary platform verification,
+  performance checks and activation remain gated under k166/k191.
 - Windows is untested. The process layer has a Windows path (k186: `run_command` through
   temp files on a no-wait spawn, `spawn_detached` through Win32::Process, the sync lock
   refreshed by its holder instead of a forked child), exercised on Linux through an injected

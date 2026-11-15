@@ -6,6 +6,7 @@ import { existsSync, linkSync, lstatSync, mkdirSync, readdirSync, readFileSync, 
 import { join, resolve as resolvePath } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { check, status, sync, type EngineContext } from "../src/engine.ts";
+import { runHook } from "../src/hooks.ts";
 import { reportHook, reportText } from "../src/report.ts";
 import { readLock } from "../src/lock.ts";
 import type { Harness } from "../src/config.ts";
@@ -35,11 +36,14 @@ function env(harnesses: Harness[]) {
     codexHome: join(home, ".codex"), // never the real $CODEX_HOME
     isGitWorkTree: () => false, // never the real location of the temp dir
   };
-  const writeCfg = (which: "user" | "project" | "local", obj: unknown) => {
+  const writeCfg = (which: "user" | "project" | "local", obj: unknown, declareProjectTargets = true) => {
     const file = which === "user"
       ? join(home, ".claude", "skilletor.json")
       : join(projectDir, ".claude", which === "local" ? "skilletor.local.json" : "skilletor.json");
-    writeFileSync(file, JSON.stringify(obj, null, 2));
+    const config = which === "project" && declareProjectTargets
+      ? { targets: harnesses, ...(obj as Record<string, unknown>) }
+      : obj;
+    writeFileSync(file, JSON.stringify(config, null, 2));
   };
   return { tmp, ctx, home, projectDir, writeCfg, cleanup: () => tmp.cleanup() };
 }
@@ -220,6 +224,181 @@ test("claude-only project never creates .agents/", async () => {
     e.writeCfg("project", { install: { skills: ["bar@mine"] } });
     await sync(e.ctx, { scope: "project" });
     assert.equal(existsSync(join(e.projectDir, ".agents")), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("project evidence migrates owned Codex outputs only and keeps a foreign file", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "skills/bar/SKILL.md": SKILL("bar") });
+    e.writeCfg("user", { targets: ["claude", "codex"], sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["bar@mine"] } });
+    await sync(e.ctx, { scope: "project" });
+    const foreign = join(e.projectDir, ".agents/skills/bar/MINE.txt");
+    writeFileSync(foreign, "mine\n");
+    writeFileSync(join(e.projectDir, "CLAUDE.md"), "Use Claude Code here.\n");
+    e.writeCfg("project", { install: { skills: ["bar@mine"] } }, false);
+
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(r.scopes[0]!.removed.map((i) => i.key), ["codex:skills/bar"]);
+    assert.equal(existsSync(join(e.projectDir, ".agents/skills/bar/SKILL.md")), false);
+    assert.equal(readFileSync(foreign, "utf8"), "mine\n");
+    assert.equal(existsSync(join(e.projectDir, ".claude/skills/bar/SKILL.md")), true);
+    assert.deepEqual(Object.keys(readLock(join(e.projectDir, ".claude/skilletor.lock.json"))), ["skills/bar"]);
+    await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(Object.keys(readLock(join(e.projectDir, ".claude/skilletor.lock.json"))), ["skills/bar"]);
+    assert.equal(existsSync(join(e.projectDir, ".agents/skills/bar/SKILL.md")), false);
+    assert.equal(readFileSync(foreign, "utf8"), "mine\n");
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("empty Claude settings beside Codex evidence select Codex stably across syncs", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "skills/bar/SKILL.md": SKILL("bar") });
+    e.writeCfg("user", { targets: ["claude", "codex"], sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["bar@mine"] } }, false);
+    mkdirSync(join(e.projectDir, ".codex"));
+    writeFileSync(join(e.projectDir, ".codex/config.toml"), "model = 'test'\n");
+    writeFileSync(join(e.projectDir, ".claude/settings.json"), "{}\n");
+
+    for (let i = 0; i < 2; i++) {
+      await sync(e.ctx, { scope: "project" });
+      assert.deepEqual(Object.keys(readLock(join(e.projectDir, ".claude/skilletor.lock.json"))), ["codex:skills/bar"]);
+      assert.equal(existsSync(join(e.projectDir, ".claude/skills/bar")), false);
+      assert.equal(existsSync(join(e.projectDir, ".agents/skills/bar/SKILL.md")), true);
+    }
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("marketplace-only Claude settings preserve both evidenced targets across syncs", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "skills/bar/SKILL.md": SKILL("bar") });
+    e.writeCfg("user", { targets: ["claude", "codex"], sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["bar@mine"] } });
+    await sync(e.ctx, { scope: "project" });
+    e.writeCfg("project", { install: { skills: ["bar@mine"] } }, false);
+    mkdirSync(join(e.projectDir, ".codex"), { recursive: true });
+    writeFileSync(join(e.projectDir, ".codex/config.toml"), "model = 'test'\n");
+    writeFileSync(join(e.projectDir, ".claude/settings.json"), JSON.stringify({
+      extraKnownMarketplaces: { team: { source: { source: "github", repo: "example/team" } } },
+    }));
+
+    for (let i = 0; i < 2; i++) {
+      await sync(e.ctx, { scope: "project" });
+      assert.deepEqual(Object.keys(readLock(join(e.projectDir, ".claude/skilletor.lock.json"))).sort(),
+        ["codex:skills/bar", "skills/bar"]);
+      assert.equal(existsSync(join(e.projectDir, ".claude/skills/bar/SKILL.md")), true);
+      assert.equal(existsSync(join(e.projectDir, ".agents/skills/bar/SKILL.md")), true);
+    }
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("Codex evidence removes owned Claude output without a residual foreign file re-enabling Claude", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "skills/bar/SKILL.md": SKILL("bar") });
+    e.writeCfg("user", { targets: ["claude", "codex"], sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["bar@mine"] } });
+    await sync(e.ctx, { scope: "project" });
+    const foreign = join(e.projectDir, ".claude/skills/bar/MINE.txt");
+    writeFileSync(foreign, "mine\n");
+    mkdirSync(join(e.projectDir, ".codex"), { recursive: true });
+    writeFileSync(join(e.projectDir, ".codex/config.toml"), "model = 'test'\n");
+    e.writeCfg("project", { install: { skills: ["bar@mine"] } }, false);
+
+    const first = await sync(e.ctx, { scope: "project" });
+    assert.deepEqual(first.scopes[0]!.removed.map((i) => i.key), ["skills/bar"]);
+    assert.equal(existsSync(join(e.projectDir, ".claude/skills/bar/SKILL.md")), false);
+    assert.equal(readFileSync(foreign, "utf8"), "mine\n");
+    for (let i = 0; i < 2; i++) {
+      await sync(e.ctx, { scope: "project" });
+      assert.deepEqual(Object.keys(readLock(join(e.projectDir, ".claude/skilletor.lock.json"))), ["codex:skills/bar"]);
+      assert.equal(existsSync(join(e.projectDir, ".claude/skills/bar/SKILL.md")), false);
+      assert.equal(readFileSync(foreign, "utf8"), "mine\n");
+    }
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("ambiguous multi-harness project preserves generated outputs on checks and repeated syncs", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "skills/bar/SKILL.md": SKILL("bar") });
+    e.writeCfg("user", { targets: ["claude", "codex"], sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["bar@mine"] } });
+    await sync(e.ctx, { scope: "project" });
+    writeFileSync(join(e.projectDir, ".claude/settings.json"), JSON.stringify({
+      enabledPlugins: { "skilletor@getty": true },
+      extraKnownMarketplaces: { getty: { source: { source: "github", repo: "example/marketplace" } } },
+    }, null, 2));
+    e.writeCfg("project", { install: { skills: ["bar@mine"] } }, false);
+    const before = readFileSync(join(e.projectDir, ".claude/skilletor.lock.json"), "utf8");
+
+    const chk = await check(e.ctx, { scope: "project", local: true });
+    assert.equal(chk.changed, false);
+    assert.equal(chk.targetsChanged, undefined);
+    assert.match(chk.warnings.join("\n"), /ambiguous.*set "targets".*left unchanged/i);
+    for (let i = 0; i < 2; i++) {
+      const r = await sync(e.ctx, { scope: "project" });
+      assert.equal(r.scopes.length, 1);
+      assert.deepEqual(r.scopes[0]!.removed, []);
+      assert.match(r.scopes[0]!.warnings.join("\n"), /ambiguous.*left unchanged/i);
+      assert.equal(readFileSync(join(e.projectDir, ".claude/skilletor.lock.json"), "utf8"), before);
+      assert.equal(existsSync(join(e.projectDir, ".claude/skills/bar/SKILL.md")), true);
+      assert.equal(existsSync(join(e.projectDir, ".agents/skills/bar/SKILL.md")), true);
+    }
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("alternating Claude and Codex hooks cannot change project-local target inference", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "skills/bar/SKILL.md": SKILL("bar") });
+    e.writeCfg("user", { targets: ["claude", "codex"], sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["bar@mine"] } }, false);
+    writeFileSync(join(e.projectDir, "CLAUDE.md"), "Use Claude Code here.\n");
+    const input = { source: "startup", cwd: e.projectDir };
+
+    await runHook("session-start", input, { ...e.ctx, harness: undefined });
+    assert.deepEqual(Object.keys(readLock(join(e.projectDir, ".claude/skilletor.lock.json"))), ["skills/bar"]);
+    assert.equal(existsSync(join(e.projectDir, ".agents/skills/bar")), false);
+    await runHook("session-start", input, { ...e.ctx, harness: "codex" });
+    await runHook("session-start", input, { ...e.ctx, harness: undefined });
+    assert.deepEqual(Object.keys(readLock(join(e.projectDir, ".claude/skilletor.lock.json"))), ["skills/bar"]);
+    assert.equal(existsSync(join(e.projectDir, ".agents/skills/bar")), false);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("user-only sync, check and status do not read a malformed project lock", async () => {
+  const e = env(["claude", "codex"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo") });
+    e.writeCfg("user", { targets: ["claude"], sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    e.writeCfg("project", {}, false);
+    writeFileSync(join(e.projectDir, ".claude/skilletor.lock.json"), "{ broken\n");
+
+    const r = await sync(e.ctx, { scope: "user" });
+    assert.equal(r.error, undefined);
+    assert.deepEqual(r.scopes.map((s) => s.scope), ["user"]);
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo/SKILL.md")), true);
+    assert.equal((await check(e.ctx, { scope: "user", local: true })).error, undefined);
+    assert.equal(status(e.ctx, { scope: "user" }).error, undefined);
+    assert.equal(readFileSync(join(e.projectDir, ".claude/skilletor.lock.json"), "utf8"), "{ broken\n");
   } finally {
     e.cleanup();
   }
@@ -604,6 +783,8 @@ test("k65: the project .codex block goes with the config and the last managed ag
     const p = e.projectDir;
     await sync(e.ctx);
     assert.equal(readFileSync(join(p, ".codex/.gitignore"), "utf8"), BLOCK("agents/**/.local.*", "skilletor-rules.md"));
+    writeFileSync(join(p, "CLAUDE.md"), "Use Claude Code here.\n");
+    writeFileSync(join(p, ".codex/config.toml"), "model = 'test'\n");
     rmSync(join(p, ".claude/skilletor.json"));
     const r = await sync(e.ctx);
     const proj = r.scopes.find((s) => s.scope === "project")!;

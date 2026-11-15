@@ -1,0 +1,4 @@
+skilletor: user scope
+  + rules/go-c (active after /reload-plugins or restart)
+  + rules/perl-a (active after /reload-plugins or restart)
+  + rules/perl-b (active after /reload-plugins or restart)

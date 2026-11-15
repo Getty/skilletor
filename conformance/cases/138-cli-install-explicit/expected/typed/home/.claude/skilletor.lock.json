@@ -1,0 +1,31 @@
+{
+  "agents/dup": {
+    "source": "shared",
+    "version": "git:aeadbb3",
+    "files": {
+      "agents/.local.dup.md": "sha256:6ddc6d365564380283d01850cb295e58305cd7848954c372d6d4fb6c15416217"
+    }
+  },
+  "agents/helper": {
+    "source": "shared",
+    "version": "git:aeadbb3",
+    "files": {
+      "agents/.local.helper.md": "sha256:2d7d806c059b2ea5e4459d77e51d7cb607fd33f950259a0fa5e79c326e006ec9"
+    }
+  },
+  "rules/style": {
+    "source": "shared",
+    "version": "git:aeadbb3",
+    "files": {
+      "rules/.local.style.md": "sha256:fc2972808525c567873a2a3ae33188f536a3af67d8481465f2e7f5b302aa41a3"
+    }
+  },
+  "skills/foo": {
+    "source": "shared",
+    "version": "git:aeadbb3",
+    "files": {
+      "skills/foo/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/foo/SKILL.md": "sha256:55b31c1be636f2af24cfb39e8b2d612ec00d7bdf15719e21e0adb4659df4c864"
+    }
+  }
+}

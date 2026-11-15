@@ -1,0 +1,6 @@
+skilletor: user scope
+  + skills/foo (active now)
+skilletor: project scope
+  + rules/r1 (active after /reload-plugins or restart)
+  .claude/.gitignore updated — commit it
+  .worktreeinclude updated — commit it

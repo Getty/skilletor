@@ -1,0 +1,3 @@
+skilletor: bundle perl, many needs sources you don't have yet; nothing was changed. Add them, then install again:
+  skilletor add peter gitlab.com/peter --project
+  skilletor add repo-2 Getty/repo --project

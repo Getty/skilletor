@@ -1,0 +1,4 @@
+{
+  "version": 2,
+  "plugins": { "skilletor@team": [{ "scope": "user" }] }
+}

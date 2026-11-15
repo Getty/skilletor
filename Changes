@@ -1,6 +1,40 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - Project scopes now select explicit project targets or genuine harness
+    evidence in that project instead of every machine target. Skilletor-owned
+    artifacts do not count as evidence; an ambiguous multi-harness project is
+    preserved and warned, and a sole machine target remains the bootstrap
+    fallback. TypeScript and Perl share cases 141-149 (k229).
+  - Automatic Claude plugin requirements are skipped, without check drift,
+    when their virtual settings would change inferred project targets. Items
+    still sync, and explicit project targets permit the settings update
+    (k234).
+  - The Perl CLI implements install and uninstall: wildcards, bundles,
+    prompts, missing-source and refusal diagnostics, and scope-aware removal.
+    Shared cases 130-139 and 200-205 hold both CLIs to the same behavior
+    (k178, k179).
+  - Both engines reject lock entries that are not objects and invalid
+    string-valued ownership maps before writing. `available` compares item
+    names without case while preserving source-alias case; cases 151-153 pin
+    the behavior (k222, k236).
+  - Plain items no longer ask the operating system for a template user. Both
+    engines create render context lazily, once, only when a `.njk` file needs
+    it (k161).
+  - Hook JSON that is null or another non-object, or has a non-string `cwd`,
+    fails open without an internal TypeError. The Perl conformance transport
+    preserves explicit JSON null; case 140 pins both CLIs (k200, k228).
+  - The Perl port decodes non-ASCII harness paths from the environment, emits
+    its ambiguous-source en dash as Unicode, and joins frontmatter UTF-16
+    surrogate pairs like the reference. Cases 126-127 pin the paths (k163,
+    k195, k198).
+  - Real Hermes child tests exclude inherited credentials, and Perl report
+    conformance follows intervening CLI steps before comparing later engine
+    results (k154, k197).
+  - Documentation reflects manifest version ownership, conditional Claude
+    settings updates, and the Perl port's current Claude, Codex and Hermes,
+    template and CLI support without claiming binary activation (k157, k226,
+    k227, k233).
   - Builds support explicitly linked local dependencies in worktrees, while
     refusing tools or bundled inputs resolved from another checkout (k148,
     k220).

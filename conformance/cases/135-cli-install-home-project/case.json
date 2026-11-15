@@ -1,0 +1,38 @@
+{
+  "description": "install --project without a project scope (cli.test.ts :431, k44): with --project-dir the home, or run in the home outside git, it exits 1 naming the home and the ways out, before the config is read, nothing written; without --project the same item installs into the user scope alone.",
+  "steps": [
+    {
+      "id": "project-dir",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@s",
+        "--project",
+        "--project-dir",
+        "${HOME}"
+      ],
+      "tree": true
+    },
+    {
+      "id": "cwd-home",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@s",
+        "--project"
+      ],
+      "cwd": "${HOME}"
+    },
+    {
+      "id": "user",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@s",
+        "--project-dir",
+        "${HOME}"
+      ],
+      "tree": true
+    }
+  ]
+}

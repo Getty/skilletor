@@ -1,0 +1,16 @@
+{
+  "sources": {
+    "shared": {
+      "local": "${HOME}/dev/shared"
+    }
+  },
+  "install": {
+    "bundles": [
+      "perl@shared",
+      "tools@shared"
+    ],
+    "rules": [
+      "go-*@shared"
+    ]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "description": "uninstall with bundles: removing an explicit item succeeds with a warning naming both bundles that still install it; without the explicit entry the lock-confirmed item is refused with both bundles and their commands; bundle: removes one declaration, a bare name held only as a bundle removes the other and its item, and an absent bundle is refused.",
+  "steps": [
+    {
+      "id": "sync",
+      "op": "cli",
+      "argv": ["sync", "--scope", "user"],
+      "tree": true
+    },
+    {
+      "id": "explicit",
+      "op": "cli",
+      "argv": ["uninstall", "rule:r1@shared"],
+      "tree": true
+    },
+    {
+      "id": "covered",
+      "op": "cli",
+      "argv": ["uninstall", "r1@shared"]
+    },
+    {
+      "id": "prefixed",
+      "op": "cli",
+      "argv": ["uninstall", "bundle:perl@shared"],
+      "tree": true
+    },
+    {
+      "id": "bare",
+      "op": "cli",
+      "argv": ["uninstall", "go@shared"],
+      "tree": true
+    },
+    {
+      "id": "absent",
+      "op": "cli",
+      "argv": ["uninstall", "bundle:perl@shared"]
+    }
+  ]
+}

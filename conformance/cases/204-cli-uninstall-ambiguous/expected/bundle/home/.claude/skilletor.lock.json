@@ -1,0 +1,9 @@
+{
+  "rules/perl": {
+    "source": "shared",
+    "version": "local",
+    "files": {
+      "rules/.local.perl.md": "sha256:2f70f45cae03fdddb95caa255c7f0b9c76951a7cd104f837f9035436e5e93fca"
+    }
+  }
+}

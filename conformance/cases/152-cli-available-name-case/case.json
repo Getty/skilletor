@@ -1,0 +1,6 @@
+{
+  "description": "available treats installed item names as case-insensitive while source aliases remain case-sensitive.",
+  "steps": [
+    { "id": "list", "op": "cli", "argv": ["available", "Mine", "--json"] }
+  ]
+}

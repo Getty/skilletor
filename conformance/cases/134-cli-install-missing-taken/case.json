@@ -1,0 +1,24 @@
+{
+  "description": "k102: the missing-source command never names a source the target config already has: the user config's `peter` is a local override and only the project config gives it the bundle's address, so the user scope has no source serving it and the printed command is `skilletor add peter-2 …`, both configs byte-identical; with --project the merged `peter` serves it – no missing source – and the sync installs the bundle's rule from the user's local checkout (author mode, spec §15.6).",
+  "steps": [
+    {
+      "id": "user",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:perl@mine"
+      ],
+      "tree": true
+    },
+    {
+      "id": "project",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:perl@mine",
+        "--project"
+      ],
+      "tree": true
+    }
+  ]
+}

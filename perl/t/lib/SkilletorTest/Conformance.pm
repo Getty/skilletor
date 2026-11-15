@@ -130,7 +130,7 @@ sub with_case_env {
   my ( $r, $code ) = @_;
   local @ENV{ @UNSET, keys %{ $r->{env} } };
   delete @ENV{@UNSET};
-  $ENV{$_} = $r->{env}{$_} for keys %{ $r->{env} };
+  $ENV{$_} = defined $r->{env}{$_} ? encode_text( $r->{env}{$_} ) : undef for keys %{ $r->{env} };
   return $code->();
 }
 

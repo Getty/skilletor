@@ -1,0 +1,6 @@
+user scope:
+  ✓ rules/go-c @shared via go-*@shared
+  ✓ rules/perl-a @shared via bundle:perl@shared
+  ✓ rules/perl-b @shared via bundle:perl@shared
+  * rules/go-* @shared (1 installed)
+  * bundle:perl@shared (2 installed)

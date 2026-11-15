@@ -1,0 +1,11 @@
+{
+  "description": "Generated-only harness roots leave a multi-harness project unresolved: check and repeated sync preserve its managed and foreign files and warn for explicit project targets.",
+  "git": { "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] } },
+  "steps": [
+    { "id": "check-before", "op": "check", "scope": "project" },
+    { "id": "sync", "op": "sync", "scope": "project", "tree": true },
+    { "id": "check-after", "op": "check", "scope": "project" },
+    { "id": "status", "op": "status", "scope": "project" },
+    { "id": "resync", "op": "sync", "scope": "project", "tree": true }
+  ]
+}

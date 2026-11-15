@@ -53,12 +53,26 @@ export function readLock(path: string): Lock {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
       throw new Error("expected an object");
     }
+    // Entries are records, but their fields stay lenient for historical and future lock formats.
     // k145: `via` is matched against bundle labels exactly; a hand-edited string would match
     // by substring (`String.includes`), so anything but an array of strings is refused.
+    // `files` is the ownership boundary, though: every reader and serializer needs its complete,
+    // string-valued map. Refuse corruption rather than reinterpreting or dropping ownership.
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      const via = entry !== null && typeof entry === "object" ? (entry as Record<string, unknown>).via : undefined;
+      if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+        throw new Error(`${key}: expected an object`);
+      }
+      const record = entry as Record<string, unknown>;
+      const via = record.via;
       if (via !== undefined && !(Array.isArray(via) && via.every((v) => typeof v === "string"))) {
         throw new Error(`${key}: "via" must be an array of strings`);
+      }
+      const files = record.files;
+      if (!Object.hasOwn(record, "files") || files === null || typeof files !== "object" || Array.isArray(files)) {
+        throw new Error(`${key}: "files" must be an object`);
+      }
+      if (!Object.values(files).every((hash) => typeof hash === "string")) {
+        throw new Error(`${key}: "files" values must be strings`);
       }
     }
     return value as Lock;

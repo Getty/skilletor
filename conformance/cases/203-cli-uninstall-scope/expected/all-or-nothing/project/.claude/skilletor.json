@@ -1,0 +1,10 @@
+{
+  "install": {
+    "rules": [
+      "r2@shared"
+    ],
+    "bundles": [
+      "perl@shared"
+    ]
+  }
+}

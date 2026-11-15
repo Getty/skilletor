@@ -1,0 +1,27 @@
+{
+  "scopes": [
+    {
+      "added": [
+        {
+          "key": "skills/greet",
+          "name": "greet",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "conflicts": [],
+      "gitignoreUpdated": [
+        ".claude/.gitignore",
+        ".worktreeinclude"
+      ],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

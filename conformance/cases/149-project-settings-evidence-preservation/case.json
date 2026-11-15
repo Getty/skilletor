@@ -1,0 +1,14 @@
+{
+  "description": "Marketplace-only Claude evidence plus own Codex config must survive automatic plugin setup: skilletor is installed from the same marketplace, gitignore is disabled, and sync/check/status plus alternating hooks preserve both targets without rewriting settings or perpetual drift.",
+  "git": { "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] } },
+  "steps": [
+    { "id": "hook-first", "op": "cli", "argv": ["hook", "session-start"], "stdin": { "source": "startup", "cwd": "${PROJECT}" }, "tree": true },
+    { "id": "check", "op": "check", "scope": "project" },
+    { "id": "status", "op": "status", "scope": "project" },
+    { "id": "resync", "op": "sync", "scope": "project", "tree": true },
+    { "id": "hook-codex", "op": "cli", "argv": ["hook", "session-start", "--harness", "codex"], "stdin": { "source": "startup", "cwd": "${PROJECT}" } },
+    { "id": "hook-claude", "op": "cli", "argv": ["hook", "session-start"], "stdin": { "source": "startup", "cwd": "${PROJECT}" } },
+    { "id": "check-final", "op": "check", "scope": "project" },
+    { "id": "status-final", "op": "status", "scope": "project" }
+  ]
+}

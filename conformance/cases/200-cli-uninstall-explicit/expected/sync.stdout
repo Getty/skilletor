@@ -1,0 +1,4 @@
+skilletor: user scope
+  + skills/dup (active now)
+  + agents/dup (active after /reload-plugins or restart)
+  + rules/r1 (active after /reload-plugins or restart)

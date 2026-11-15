@@ -82,7 +82,9 @@ function localSource(e: Env): void {
  */
 async function mainWithWorktree(e: Env): Promise<string> {
   localSource(e);
-  e.writeJson(join(e.main, ".claude", "skilletor.json"), { install: { skills: ["foo@mine"] } });
+  e.writeJson(join(e.main, ".claude", "skilletor.json"), {
+    targets: [e.ctx.harness!], install: { skills: ["foo@mine"] },
+  });
   git(e.main, "init", "-q", "-b", "main");
   const started = await runHook("session-start", { source: "startup", cwd: e.main, session_id: "s1" }, e.ctx);
   assert.match(started.systemMessage ?? "", /item\(s\) updated/);
@@ -143,7 +145,9 @@ for (const harness of HARNESSES) {
     const e = env(harness);
     try {
       localSource(e);
-      e.writeJson(join(e.main, ".claude", "skilletor.json"), { install: { skills: ["foo@mine"] } });
+      e.writeJson(join(e.main, ".claude", "skilletor.json"), {
+        targets: [e.ctx.harness!], install: { skills: ["foo@mine"] },
+      });
       git(e.main, "init", "-q", "-b", "main");
       new State(e.ctx.stateRoot).putSessionCwd("s1", e.main);
       const sub = join(e.main, "src", "deep");
@@ -282,16 +286,16 @@ test("k152 hermes: the trust hint comes with a skill Hermes loads, not with an a
     writeFileSync(join(src, "skills", "foo", "SKILL.md"), SKILL("foo"));
     writeFileSync(join(src, "agents", "bar.md"), "---\ndescription: bar\n---\nBODY\n");
     const sources = { mine: { local: src } };
-    const checkout = (name: string, install: Record<string, string[]>) => {
+    const checkout = (name: string, install: Record<string, string[]>, targets: string[]) => {
       const dir = join(e.dir, name);
-      e.writeJson(join(dir, ".claude", "skilletor.json"), { install });
+      e.writeJson(join(dir, ".claude", "skilletor.json"), { targets, install });
       git(dir, "init", "-q", "-b", "main");
       return dir;
     };
     new State(e.ctx.stateRoot).putSessionCwd("s1", e.main);
 
     e.userCfg({ targets: ["codex", "hermes"], sources });
-    const viaCodex = checkout("via-codex", { skills: ["foo@mine"] });
+    const viaCodex = checkout("via-codex", { skills: ["foo@mine"] }, ["codex", "hermes"]);
     const codexCopy = await e.prompt(viaCodex);
     assert.equal(existsSync(join(viaCodex, ".agents", "skills", "foo", "SKILL.md")), true);
     assert.equal(existsSync(join(viaCodex, ".hermes")), false);
@@ -309,14 +313,14 @@ test("k152 hermes: the trust hint comes with a skill Hermes loads, not with an a
     ]);
 
     e.userCfg({ targets: ["claude", "hermes"], sources });
-    const agentOnly = checkout("agent-only", { agents: ["bar@mine"] });
+    const agentOnly = checkout("agent-only", { agents: ["bar@mine"] }, ["claude", "hermes"]);
     const agent = await e.prompt(agentOnly);
     assert.equal(existsSync(join(agentOnly, ".claude", "agents", ".local.bar.md")), true);
     assert.match(agent.systemMessage ?? "", /^skilletor: 1 item\(s\) updated\b/);
     assert.doesNotMatch(JSON.stringify(agent), /hermes skills trust/);
 
     e.userCfg({ targets: ["hermes"], sources });
-    const removal = checkout("removal", { skills: ["foo@mine"] });
+    const removal = checkout("removal", { skills: ["foo@mine"] }, ["hermes"]);
     assert.match((await e.prompt(removal)).systemMessage ?? "", /hermes skills trust/);
     e.writeJson(join(removal, ".claude", "skilletor.json"), { install: {} });
     assert.deepEqual(await e.prompt(e.main), {});

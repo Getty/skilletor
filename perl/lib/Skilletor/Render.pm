@@ -88,14 +88,15 @@ sub _message {
 # uses `{{ }}` itself stays intact.
 sub build {
   my ( $item, $source_dir, $context ) = @_;
-  my ( $env, $vars, @out );
+  my ( $env, $vars, $template_context, @out );
   for my $file ( @{ $item->{files} } ) {
     unless ( $file =~ /\.njk\z/ ) {
       push @out, [ install_path( $item, $file ), path( encode_text( path_join( $source_dir, $file ) ) )->slurp_raw ];
       next;
     }
     $env  //= _env($source_dir);
-    $vars //= _template_context($context);
+    $template_context //= ref $context eq 'CODE' ? $context->() : $context;
+    $vars //= _template_context($template_context);
     my $rendered;
     unless ( eval { $rendered = $env->render( $file, $vars ); 1 } ) {
       my $err = $@;
@@ -173,15 +174,21 @@ Nunjucks message> >>.
 =func build
 
   build( $item, $source_dir, $context );
+  build( $item, $source_dir, sub { $context } );
 
 The item's output as an ordered list of C<[ install path, bytes ]>. The
-context is the reference's C<RenderContext>, values as L<Skilletor::JSON>
+context remains the reference's C<RenderContext>, values as L<Skilletor::JSON>
 reads them:
 C<< { vars, project?, scope, harness, target => { dir }, host => { name, os },
 user => { name, home }, item => { name, type, source } } >>. A JSON C<null> in
 it is the template's C<null>, a missing field its C<undefined>; objects keep
-their property order. Throws L<Skilletor::Error::Render> for a template that
-fails.
+their property order.
+
+Alternatively, C<$context> may be a zero-argument C<CODE> reference. It is
+evaluated at the first C<.njk> file only, including a companion template, and
+its returned hash is cached for the build. An item with no C<.njk> files copies
+without evaluating it. A supplier exception propagates directly; a template
+rendering failure throws L<Skilletor::Error::Render>.
 
 =func executables
 

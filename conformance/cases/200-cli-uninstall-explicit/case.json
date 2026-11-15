@@ -1,0 +1,29 @@
+{
+  "description": "uninstall of explicit entries: after a sync, a type-prefixed name removes only that type and its installed files; a bare name removes that name from every type; removing the last entry removes the last file, install object and empty lock.",
+  "steps": [
+    {
+      "id": "sync",
+      "op": "cli",
+      "argv": ["sync", "--scope", "user"],
+      "tree": true
+    },
+    {
+      "id": "typed",
+      "op": "cli",
+      "argv": ["uninstall", "skill:dup@shared"],
+      "tree": true
+    },
+    {
+      "id": "bare",
+      "op": "cli",
+      "argv": ["uninstall", "dup@shared"],
+      "tree": true
+    },
+    {
+      "id": "last",
+      "op": "cli",
+      "argv": ["uninstall", "r1@shared"],
+      "tree": true
+    }
+  ]
+}

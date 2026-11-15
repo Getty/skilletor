@@ -1,0 +1,11 @@
+{
+  "description": "A project without evidence bootstraps from the sole explicit machine target.",
+  "git": { "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] } },
+  "claude": false,
+  "steps": [
+    { "id": "sync", "op": "sync", "scope": "project", "tree": true },
+    { "id": "check", "op": "check", "scope": "project" },
+    { "id": "status", "op": "status", "scope": "project" },
+    { "id": "resync", "op": "sync", "scope": "project" }
+  ]
+}

@@ -1,0 +1,5 @@
+user scope (claude, codex):
+  ✓ agents/rev @mine
+  ✓ codex:agents/rev @mine
+project scope:
+warning: Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${TMP}/codex-ü/config.toml); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules

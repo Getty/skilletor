@@ -1,0 +1,53 @@
+{
+  "description": "install of explicit items from a git source, fetched under the sync lock: a bare name's type found in the catalog, stored as `name@source` in that type's list after the config's own keys in their order, the sync installing it beside what the config declared; a typed name of a name two types share and a second item in one run; the same item again adds no second entry and the sync is up to date; --project creates the project config's `install` after its own keys and the project sync installs there.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "skill",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@shared"
+      ],
+      "tree": true
+    },
+    {
+      "id": "typed",
+      "op": "cli",
+      "argv": [
+        "install",
+        "agent:dup@shared",
+        "helper@shared"
+      ],
+      "tree": true
+    },
+    {
+      "id": "again",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@shared"
+      ],
+      "tree": true
+    },
+    {
+      "id": "project",
+      "op": "cli",
+      "argv": [
+        "install",
+        "skill:dup@shared",
+        "--project"
+      ],
+      "tree": true
+    }
+  ]
+}

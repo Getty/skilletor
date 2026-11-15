@@ -1,0 +1,1 @@
+skilletor: agent:foo@shared is not declared in the user config (${HOME}/.claude/skilletor.json); it is declared as skill:foo@shared

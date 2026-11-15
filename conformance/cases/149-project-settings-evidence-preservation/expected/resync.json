@@ -1,0 +1,37 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "settingsSkipped": [
+        ".claude/settings.json not updated: the plugin requirement would change implicitly selected project targets; set \"targets\" in the project's .claude/skilletor.json or .claude/skilletor.local.json, then sync"
+      ],
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [
+        {
+          "key": "codex:skills/sample",
+          "name": "sample",
+          "source": "shared",
+          "type": "skill"
+        },
+        {
+          "key": "skills/sample",
+          "name": "sample",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "updated": [],
+      "warnings": [
+        ".claude/settings.json not updated: the plugin requirement would change implicitly selected project targets; set \"targets\" in the project's .claude/skilletor.json or .claude/skilletor.local.json, then sync"
+      ]
+    }
+  ],
+  "warnings": [
+    "Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${HOME}/.codex/config.toml); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules"
+  ]
+}

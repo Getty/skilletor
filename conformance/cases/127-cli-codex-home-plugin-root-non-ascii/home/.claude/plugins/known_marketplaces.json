@@ -1,0 +1,14 @@
+{
+  "getty": {
+    "source": {
+      "source": "github",
+      "repo": "Getty/marketplace"
+    }
+  },
+  "other": {
+    "source": {
+      "source": "github",
+      "repo": "someone/other"
+    }
+  }
+}

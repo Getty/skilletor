@@ -1,0 +1,30 @@
+{
+  "scopes": [
+    {
+      "bundles": [],
+      "declared": [
+        {
+          "installed": true,
+          "key": "codex:skills/greet",
+          "source": "shared"
+        },
+        {
+          "installed": true,
+          "key": "skills/greet",
+          "source": "shared"
+        }
+      ],
+      "orphans": [],
+      "scope": "project",
+      "sourceVersions": {
+        "shared": "git:1f8a43c"
+      },
+      "targets": [
+        "claude",
+        "codex"
+      ],
+      "trustRequests": [],
+      "wildcards": []
+    }
+  ]
+}

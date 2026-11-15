@@ -18,7 +18,6 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { delimiter, dirname, join } from "node:path";
 import { buildToString } from "../scripts/esbuild.config.mjs";
-import { gitEnv } from "../src/gitenv.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const PLUGIN = join(root, "hermes", "skilletor");
@@ -65,6 +64,32 @@ const SKILL = (name: string, body = "BODY") =>
 
 let cases = 0;
 
+type HermesTestPaths = { home: string; hermesHome: string; tmp: string; cli: string };
+
+/** The environment for every child process in one throwaway Hermes machine. */
+function hermesTestEnv(
+  { home, hermesHome, tmp, cli }: HermesTestPaths,
+  more: Record<string, string | undefined> = {},
+  parent: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  // PATH is needed for git and for the shell shim. Windows also needs its system paths to start
+  // executables. Everything else is explicitly local to this machine or this test case.
+  const essentials = ["PATH", ...(process.platform === "win32" ? ["SystemRoot", "ComSpec", "PATHEXT", "WINDIR"] : [])];
+  const platform: Record<string, string> = {};
+  for (const name of essentials) {
+    const value = parent[name];
+    if (value !== undefined) platform[name] = value;
+  }
+  return Object.fromEntries(Object.entries({
+    ...platform,
+    HOME: home, HERMES_HOME: hermesHome, CODEX_HOME: join(home, ".no-codex"),
+    TMPDIR: tmp, TMP: tmp, TEMP: tmp,
+    ...(process.platform === "win32" ? { USERPROFILE: home } : {}),
+    SKILLETOR_BIN: cli, PYTHONDONTWRITEBYTECODE: "1", // no __pycache__ in the linked plugin directory
+    ...more,
+  }).filter(([, value]) => value !== undefined));
+}
+
 /** One throwaway machine: a home with skilletor's config, a Hermes home, a git project, a source. */
 function machine(opts: { enabled?: string[]; trustProject?: boolean } = {}) {
   const dir = join(run, `case-${++cases}`);
@@ -75,11 +100,14 @@ function machine(opts: { enabled?: string[]; trustProject?: boolean } = {}) {
   for (const d of [join(home, ".claude"), join(hermesHome, "plugins"), join(project, ".claude"), join(dir, "tmp")]) {
     mkdirSync(d, { recursive: true });
   }
+  /** Every child gets only platform execution essentials and this machine's disposable paths. */
+  const env = (more: Record<string, string | undefined> = {}): NodeJS.ProcessEnv =>
+    hermesTestEnv({ home, hermesHome, tmp: join(dir, "tmp"), cli }, more);
   // A repository of its own: every process below runs in it, and skilletor takes the git top
   // level of where it runs as the project. Without it that would be this checkout, whose
   // .claude/skilletor.json is real (k123) – on a machine where only Hermes is in use, a sync
   // there removes what skilletor installed for Claude Code.
-  execFileSync("git", ["init", "-q", project], { env: gitEnv() });
+  execFileSync("git", ["init", "-q", project], { env: env() });
   assert.ok(existsSync(join(project, ".git")));
   const config = (enabled: string[], trust: boolean, more: string[] = []) => writeFileSync(join(hermesHome, "config.yaml"), [
     "plugins:", enabled.length ? "  enabled:" : "  enabled: []", ...enabled.map((p) => `    - ${p}`),
@@ -91,23 +119,11 @@ function machine(opts: { enabled?: string[]; trustProject?: boolean } = {}) {
     writeFileSync(join(src, "skills", name, "SKILL.md"), SKILL(name, body));
   };
   /** Declare skills; Hermes is never detected, so the user config opts in by `targets`. */
-  const declare = (user: string[], inProject: string[] = [], targets = ["hermes"]) => {
+  const declare = (user: string[], inProject: string[] = [], targets = ["hermes"], projectTargets?: string[]) => {
     writeFileSync(join(home, ".claude", "skilletor.json"),
       JSON.stringify({ targets, sources: { mine: { local: src } }, install: { skills: user.map((n) => `${n}@mine`) } }));
     writeFileSync(join(project, ".claude", "skilletor.json"),
-      JSON.stringify({ install: { skills: inProject.map((n) => `${n}@mine`) } }));
-  };
-  /** The environment of a Hermes (or skilletor) process on this machine: nothing of the
-   *  developer's Hermes, Claude Code, Codex or skilletor, and its temp files on disk. A
-   *  variable `more` sets to undefined is not passed. */
-  const env = (more: Record<string, string | undefined> = {}): NodeJS.ProcessEnv => {
-    const kept = Object.fromEntries(Object.entries(gitEnv()).filter(([k]) =>
-      !/^(HERMES_|CLAUDE_|CLAUDECODE|CODEX_|SKILLETOR_|AI_AGENT)/.test(k)));
-    return {
-      ...kept, HOME: home, HERMES_HOME: hermesHome, CODEX_HOME: join(home, ".no-codex"), TMPDIR: join(dir, "tmp"),
-      SKILLETOR_BIN: cli, PYTHONDONTWRITEBYTECODE: "1", // no __pycache__ in the linked plugin directory
-      ...more,
-    };
+      JSON.stringify({ ...(projectTargets ? { targets: projectTargets } : {}), install: { skills: inProject.map((n) => `${n}@mine`) } }));
   };
   const installPlugin = (how: "link" | "copy") => {
     const at = join(hermesHome, "plugins", "skilletor");
@@ -127,6 +143,21 @@ function machine(opts: { enabled?: string[]; trustProject?: boolean } = {}) {
   };
   return { dir, home, hermesHome, project, src, config, skill, declare, env, installPlugin, skilletor, hermes, python };
 }
+
+test("Hermes child processes exclude credential-shaped parent variables", () => {
+  const names = ["K154_PROVIDER_API_KEY", "K154_PROVIDER_TOKEN", "K154_DATABASE_PASSWORD"];
+  const paths = { home: "/tmp/k154-home", hermesHome: "/tmp/k154-hermes", tmp: "/tmp/k154-tmp", cli: "/tmp/k154-skilletor" };
+  const parent = Object.fromEntries([
+    ["PATH", process.env.PATH],
+    ...names.map((name) => [name, "synthetic-sentinel"]),
+  ]);
+  const child = spawnSync(process.execPath, ["-e", `
+    const names = ${JSON.stringify(names)};
+    process.stdout.write(JSON.stringify(names.map((name) => Object.hasOwn(process.env, name))));
+  `], { encoding: "utf8", env: hermesTestEnv(paths, {}, parent) });
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout), [false, false, false]);
+});
 
 const HEAD = `
 import json, os, sys
@@ -212,7 +243,7 @@ test("a project skill: under .hermes/skills in a trusted project; with Codex act
   mkdirSync(codexHome);
   writeFileSync(join(codexHome, "config.toml"), "");
   const both = { CODEX_HOME: codexHome };
-  m.declare([], ["sk-proj"], ["codex", "hermes"]);
+  m.declare([], ["sk-proj"], ["codex", "hermes"], ["codex", "hermes"]);
   const sync = m.skilletor(["sync"], m.project, both);
   assert.equal(sync.status, 0, sync.stderr);
   assert.match(sync.stdout, /\+ codex:skills\/sk-proj/);
@@ -285,7 +316,7 @@ test("a move between turns, the way `/worktree new` makes one: the next turn syn
   m.installPlugin("link");
   m.skill("sk-proj");
   m.declare([], ["sk-proj"]);
-  const git = (...args: string[]) => execFileSync("git", ["-C", m.project, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { env: gitEnv() });
+  const git = (...args: string[]) => execFileSync("git", ["-C", m.project, "-c", "user.name=t", "-c", "user.email=t@t", ...args], { env: m.env() });
   git("add", ".claude/skilletor.json");
   git("commit", "-q", "-m", "config");
   const wt = join(m.dir, "wt");
@@ -403,7 +434,7 @@ test("`hermes plugins install <git URL>#hermes/skilletor --enable`: enabled, fin
   // the checkout itself would take its last commit, not the tree under test).
   const upstream = join(m.dir, "upstream");
   cpSync(PLUGIN, join(upstream, "hermes", "skilletor"), { recursive: true, filter: (p) => !p.includes("__pycache__") });
-  const git = (...args: string[]) => execFileSync("git", ["-C", upstream, ...args], { env: gitEnv() });
+  const git = (...args: string[]) => execFileSync("git", ["-C", upstream, ...args], { env: m.env() });
   const commit = () => {
     git("add", "-A");
     git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "plugin");

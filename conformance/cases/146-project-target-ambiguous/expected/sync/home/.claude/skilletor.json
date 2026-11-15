@@ -1,0 +1,6 @@
+{
+  "targets": ["claude", "codex"],
+  "sources": {
+    "shared": { "git": "https://conformance.invalid/shared.git" }
+  }
+}

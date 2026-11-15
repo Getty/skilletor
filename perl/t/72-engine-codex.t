@@ -21,6 +21,7 @@ use Path::Tiny qw( path tempdir );
 use Skilletor::Engine;
 use Skilletor::FSUtil qw( decode_utf8_lossy encode_text );
 use Skilletor::JSON qw( js_parse js_sort_keys js_stringify js_type );
+use Skilletor::Lock qw( read_lock );
 use Skilletor::Report qw( report_json );
 
 binmode Test::More->builder->$_, ':encoding(UTF-8)' for qw( output failure_output todo_output );
@@ -111,7 +112,10 @@ sub machine {
   path( $m->{home}, '.claude.json' )->spew_raw("{}\n") unless $codex_only;
   files( $m->{home}, '.codex/config.toml' => $TRUSTED );
   write_json( "$m->{home}/.claude/skilletor.json", { sources => { s => { local => $SRC } }, install => { rules => ['style@s'] } } );
-  write_json( "$m->{project}/.claude/skilletor.json", { install => { rules => ['style@s'], skills => ['greet@s'] } } );
+  write_json( "$m->{project}/.claude/skilletor.json", {
+    targets => $codex_only ? ['codex'] : [qw( claude codex )],
+    install => { rules => ['style@s'], skills => ['greet@s'] },
+  } );
   $extra->($m);
   return $m;
 }
@@ -253,6 +257,136 @@ subtest 'a rules file git tracks: one warning with the command that untracks it'
   ok( ( grep { $_->[0] eq "$m->{project}/.codex" && grep { $_ eq 'skilletor-rules.md' } @{ $_->[1] } } @asked ), 'asked in the Codex root' );
   $r = $e->sync( scope => 'project' );
   is_deeply( $r->{scopes}[0]{warnings}, [], 'a sync that writes nothing asks about nothing' );
+};
+
+subtest 'project evidence removes owned Codex outputs and keeps a foreign file' => sub {
+  my $m = machine( 0, sub { } );
+  my $e = perl_engine($m);
+  $e->sync( scope => 'project' );
+  my $foreign = path( $m->{project}, '.agents', 'skills', 'greet', 'MINE.txt' );
+  $foreign->spew("mine\n");
+  path( $m->{project}, 'CLAUDE.md' )->spew("Use Claude Code here.\n");
+  write_json( "$m->{project}/.claude/skilletor.json", { install => { rules => ['style@s'], skills => ['greet@s'] } } );
+  my $r = $e->sync( scope => 'project' );
+  my @removed = map { $_->{key} } @{ $r->{scopes}[0]{removed} };
+  ok( ( grep { $_ eq 'codex:skills/greet' } @removed ), 'the owned Codex skill is removed' );
+  ok( !$foreign->parent->child('SKILL.md')->exists, 'the generated Codex file is gone' );
+  is( $foreign->slurp_utf8, "mine\n", 'the foreign file remains' );
+  ok( path( $m->{project}, '.claude', 'skills', 'greet', 'SKILL.md' )->exists, 'the Claude copy remains' );
+  $e->sync( scope => 'project' );
+  ok( !$foreign->parent->child('SKILL.md')->exists, 'a second sync does not reinstall the Codex skill' );
+  is( $foreign->slurp_utf8, "mine\n", 'the foreign file still remains' );
+};
+
+subtest 'empty Claude settings beside Codex evidence select Codex stably across syncs' => sub {
+  my $m = machine( 0, sub { } );
+  my $e = perl_engine($m);
+  write_json( "$m->{project}/.claude/skilletor.json", { install => { rules => ['style@s'], skills => ['greet@s'] } } );
+  files( $m->{project}, '.codex/config.toml' => "model = 'test'\n", '.claude/settings.json' => "{}\n" );
+  for ( 1 .. 2 ) {
+    my $r = $e->sync( scope => 'project' );
+    ok( !defined $r->{error}, 'sync has no error' );
+    my @keys = sort keys %{ read_lock("$m->{project}/.claude/skilletor.lock.json") };
+    is_deeply( \@keys, [ 'codex:rules/style', 'codex:skills/greet' ], 'only Codex remains selected' );
+    ok( !-e "$m->{project}/.claude/skills/greet", 'there is no Claude skill' );
+    ok( -e "$m->{project}/.agents/skills/greet/SKILL.md", 'the Codex skill exists' );
+  }
+};
+
+subtest 'marketplace-only Claude settings preserve both evidenced targets across syncs' => sub {
+  my $m = machine( 0, sub { } );
+  my $e = perl_engine($m);
+  $e->sync( scope => 'project' );
+  write_json( "$m->{project}/.claude/skilletor.json", { install => { rules => ['style@s'], skills => ['greet@s'] } } );
+  files( $m->{project}, '.codex/config.toml' => "model = 'test'\n" );
+  write_json( "$m->{project}/.claude/settings.json", {
+    extraKnownMarketplaces => { team => { source => { source => 'github', repo => 'example/team' } } },
+  } );
+  for ( 1 .. 2 ) {
+    $e->sync( scope => 'project' );
+    my @keys = sort keys %{ read_lock("$m->{project}/.claude/skilletor.lock.json") };
+    is_deeply( \@keys, [ 'codex:rules/style', 'codex:skills/greet', 'rules/style', 'skills/greet' ], 'both targets remain selected' );
+    ok( -e "$m->{project}/.claude/skills/greet/SKILL.md", 'the Claude skill remains' );
+    ok( -e "$m->{project}/.agents/skills/greet/SKILL.md", 'the Codex skill remains' );
+  }
+};
+
+subtest 'explicit null settings stay stable across alternating TypeScript and Perl syncs' => sub {
+  plan skip_all => $why_no_ts if $why_no_ts;
+  for my $field (qw( enabledPlugins extraKnownMarketplaces )) {
+    my $m = machine( 0, sub { } );
+    write_json( "$m->{project}/.claude/skilletor.json", { install => { rules => ['style@s'], skills => ['greet@s'] } } );
+    files( $m->{project}, '.codex/config.toml' => "model = 'test'\n" );
+    write_json( "$m->{project}/.claude/settings.json", { $field => undef } );
+    my $lock = "$m->{project}/.claude/skilletor.lock.json";
+    my $want = [ 'codex:rules/style', 'codex:skills/greet', 'rules/style', 'skills/greet' ];
+
+    ts( { op => 'sync', home => $m->{home}, projectDir => $m->{project}, scope => 'project' } );
+    is_deeply( [ sort keys %{ read_lock($lock) } ], $want, "$field: TypeScript selects both" );
+    perl_engine($m)->sync( scope => 'project' );
+    is_deeply( [ sort keys %{ read_lock($lock) } ], $want, "$field: Perl keeps the same targets" );
+    ts( { op => 'sync', home => $m->{home}, projectDir => $m->{project}, scope => 'project' } );
+    is_deeply( [ sort keys %{ read_lock($lock) } ], $want, "$field: TypeScript remains stable after Perl" );
+  }
+};
+
+subtest 'Codex evidence removes Claude output without a residual foreign file re-enabling Claude' => sub {
+  my $m = machine( 0, sub { } );
+  my $e = perl_engine($m);
+  $e->sync( scope => 'project' );
+  my $foreign = path( $m->{project}, '.claude', 'skills', 'greet', 'MINE.txt' );
+  $foreign->spew("mine\n");
+  files( $m->{project}, '.codex/config.toml' => "model = 'test'\n" );
+  write_json( "$m->{project}/.claude/skilletor.json", { install => { rules => ['style@s'], skills => ['greet@s'] } } );
+  my $first = $e->sync( scope => 'project' );
+  ok( ( grep { $_->{key} eq 'skills/greet' } @{ $first->{scopes}[0]{removed} } ), 'the Claude skill is removed' );
+  ok( !$foreign->parent->child('SKILL.md')->exists, 'the generated Claude file is gone' );
+  is( $foreign->slurp_utf8, "mine\n", 'the foreign file remains' );
+  for ( 1 .. 2 ) {
+    $e->sync( scope => 'project' );
+    my @keys = sort keys %{ read_lock("$m->{project}/.claude/skilletor.lock.json") };
+    is_deeply( \@keys, [ 'codex:rules/style', 'codex:skills/greet' ], 'Claude is not selected again' );
+    ok( !$foreign->parent->child('SKILL.md')->exists, 'the Claude skill is not reinstalled' );
+    is( $foreign->slurp_utf8, "mine\n", 'the foreign file still remains' );
+  }
+};
+
+subtest 'user-only sync, check and status do not read a malformed project lock' => sub {
+  my $m = machine( 1, sub { } );
+  write_json( "$m->{project}/.claude/skilletor.json", {} );
+  path( $m->{project}, '.claude', 'skilletor.lock.json' )->spew_raw("{ broken\n");
+  my $e = perl_engine($m);
+  my $sync = $e->sync( scope => 'user' );
+  ok( !defined $sync->{error}, 'sync has no error' );
+  is_deeply( [ map { $_->{scope} } @{ $sync->{scopes} } ], ['user'], 'only the user scope synced' );
+  ok( -e "$m->{home}/.codex/skilletor-rules.md", 'the user item was installed' );
+  ok( !defined $e->check( scope => 'user', local => 1 )->{error}, 'check has no error' );
+  ok( !defined $e->status( scope => 'user' )->{error}, 'status has no error' );
+  is( path( $m->{project}, '.claude', 'skilletor.lock.json' )->slurp_raw, "{ broken\n", 'the project lock was untouched' );
+};
+
+subtest 'ambiguous multi-harness project preserves generated outputs on repeated checks and syncs' => sub {
+  my $m = machine( 0, sub { } );
+  my $e = perl_engine($m);
+  $e->sync( scope => 'project' );
+  write_json( "$m->{project}/.claude/settings.json", {
+    enabledPlugins => { 'skilletor@getty' => JSON::MaybeXS::true() },
+    extraKnownMarketplaces => { getty => { source => { source => 'github', repo => 'example/marketplace' } } },
+  } );
+  write_json( "$m->{project}/.claude/skilletor.json", { install => { rules => ['style@s'], skills => ['greet@s'] } } );
+  my $lock = path( $m->{project}, '.claude', 'skilletor.lock.json' );
+  my $before = $lock->slurp_raw;
+  my $check = $e->check( scope => 'project', local => 1 );
+  ok( !$check->{changed}, 'an unresolved project is not drift' );
+  like( join( "\n", @{ $check->{warnings} } ), qr/ambiguous.*set "targets".*left unchanged/i, 'check gives the actionable warning' );
+  for ( 1 .. 2 ) {
+    my $r = $e->sync( scope => 'project' );
+    is_deeply( $r->{scopes}[0]{removed}, [], 'sync removes nothing' );
+    like( join( "\n", @{ $r->{scopes}[0]{warnings} } ), qr/ambiguous.*left unchanged/i, 'sync gives the warning' );
+    is( $lock->slurp_raw, $before, 'the lock is unchanged' );
+    ok( path( $m->{project}, '.claude', 'skills', 'greet', 'SKILL.md' )->exists, 'Claude output remains' );
+    ok( path( $m->{project}, '.agents', 'skills', 'greet', 'SKILL.md' )->exists, 'Codex output remains' );
+  }
 };
 
 subtest 'the run notes: one line per harness without a counterpart, one per harness and scope served from another root' => sub {

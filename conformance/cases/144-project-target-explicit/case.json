@@ -1,0 +1,9 @@
+{
+  "description": "Committed project targets override contrary project evidence while still intersecting the explicit machine allowlist.",
+  "git": { "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] } },
+  "steps": [
+    { "id": "sync", "op": "sync", "scope": "project", "tree": true },
+    { "id": "check", "op": "check", "scope": "project" },
+    { "id": "status", "op": "status", "scope": "project" }
+  ]
+}

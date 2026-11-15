@@ -1,0 +1,42 @@
+{
+  "description": "install of a wildcard (cli.test.ts :81): a name with `*` and no type prefix exits 1 naming the three prefixed forms, nothing written; `rule:*@shared` stores `*@shared` under `install.rules` – the compact user config rewritten as two-space JSON in its key order – and the sync installs every rule of the source, no skill; `skill:perl-*@shared` and `agent:*@shared` add a pattern and a wildcard nothing matches yet, both stored as written without the prefix, the sync installs the matching skill and says nothing of the agents; status marks each item `via` its wildcard and counts each wildcard's items.",
+  "steps": [
+    {
+      "id": "bare",
+      "op": "cli",
+      "argv": [
+        "install",
+        "*@shared"
+      ],
+      "tree": true
+    },
+    {
+      "id": "rules",
+      "op": "cli",
+      "argv": [
+        "install",
+        "rule:*@shared"
+      ],
+      "tree": true
+    },
+    {
+      "id": "pattern",
+      "op": "cli",
+      "argv": [
+        "install",
+        "skill:perl-*@shared",
+        "agent:*@shared"
+      ],
+      "tree": true
+    },
+    {
+      "id": "status",
+      "op": "cli",
+      "argv": [
+        "status",
+        "--scope",
+        "user"
+      ]
+    }
+  ]
+}

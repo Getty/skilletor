@@ -1,0 +1,4 @@
+{
+  "targets": ["codex"],
+  "install": { "skills": ["greet@shared"] }
+}

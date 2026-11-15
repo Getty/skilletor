@@ -1,0 +1,6 @@
+{
+  "description": "available refuses a lock whose entry is not an object before it lists a local source.",
+  "steps": [
+    { "id": "entry-error", "op": "cli", "argv": ["available", "shared"] }
+  ]
+}

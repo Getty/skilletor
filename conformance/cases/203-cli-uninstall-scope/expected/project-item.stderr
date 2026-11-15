@@ -1,0 +1,1 @@
+skilletor: r2@shared is not declared in the user config (${HOME}/.claude/skilletor.json); the project config declares it (use --project)

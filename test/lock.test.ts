@@ -1,10 +1,11 @@
 // Tests for the per-scope lock file (spec §6.2).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
-import { readLock, writeLock, type Lock } from "../src/lock.ts";
+import { apply } from "../src/apply.ts";
+import { LockError, readLock, serializeLock, writeLock, type Lock } from "../src/lock.ts";
 
 test("a missing lock reads as empty", () => {
   const tmp = makeTmpDir();
@@ -64,6 +65,70 @@ test("invalid JSON is rejected", () => {
     const p = join(tmp.dir, "l.json");
     writeFileSync(p, "{ broken");
     assert.throws(() => readLock(p));
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("a lock entry must be an object", () => {
+  const tmp = makeTmpDir();
+  try {
+    const p = join(tmp.dir, "l.json");
+    for (const bad of ["null", "\"x\"", "3", "[]"] as const) {
+      writeFileSync(p, `{ "rules/r": ${bad} }`);
+      assert.throws(() => readLock(p), (err: Error) =>
+        err instanceof LockError && err.message.includes('rules/r: expected an object'), bad);
+    }
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("a lock entry's files must be a string-valued object", () => {
+  const tmp = makeTmpDir();
+  try {
+    const p = join(tmp.dir, "l.json");
+    const entry = (files: unknown, present = true, via?: unknown) => ({
+      source: "s", version: "v", ...(present ? { files } : {}), ...(via === undefined ? {} : { via }),
+    });
+    for (const [what, value, present] of [
+      ["missing", undefined, false], ["null", null, true], ["an array", [], true], ["a string", "sha256:x", true],
+      ["a number", 1, true], ["a boolean", true, true],
+    ] as const) {
+      writeFileSync(p, JSON.stringify({ "skills/x": entry(value, present) }));
+      assert.throws(() => serializeLock(readLock(p)), (err: Error) =>
+        err instanceof LockError && err.message.endsWith('invalid lock JSON (skills/x: "files" must be an object)'), what);
+    }
+    for (const value of [null, [], {}, 1, true]) {
+      writeFileSync(p, JSON.stringify({ "skills/x": entry({ "skills/x/SKILL.md": value }) }));
+      assert.throws(() => readLock(p), (err: Error) =>
+        err instanceof LockError && err.message.endsWith('invalid lock JSON (skills/x: "files" values must be strings)'), JSON.stringify(value));
+    }
+    writeFileSync(p, JSON.stringify({ "skills/x": entry({ "skills/x/SKILL.md": "legacy:any-string" }) }));
+    assert.deepEqual(readLock(p)["skills/x"]!.files, { "skills/x/SKILL.md": "legacy:any-string" });
+    writeFileSync(p, JSON.stringify({ "skills/x": entry(null, true, "bundle:bad@shared") }));
+    assert.throws(() => readLock(p), (err: Error) =>
+      err instanceof LockError && err.message.endsWith('invalid lock JSON (skills/x: "via" must be an array of strings)'));
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("a corrupt hash aborts apply before changing ownership", () => {
+  const tmp = makeTmpDir();
+  try {
+    const p = join(tmp.dir, "skilletor.lock.json");
+    const rel = "skills/x/SKILL.md";
+    mkdirSync(join(tmp.dir, "skills", "x"), { recursive: true });
+    writeFileSync(join(tmp.dir, rel), "old");
+    const broken = JSON.stringify({ "skills/x": { source: "s", version: "v", files: { [rel]: 1 } } });
+    writeFileSync(p, broken);
+    assert.throws(() => apply([{
+      key: "skills/x", type: "skill", name: "x", source: "s", version: "v", output: new Map([[rel, Buffer.from("new")]]),
+    }], { targetDir: tmp.dir }), (err: Error) =>
+      err instanceof LockError && err.message.endsWith('invalid lock JSON (skills/x: "files" values must be strings)'));
+    assert.equal(readFileSync(join(tmp.dir, rel), "utf8"), "old");
+    assert.equal(readFileSync(p, "utf8"), broken);
   } finally {
     tmp.cleanup();
   }

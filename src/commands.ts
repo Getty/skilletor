@@ -351,7 +351,7 @@ async function listAvailable(
         name: item.name,
         description: item.description,
         source: name,
-        installed: installedKeys.has(`${TYPE_DIR[item.type]}/${item.name}@${name}`),
+        installed: installedKeys.has(installedKey(`${TYPE_DIR[item.type]}/${item.name}`, name)),
       };
       if (item.error !== undefined) entry.error = item.error;
       out.push(entry);
@@ -778,17 +778,23 @@ function usedSources(config: LoadedConfig): Set<string> {
   return used;
 }
 
+/** An available item's identity: its name ignores case, its target directory and source alias do not. */
+function installedKey(target: string, source: string): string {
+  const slash = target.indexOf("/");
+  return `${target.slice(0, slash + 1)}${nameKey(target.slice(slash + 1))}@${source}`;
+}
+
 /** Set of "<typedir>/<name>@<source>" for every declared or locked item. */
 function installedSet(ctx: CommandContext, config: LoadedConfig): Set<string> {
   const set = new Set<string>();
-  for (const i of declaredItems(config)) set.add(`${i.key}@${i.source}`);
+  for (const i of declaredItems(config)) set.add(installedKey(i.key, i.source));
   const projectDir = projectDirOf(ctx);
   for (const scope of ["user", "project"] as const) {
     const dir = scope === "user" ? claudeConfigDirOf(ctx.home, ctx.claudeConfigDir) : join(projectDir ?? "", ".claude");
     if (scope === "project" && !projectDir) continue;
     for (const [key, entry] of Object.entries(readLock(join(dir, "skilletor.lock.json")))) {
       if (entry.skipped) continue; // renders empty here: nothing installed
-      set.add(`${parseLockKey(key).target}@${entry.source}`); // any target counts
+      set.add(installedKey(parseLockKey(key).target, entry.source)); // any target counts
     }
   }
   return set;

@@ -2,23 +2,32 @@
 
 ## Which harnesses (`targets`)
 
-Without `targets`, skilletor installs for every harness it detects, by files the harness
-itself creates (never `~/.claude/` alone — skilletor's config lives there):
+Without `targets`, skilletor detects machine harnesses by files the harness itself creates
+(never `~/.claude/` alone — skilletor's config lives there):
 
 | Harness | Detected when any exists |
 |---|---|
 | `claude` | `~/.claude.json`, `~/.claude/settings.json`, `~/.claude/projects/` |
 | `codex` | in `$CODEX_HOME` (default `~/.codex`): `config.toml`, `auth.json`, `sessions/`, `installation_id` |
-| `hermes` | never — a target only when the user `targets` names it |
+| `hermes` | never by machine detection — a target only when the user `targets` names it |
 
-- Machine set = user `targets` if set, else detected. Empty → `sync`/`check`/`status` fail
-  with a config error naming the markers; nothing is touched. Fix: set `targets` in
-  `~/.claude/skilletor.json`.
-- User scope installs for the machine set. Project scope: the machine set narrowed by
-  `skilletor.local.json` `targets`, else `skilletor.json` `targets`. A project never adds
-  a harness; an empty intersection installs nothing for the project and warns.
-- Detection re-runs every sync: a harness that disappears has its items removed. Pin
-  `targets` to prevent that. Config, lock and state stay under `.claude/` for every harness.
+- Machine set = user `targets` if set, else detected. It is the user-scope set and a machine
+  allowlist, not an instruction to use every harness in every project. Empty → `sync`/`check`/
+  `status` fail with a config error naming the markers; nothing is touched. Fix: set `targets`
+  in `~/.claude/skilletor.json`.
+- Project selection is local `skilletor.local.json` `targets`, then committed `skilletor.json`
+  `targets`, then genuine project-local harness evidence, always intersected with the machine
+  set. Explicit project targets settle a fresh checkout and can deliberately select both
+  harnesses; an empty intersection installs nothing for the project and warns.
+- Skilletor config, locks, state, generated ignores/pointers, current-lock outputs and generated
+  `.local.*` files are not evidence. Neither are empty settings or settings containing only
+  skilletor's generated plugin/marketplace declarations; genuine user-owned harness files are.
+- Without explicit targets or evidence, one machine target bootstraps the project. With several,
+  the project is left unchanged and one warning asks for project `targets`; user scope continues.
+  A hook's invoking harness never changes this selection.
+- Detection re-runs every sync for the machine fallback: a harness that disappears has its items
+  removed. Pin user `targets` to prevent that. Config, lock and state stay under `.claude/` for
+  every harness.
 
 ## Agents → Codex agent-role TOML
 

@@ -1,0 +1,13 @@
+{
+  "sources": {
+    "shared": {
+      "local": "${HOME}/dev/shared"
+    },
+    "empty": {
+      "local": "${HOME}/dev/empty"
+    },
+    "gone": {
+      "local": "${HOME}/dev/gone"
+    }
+  }
+}

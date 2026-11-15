@@ -1,0 +1,2 @@
+description: Served
+rules: ["p-one@https://conformance.invalid/peter.git"]

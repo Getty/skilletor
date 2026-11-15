@@ -1,0 +1,41 @@
+{
+  "description": "install of an item that cannot be built (cli.test.ts :180 k100, :219 k113; spec §4.1) exits 1 before any edit, nothing on stdout, `skilletor: <source>: <type> <name>: <error>` on stderr: a rule with `x.md` beside `x.md.njk`, a skill with `SKILL.md` beside `SKILL.md.njk` by its typed name, a skill with a companion file in both forms named after an intact item; the config byte-identical; the intact items then install.",
+  "steps": [
+    {
+      "id": "rule-x",
+      "op": "cli",
+      "argv": [
+        "install",
+        "x@shared"
+      ]
+    },
+    {
+      "id": "skill-z",
+      "op": "cli",
+      "argv": [
+        "install",
+        "skill:z@shared"
+      ]
+    },
+    {
+      "id": "skill-y",
+      "op": "cli",
+      "argv": [
+        "install",
+        "fine@shared",
+        "y@shared"
+      ],
+      "tree": true
+    },
+    {
+      "id": "intact",
+      "op": "cli",
+      "argv": [
+        "install",
+        "fine@shared",
+        "ok@shared"
+      ],
+      "tree": true
+    }
+  ]
+}

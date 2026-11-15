@@ -1,0 +1,8 @@
+  skill lint@shared — lint skill
+✓ rule go-c@shared — go-c rule
+✓ rule perl-a@shared — perl-a rule
+✓ rule perl-b@shared — perl-b rule
+✓ bundle perl@shared — Perl things
+    rule:perl-a, rule:perl-b
+  bundle tools@shared — Tools
+    skill:lint

@@ -85,6 +85,34 @@ test("a binary companion file stays byte-identical", () => {
   }
 });
 
+test("a lazy context runs once for templates and never for plain files", () => {
+  const tmp = makeTmpDir();
+  try {
+    let calls = 0;
+    const lazy = (() => {
+      calls += 1;
+      return ctx({ value: "rendered" });
+    }) satisfies () => RenderContext;
+    put(tmp.dir, "skills/plain/SKILL.md", "literal\n");
+    const plain: CatalogItem = { type: "skill", name: "plain", files: ["skills/plain/SKILL.md"] };
+    assert.equal(build(plain, tmp.dir, lazy).get("skills/plain/SKILL.md")!.toString("utf8"), "literal\n");
+    assert.equal(calls, 0);
+
+    put(tmp.dir, "skills/templ/SKILL.md.njk", "{{ vars.value }} main\n");
+    put(tmp.dir, "skills/templ/references/extra.md.njk", "{{ vars.value }} extra\n");
+    const templ: CatalogItem = {
+      type: "skill", name: "templ",
+      files: ["skills/templ/SKILL.md.njk", "skills/templ/references/extra.md.njk"],
+    };
+    const rendered = build(templ, tmp.dir, lazy);
+    assert.equal(calls, 1);
+    assert.equal(rendered.get("skills/templ/SKILL.md")!.toString("utf8"), "rendered main\n");
+    assert.equal(rendered.get("skills/templ/references/extra.md")!.toString("utf8"), "rendered extra\n");
+  } finally {
+    tmp.cleanup();
+  }
+});
+
 test("an undefined variable is an error", () => {
   const tmp = makeTmpDir();
   try {

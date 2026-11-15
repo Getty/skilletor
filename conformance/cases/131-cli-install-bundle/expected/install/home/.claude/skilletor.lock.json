@@ -1,0 +1,29 @@
+{
+  "rules/go-c": {
+    "source": "shared",
+    "version": "local",
+    "files": {
+      "rules/.local.go-c.md": "sha256:75dd1b4b0ca3cfd2461afb4da46c6e25933db6c2526b9dd7c5821d22312c07b0"
+    }
+  },
+  "rules/perl-a": {
+    "source": "shared",
+    "version": "local",
+    "files": {
+      "rules/.local.perl-a.md": "sha256:96435c65bfb05bd09adcfe29a0d752e35ec65408f8e01e5a84b37d5bce078817"
+    },
+    "via": [
+      "bundle:perl@shared"
+    ]
+  },
+  "rules/perl-b": {
+    "source": "shared",
+    "version": "local",
+    "files": {
+      "rules/.local.perl-b.md": "sha256:be5fa3dacb22554e3587c8016ed7ee5238278c0d8f8fe0dd91f7f96fb8be24f2"
+    },
+    "via": [
+      "bundle:perl@shared"
+    ]
+  }
+}

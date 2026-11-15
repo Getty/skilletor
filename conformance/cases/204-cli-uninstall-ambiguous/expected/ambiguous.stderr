@@ -1,0 +1,1 @@
+skilletor: perl@shared is ambiguous in the user config: it names a bundle and rule:perl@shared; use a prefix (bundle:perl@shared)

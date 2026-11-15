@@ -108,6 +108,7 @@ test("k124: a project in use gets a fixed .worktreeinclude block, with one commi
     const more = await sync(e.ctx);
     assert.equal(projectOf(more).added.length, 2);
     e.writeCfg("user", { targets: ["claude", "codex", "hermes"], sources: { mine: { local: src } } });
+    e.writeCfg("project", { targets: ["claude", "codex", "hermes"], install: INSTALL });
     const targets = await sync(e.ctx);
     assert.equal(projectOf(targets).added.length, 3);
     assert.equal(statSync(e.wti).mtimeMs, mtime);
@@ -128,7 +129,7 @@ test("k124: the block covers every file a sync leaves gitignored, for each harne
   try {
     const src = source(e.tmp.dir, "s", FILES);
     e.writeCfg("user", { sources: { mine: { local: src } } });
-    e.writeCfg("project", { install: INSTALL });
+    e.writeCfg("project", { targets: ["claude", "codex"], install: INSTALL });
     const p = e.projectDir;
     const git = (...args: string[]) => execFileSync("git", ["-C", p, ...args], { encoding: "utf8" });
     const lines = (s: string) => s.split("\n").filter(Boolean).sort();
@@ -150,6 +151,7 @@ test("k124: the block covers every file a sync leaves gitignored, for each harne
     assert.deepEqual(uncovered(), []);
 
     e.writeCfg("user", { targets: ["claude", "hermes"], sources: { mine: { local: src } } });
+    e.writeCfg("project", { targets: ["claude", "hermes"], install: INSTALL });
     await sync(e.ctx);
     assert.equal(existsSync(join(p, ".hermes/skills/foo/SKILL.md")), true);
     assert.deepEqual(uncovered(), []);

@@ -1,0 +1,6 @@
+{
+  "description": "sync refuses a lock entry whose ownership map is null without changing it.",
+  "steps": [
+    { "id": "refused", "op": "cli", "argv": ["sync", "--scope", "user"], "tree": true }
+  ]
+}

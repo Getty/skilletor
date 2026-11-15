@@ -1,0 +1,16 @@
+{
+  "rules/r1": {
+    "source": "shared",
+    "version": "local",
+    "files": {
+      "rules/.local.r1.md": "sha256:0060849f5fc39a15ee521f5c140dab4c5d2f7624bd89c39d82a86cc9ad869823"
+    }
+  },
+  "rules/r2": {
+    "source": "shared",
+    "version": "local",
+    "files": {
+      "rules/.local.r2.md": "sha256:af7ccba8477e0dc3ad6eb18661c7c5b97a39a7daee5f8bf20dcffcdb84e8a678"
+    }
+  }
+}

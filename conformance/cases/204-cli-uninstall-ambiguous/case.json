@@ -1,0 +1,35 @@
+{
+  "description": "uninstall matches explicit entries and lock item names ignoring case; a bare name held both as an explicit item and a bundle is refused as ambiguous with both prefixed choices, leaving the config untouched; explicit bundle and item prefixes then remove each declaration.",
+  "steps": [
+    {
+      "id": "sync",
+      "op": "cli",
+      "argv": ["sync", "--scope", "user"],
+      "tree": true
+    },
+    {
+      "id": "case-fold",
+      "op": "cli",
+      "argv": ["uninstall", "foo@shared"],
+      "tree": true
+    },
+    {
+      "id": "ambiguous",
+      "op": "cli",
+      "argv": ["uninstall", "perl@shared"],
+      "tree": true
+    },
+    {
+      "id": "bundle",
+      "op": "cli",
+      "argv": ["uninstall", "bundle:perl@shared"],
+      "tree": true
+    },
+    {
+      "id": "item",
+      "op": "cli",
+      "argv": ["uninstall", "rule:perl@shared"],
+      "tree": true
+    }
+  ]
+}

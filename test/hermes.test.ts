@@ -44,10 +44,11 @@ function env(harnesses: Harness[]) {
   };
   // Hermes is never detected (spec §16.2): an env that uses it names its harnesses in the
   // user config's `targets`, unless a test sets `targets` itself.
-  const writeCfg = (which: "user" | "project", obj: Record<string, unknown>) => {
+  const writeCfg = (which: "user" | "project", obj: Record<string, unknown>, declareProjectTargets = true) => {
     const file = join(which === "user" ? home : projectDir, ".claude", "skilletor.json");
     const optIn = which === "user" && harnesses.includes("hermes") && !("targets" in obj);
-    writeFileSync(file, JSON.stringify(optIn ? { targets: harnesses, ...obj } : obj, null, 2));
+    const projectTargets = which === "project" && declareProjectTargets ? { targets: harnesses, ...obj } : obj;
+    writeFileSync(file, JSON.stringify(optIn ? { targets: harnesses, ...obj } : projectTargets, null, 2));
   };
   return { tmp, ctx, home, projectDir, hermesHome, writeCfg, cleanup: () => tmp.cleanup() };
 }
@@ -201,6 +202,25 @@ test("a project skill goes to <repo>/.hermes/skills; the .hermes root gets no .g
     assert.match(readFileSync(join(e.projectDir, ".claude/skills/foo/SKILL.md"), "utf8"), /for claude in /);
     assert.deepEqual(Object.keys(projectLock(e)).sort(), ["hermes:skills/foo", "skills/foo"]);
     assert.deepEqual(r.scopes[1]!.added.map((i) => i.key), ["skills/foo", "hermes:skills/foo"]);
+  } finally {
+    e.cleanup();
+  }
+});
+
+test("project-local Hermes evidence selects Hermes inside an explicit machine allowlist", async () => {
+  const e = env(["claude", "hermes"]);
+  try {
+    const src = source(e.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo") });
+    e.writeCfg("user", { sources: { mine: { local: src } } });
+    e.writeCfg("project", { install: { skills: ["foo@mine"] } }, false);
+    mkdirSync(join(e.projectDir, ".hermes"));
+    writeFileSync(join(e.projectDir, ".hermes/config.yaml"), "model: test\n");
+    const r = await sync(e.ctx, { scope: "project" });
+    assert.equal(r.error, undefined);
+    assert.deepEqual(Object.keys(projectLock(e)), ["hermes:skills/foo"]);
+    assert.equal(existsSync(join(e.projectDir, ".hermes/skills/foo/SKILL.md")), true);
+    assert.equal(existsSync(join(e.projectDir, ".claude/skills/foo")), false);
+    assert.deepEqual(status(e.ctx, { scope: "project" }).scopes[0]!.targets, ["hermes"]);
   } finally {
     e.cleanup();
   }
@@ -369,6 +389,7 @@ test("Codex becomes active in a project: check reports it, the sync removes Herm
     assert.equal(existsSync(join(e.projectDir, ".hermes/skills/foo/SKILL.md")), true);
 
     e.writeCfg("user", { targets: ["codex", "hermes"], sources: { mine: { local: src } } });
+    e.writeCfg("project", { targets: ["codex", "hermes"], install: { skills: ["foo@mine"] } });
     const chk = await check(e.ctx);
     assert.equal(chk.changed, true);
     assert.deepEqual(chk.targetsChanged, ["project"]);

@@ -1,0 +1,71 @@
+{
+  "description": "install of a bundle whose entries of other sources no configured source serves (spec §15.6), stdin no TTY (cli.test.ts :268, commands.test.ts :1697): exit 1 before any edit, `bundle <names> needs sources you don't have yet; nothing was changed. Add them, then install again:` and one indented `skilletor add <name> <spec>` line per missing source – once per address, two entries of one counting once, across bundles too; a name derived as add derives it, `-2` when another address holds it (`repo`), `source` for a spec without a usable name (k95), ` --project` with --project; an address config load would refuse is the bundle's error, not a missing source (k115); a bundle whose other source is configured under another name installs from it (fetched through insteadOf); the config and the trust byte-identical throughout.",
+  "git": {
+    "peter": {
+      "url": "https://conformance.invalid/peter.git",
+      "commits": [
+        {
+          "tree": "sources/peter"
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "id": "one",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:perl@mine"
+      ],
+      "stdin": "",
+      "tree": true
+    },
+    {
+      "id": "many",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:many@mine"
+      ]
+    },
+    {
+      "id": "two-bundles",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:perl@mine",
+        "rule:r1@mine",
+        "bundle:many@mine",
+        "--project"
+      ],
+      "tree": true
+    },
+    {
+      "id": "underscores",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:under@mine"
+      ]
+    },
+    {
+      "id": "refused",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:refused@mine",
+        "rule:r1@mine"
+      ]
+    },
+    {
+      "id": "served",
+      "op": "cli",
+      "argv": [
+        "install",
+        "bundle:served@mine"
+      ],
+      "tree": true
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "description": "uninstall validates its target config and scope before editing: a typed item declared under another type names it; an item or bundle declared by the project points to --project; one bad item leaves an earlier valid item untouched; --project removes project entries, while a project edit with the home as project dir is refused before writing.",
+  "steps": [
+    {
+      "id": "other-type",
+      "op": "cli",
+      "argv": ["uninstall", "agent:foo@shared"]
+    },
+    {
+      "id": "project-item",
+      "op": "cli",
+      "argv": ["uninstall", "r2@shared"]
+    },
+    {
+      "id": "project-bundle",
+      "op": "cli",
+      "argv": ["uninstall", "bundle:perl@shared"]
+    },
+    {
+      "id": "all-or-nothing",
+      "op": "cli",
+      "argv": ["uninstall", "foo@shared", "nope@shared"],
+      "tree": true
+    },
+    {
+      "id": "remove-project-item",
+      "op": "cli",
+      "argv": ["uninstall", "r2@shared", "--project"],
+      "tree": true
+    },
+    {
+      "id": "home-project",
+      "op": "cli",
+      "argv": ["uninstall", "bundle:perl@shared", "--project", "--project-dir", "${HOME}"]
+    },
+    {
+      "id": "remove-project-bundle",
+      "op": "cli",
+      "argv": ["uninstall", "bundle:perl@shared", "--project"],
+      "tree": true
+    },
+    {
+      "id": "remove-user",
+      "op": "cli",
+      "argv": ["uninstall", "foo@shared"],
+      "tree": true
+    }
+  ]
+}

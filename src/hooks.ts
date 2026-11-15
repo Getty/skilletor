@@ -57,6 +57,14 @@ export interface HookContext extends EngineContext {
   harness?: Harness;
 }
 
+/** Valid hook input is a JSON object, never null, a scalar or an array. */
+export function hookInputOf(value: unknown): HookInput {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as HookInput : {};
+}
+
+/** A hook input's string field, when it is a non-empty one. */
+const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined);
+
 const SESSION_START_TIMEOUT_MS = 5_000;
 const DEFAULT_INTERVAL = 600;
 /** A move's sync writes nothing once this has passed (spec §8): `hooks/hooks.json` and
@@ -66,7 +74,7 @@ const DEFAULT_INTERVAL = 600;
 export const MOVE_DEADLINE_MS = 20_000;
 
 function projectKeyOf(ctx: HookContext, input: HookInput): string {
-  return ctx.projectDir ?? input.cwd ?? "";
+  return ctx.projectDir ?? text(input.cwd) ?? "";
 }
 
 /** One warning line; the message – an error, git's stderr, a name from a config – display-safe. */
@@ -104,14 +112,15 @@ export function projectRootOf(cwd: string): string {
 }
 
 /** Dispatch a hook event; never throws. */
-export async function runHook(event: string, input: HookInput, hookCtx: HookContext): Promise<HookOutput> {
+export async function runHook(event: string, givenInput: unknown, hookCtx: HookContext): Promise<HookOutput> {
+  const input = hookInputOf(givenInput);
   try {
     // The checkout the session moved into is the project, never the session's own (spec §8).
     if (event === "cwd-changed") return await cwdChanged(input, hookCtx);
     if (event === "post-tool-use") return await postToolUse(input, hookCtx);
     const ctx: HookContext = hookCtx.projectDir
       ? hookCtx
-      : { ...hookCtx, projectDir: projectRootOf(input.cwd || process.cwd()) };
+      : { ...hookCtx, projectDir: projectRootOf(text(input.cwd) ?? process.cwd()) };
     switch (event) {
       case "session-start":
         return await sessionStart(input, ctx);
@@ -353,9 +362,6 @@ function withHermesTrust(out: HookOutput, dir: string): HookOutput {
   }
   return result;
 }
-
-/** A hook input's string field, when it is a non-empty one. */
-const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined);
 
 /** Claude Code's CwdChanged (spec §8): it is not awaited, and its output takes no context
  *  (only `watchPaths`), so the line is all it gives – it reaches the user, not the model. It

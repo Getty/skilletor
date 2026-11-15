@@ -6,9 +6,11 @@
 // is a target only when `targets` names it (spec §16.2). The layout table is
 // the seam later phases extend (Codex agents as TOML, rules in a rules file;
 // Hermes Agent, spec §16: skills only).
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join, win32 } from "node:path";
 import { HARNESSES, type Harness, type ItemType } from "./config.ts";
+import { SKILL_GITIGNORE } from "./gitignore.ts";
+import type { Lock } from "./lock.ts";
 
 export type { Harness } from "./config.ts";
 
@@ -151,19 +153,204 @@ export function detectHarnesses(markers: HarnessMarkers): Harness[] {
   return DETECTED.filter((h) => (markers[h] ?? []).some((p) => existsSync(p)));
 }
 
+type EvidenceVerdict = "inspect" | "skip" | "evidence";
+
+/** A path explicitly present at the project root is evidence even when it is a link. */
+function pathIsEvidence(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function pathIsLink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/** Does a root contain a user-owned entry? Symlinks are evidence but are never traversed. */
+function rootHasEvidence(
+  root: string,
+  classify: (rel: string, abs: string, directory: boolean) => EvidenceVerdict,
+): boolean {
+  let rootStat;
+  try {
+    rootStat = lstatSync(root);
+  } catch {
+    return false;
+  }
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) return true;
+
+  const visit = (dir: string, prefix: string): boolean => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    for (const entry of entries) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const abs = join(dir, entry.name);
+      const verdict = classify(rel, abs, entry.isDirectory());
+      if (verdict === "skip") continue;
+      if (verdict === "evidence" || entry.isSymbolicLink() || !entry.isDirectory()) return true;
+      if (visit(abs, rel)) return true;
+    }
+    return false;
+  };
+  return visit(root, "");
+}
+
+/** Skill directories a valid current lock identifies as generated for one harness. */
+function ownedSkills(lock: Lock, harness: Harness): Set<string> {
+  const out = new Set<string>();
+  for (const key of Object.keys(lock)) {
+    const parsed = parseLockKey(key);
+    if (parsed.harness === harness && parsed.type === "skill") out.add(parsed.target);
+  }
+  return out;
+}
+
+function ownedFiles(lock: Lock, harness: Harness, types: readonly ItemType[]): Set<string> {
+  const out = new Set<string>();
+  for (const [key, entry] of Object.entries(lock)) {
+    const parsed = parseLockKey(key);
+    if (parsed.harness !== harness || !types.includes(parsed.type)) continue;
+    const files = entry !== null && typeof entry === "object" && entry.files !== null && typeof entry.files === "object"
+      ? Object.keys(entry.files)
+      : [];
+    for (const file of files) out.add(file);
+  }
+  return out;
+}
+
+function inOwnedSkill(rel: string, owned: Set<string>): boolean {
+  for (const target of owned) if (rel === target || rel.startsWith(`${target}/`)) return true;
+  return false;
+}
+
+/** The fixed per-skill ignore file identifies a generated skill even without its lock entry. */
+function generatedSkillDir(rel: string, abs: string, directory: boolean): boolean {
+  if (!directory || !/^skills\/[^/]+$/.test(rel)) return false;
+  try {
+    return readFileSync(join(abs, ".gitignore"), "utf8") === SKILL_GITIGNORE;
+  } catch {
+    return false;
+  }
+}
+
+/** A committed Claude settings file with something other than skilletor's generated
+ * plugin/marketplace declarations is project-owned Claude evidence. */
+function claudeSettingsAreEvidence(path: string, text?: string): boolean {
+  let value: unknown;
+  try {
+    value = JSON.parse(text ?? readFileSync(path, "utf8"));
+  } catch {
+    return true;
+  }
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return true;
+  const settings = value as Record<string, unknown>;
+  if (Object.keys(settings).some((key) => key !== "enabledPlugins" && key !== "extraKnownMarketplaces")) return true;
+  const object = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
+  const enabled = settings.enabledPlugins;
+  const marketplaces = settings.extraKnownMarketplaces;
+  if (Object.hasOwn(settings, "enabledPlugins") && !object(enabled)) return true;
+  if (Object.hasOwn(settings, "extraKnownMarketplaces") && !object(marketplaces)) return true;
+  const enabledEntries = Object.entries(object(enabled) ? enabled : {});
+  const marketplaceKeys = Object.keys(object(marketplaces) ? marketplaces : {});
+  if (enabledEntries.length === 0) return marketplaceKeys.length > 0;
+  if (enabledEntries.length !== 1) return true;
+  const [key, pluginValue] = enabledEntries[0]!;
+  const at = key.lastIndexOf("@");
+  if (at <= 0 || at === key.length - 1 || key.slice(0, at) !== "skilletor" || pluginValue !== true) return true;
+  const marketplace = key.slice(at + 1);
+  return marketplaceKeys.some((name) => name !== marketplace);
+}
+
+/** A direct skill entry is evidence only when it is a linked entry or contains SKILL.md.
+ * A leftover directory containing unrelated foreign files must not re-enable its harness. */
+function skillEvidenceVerdict(rel: string, abs: string, directory: boolean): EvidenceVerdict | undefined {
+  if (!/^skills\/[^/]+$/.test(rel)) return undefined;
+  if (!directory) return pathIsLink(abs) ? "evidence" : "skip";
+  return pathIsEvidence(join(abs, "SKILL.md")) ? "evidence" : "skip";
+}
+
+/**
+ * Project-local harness evidence (k229), read without following symlink trees. Current lock
+ * ownership, generated `.local.*` files, per-skill ignore markers and skilletor's fixed files
+ * are excluded so a sync cannot opt the project into another harness on its next run.
+ * `settingsText` substitutes a proposed .claude/settings.json in memory, even if absent on disk.
+ */
+export function detectProjectHarnesses(projectDir: string, lock: Lock, settingsText?: string): Harness[] {
+  const evidence = new Set<Harness>();
+  const claudeOwned = ownedSkills(lock, "claude");
+  const claudeFiles = ownedFiles(lock, "claude", ["skill", "agent", "rule"]);
+  const projectedSettings = settingsText === undefined ? undefined
+    : !claudeFiles.has("settings.json") && claudeSettingsAreEvidence(join(projectDir, ".claude", "settings.json"), settingsText);
+  if (pathIsEvidence(join(projectDir, "CLAUDE.md")) || projectedSettings || rootHasEvidence(join(projectDir, ".claude"), (rel, abs, directory) => {
+    if (["skilletor.json", "skilletor.local.json", "skilletor.lock.json", ".gitignore", "skilletor"].includes(rel)) return "skip";
+    if (claudeFiles.has(rel)) return "skip";
+    if (rel === "settings.json") return (projectedSettings ?? claudeSettingsAreEvidence(abs)) ? "evidence" : "skip";
+    if (inOwnedSkill(rel, claudeOwned) || generatedSkillDir(rel, abs, directory)) return "skip";
+    const skill = skillEvidenceVerdict(rel, abs, directory);
+    if (skill) return skill;
+    const [top, ...rest] = rel.split("/");
+    if ((top === "agents" || top === "rules") && rest.at(-1)?.startsWith(".local.")) return "skip";
+    return "inspect";
+  })) evidence.add("claude");
+
+  const codexOwned = ownedSkills(lock, "codex");
+  const codexFiles = ownedFiles(lock, "codex", ["agent", "rule"]);
+  const agents = rootHasEvidence(join(projectDir, ".agents"), (rel, abs, directory) => {
+    const top = rel.split("/")[0];
+    if (rel === ".gitignore" || top !== "skills") return "skip";
+    if (inOwnedSkill(rel, codexOwned) || generatedSkillDir(rel, abs, directory)) return "skip";
+    return skillEvidenceVerdict(rel, abs, directory) ?? "inspect";
+  });
+  const codex = rootHasEvidence(join(projectDir, ".codex"), (rel) => {
+    if (rel === ".gitignore" || rel === RULES_EVIDENCE_EXCLUSION || codexFiles.has(rel)) return "skip";
+    const parts = rel.split("/");
+    if (parts[0] === "agents" && parts.at(-1)?.startsWith(".local.")) return "skip";
+    return "inspect";
+  });
+  if (agents || codex || pathIsEvidence(join(projectDir, "AGENTS.override.md"))) evidence.add("codex");
+
+  const hermesOwned = ownedSkills(lock, "hermes");
+  if (rootHasEvidence(join(projectDir, ".hermes"), (rel, abs, directory) => {
+    if (rel === ".gitignore") return "skip";
+    if (inOwnedSkill(rel, hermesOwned) || generatedSkillDir(rel, abs, directory)) return "skip";
+    return skillEvidenceVerdict(rel, abs, directory) ?? "inspect";
+  })) evidence.add("hermes");
+
+  return HARNESSES.filter((h) => evidence.has(h));
+}
+
+/** The one Codex rules file skilletor itself assembles. */
+const RULES_EVIDENCE_EXCLUSION = "skilletor-rules.md";
+
 export interface TargetSelection {
   user: Harness[];
   project: Harness[];
   warnings: string[];
+  /** Several machine targets but no explicit project target or reliable local evidence: callers
+   *  must not reconcile the project scope. `project` remains the machine set for read-only
+   *  consumers and is not a destructive empty-target sentinel. */
+  projectUnresolved?: true;
 }
 
 /**
- * The merge rule (spec §14.1): machine = user `targets` ?? detected (empty is an
- * error); user scope = machine; project scope = machine, narrowed to the
- * project's `targets` (local over committed) when one is set.
+ * Machine = user `targets` ?? detected (empty is an error); user scope = machine. A project
+ * with explicit targets narrows the machine set. Otherwise project evidence decides inside
+ * that set; one machine target remains the bootstrap default, while a multi-target project
+ * without evidence is explicitly unresolved and must be left untouched.
  */
 export function selectTargets(
-  configured: { user?: Harness[]; project?: Harness[] },
+  configured: { user?: Harness[]; project?: Harness[]; projectEvidence?: Harness[] },
   detected: Harness[],
   markers?: HarnessMarkers,
 ): TargetSelection {
@@ -178,6 +365,7 @@ export function selectTargets(
   }
   const warnings: string[] = [];
   let project = machine;
+  let projectUnresolved: true | undefined;
   if (configured.project) {
     project = machine.filter((h) => configured.project!.includes(h));
     if (project.length === 0) {
@@ -186,8 +374,28 @@ export function selectTargets(
           `(${machine.join(", ")}); nothing is installed for the project`,
       );
     }
+  } else if (configured.projectEvidence !== undefined) {
+    if (configured.projectEvidence.length > 0) {
+      project = machine.filter((h) => configured.projectEvidence!.includes(h));
+      if (project.length === 0) {
+        warnings.push(
+          `project harness evidence (${configured.projectEvidence.join(", ")}) is not in use on this machine ` +
+            `(${machine.join(", ")}); nothing is installed for the project`,
+        );
+      }
+    } else if (machine.length === 1) {
+      project = [...machine];
+    } else {
+      project = [...machine];
+      projectUnresolved = true;
+      warnings.push(
+        `project targets are ambiguous: no project-local harness evidence for machine targets (${machine.join(", ")}); ` +
+          `set "targets" in the project's .claude/skilletor.json or .claude/skilletor.local.json; ` +
+          "project scope is left unchanged",
+      );
+    }
   }
-  return { user: [...machine], project, warnings };
+  return { user: [...machine], project, warnings, ...(projectUnresolved ? { projectUnresolved } : {}) };
 }
 
 // ---- lock keys ----------------------------------------------------------------

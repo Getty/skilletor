@@ -1,0 +1,12 @@
+{
+  "sources": {
+    "peter": {
+      "git": "https://gitlab.com/peter/skills"
+    }
+  },
+  "install": {
+    "bundles": [
+      "perl@mine"
+    ]
+  }
+}

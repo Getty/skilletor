@@ -1,0 +1,12 @@
+{
+  "description": "CLAUDE_CONFIG_DIR with a non-ASCII name, outside the home (${TMP}/conf-ü, k198): the Claude Code marker is found there, add writes the user config there and the sync after it reads the source from it, so the project's explicit Claude target installs bar@mine; status, the CLI's and the engine's (which takes the dir from the environment too), finds it installed; a second add under the taken name names that config file, ü as its UTF-8 bytes.",
+  "env": {
+    "CLAUDE_CONFIG_DIR": "${TMP}/conf-ü"
+  },
+  "steps": [
+    { "id": "add", "op": "cli", "argv": ["add", "mine", "${HOME}/dev/tools"], "tree": true },
+    { "id": "cli-status", "op": "cli", "argv": ["status"] },
+    { "id": "add-taken", "op": "cli", "argv": ["add", "mine", "${HOME}/dev"] },
+    { "id": "status", "op": "status" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "vars": {
+    "team": "core"
+  },
+  "install": {
+    "skills": [
+      "dup@shared"
+    ]
+  }
+}

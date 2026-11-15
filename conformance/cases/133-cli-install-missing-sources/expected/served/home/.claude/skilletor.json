@@ -1,0 +1,18 @@
+{
+  "sources": {
+    "mine": {
+      "local": "${HOME}/dev/mine"
+    },
+    "repo": {
+      "git": "https://example.com/other"
+    },
+    "whatever": {
+      "git": "https://conformance.invalid/peter.git"
+    }
+  },
+  "install": {
+    "bundles": [
+      "served@mine"
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "targets": ["claude"],
+  "install": { "skills": ["bar@mine"] }
+}

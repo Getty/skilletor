@@ -127,6 +127,31 @@ test("session-start is silent with nothing declared", async () => {
   }
 });
 
+test("malformed hook input shapes and cwd fields fail open without internal TypeErrors", async () => {
+  const e = env();
+  const previousCwd = process.cwd();
+  try {
+    e.writeUserCfg({});
+    process.chdir(e.projectDir);
+    const ctx = { ...e.ctx, projectDir: undefined };
+    const cases: [string, unknown][] = [
+      ["null", null],
+      ["scalar", 42],
+      ["array", []],
+      ["number cwd", { cwd: 42 }],
+      ["object cwd", { cwd: {} }],
+      ["array cwd", { cwd: [] }],
+      ["empty cwd", { cwd: "" }],
+    ];
+    for (const [label, input] of cases) {
+      assert.deepEqual(await runHook("session-start", input, ctx), {}, label);
+    }
+  } finally {
+    process.chdir(previousCwd);
+    e.cleanup();
+  }
+});
+
 test("session-start syncs a change and reports with an activation hint", async () => {
   const e = env();
   try {

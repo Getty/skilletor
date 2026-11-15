@@ -1,0 +1,10 @@
+{
+  "sources": {
+    "mine": {
+      "local": "${HOME}/dev/mine"
+    },
+    "peter": {
+      "local": "${HOME}/dev/peter-checkout"
+    }
+  }
+}

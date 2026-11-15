@@ -1,0 +1,2 @@
+description: P
+rules: [r1, x@http://host/x.tar.gz]

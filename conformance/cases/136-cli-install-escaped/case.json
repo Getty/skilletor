@@ -1,0 +1,22 @@
+{
+  "description": "k87 (cli.test.ts :926, its install end): an item naming a source with an escape sequence, a BEL, a bidi override and a newline exits 1 with `unknown source: …` escaped on stderr, its newline a line break; so does an item without `@` holding them, in the message that quotes it; nothing written.",
+  "steps": [
+    {
+      "id": "unknown-source",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo@team\u001b[31mred\u0007‮evil\nnext"
+      ],
+      "tree": true
+    },
+    {
+      "id": "no-source",
+      "op": "cli",
+      "argv": [
+        "install",
+        "foo\u001b[31mred\u0007‮evil\nnext"
+      ]
+    }
+  ]
+}

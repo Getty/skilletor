@@ -1,0 +1,12 @@
+{
+  "rules/p-one": {
+    "source": "whatever",
+    "version": "git:24e7931",
+    "files": {
+      "rules/.local.p-one.md": "sha256:de1773d25d825632fdece739cfe712c71c654ca9fd5b23787c4b4cfff19f58fd"
+    },
+    "via": [
+      "bundle:served@mine"
+    ]
+  }
+}

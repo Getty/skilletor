@@ -1,0 +1,7 @@
+user scope:
+  ✓ rules/r1 @shared via *@shared
+  ✓ rules/r2 @shared via *@shared
+  ✓ skills/perl-moo @shared via perl-*@shared
+  * skills/perl-* @shared (1 installed)
+  * agents/* @shared (0 installed)
+  * rules/* @shared (2 installed)

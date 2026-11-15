@@ -1,0 +1,16 @@
+{
+  "codex:skills/sample": {
+    "source": "shared",
+    "version": "git:3f98e25",
+    "files": {
+      "skills/sample/SKILL.md": "sha256:7ef3542e36a55811ce5190c4a45861e23fd429fafc82ecc4351ef78a9fac935b"
+    }
+  },
+  "skills/sample": {
+    "source": "shared",
+    "version": "git:3f98e25",
+    "files": {
+      "skills/sample/SKILL.md": "sha256:7ef3542e36a55811ce5190c4a45861e23fd429fafc82ecc4351ef78a9fac935b"
+    }
+  }
+}

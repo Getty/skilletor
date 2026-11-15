@@ -15,7 +15,7 @@ import {
   BundleError, entryMiss, expandBundle, matchEntry, matchesPattern, sameIdentity, type Chain,
 } from "./bundles.ts";
 import {
-  defaultHermesHome, defaultMarkers, detectHarnesses, lockKey, parseLockKey, placeOutput, receivers, rootOf, rootOfKey, selectTargets, servedVia, supports,
+  defaultHermesHome, defaultMarkers, detectHarnesses, detectProjectHarnesses, lockKey, parseLockKey, placeOutput, receivers, rootOf, rootOfKey, selectTargets, servedVia, supports,
   targetGaps, allRoots, isBlockType, lacksLocalPrefix, LAYOUTS, type HarnessMarkers, type RootContext, type TargetSelection,
 } from "./targets.ts";
 import {
@@ -174,10 +174,22 @@ function rootContextOf(ctx: EngineContext, scope: ScopeName): RootContext {
   return { base: baseOf(ctx, scope), scope, claudeDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), codexHome: codexHomeOf(ctx), hermesHome: hermesHomeOf(ctx) };
 }
 
-/** Active targets per scope (spec §14.1); throws a TargetError when none apply. */
-export function targetsOf(ctx: EngineContext, config: LoadedConfig): TargetSelection {
+/** Active targets per scope (spec §14.1, k229); throws a TargetError when none apply.
+ * `includeProject` is false for a user-only operation, which must not read project evidence. */
+export function targetsOf(ctx: EngineContext, config: LoadedConfig, includeProject = true): TargetSelection {
   const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx), ctx.claudeConfigDir || process.env.CLAUDE_CONFIG_DIR || undefined);
-  return selectTargets({ user: config.user.targets, project: config.project?.targets }, detectHarnesses(markers), markers);
+  const configured: { user?: Harness[]; project?: Harness[]; projectEvidence?: Harness[] } = {
+    user: config.user.targets,
+    project: config.project?.targets,
+  };
+  const projectDir = projectDirOf(ctx);
+  if (includeProject && projectDir && config.project && config.project.targets === undefined) {
+    const targetDir = targetDirOf(ctx, "project");
+    const lockPath = join(targetDir, "skilletor.lock.json");
+    const inUse = existsSync(join(targetDir, "skilletor.json")) || existsSync(join(targetDir, "skilletor.local.json")) || existsSync(lockPath);
+    if (inUse) configured.projectEvidence = detectProjectHarnesses(projectDir, readLock(lockPath));
+  }
+  return selectTargets(configured, detectHarnesses(markers), markers);
 }
 
 /**
@@ -189,7 +201,7 @@ export function targetsOf(ctx: EngineContext, config: LoadedConfig): TargetSelec
 export function hermesOptInHint(ctx: EngineContext): string | undefined {
   let machine: Harness[];
   try {
-    machine = targetsOf(ctx, loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: projectDirOf(ctx) })).user;
+    machine = targetsOf(ctx, loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: projectDirOf(ctx) }), false).user;
   } catch {
     return undefined;
   }
@@ -199,10 +211,12 @@ export function hermesOptInHint(ctx: EngineContext): string | undefined {
 }
 
 /** Load config and select targets; either failure is one message, nothing touched. */
-function loadWithTargets(ctx: EngineContext): { config: LoadedConfig; targets: TargetSelection } | { error: string } {
+function loadWithTargets(
+  ctx: EngineContext, includeProject = true,
+): { config: LoadedConfig; targets: TargetSelection } | { error: string } {
   try {
     const config = loadConfig({ home: ctx.home, claudeConfigDir: ctx.claudeConfigDir, projectDir: ctx.projectDir });
-    return { config, targets: targetsOf(ctx, config) };
+    return { config, targets: targetsOf(ctx, config, includeProject) };
   } catch (err) {
     return { error: (err as Error).message };
   }
@@ -526,7 +540,7 @@ export async function sync(ctx: EngineContext, opts: SyncOptions = {}): Promise<
 }
 
 async function syncInner(ctx: EngineContext, opts: SyncOptions, state: State): Promise<SyncReport> {
-  const loaded = loadWithTargets(ctx);
+  const loaded = loadWithTargets(ctx, opts.scope !== "user");
   if ("error" in loaded) return { scopes: [], error: loaded.error };
   const { config, targets } = loaded;
   const sel = opts.scope ?? "all";
@@ -539,9 +553,15 @@ async function syncInner(ctx: EngineContext, opts: SyncOptions, state: State): P
     if (!targets.user.includes("hermes")) state.putHermesHome(undefined);
   }
   if ((sel === "project" || sel === "all") && config.project) {
-    const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, resolveSource, noCopy);
-    rep.warnings.unshift(...targets.warnings);
-    report.scopes.push(rep);
+    if (targets.projectUnresolved) {
+      const rep = emptyScopeReport("project");
+      rep.warnings.push(...targets.warnings);
+      report.scopes.push(rep);
+    } else {
+      const rep = await syncScope(ctx, config, config.project, "project", targets.project, opts, state, resolveSource, noCopy);
+      rep.warnings.unshift(...targets.warnings);
+      report.scopes.push(rep);
+    }
   }
   const trust = hookTrustWarning(ctx, targets);
   if (trust) report.warnings = [trust];
@@ -792,7 +812,7 @@ async function syncScopeRun(
       let executable: Set<string>;
       try {
         output = build(
-          catItem, r.dir, makeContext(ctx, inputsOf(), scope, h, root, item, cat.meta.vars ?? {}, extra.bundleVars),
+          catItem, r.dir, () => makeContext(ctx, inputsOf(), scope, h, root, item, cat.meta.vars ?? {}, extra.bundleVars),
         );
         // A skill's scripts keep their source's executable bit (k99); an agent or rule is one
         // Markdown file its harness reads, never runs.
@@ -1070,7 +1090,8 @@ async function syncScopeRun(
 
   // The plugin requirement in the committed `.claude/settings.json` (spec §6.8): add-only,
   // and a file skilletor cannot read, parse or write never stops the sync.
-  const settings = claudeSettingsPlan(ctx, scope, scopeCfg, harnesses);
+  const finalLock = readLock(lockPath);
+  const settings = claudeSettingsPlan(ctx, config, scope, harnesses, finalLock);
   if (settings) {
     const label = scopeLabel(scope, base, settingsFileOf(ctx));
     rep.warnings.push(...settings.warnings);
@@ -1115,7 +1136,6 @@ async function syncScopeRun(
   }
 
   // Briefing check (spec §6.7): every agent the lock holds now, from its installed file.
-  const finalLock = readLock(lockPath);
   const briefing = briefingOf(ctx, scope, finalLock);
   for (const b of briefing) rep.warnings.push(briefingWarning(parseLockKey(b.key).name, b.harness, b.missing));
   if (briefing.length) rep.briefingMissing = briefing;
@@ -1127,7 +1147,7 @@ async function syncScopeRun(
   // §14.3, k70). (A source served from its cache was read: what it lacks comes with a move.)
   const reachable = (name: string) => Boolean(resolved.get(name)) && catalogs.get(name) !== null;
   const served = new Map(expansions.map((x) => [x.label, x.foreign.flatMap((f) => (f.served ? [f.served] : []))]));
-  state.putUnreached(lockPath, scopeDrift(ctx, scope, scopeCfg, harnesses, finalLock, served)
+  state.putUnreached(lockPath, scopeDrift(ctx, config, scope, harnesses, finalLock, served)
     .filter((d) => d.sources.every(reachable)).map((d) => d.id));
   // What this sync read of each source, and through which backend (spec §14.3, k80): `check`
   // compares the source with it. A source it tried but could not read keeps what an earlier
@@ -1161,21 +1181,37 @@ function settingsFileOf(ctx: EngineContext): string {
  * What a sync adds to the project's `.claude/settings.json` (spec §6.8), or undefined when the
  * file is not skilletor's to touch: the user scope, a project without a committed
  * `skilletor.json` (a `skilletor.local.json` is this machine's alone), Claude Code no target
- * of the project, or `"claudeSettings": false`. Reads three small files; never throws.
+ * of the project, or `"claudeSettings": false`. A proposed write must preserve implicit targets.
+ * `lock` owns the files currently on disk (the new lock after apply, not the pre-sync lock).
+ * Reads only local files; never throws.
  */
 function claudeSettingsPlan(
-  ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig, harnesses: Harness[],
+  ctx: EngineContext, config: LoadedConfig, scope: ScopeName, harnesses: Harness[], lock: Lock,
 ): SettingsPlan | undefined {
-  if (scope !== "project" || scopeCfg.claudeSettings === false || !harnesses.includes("claude")) return undefined;
+  if (scope !== "project" || config.project?.claudeSettings === false || !harnesses.includes("claude")) return undefined;
   if (!existsSync(join(targetDirOf(ctx, scope), "skilletor.json"))) return undefined;
   const file = settingsFileOf(ctx);
+  const label = scopeLabel(scope, ctx.projectDir!, file);
   try {
-    return planClaudeSettings({
-      file, label: scopeLabel(scope, ctx.projectDir!, file), projectDir: ctx.projectDir!, claudeDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir),
+    const plan = planClaudeSettings({
+      file, label, projectDir: ctx.projectDir!, claudeDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir),
       pluginRoot: ctx.pluginRoot ?? (process.env.CLAUDE_PLUGIN_ROOT || undefined),
     });
+    if (plan.next !== undefined && config.project?.targets === undefined) {
+      const machine = targetsOf(ctx, config, false).user;
+      const projected = selectTargets({
+        user: machine, projectEvidence: detectProjectHarnesses(ctx.projectDir!, lock, plan.next),
+      }, []);
+      if (projected.projectUnresolved || projected.project.join(",") !== harnesses.join(",")) {
+        return { enabled: [], declared: [], warnings: [...plan.warnings,
+          `${label} not updated: the plugin requirement would change implicitly selected project targets; ` +
+          'set "targets" in the project\'s .claude/skilletor.json or .claude/skilletor.local.json, then sync',
+        ] };
+      }
+    }
+    return plan;
   } catch (err) {
-    return { enabled: [], declared: [], warnings: [`${scopeLabel(scope, ctx.projectDir!, file)} not updated: ${(err as Error).message}`] };
+    return { enabled: [], declared: [], warnings: [`${label} not updated: ${(err as Error).message}`] };
   }
 }
 
@@ -1492,7 +1528,7 @@ export interface ResolveReport {
 export async function resolveItems(given: EngineContext, opts: SyncOptions = {}): Promise<ResolveReport> {
   return withSyncLock(given, async (state) => {
     const ctx = scoped(given);
-    const loaded = loadWithTargets(ctx);
+    const loaded = loadWithTargets(ctx, opts.scope !== "user");
     if ("error" in loaded) return { scopes: [], error: loaded.error };
     const { config, targets } = loaded;
     const sel = opts.scope ?? "all";
@@ -1572,7 +1608,7 @@ const DRIFT_FIELD = { targets: "targetsChanged", layout: "layoutChanged", declar
 
 export async function check(given: EngineContext, opts: CheckOptions = {}): Promise<CheckReport> {
   const ctx = scoped(given);
-  const loaded = loadWithTargets(ctx);
+  const loaded = loadWithTargets(ctx, opts.scope !== "user");
   if ("error" in loaded) return { changed: false, sources: [], warnings: [], error: loaded.error };
   const { config, targets } = loaded;
   const state = new State(ctx.stateRoot);
@@ -1583,8 +1619,10 @@ export async function check(given: EngineContext, opts: CheckOptions = {}): Prom
   const scopes: [ScopeName, ScopeConfig][] = [];
   if (sel === "user" || sel === "all") scopes.push(["user", config.user]);
   if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
+  if (targets.projectUnresolved && scopes.some(([scope]) => scope === "project")) out.warnings.push(...targets.warnings);
 
   for (const [scope, scopeCfg] of scopes) {
+    if (scope === "project" && targets.projectUnresolved) continue;
     const lockPath = join(targetDirOf(ctx, scope), "skilletor.lock.json");
     const oldLock = readLock(lockPath);
     const sources = sourcesOf(config, scope);
@@ -1606,7 +1644,7 @@ export async function check(given: EngineContext, opts: CheckOptions = {}): Prom
     // source it needs is untrusted – that asks for trust, not for a sync (spec §14.3, k70).
     const unreached = new Set(state.unreached(lockPath));
     const read = state.sourcesRead(lockPath);
-    const open = scopeDrift(ctx, scope, scopeCfg, targets[scope], oldLock)
+    const open = scopeDrift(ctx, config, scope, targets[scope], oldLock)
       .filter((d) => !unreached.has(d.id) && d.sources.every(trusted));
     for (const kind of ["targets", "layout", "declared"] as const) {
       if (!open.some((d) => d.kind === kind)) continue;
@@ -1666,9 +1704,10 @@ interface Drift {
  *  no git, no network. `servedBy` (sync only): the other sources a bundle's entries are
  *  served by (spec §15.6). */
 function scopeDrift(
-  ctx: EngineContext, scope: ScopeName, scopeCfg: ScopeConfig, harnesses: Harness[], lock: Lock,
+  ctx: EngineContext, config: LoadedConfig, scope: ScopeName, harnesses: Harness[], lock: Lock,
   servedBy?: Map<string, string[]>,
 ): Drift[] {
+  const scopeCfg = config[scope]!;
   const out: Drift[] = [];
   // An entry of a target that gets no copy goes; a copy an active target lacks is added (§14.3).
   for (const g of targetGaps(Object.keys(lock), harnesses, scope)) {
@@ -1686,7 +1725,7 @@ function scopeDrift(
   }
   // The committed `.claude/settings.json` lacks what a sync would add (spec §6.8): a project
   // that used skilletor before gets it in the next session. What it cannot add is no drift.
-  if (claudeSettingsPlan(ctx, scope, scopeCfg, harnesses)?.next !== undefined) {
+  if (claudeSettingsPlan(ctx, config, scope, harnesses, lock)?.next !== undefined) {
     out.push({ kind: "layout", id: "layout:claude-settings", sources: [] });
   }
   return [...out, ...layoutDrift(ctx, scope, scopeCfg, lock), ...declaredDrift(scopeCfg, scope, harnesses, lock, servedBy)];
@@ -1842,7 +1881,7 @@ export interface StatusReport {
 
 export function status(given: EngineContext, opts: SyncOptions = {}): StatusReport {
   const ctx = scoped(given);
-  const loaded = loadWithTargets(ctx);
+  const loaded = loadWithTargets(ctx, opts.scope !== "user");
   if ("error" in loaded) return { scopes: [], error: loaded.error };
   const { config, targets } = loaded;
   const state = new State(ctx.stateRoot);
@@ -1852,6 +1891,7 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
   if ((sel === "project" || sel === "all") && config.project) scopes.push(["project", config.project]);
 
   const out: StatusReport = { scopes: [] };
+  if (targets.projectUnresolved && scopes.some(([scope]) => scope === "project")) out.warnings = [...targets.warnings];
   if (sel !== "user" && projectIsHome(given)) out.projectIsHome = true;
   for (const [scope, scopeCfg] of scopes) {
     const lock = readLock(join(targetDirOf(ctx, scope), "skilletor.lock.json"));
@@ -1920,6 +1960,6 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
     });
   }
   const trust = hookTrustWarning(ctx, targets);
-  if (trust) out.warnings = [trust];
+  if (trust) (out.warnings ??= []).push(trust);
   return out;
 }

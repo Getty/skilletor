@@ -1,0 +1,4 @@
+---
+description: Perl rule
+---
+Perl.

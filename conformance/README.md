@@ -3,8 +3,8 @@
 Shared cases that every skilletor engine runs, so the TypeScript engine (`src/`, the
 reference) and the Perl port (`perl/`, namespace `Skilletor`) resolve and install the same
 way. Each case is a config, a few source trees and what an engine must make of them: the
-items each scope resolves to and, for sync cases, the files a sync for the Claude target
-writes, the lock bytes and what `check` and `status` say afterwards; for `cli` steps, what a
+items each scope resolves to and, for sync cases, the files written for the selected targets,
+the lock bytes and what `check` and `status` say afterwards; for `cli` steps, what a
 command line prints and exits with, byte for byte.
 
 Runners:
@@ -93,7 +93,7 @@ Cases run in name order, each in a fresh temp dir; none depends on another.
 | `description` | Required. What the case pins. |
 | `git` | Optional. Git sources, by repository name (below). |
 | `git.<name>.commits[].executable` | Optional. Paths in the commit's tree made executable before it is committed (below). |
-| `env` | Optional. Environment variables set for the whole case – the engine ops' and every `cli` step's – `${HOME}`, `${PROJECT}` and `${TMP}` replaced; only `CLAUDE_CONFIG_DIR` so far. |
+| `env` | Optional. Environment variables set for the whole case – the engine ops' and every `cli` step's – `${HOME}`, `${PROJECT}` and `${TMP}` replaced. Perl runners encode character values as UTF-8 bytes at the environment boundary. |
 | `claude` | Optional. `false`: the runner writes no Claude Code marker (`.claude.json`, below), so – Codex not in use either – no agent harness is detected. Default `true`. |
 | `gitInit` | Optional. `["home"]`, `["project"]` or both: those directories become git work trees – `git init -q -b main` in each, after its inputs are copied, nothing committed – so a `cli` step's CLI takes git's top level as its project and git answers for them (below). |
 | `steps` | Required, run in order on the same temp dirs: a step sees what the steps before it wrote. |
@@ -305,7 +305,9 @@ every needed source resolved into its cache (git sources are fetched), catalogs 
 wildcards and bundles expanded with the overlap rules (§3, §15) – stopped before anything is
 built: nothing is rendered, nothing written to a target, the lock or the state's records.
 The items are the same for every target: which harness gets a copy where is the sync's
-business.
+business. Resolution still reads logical offers from scope locks when a source or bundle
+is unavailable, so those offers continue to participate in collisions. Existing malformed
+or unreadable locks are not silently discarded just because the operation writes no items.
 
 ```json
 {
@@ -557,6 +559,37 @@ show it, its `description` saying which.
 | `123-hook-hermes-move-agent` | a move into a checkout that installs only an agent (Claude Code and Hermes targets): the agent synced and named, the run note left unsaid, no `hermes skills trust` (k152) |
 | `124-hook-hermes-claude-move` | Claude Code's PostToolUse with Hermes the only target: the move syncs the Hermes copy and answers without `hermes skills trust` – the hint follows the harness whose hook runs, not the targets (k152) |
 | `125-hook-hermes-move-removal` | a move into a checkout whose lock holds a Hermes skill the config no longer declares, its blocks in place: removed, one line `skilletor: 1 removed in ${PROJECT}`, no `hermes skills trust` (k152) |
+| `126-cli-claude-config-dir-non-ascii` | non-ASCII CLAUDE_CONFIG_DIR is decoded once: config edits, installation, CLI/engine status and diagnostics use the same UTF-8 path |
+| `127-cli-codex-home-plugin-root-non-ascii` | non-ASCII CODEX_HOME and CLAUDE_PLUGIN_ROOT retain their paths; Codex output and warning paths match, and the correct installed plugin marketplace is selected |
+| `130-cli-install-wildcard` | `install` of a wildcard: `*` without a type prefix exits 1 naming the three prefixed forms; `rule:*@shared` stored as `*@shared` under `install.rules`, the compact user config rewritten as two-space JSON in its key order, every rule installed; `skill:perl-*@shared` and `agent:*@shared` (nothing matches yet) stored as written; status marks each item `via` its wildcard and counts them |
+| `131-cli-install-bundle` | `bundle:perl@shared` beside `rule:go-*@shared`: `perl@shared` under `install.bundles`, before the pattern's `install.rules`, the bundle's rules and the pattern's installed; status `via` both, available's `✓`; a bare `tools@shared` only a bundle has is that bundle; the same bundle again is up to date; `--project` writes it into the project config |
+| `132-cli-install-item-errors` | an item that cannot be built (k100, k113): exit 1 before any edit, `skilletor: <source>: <type> <name>: <error>` – `x.md` beside `x.md.njk`, `SKILL.md` beside `SKILL.md.njk` by its typed name, a companion file in both forms named after an intact item; config byte-identical, the intact items then install |
+| `133-cli-install-missing-sources` | a bundle's entries of other sources no configured source serves, stdin no TTY (spec §15.6): exit 1 before any edit, one `skilletor add <name> <spec>` line per address, across bundles too, `-2` when another address holds the name, `source` for a spec without a usable name (k95), ` --project` with --project; an address load refuses is the bundle's error (k115); configured under another name, the bundle installs from it |
+| `134-cli-install-missing-taken` | k102: the user config's `peter` is a local override, only the project's has the bundle's address: the command printed is `skilletor add peter-2 …`, both configs byte-identical; with --project the merged `peter` serves it and the rule installs from the local checkout |
+| `135-cli-install-home-project` | `install --project` without a project scope (k44): `--project-dir` the home, or run in the home outside git, exits 1 naming the home and the ways out, nothing written; without --project the item installs into the user scope |
+| `136-cli-install-escaped` | k87: an item naming a source with an escape sequence, a BEL, a bidi override and a newline exits 1 with `unknown source: …` escaped, its newline a line break; so does an item without `@` holding them |
+| `137-cli-install-refused` | install's refusals in the reference's order, exit 1, every file byte-identical: an item that is not name@source, an unknown type prefix, an empty name, a pattern over bundle names or without a type; an unknown source, a project-only one (naming --project), an untrusted one (a wildcard of it too); an unknown item with the first eight suggestions, an ambiguous name, an unknown or broken bundle; a missing local directory, a config load refuses; a valid item before a failing one |
+| `138-cli-install-explicit` | explicit items of a git source, fetched under the sync lock: a bare name's type from the catalog, stored after the config's own keys in their order; a typed name two types share and two items in one run; the same again is up to date; --project creates the project config's `install` after its own keys |
+| `139-cli-install-no-harness` | k103: install with no harness (`"claude": false`): the entry written, then exit 2 with the sync's config error and the saved file – the user's, or the project's with --project – on stderr; an item install refuses still exits 1 before any edit |
+| `140-hook-input-shape` | hook stdin that is null, a scalar or an array, and an invalid `cwd`, are ignored safely; every hook invocation still exits 0 |
+| `141-project-evidence-claude` | explicit machine targets Claude and Codex, but Claude-only project evidence selects only Claude and stays stable across check, status and resync |
+| `142-project-evidence-codex` | explicit machine targets Claude and Codex, but Codex-only project evidence selects only Codex and stays stable |
+| `143-project-evidence-both` | Claude and Codex project evidence selects both targets in stable machine order |
+| `144-project-target-explicit` | committed project `targets` override contrary project evidence while remaining inside the machine allowlist |
+| `145-project-target-local` | local project `targets` override committed targets and contrary project evidence |
+| `146-project-target-ambiguous` | generated-only roots leave a multi-target project unresolved; check and repeated sync warn and preserve managed and foreign files |
+| `147-project-target-single` | a project without evidence bootstraps from the sole machine target |
+| `148-project-target-cleanup` | Claude evidence deselects Codex, removes only Codex-owned files, preserves a foreign residual file and remains stable on resync |
+| `149-project-settings-evidence-preservation` | same-marketplace plugin setup would erase genuine Claude evidence: with gitignore disabled, the settings write is skipped, both target copies stay, and check/resync/alternating hooks remain stable without perpetual drift |
+| `151-cli-available-entry-refused` | available rejects a non-object lock entry with a keyed lock error instead of an internal TypeError |
+| `152-cli-available-name-case` | installed item names match the available catalog ignoring case, while source aliases remain case-sensitive |
+| `153-cli-sync-files-refused` | sync rejects a null ownership files map with a keyed lock error and preserves the existing lock and file tree |
+| `200-cli-uninstall-explicit` | explicit uninstall after a sync: a type prefix removes only that type and its files; a bare name removes every type; the last entry removes the last file, `install` object and empty lock |
+| `201-cli-uninstall-wildcard` | an explicit item also covered by a wildcard is removed with a stderr warning but stays installed; without the explicit entry the lock-confirmed item is refused naming its typed wildcard; an absent matching name gets the conditional wildcard diagnostic; removing a typed wildcard removes only its type; a bare wildcard is refused |
+| `202-cli-uninstall-bundle` | an explicit item also covered by two bundles is removed with a warning naming both; without the explicit entry the lock-confirmed item is refused with both bundle commands; `bundle:` removes one declaration, a bare bundle name the other and its item; an absent bundle is refused |
+| `203-cli-uninstall-scope` | a typed item declared under another type names it; an item or bundle declared in the project points to `--project`; one bad request leaves an earlier valid one untouched; `--project` removes project entries, while the home as project dir is refused |
+| `204-cli-uninstall-ambiguous` | item and lock names match ignoring case; a bare name held as both an explicit item and a bundle is ambiguous and changes nothing; prefixes then remove the bundle and item separately |
+| `205-cli-uninstall-no-harness` | k103: an undeclared item is refused before a sync; a valid user or project removal is saved, then the no-harness sync error exits 2 and names the edited config file |
 
 The state files two engines on one machine share – `render-inputs.json` with its hash,
 `sources-read.json`, `unreached.json` – are not compared here: their keys are absolute lock
@@ -564,8 +597,8 @@ paths and the hash covers the project dir, so they differ from one temp dir to t
 Perl port's `t/52-parity-sync.t` has both engines sync one machine and compares them byte for
 byte.
 
-Not covered yet: the CLI's `install` and `uninstall` (the Perl CLI runs neither yet);
-`available` waiting for the sync lock another run holds (k74; each engine's own tests pin it:
+Not covered yet: `available` waiting for the sync lock another run holds (k74; each engine's
+own tests pin it:
 `test/commands.test.ts`, the Perl port's `t/76-commands-available.t`); of `add`, a generic
 host whose tarball answers the probe's HEAD (it needs a TLS server; the Perl port's
 `t/31-probe.t` pins the HEAD against a local HTTP server, the reference has no test of it yet);

@@ -1,0 +1,23 @@
+[
+  {
+    "type": "skill",
+    "name": "Baz",
+    "description": "Baz",
+    "source": "Mine",
+    "installed": true
+  },
+  {
+    "type": "skill",
+    "name": "Foo",
+    "description": "Foo",
+    "source": "Mine",
+    "installed": true
+  },
+  {
+    "type": "skill",
+    "name": "bar",
+    "description": "Bar",
+    "source": "Mine",
+    "installed": false
+  }
+]

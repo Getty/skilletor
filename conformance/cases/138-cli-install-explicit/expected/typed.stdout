@@ -1,0 +1,3 @@
+skilletor: user scope
+  + agents/dup (active after /reload-plugins or restart)
+  + agents/helper (active after /reload-plugins or restart)

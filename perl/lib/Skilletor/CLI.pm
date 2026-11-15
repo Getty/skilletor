@@ -276,6 +276,47 @@ sub _available {
   return 0;
 }
 
+# The sync's text after the edit. A bundle's missing sources are asked for on a terminal.
+sub _install {
+  my ( $flags ) = @_;
+  my $engine = _engine($flags);
+  require Skilletor::Commands;
+  my $r = Skilletor::Commands::install( $engine, items => $flags->{rest}, project => $flags->{project}, prompt => _tty_prompter() );
+  return _sync_failed( $r, saved => Skilletor::Commands::config_path( $engine, $flags->{project} ) ) if _truthy( $r->{error} );
+  _print_text( \*STDOUT, _sync_text($r) );
+  return 0;
+}
+
+# The sync's text after the edit. A warning names each covering wildcard or bundle that remains.
+sub _uninstall {
+  my ( $flags ) = @_;
+  my $engine = _engine($flags);
+  require Skilletor::Commands;
+  my $r = Skilletor::Commands::uninstall( $engine, items => $flags->{rest}, project => $flags->{project} );
+  _print_lines( \*STDERR, 'skilletor: warning: '.$_ ) for @{ $r->{hints} };
+  return _sync_failed( $r->{report}, saved => Skilletor::Commands::config_path( $engine, $flags->{project} ) )
+    if _truthy( $r->{report}{error} );
+  _print_text( \*STDOUT, _sync_text( $r->{report} ) );
+  return 0;
+}
+
+# Questions on the terminal (the reference's ttyPrompter): stdin in, stderr out, so stdout stays
+# clean; none unless both are terminals. The end of input (Ctrl+D) and Ctrl+C abort the command
+# with the message Node's readline gives.
+sub _tty_prompter {
+  return undef unless -t STDIN && -t STDERR;
+  return sub {
+    my ( $question ) = @_;
+    _write( \*STDERR, display_safe($question).' ' );
+    local $SIG{INT} = sub { die "Aborted with Ctrl+C\n" };
+    binmode STDIN;
+    my $line = <STDIN>;
+    die "Aborted with Ctrl+D\n" unless defined $line;
+    $line =~ s/\r?\n\z//;
+    return decode_utf8_lossy($line);
+  };
+}
+
 sub _trust {
   my ( $flags, $name ) = @_;
   my $engine = _engine($flags);
@@ -290,13 +331,6 @@ sub _usage_error {
   my ( $line ) = @_;
   _write( \*STDERR, "$line\n" );
   return 2;
-}
-
-# A command whose engine side this CLI does not have yet: say so, exit 1.
-sub _not_ported {
-  my ( $what ) = @_;
-  _print_lines( \*STDERR, "skilletor: $what is not ported to the Perl CLI yet" );
-  return 1;
 }
 
 # What a caught error says: a Skilletor::Error's message, else Perl's text without the
@@ -443,7 +477,7 @@ sub _dispatch {
   }
   if ( $cmd eq 'install' || $cmd eq 'uninstall' ) {
     return _usage_error("skilletor: $cmd needs at least one item") unless @rest;
-    return _not_ported($cmd);
+    return $cmd eq 'install' ? _install($flags) : _uninstall($flags);
   }
   if ( $cmd eq 'trust' ) {
     return _usage_error('skilletor: trust needs a source name') unless $given->( $rest[0] );
@@ -487,8 +521,8 @@ stdout as well, exit 2.
 
 =back
 
-It runs C<add>, C<trust>, C<source list>, C<source remove> and C<available>
-through L<Skilletor::Commands>:
+It runs C<add>, C<trust>, C<source list>, C<source remove>, C<available>,
+C<install> and C<uninstall> through L<Skilletor::Commands>:
 
 =over 4
 
@@ -524,6 +558,25 @@ line is always followed by one: C<error: E<lt>whyE<gt>>, its members joined by
 C<, >, or C<(no items)>. C<--json> prints the list as JSON. A source not
 trusted is skipped, even by name.
 
+=item * C<install E<lt>itemE<gt>... [--project]> adds each item
+(C<[type:]name@source>, C<type:*@source>, C<bundle:name@source>) to the user
+config, or the project config, then syncs and prints the sync's text. Every
+item is checked first, under the sync lock; one that fails changes nothing. A
+bundle naming sources by an address no configured source serves: on a
+terminal (stdin and stderr) each is asked for on stderr, a name, the proposed
+one or C<n> to skip, and an added one is trusted as C<add> trusts; elsewhere
+the command fails naming the C<skilletor add> commands. A sync that stops at a
+config error exits 2 with two lines on stderr naming the saved config file
+(k103).
+
+=item * C<uninstall E<lt>itemE<gt>... [--project]> removes explicit item,
+wildcard or bundle entries from the user or project config, then syncs and
+prints its text. Every item is checked before any edit. An item still installed
+by a wildcard or bundle leaves a warning on stderr after its explicit entry is
+removed; an item with no explicit entry exits 1 and the diagnostic names the
+covering entry or where else it is declared. A sync that stops at a config
+error exits 2 and names the saved config file.
+
 =back
 
 A refusal or a config file that does not load is C<skilletor: E<lt>whyE<gt>>
@@ -545,8 +598,6 @@ happens – a failure is that line's C<systemMessage>, its own setup's too. It i
 dispatched before any option check, so no option makes it fail. Its background
 sync re-runs this CLI (L</self_command>).
 
-C<install> and C<uninstall> are not ported yet: each says so on stderr and
-exits 1.
 Beside them the CLI has the argument layer: C<--help>, C<--version>, the
 options each command accepts, an unknown option or command, an invalid
 C<--scope> and a missing operand.

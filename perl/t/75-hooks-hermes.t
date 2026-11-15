@@ -142,7 +142,7 @@ sub prompt {
 sub main_with_worktree {
   my ( $m ) = @_;
   user_config( $m, { targets => ['hermes'], sources => { mine => { local => local_source($m) } } } );
-  write_json( "$m->{project}/.claude/skilletor.json", { install => { skills => ['foo@mine'] } } );
+  write_json( "$m->{project}/.claude/skilletor.json", { targets => ['hermes'], install => { skills => ['foo@mine'] } } );
   git_ok( $m->{project}, 'init', '-q', '-b', 'main' );
   my $started = run_hook( 'session-start', { source => 'startup', cwd => $m->{project}, session_id => 's1' }, ctx_with( $m, project_dir => undef ) );
   like( $started->{systemMessage} // '', qr/item\(s\) updated/, "main's SessionStart syncs it" );
@@ -184,7 +184,7 @@ subtest 'prompts within the same checkout, or outside any project, sync nothing'
   my $m = machine();
   local $ENV{GIT_CEILING_DIRECTORIES} = $m->{dir};
   user_config( $m, { targets => ['hermes'], sources => { mine => { local => local_source($m) } }, install => { skills => ['foo@mine'] } } );
-  write_json( "$m->{project}/.claude/skilletor.json", { install => { skills => ['foo@mine'] } } );
+  write_json( "$m->{project}/.claude/skilletor.json", { targets => ['hermes'], install => { skills => ['foo@mine'] } } );
   git_ok( $m->{project}, 'init', '-q', '-b', 'main' );
   state($m)->put_session_cwd( 's1', $m->{project} );
   my $sub = "$m->{project}/src/deep";
@@ -224,16 +224,16 @@ subtest 'the trust hint comes with a skill Hermes loads, not with an agent or a 
   path("$src/agents/bar.md")->spew_utf8("---\ndescription: bar\n---\nBODY\n");
   my $sources = { mine => { local => $src } };
   my $checkout = sub {
-    my ( $name, $install ) = @_;
+    my ( $name, $install, $targets ) = @_;
     my $dir = "$m->{dir}/$name";
-    write_json( "$dir/.claude/skilletor.json", { install => $install } );
+    write_json( "$dir/.claude/skilletor.json", { targets => $targets, install => $install } );
     git_ok( $dir, 'init', '-q', '-b', 'main' );
     return $dir;
   };
   state($m)->put_session_cwd( 's1', $m->{project} );
 
   user_config( $m, { targets => [ 'codex', 'hermes' ], sources => $sources } );
-  my $via_codex = $checkout->( 'via-codex', { skills => ['foo@mine'] } );
+  my $via_codex = $checkout->( 'via-codex', { skills => ['foo@mine'] }, [ 'codex', 'hermes' ] );
   my $codex_copy = prompt( $m, $via_codex );
   ok( -e "$via_codex/.agents/skills/foo/SKILL.md" && !-e "$via_codex/.hermes", 'the Codex copy serves Hermes' );
   is( $codex_copy->{systemMessage},
@@ -244,14 +244,14 @@ subtest 'the trust hint comes with a skill Hermes loads, not with an agent or a 
     'and so does the context' );
 
   user_config( $m, { targets => [ 'claude', 'hermes' ], sources => $sources } );
-  my $agent_only = $checkout->( 'agent-only', { agents => ['bar@mine'] } );
+  my $agent_only = $checkout->( 'agent-only', { agents => ['bar@mine'] }, [ 'claude', 'hermes' ] );
   my $agent = prompt( $m, $agent_only );
   ok( -e "$agent_only/.claude/agents/.local.bar.md", 'the agent for Claude Code' );
   like( $agent->{systemMessage} // '', qr/\Askilletor: 1 item\(s\) updated\b/, 'synced' );
   unlike( out($agent), qr/hermes skills trust/, 'no trust hint' );
 
   user_config( $m, { targets => ['hermes'], sources => $sources } );
-  my $removal = $checkout->( 'removal', { skills => ['foo@mine'] } );
+  my $removal = $checkout->( 'removal', { skills => ['foo@mine'] }, ['hermes'] );
   like( prompt( $m, $removal )->{systemMessage} // '', qr/hermes skills trust/, 'a skill landed: the hint' );
   write_json( "$removal/.claude/skilletor.json", { install => {} } );
   is( out( prompt( $m, $m->{project} ) ), '{}', 'back to main' );

@@ -1,0 +1,17 @@
+{
+  "rules/ok": {
+    "source": "shared",
+    "version": "local",
+    "files": {
+      "rules/.local.ok.md": "sha256:519b34dc6b15fea5e628caf29d94f8e674b3a1e8ff71638a9e0b2a2392ec164e"
+    }
+  },
+  "skills/fine": {
+    "source": "shared",
+    "version": "local",
+    "files": {
+      "skills/fine/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/fine/SKILL.md": "sha256:4d90a30731eb287cb9edfd5cd19aaa5657a5a597e400af623c3c44c83d04cfa1"
+    }
+  }
+}

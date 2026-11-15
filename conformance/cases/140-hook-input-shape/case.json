@@ -1,0 +1,12 @@
+{
+  "description": "Hook stdin that is null, a scalar or an array counts as no input; cwd is used only when it is a nonempty string. Every malformed shape stays silent and exits 0.",
+  "steps": [
+    { "id": "null", "op": "cli", "argv": ["hook", "session-start"], "stdin": null },
+    { "id": "scalar", "op": "cli", "argv": ["hook", "session-start"], "stdin": 42 },
+    { "id": "array", "op": "cli", "argv": ["hook", "session-start"], "stdin": [] },
+    { "id": "cwd-number", "op": "cli", "argv": ["hook", "session-start"], "stdin": { "cwd": 42 } },
+    { "id": "cwd-object", "op": "cli", "argv": ["hook", "session-start"], "stdin": { "cwd": {} } },
+    { "id": "cwd-array", "op": "cli", "argv": ["hook", "session-start"], "stdin": { "cwd": [] } },
+    { "id": "cwd-empty", "op": "cli", "argv": ["hook", "session-start"], "stdin": { "cwd": "" } }
+  ]
+}

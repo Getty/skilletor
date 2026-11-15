@@ -1,0 +1,12 @@
+{
+  "rules/p-x": {
+    "source": "peter",
+    "version": "local",
+    "files": {
+      "rules/.local.p-x.md": "sha256:d6cb949d89875a789981c7dc5f11009e95825f99f4c9d76610354d130603e60c"
+    },
+    "via": [
+      "bundle:perl@mine"
+    ]
+  }
+}

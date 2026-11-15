@@ -1,20 +1,22 @@
 package Skilletor::Commands;
-# ABSTRACT: The CLI's config commands – add, trust, source list, source remove, available – after the reference's commands.ts
+# ABSTRACT: The CLI's config commands – add, trust, source list, source remove, available, install, uninstall – after the reference's commands.ts
 
 use strict;
 use warnings;
 
 use Exporter qw( import );
+use File::Basename qw( dirname );
 use JSON::MaybeXS ();
 use Scalar::Util qw( blessed );
 use Skilletor::Backend;
-use Skilletor::Bundles qw( expand_bundle same_identity );
+use Skilletor::Bundles qw( expand_bundle matches_pattern same_identity );
 use Skilletor::Catalog;
 use Skilletor::Config;
-use Skilletor::Entry qw( SOURCE_NAME_RULE is_source_name );
+use Skilletor::Entry qw( SOURCE_NAME_RULE WILDCARD is_source_name name_key );
 use Skilletor::Error::Command;
 use Skilletor::FSUtil qw( inner_segments path_join );
 use Skilletor::JSON qw( js_ordered js_sort_keys js_stringify js_type );
+use Skilletor::JSString qw( js_trim );
 use Skilletor::Lock qw( parse_lock_key read_lock );
 use Skilletor::Probe qw( make_probe );
 use Skilletor::Resolver;
@@ -25,7 +27,7 @@ use Skilletor::State;
 
 our $VERSION = '0.002';
 
-our @EXPORT_OK = qw( add available config_path source_list source_remove trust );
+our @EXPORT_OK = qw( add available config_path install source_list source_remove trust uninstall );
 
 my @ADDRESS_KEYS = qw( git url local );
 my %ADDRESS_KEY  = map { ( $_ => 1 ) } @ADDRESS_KEYS;
@@ -121,8 +123,7 @@ sub add {
     Skilletor::Config->add_source( $path, $name, $def );
   }
   # add is the trust act.
-  Skilletor::State->new( root => $engine->state_root )
-    ->trust( $name, Skilletor::Backend->resolve( { name => $name, %$def, origins => {} }, $engine->home ) );
+  _trust_def( $engine, $name, $def );
 
   return { name => $name, def => $def, kept => $kept, report => $engine->sync };
 }
@@ -318,7 +319,7 @@ sub _list_available {
       my $entry = js_ordered( type => $item->{type}, name => $item->{name} );
       $entry->{description} = $item->{description} if defined $item->{description};
       $entry->{source}      = $name;
-      $entry->{installed}   = _bool( $installed->{ $TYPE_DIR{ $item->{type} }.'/'.$item->{name}.'@'.$name } );
+      $entry->{installed}   = _bool( $installed->{ _installed_key( $TYPE_DIR{ $item->{type} }.'/'.$item->{name}, $name ) } );
       $entry->{error}       = $item->{error} if defined $item->{error};
       push @out, $entry;
     }
@@ -362,22 +363,361 @@ sub _with_sync_lock {
   return $result;
 }
 
+# An available item's identity: its name ignores case, its target directory and source alias do not.
+sub _installed_key {
+  my ( $target, $source ) = @_;
+  my $slash = index $target, '/';
+  return substr( $target, 0, $slash + 1 ).name_key( substr( $target, $slash + 1 ) ).'@'.$source;
+}
+
 # `<typedir>/<name>@<source>` of every item an explicit entry of either scope declares or a lock
 # of either scope holds – under any target, unless it rendered empty there.
 sub _installed_set {
   my ( $engine, $config ) = @_;
   my %set;
-  $set{ $_->{target}.'@'.$_->{source} } = 1 for @{ $config->user->{install} }, @{ $config->project ? $config->project->{install} : [] };
+  $set{ _installed_key( $_->{target}, $_->{source} ) } = 1 for @{ $config->user->{install} }, @{ $config->project ? $config->project->{install} : [] };
   my $project = $engine->project_dir_of;
   for my $dir ( $engine->claude_dir, defined $project ? path_join( $project, '.claude' ) : () ) {
     my $lock = read_lock( path_join( $dir, 'skilletor.lock.json' ) );
     for my $key ( keys %$lock ) {
       my $entry = $lock->{$key};
-      next if js_type($entry) ne 'object' || $entry->{skipped};    # renders empty here: nothing installed
-      $set{ parse_lock_key($key)->{target}.'@'.( $entry->{source} // 'undefined' ) } = 1;
+      next if $entry->{skipped};    # renders empty here: nothing installed
+      $set{ _installed_key( parse_lock_key($key)->{target}, $entry->{source} // 'undefined' ) } = 1;
     }
   }
   return \%set;
+}
+
+#### install ###################################################################
+
+# Plan every edit first, so a failure – or a missing source without a TTY – edits nothing: each
+# item checked against the sources the target scope's sync resolves against (spec §3), its
+# source resolved and scanned under the sync lock (spec §6.5), released before any question and
+# before the sync, which takes it itself. Then the sources the bundles miss, then the edits in
+# the order planned, the sources added last, then the sync.
+sub install {
+  my ( $engine, %args ) = @_;
+  my $project = $args{project} ? 1 : 0;
+  my $path    = config_path( $engine, $project );
+  my $config  = _load($engine);
+  my $state   = Skilletor::State->new( root => $engine->state_root );
+  my $scope   = $project ? 'project' : 'user';
+  my %catalogs;
+  my $catalog_of = sub {
+    my ( $source, $backend ) = @_;
+    return $catalogs{$source} //=
+      Skilletor::Catalog->scan( Skilletor::Backend->make( $backend, $engine->cache_root )->resolve->{dir}, $backend->{path} );
+  };
+
+  my ( @edits, @bundles );
+  my $plan_item = sub {
+    my ( $spec ) = @_;
+    my $p = _parse_item_spec($spec);
+    my ( $explicit_type, $name, $source ) = @{$p}{qw( type name source )};
+    my $src = $config->source_of( $scope, $source );
+    unless ($src) {
+      my $hint = !$project && $config->source($source) ? ' in the user config (a project declares it: use --project)' : '';
+      _fail( 'unknown source: '.$source.$hint );
+    }
+    my $backend = Skilletor::Backend->resolve( $src, $engine->home );
+    _fail( 'source "'.$source.'" is not trusted; run: skilletor trust '.$source ) unless $state->is_trusted( $source, $backend );
+    if ( index( $name, WILDCARD ) >= 0 ) {
+      # Expanded at sync time; an empty match is fine here (items may arrive later).
+      push @edits, sub { Skilletor::Config->add_install_entry( $path, $explicit_type, $name.'@'.$source ) };
+      return;
+    }
+    my $cat = $catalog_of->( $source, $backend );
+    my $has_bundle = grep { $_->{name} eq $name } @{ $cat->{bundles} };
+    my @matches = $p->{bundle} ? () : grep { $_->{name} eq $name && ( !$explicit_type || $_->{type} eq $explicit_type ) } @{ $cat->{items} };
+    # Without a prefix, a name only a bundle has is that bundle (spec §15.5).
+    if ( $p->{bundle} || ( !$explicit_type && $has_bundle && !@matches ) ) {
+      push @bundles, { name => $name, foreign => _check_bundle( $cat, $name, $source ) };
+      push @edits, sub { Skilletor::Config->add_bundle_entry( $path, $name.'@'.$source ) };
+      return;
+    }
+    unless (@matches) {
+      my $suggestions = join ', ', _first8( map { $_->{type}.':'.$_->{name} } @{ $cat->{items} } );
+      _fail( 'unknown item "'.$name.'" in '.$source.( length $suggestions ? ' (available: '.$suggestions.')' : '' ) );
+    }
+    if ( @matches > 1 || ( !$explicit_type && $has_bundle ) ) {
+      my @options = map { $_->{type}.':'.$name.'@'.$source } @matches;
+      push @options, 'bundle:'.$name.'@'.$source if !$explicit_type && $has_bundle;
+      _fail( '"'.$name.'" is ambiguous in '.$source.'; use one of: '.join( ', ', @options ) );
+    }
+    my $type = $matches[0]{type};
+    # An error of the item itself (spec §4.1) fails before any edit, as a broken bundle's does.
+    _fail( $source.': '.$type.' '.$name.': '.$matches[0]{error} ) if defined $matches[0]{error};
+    push @edits, sub { Skilletor::Config->add_install_entry( $path, $type, $name.'@'.$source ) };
+  };
+  _with_sync_lock( $engine, sub { $plan_item->($_) for @{ $args{items} }; return } );
+
+  for my $addition ( @{ _missing_sources( $engine, $config, \@bundles, $path, $project, $args{prompt} ) } ) {
+    push @edits, sub {
+      Skilletor::Config->add_source( $path, $addition->{name}, $addition->{def} );
+      _trust_def( $engine, $addition->{name}, $addition->{def} );    # as `add`: adding is the act of trust (spec §4.3)
+    };
+  }
+  $_->() for @edits;
+  return $engine->sync;
+}
+
+# The first eight of a list, as the reference's slice(0, 8).
+sub _first8 { @_ > 8 ? @_[ 0 .. 7 ] : @_ }
+
+# Sources the bundles name by address that no configured source the target scope sees serves
+# (spec §15.6), once per identity. With a prompter each is offered for adding; without one the
+# command fails, naming the `skilletor add` commands. None is one config load would refuse
+# (k110): such an address is already an error of its bundle (k115, spec §15.4). Returns the
+# sources to add: [ { name, def, url } ].
+sub _missing_sources {
+  my ( $engine, $config, $bundles, $path, $project, $prompt ) = @_;
+  my $scope = $project ? 'project' : 'user';
+  my @missing;
+  for my $b (@$bundles) {
+    for my $f ( @{ $b->{foreign} } ) {
+      next if defined Skilletor::Resolver::_serving_source( $config, $scope, $f->{url} );
+      push @missing, { bundle => $b->{name}, f => $f } unless grep { same_identity( $_->{f}{url}, $f->{url} ) } @missing;
+    }
+  }
+  return [] unless @missing;
+  my %taken = map { ( $_->{name} => $_->{git} // $_->{url} // $_->{local} // '' ) } @{ $config->sources };
+  # A name is free unless $path, the config the source goes into, has it – whatever its address:
+  # the prompt never writes over an entry, as `add` never replaces one (k102) – or a source with
+  # another address holds it.
+  my $free = sub {
+    my ( $name, $url ) = @_;
+    return !Skilletor::Config->has_source_entry( $path, $name ) && ( !exists $taken{$name} || same_identity( $taken{$name}, $url ) );
+  };
+  my $suggest = sub {
+    my ( $f ) = @_;
+    return $f->{derivedName} if $free->( $f->{derivedName}, $f->{url} );
+    my $n = 2;
+    $n++ until $free->( $f->{derivedName}.'-'.$n, $f->{url} );
+    return $f->{derivedName}.'-'.$n;
+  };
+  my $flag = $project ? ' --project' : '';
+  unless ($prompt) {
+    my @lines = map { '  skilletor add '.$suggest->( $_->{f} ).' '.$_->{f}{spec}.$flag } @missing;
+    my %seen;
+    my $names = join ', ', grep { !$seen{$_}++ } map { $_->{bundle} } @missing;
+    _fail( 'bundle '.$names." needs sources you don't have yet; nothing was changed. Add them, then install again:\n"
+        .join( "\n", @lines ) );
+  }
+  my @out;
+  for my $m (@missing) {
+    my ( $bundle, $f ) = @{$m}{qw( bundle f )};
+    my $fallback = $suggest->($f);
+    my $question = 'bundle '.$bundle." needs a source you don't have yet: ".$f->{spec}." \x{2192} ".$f->{url}." \x{2014} "
+      .'add it as ['.$fallback.']? (name, or n to skip)';
+    my $note = '';
+    for ( ;; ) {
+      my $answer = js_trim( $prompt->( $note.$question ) );
+      last if $answer =~ /\A(?:n|no)\z/i;
+      my $name = length $answer ? $answer : $fallback;
+      unless ( is_source_name($name) ) {
+        $note = '"'.$name.'" is not a valid source name. ';
+        next;
+      }
+      unless ( $free->( $name, $f->{url} ) ) {
+        my $own = Skilletor::Config->has_source_entry( $path, $name ) ? _address_text( Skilletor::Config->source_entry( $path, $name ) ) : $taken{$name};
+        $note = '"'.$name.'" is already a source with another address ('.$own.'). ';
+        next;
+      }
+      push @out, { name => $name, def => js_ordered( $f->{kind} eq 'git' ? 'git' : 'url', $f->{url} ), url => $f->{url} };
+      $taken{$name} = $f->{url};
+      last;
+    }
+  }
+  return \@out;
+}
+
+# A bundle must exist and expand before it is declared (errors of spec §15.4); returns its
+# entries of other sources.
+sub _check_bundle {
+  my ( $cat, $name, $source ) = @_;
+  unless ( grep { $_->{name} eq $name } @{ $cat->{bundles} } ) {
+    my $known = join ', ', _first8( map { $_->{name} } @{ $cat->{bundles} } );
+    _fail( 'unknown bundle "'.$name.'" in '.$source.( length $known ? ' (available bundles: '.$known.')' : '' ) );
+  }
+  my $e;
+  return $e->{foreign} if eval { $e = expand_bundle( $cat, $name ); 1 };
+  my $err = $@;
+  die $err unless blessed $err && $err->isa('Skilletor::Error::Bundle');
+  _fail( $source.': '.$err->message );
+}
+
+#### uninstall #################################################################
+
+# Remove explicit entries from one config, then sync. Plan every removal first: an item with no
+# explicit entry is an error (naming a covering wildcard or bundle, another type, or the other
+# scope) and leaves the config untouched. Hints name covering entries that remain after a valid
+# explicit removal.
+sub uninstall {
+  my ( $engine, %args ) = @_;
+  my $project    = $args{project} ? 1 : 0;
+  my $path       = config_path( $engine, $project );
+  my $scope_name = $project ? 'project' : 'user';
+  my $lock       = read_lock( path_join( dirname($path), 'skilletor.lock.json' ) );
+  my @parsed     = map { +{ spec => $_, %{ _parse_item_spec($_) } } } @{ $args{items} };
+
+  my ( @errors, @hints );
+  my $where        = 'the '.$scope_name.' config';
+  my $bundles_here = Skilletor::Config->bundle_entries($path);
+  for my $p (@parsed) {
+    my $explicit = $p->{bundle} ? []
+      : Skilletor::Config->find_install_entries( $path, $p->{name}, $p->{source}, $p->{type} );
+    my $bundle_hit = grep { $_->{name} eq $p->{name} && $_->{source} eq $p->{source} } @$bundles_here;
+    # Without a prefix, a name declared only as a bundle here is that bundle (spec §15.5).
+    if ( !$p->{bundle} && !$p->{type} && index( $p->{name}, WILDCARD ) < 0 && $bundle_hit ) {
+      if (@$explicit) {
+        push @errors, $p->{name}.'@'.$p->{source}.' is ambiguous in '.$where.': it names a bundle and '
+          .join( ', ', map { $_->{type}.':'.$p->{name}.'@'.$p->{source} } @$explicit )
+          .'; use a prefix (bundle:'.$p->{name}.'@'.$p->{source}.')';
+      }
+      else {
+        $p->{bundle} = 1;
+      }
+      next;
+    }
+    if ( $p->{bundle} ) {
+      push @errors, 'bundle:'.$p->{name}.'@'.$p->{source}.' is not declared in '.$where.' ('.$path.')'
+        ._bundle_elsewhere( $engine, $p, $project ) unless $bundle_hit;
+      next;
+    }
+    my $label = ( $p->{type} ? $p->{type}.':' : '' ).$p->{name}.'@'.$p->{source};
+    my $cover = index( $p->{name}, WILDCARD ) >= 0
+      ? { source => $p->{source}, wilds => [], bundles => [], confirmed => 0 }
+      : _covering( $path, $lock, $bundles_here, $p->{name}, $p->{source}, $p->{type}, [ map { $_->{type} } @$explicit ] );
+    my $text = _cover_text($cover);
+    if ( !@$explicit ) {
+      if ( length $text && $cover->{confirmed} ) {
+        push @errors, $label.' is not declared explicitly; it is installed by the '.$text.' in '.$where.'. To drop it, '
+          ._way_out( $cover, $project );
+      }
+      elsif ( length $text ) {
+        push @errors, $label.' is not declared in '.$where.' ('.$path.'); the '.$text
+          .' there installs every matching item of its type from '.$p->{source}.', so if '.$p->{source}.' offers it: '
+          ._way_out( $cover, $project );
+      }
+      else {
+        push @errors, $label.' is not declared in '.$where.' ('.$path.')'
+          ._declared_elsewhere( $engine, $path, $p, $project );
+      }
+    }
+    elsif ( length $text ) {
+      push @hints, $label.' removed, but the '.$text.' in '.$where.' still installs it on the next sync. To drop it, '
+        ._way_out( $cover, $project );
+    }
+  }
+  _fail( join "\n", @errors ) if @errors;
+
+  for my $p (@parsed) {
+    if ( $p->{bundle} ) {
+      Skilletor::Config->remove_bundle_entries( $path, $p->{name}, $p->{source} );
+    }
+    else {
+      Skilletor::Config->remove_install_entries( $path, $p->{name}, $p->{source}, $p->{type} );
+    }
+  }
+  return { report => $engine->sync, hints => \@hints };
+}
+
+# Wildcards and bundles in one config that install name@source. A wildcard's type comes from the
+# prefix, else from explicit entries being removed plus the scope's lock; if neither knows it,
+# every matching wildcard of the source counts. A bundle counts when the lock records it in the
+# item's `via` (spec §15.5).
+sub _covering {
+  my ( $path, $lock, $bundles_here, $name, $source, $type, $explicit_types ) = @_;
+  my @found = map { +{ type => $_->{type}, pattern => $_->{pattern} } }
+    grep { matches_pattern( $_->{pattern}, $name ) }
+    @{ Skilletor::Config->find_wildcard_entries( $path, $source, $type ) };
+  # Any target's entry counts (claude `skills/x`, codex `codex:skills/x`), its name ignoring case.
+  my $locked = sub {
+    my ( $wanted_type ) = @_;
+    return [ grep {
+      my $entry = $lock->{$_};
+      my $key   = parse_lock_key($_);
+      js_type($entry) eq 'object'
+        && name_key( $key->{name} ) eq name_key($name)
+        && ( !$wanted_type || $key->{type} eq $wanted_type )
+        && defined $entry->{source} && $entry->{source} eq $source;
+    } keys %$lock ];
+  };
+  my $in_lock = sub { @{ $locked->( $_[0] ) } ? 1 : 0 };
+  my %labels = map { ( Skilletor::Resolver->bundle_label($_) => 1 ) } @$bundles_here;
+  my ( @bundles, %seen );
+  for my $key ( @{ $locked->($type) } ) {
+    for my $via ( @{ $lock->{$key}{via} // [] } ) {
+      push @bundles, $via if $labels{$via} && !$seen{$via}++;
+    }
+  }
+  my $confirmed = @bundles || grep { $in_lock->( $_->{type} ) } @found;
+  return { source => $source, wilds => \@found, bundles => \@bundles, confirmed => $confirmed ? 1 : 0 } if $type;
+  my @known = grep {
+    my $wild = $_;
+    ( grep { $_ eq $wild->{type} } @$explicit_types ) || $in_lock->( $wild->{type} );
+  } @found;
+  return {
+    source    => $source,
+    wilds     => @known || @$explicit_types ? \@known : \@found,
+    bundles   => \@bundles,
+    confirmed => $confirmed ? 1 : 0,
+  };
+}
+
+# The covering wildcards as written with their type, then the bundles.
+sub _cover_entries {
+  my ( $cover ) = @_;
+  return ( map { $_->{type}.':'.$_->{pattern}.'@'.$cover->{source} } @{ $cover->{wilds} } ), @{ $cover->{bundles} };
+}
+
+sub _cover_text {
+  my ( $cover ) = @_;
+  my @wilds = map { $_->{type}.':'.$_->{pattern}.'@'.$cover->{source} } @{ $cover->{wilds} };
+  my @parts;
+  push @parts, ( @wilds == 1 ? 'wildcard ' : 'wildcards ' ).join( ', ', @wilds ) if @wilds;
+  push @parts, ( @{ $cover->{bundles} } == 1 ? 'bundle ' : 'bundles ' ).join( ', ', @{ $cover->{bundles} } )
+    if @{ $cover->{bundles} };
+  return join ' and ', @parts;
+}
+
+sub _way_out {
+  my ( $cover, $project ) = @_;
+  my $flag = $project ? ' --project' : '';
+  my $cmds = join ' or ', map { "skilletor uninstall '".$_."'".$flag } _cover_entries($cover);
+  my $what = !@{ $cover->{bundles} } ? 'the wildcard' : !@{ $cover->{wilds} } ? 'the bundle' : 'them';
+  return 'uninstall '.$what.' ('.$cmds.'), or keep it and gate the item via vars '
+    .'if its template renders empty for some value (an empty render is skipped).';
+}
+
+# Where else a bundle is declared: the other scope's config.
+sub _bundle_elsewhere {
+  my ( $engine, $p, $project ) = @_;
+  return '' if !$project && !defined $engine->project_dir_of;
+  my $hit = grep { $_->{name} eq $p->{name} && $_->{source} eq $p->{source} }
+    @{ Skilletor::Config->bundle_entries( config_path( $engine, !$project ) ) };
+  return '' unless $hit;
+  return $project ? '; the user config declares it (run without --project)'
+    : '; the project config declares it (use --project)';
+}
+
+# Where else the item is declared: under another type here, or in the other scope's config.
+sub _declared_elsewhere {
+  my ( $engine, $path, $p, $project ) = @_;
+  if ( $p->{type} ) {
+    my @other = map { $_->{type}.':'.$p->{name}.'@'.$p->{source} }
+      @{ Skilletor::Config->find_install_entries( $path, $p->{name}, $p->{source} ) };
+    return '; it is declared as '.join( ', ', @other ) if @other;
+  }
+  return '' if !$project && !defined $engine->project_dir_of;
+  my $other_path = config_path( $engine, !$project );
+  my $hit = @{ Skilletor::Config->find_install_entries( $other_path, $p->{name}, $p->{source}, $p->{type} ) }
+    || ( index( $p->{name}, WILDCARD ) < 0
+      && grep { matches_pattern( $_->{pattern}, $p->{name} ) }
+        @{ Skilletor::Config->find_wildcard_entries( $other_path, $p->{source}, $p->{type} ) } );
+  return '' unless $hit;
+  return $project ? '; the user config declares it (run without --project)'
+    : '; the project config declares it (use --project)';
 }
 
 #### trust #####################################################################
@@ -390,11 +730,51 @@ sub trust {
   return js_ordered( name => $name, kind => $backend->{kind}, url => $backend->{address} );
 }
 
+# Trust a source definition just written by `add` (or a bundle's missing source): the backend it
+# names, normalized by the one resolver (spec §4.3).
+sub _trust_def {
+  my ( $engine, $name, $def ) = @_;
+  Skilletor::State->new( root => $engine->state_root )
+    ->trust( $name, Skilletor::Backend->resolve( { name => $name, %$def, origins => {} }, $engine->home ) );
+}
+
+#### helpers ###################################################################
+
+# `[type:]name@source`, `type:pattern@source` or `bundle:name@source` (spec §7, §15.5):
+# { type, bundle, name, source }, `type` and `bundle` only when given. Uninstall (k179) reads its
+# items the same way.
+sub _parse_item_spec {
+  my ( $spec ) = @_;
+  my $at = rindex $spec, '@';
+  _fail( 'item "'.$spec.'" must be name@source (or type:name@source)' ) if $at <= 0 || $at == length($spec) - 1;
+  my $source = substr $spec, $at + 1;
+  my $name   = substr $spec, 0, $at;
+  my %out;
+  my $colon = index $name, ':';
+  if ( $colon != -1 ) {
+    my $prefix = substr $name, 0, $colon;
+    if    ( $prefix eq 'bundle' )                                         { $out{bundle} = 1 }
+    elsif ( $prefix eq 'skill' || $prefix eq 'agent' || $prefix eq 'rule' ) { $out{type}   = $prefix }
+    else                                                                  { _fail( 'unknown type prefix "'.$prefix.'" in "'.$spec.'"' ) }
+    $name = substr $name, $colon + 1;
+  }
+  _fail( 'item "'.$spec.'" has an empty name' ) if $name eq '';
+  if ( $out{bundle} ) {
+    _fail( '"'.$spec.'": patterns over bundle names are not supported' ) if index( $name, WILDCARD ) >= 0;
+    return { bundle => 1, name => $name, source => $source };
+  }
+  if ( index( $name, WILDCARD ) >= 0 && !$out{type} ) {
+    _fail( 'wildcard "'.$spec.'" needs a type prefix: rule:'.$name.'@'.$source.', skill:'.$name.'@'.$source
+        .' or agent:'.$name.'@'.$source );
+  }
+  return { %out, name => $name, source => $source };
+}
+
 1;
 
 =synopsis
 
-  use Skilletor::Commands qw( add available source_list source_remove trust );
+  use Skilletor::Commands qw( add available install source_list source_remove trust uninstall );
 
   my $engine = Skilletor::Engine->new( home => $ENV{HOME}, project_dir => $project );
   my $added  = add( $engine, spec => 'Getty/skills', project => 0 );   # { name, def, kept, report }
@@ -402,6 +782,8 @@ sub trust {
   my $r      = trust( $engine, 'team' );                 # { name, kind, url }
   my $report = source_remove( $engine, name => 'extra', project => 0, force => 0 );
   my $items  = available( $engine, source => 'team' );   # [ { type, name, description, source, installed, ... }, ... ]
+  $report    = install( $engine, items => ['rule:*@team', 'bundle:perl@team'], project => 0, prompt => $prompt );
+  my $result = uninstall( $engine, items => ['rule:old@team'], project => 0 ); # { report, hints }
 
 =description
 
@@ -410,7 +792,8 @@ F<src/commands.ts>: the same checks in the same order, the same messages, the
 config files written by L<Skilletor::Config>'s edit operations (two-space
 JSON, the file's key order kept); an edit is followed by the engine's sync,
 whose report the command returns. C<available> edits nothing: it reads the
-sources under the sync lock, as a sync does. Each takes the L<Skilletor::Engine> the CLI
+sources under the sync lock, as a sync does; C<install> plans its edits under
+it; C<uninstall> validates every removal before editing. Each takes the L<Skilletor::Engine> the CLI
 runs on as its context – home, project dir, C<CLAUDE_CONFIG_DIR>, state root –
 as the reference's take its C<CommandContext>.
 
@@ -498,6 +881,65 @@ C<vars>, its own var defaults; or C<error>, why it cannot be expanded (spec
 It throws a L<Skilletor::Error::Command> for a name no source has, a
 L<Skilletor::Error::Config> for a config file load refuses, and passes on what
 a lock read, a resolve or a scan throws; the CLI then prints nothing else.
+
+=func install
+
+  my $report = install( $engine, items => \@items, project => $bool, prompt => $prompt );
+
+Adds each item to the user config, or the project config with C<project>,
+then syncs and returns the sync's report (its C<error> set when that sync
+stopped at a config error; the edits stay). An item is
+C<[type:]name@source>, C<type:pattern@source> with a C<*> (a wildcard entry,
+expanded by the sync; C<*> alone needs a type) or C<bundle:name@source>; a
+bare C<name@source> that no item of the source has but a bundle does is that
+bundle (spec §15.5). The source is the one the target scope sees: the user
+config's for the user scope, the merged one for the project's.
+
+Every item is checked before anything is written, holding the sync lock
+(L<Skilletor::State/with_lock>; the caches' leftovers swept first), the
+source resolved and scanned as a sync would; the lock is free again for the
+questions and the sync, which takes it itself. It throws a
+L<Skilletor::Error::Command>, changing nothing, for an item it cannot read, no
+project scope with C<project>, an unknown or untrusted source, an unknown or
+ambiguous name, an item with an error of its own (spec §4.1), and a bundle
+that does not exist or does not expand (spec §15.4: an entry address config
+load would refuse, k115, is such an error); a config file load refuses is a
+L<Skilletor::Error::Config>.
+
+A bundle's entries of other sources whose address no configured source the
+target scope sees serves are missing sources (spec §15.6), each identity once.
+Without C<prompt> the command throws, naming the C<skilletor add> commands
+that would add them. With it each is asked for: C<prompt> is called with the
+question – C<bundle E<lt>nameE<gt> needs a source you don't have yet:
+E<lt>specE<gt> → E<lt>addressE<gt> — add it as [E<lt>nameE<gt>]? (name, or n
+to skip)> – and returns the answer: empty takes the proposed name, C<n> or
+C<no> skips the source (its members then a warning of the sync), any other is
+the name, asked again with a note before the question when config load would
+refuse it (k95) or a source with another address – or an entry of the config
+written, whatever its address (k102) – has it. The proposed name is the
+address's derived one, else that with C<-2>, C<-3>, … An added source is
+written after the items and trusted as L</add> trusts it.
+
+=func uninstall
+
+  my $r = uninstall( $engine, items => \@items, project => $bool );
+  # { report => $sync_report, hints => \@warnings }
+
+Removes explicit item, wildcard or bundle entries from the user config, or the
+project config with C<project>, then syncs. A type prefix restricts removal to
+that type; a bare item name removes it from every type. A bare name that only a
+bundle entry has removes that bundle, while a name held both as an item and a
+bundle is ambiguous. Returns the sync's C<report> and one C<hints> line per
+removed explicit item a wildcard or bundle in the same config still installs.
+
+Every requested removal is checked before any edit. An entry not declared
+explicitly throws a L<Skilletor::Error::Command>, naming its covering wildcard
+or bundle when the scope's lock confirms it, a matching wildcard conditionally
+when no installed item confirms it, another type in the same config, or the
+other scope and the needed C<--project> choice. The message gives the command
+that removes a covering entry and the alternative of gating a template to
+render empty. A failure leaves the config byte-identical. A sync error after a
+valid edit is returned in C<report>; the edit stays.
 
 =func trust
 

@@ -1,0 +1,10 @@
+{
+  "description": "Explicit machine targets Claude and Codex, with both kinds of project evidence: the project installs for both in stable target order.",
+  "git": { "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] } },
+  "steps": [
+    { "id": "sync", "op": "sync", "scope": "project", "tree": true },
+    { "id": "check", "op": "check", "scope": "project" },
+    { "id": "status", "op": "status", "scope": "project" },
+    { "id": "resync", "op": "sync", "scope": "project" }
+  ]
+}

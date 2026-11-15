@@ -1017,6 +1017,28 @@ test("available lists a trusted source's catalog with installed markers", async 
   }
 });
 
+test("available matches installed item names ignoring case but preserves source alias case", async () => {
+  const e = env();
+  try {
+    const src = makeSource(e.tmp.dir, "s", (d) => {
+      skill(d, "Foo");
+      skill(d, "bar");
+      skill(d, "Baz");
+    });
+    e.writeUserCfg({ sources: { Mine: { local: src } }, install: { skills: ["bAz@Mine"] } });
+    writeFileSync(join(e.home, ".claude", "skilletor.lock.json"), JSON.stringify({
+      "skills/Foo": { source: "Mine", version: "v", files: {} },
+      "skills/BAR": { source: "mine", version: "v", files: {} },
+    }));
+    const byName = new Map((await cmdAvailable(e.ctx, { source: "Mine" })).map((i) => [i.name, i]));
+    assert.equal(byName.get("Foo")?.installed, true, "lock entry name");
+    assert.equal(byName.get("bar")?.installed, false, "different source alias");
+    assert.equal(byName.get("Baz")?.installed, true, "explicit entry name");
+  } finally {
+    e.cleanup();
+  }
+});
+
 test("trust confirms a project-only source and shows the URL", async () => {
   const e = env();
   try {

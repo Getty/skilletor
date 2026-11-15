@@ -1,0 +1,7 @@
+{
+  "targets": ["claude", "codex"],
+  "sources": {
+    "mine": { "local": "${HOME}/dev/tools" }
+  },
+  "install": { "agents": ["rev@mine"] }
+}

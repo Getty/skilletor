@@ -1,0 +1,4 @@
+{
+  "enabledPlugins": { "skilletor@getty": true },
+  "extraKnownMarketplaces": { "getty": { "source": { "source": "github", "repo": "example/marketplace" } } }
+}

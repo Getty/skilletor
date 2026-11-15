@@ -1,0 +1,1 @@
+skilletor: no project scope: the project directory is the home directory (${HOME}); run from a project, pass --project-dir, or drop --project to edit the user config

@@ -1,0 +1,4 @@
+skilletor: user scope
+  + skills/Foo (active now)
+  + rules/perl (active after /reload-plugins or restart)
+  + rules/r1 (active after /reload-plugins or restart)

@@ -1,0 +1,12 @@
+{
+  "rules/r1": {
+    "source": "shared",
+    "version": "local",
+    "files": {
+      "rules/.local.r1.md": "sha256:42441f56923bcd7df8f2e14052a3281479a587be996dfb2cc06abbdca864ed8e"
+    },
+    "via": [
+      "bundle:perl@shared"
+    ]
+  }
+}

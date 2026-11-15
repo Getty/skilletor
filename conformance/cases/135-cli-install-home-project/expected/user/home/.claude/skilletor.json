@@ -1,0 +1,12 @@
+{
+  "sources": {
+    "s": {
+      "local": "${HOME}/dev/s"
+    }
+  },
+  "install": {
+    "skills": [
+      "foo@s"
+    ]
+  }
+}

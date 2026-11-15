@@ -11,6 +11,7 @@ use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/lib";
 use SkilletorTest qw( git_ok );
+use SkilletorTest::ParityCLI ();
 
 use Cwd ();
 use Encode ();
@@ -250,7 +251,7 @@ sub run_cli {
   return { failed => 'argv is no array of strings' }
     unless js_type($argv) eq 'array' && !grep { js_type($_) ne 'string' } @$argv;
   my $stdin =
-      !defined $step->{stdin}                ? ''
+      !exists $step->{stdin}                  ? ''
     : js_type( $step->{stdin} ) eq 'string' ? concrete( $step->{stdin}, $r )
     :                                         js_stringify( concrete_deep( $step->{stdin}, $r ) );
   my $res = run_command(
@@ -317,7 +318,7 @@ sub run_case {
   local $ENV{GIT_CONFIG_NOSYSTEM} = '1';
   local @ENV{qw( CODEX_HOME HERMES_HOME CLAUDE_PLUGIN_ROOT CLAUDE_CONFIG_DIR )};
   delete @ENV{qw( CODEX_HOME HERMES_HOME CLAUDE_PLUGIN_ROOT CLAUDE_CONFIG_DIR )};
-  $ENV{$_} = concrete( $c->{env}{$_}, $r ) for sort keys %{ $c->{env} // {} };
+  $ENV{$_} = encode_text( concrete( $c->{env}{$_}, $r ) ) for sort keys %{ $c->{env} // {} };
   build_git( $case_dir, $c, $r );
   path( $r->{home}, '.claude' )->mkpath;
   my $marker = !( exists $c->{claude} && !$c->{claude} );    # "claude": false – no marker, Claude Code is not in use
@@ -436,6 +437,35 @@ subtest "a cli step's CLI gets the README's environment, argv, cwd and stdin –
   my $raw = { %$step, stdin => 'not json ${TMP}', cwd => '${HOME}' };
   my @got = split /\0/, run_cli( \@echo, $raw, $r, cli_env( $c, $raw, $r ) )->{stdout}, -1;
   is_deeply( [ @got[ 0 .. 2 ] ], [ $r->{home}, 'pipe', "not json $tmp" ], 'a string is stdin as it is; a step cwd' );
+
+  # Capture stdin unchanged: omitted stdin is empty, but a present JSON null is the four bytes
+  # `null`. Exercise the conformance runner and ParityCLI, which t/65 uses for interleaved steps.
+  my @capture = ( $^X, '-e', 'binmode STDIN; binmode STDOUT; local $/; my $in = <STDIN>; print STDOUT $in // q{}' );
+  my @stdin_cases = (
+    [ 'absent',                 {},                                                     '' ],
+    [ 'JSON null',              { stdin => undef },                                     'null' ],
+    [ 'empty string',           { stdin => '' },                                        '' ],
+    [ 'the string null',        { stdin => 'null' },                                    'null' ],
+    [ 'a scalar',               { stdin => 42 },                                        '42' ],
+    [ 'an array',               { stdin => [ 1, 'two' ] },                              '[1,"two"]' ],
+    [ 'an object',              { stdin => js_ordered( cwd => '${HOME}', n => [1] ) }, '{"cwd":"'.$r->{home}.'","n":[1]}' ],
+    [ 'placeholder text',       { stdin => 'not JSON ${TMP}' },                         "not JSON $tmp" ],
+  );
+  my $m = { %$r, env => {} };
+  my @drivers = (
+    [ conformance => sub { run_cli( \@capture, $_[0], $r, cli_env( {}, $_[0], $r ) ) } ],
+    [ parity      => sub { SkilletorTest::ParityCLI::run_cli( \@capture, $m, $_[0] ) } ],
+  );
+  for my $driver (@drivers) {
+    for my $case (@stdin_cases) {
+      my ( $name, $input, $want ) = @$case;
+      my $transport = { id => "capture $name", op => 'cli', argv => [], %$input };
+      my $received = $driver->[1]->($transport);
+      is( $received->{exit}, 0, "$driver->[0]: $name exits cleanly" );
+      is( $received->{stdout}, $want, "$driver->[0]: $name is the exact stdin bytes" );
+      is( $received->{stderr}, '', "$driver->[0]: $name writes no stderr" );
+    }
+  }
 };
 
 subtest 'a cli step fails when its CLI dies of a signal or outlives its timeout' => sub {

@@ -629,6 +629,27 @@ test("an option the command does not accept: exit 2, named, nothing touched", ()
   }
 });
 
+test("hook input accepts only a JSON object with a nonempty string cwd and always exits 0", () => {
+  const home = join(tmp.dir, "hook-input-home");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  const env = claudeOnlyEnv(home);
+  delete env.CLAUDE_PROJECT_DIR;
+  delete env.SKILLETOR_PROJECT_DIR;
+  const cases: [string, string][] = [
+    ["null", "null"],
+    ["scalar", "42"],
+    ["array", "[]"],
+    ["number cwd", JSON.stringify({ cwd: 42 })],
+    ["object cwd", JSON.stringify({ cwd: {} })],
+    ["array cwd", JSON.stringify({ cwd: [] })],
+    ["empty cwd", JSON.stringify({ cwd: "" })],
+  ];
+  for (const [label, input] of cases) {
+    const r = runCli(["hook", "session-start"], env, input);
+    assert.deepEqual([r.status, r.stdout, r.stderr], [0, "", ""], label);
+  }
+});
+
 test("every documented option still works for its command", () => {
   const h = hygieneHome("ok");
   const pd = ["--project-dir", h.home];

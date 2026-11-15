@@ -1,0 +1,1 @@
+skilletor: mine: bundle refused: bundles/refused.yaml: rules: "x@http://host/x.tar.gz" cannot be added as a source: sources.host.url "http://host/x.tar.gz" must be an https:// URL

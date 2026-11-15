@@ -10,13 +10,13 @@ use Skilletor::Cache qw( cache_name git_identity );
 use Skilletor::Catalog;
 use Skilletor::Config;
 use Skilletor::Entry qw( WILDCARD name_key );
-use Skilletor::FSUtil qw( path_join same_path );
+use Skilletor::FSUtil qw( decode_utf8_lossy encode_text path_join same_path );
 use Skilletor::JSON qw( js_ordered js_stringify js_type );
 use Skilletor::Lock qw( read_lock key_to_type_name );
 use Skilletor::Source::Git;
 use Skilletor::Source::Url;
 use Skilletor::State;
-use Skilletor::Targets qw( default_markers detect_harnesses select_targets );
+use Skilletor::Targets qw( default_markers detect_harnesses detect_project_harnesses select_targets );
 use namespace::clean;
 
 our $VERSION = '0.002';
@@ -37,7 +37,7 @@ has project_dir => (
 # config, lock, state, roots – and where its plugin state lives. Empty means unset.
 has claude_config_dir => (
   is      => 'lazy',
-  builder => sub { $ENV{CLAUDE_CONFIG_DIR} },
+  builder => sub { defined $ENV{CLAUDE_CONFIG_DIR} ? decode_utf8_lossy( $ENV{CLAUDE_CONFIG_DIR} ) : undef },
 );
 
 has state_root => (
@@ -53,7 +53,7 @@ has cache_root => (
 # `$CODEX_HOME`, for the harness markers; empty means unset.
 has codex_home => (
   is      => 'lazy',
-  builder => sub { $ENV{CODEX_HOME} },
+  builder => sub { defined $ENV{CODEX_HOME} ? decode_utf8_lossy( $ENV{CODEX_HOME} ) : undef },
 );
 
 has markers => (
@@ -121,10 +121,17 @@ sub _base_of {
 # Config and targets. A harness is only needed with require_harness (the reference's sync
 # needs one); without it a machine with none resolves all the same, with no targets warnings.
 sub _load {
-  my ( $self ) = @_;
+  my ( $self, $include_project ) = @_;
+  $include_project //= 1;
   my $config = Skilletor::Config->load( home => $self->home, claude_config_dir => $self->claude_config_dir, project_dir => $self->project_dir_of );
   my $markers = $self->markers;
   my $wanted = { user => $config->user->{targets}, project => $config->project ? $config->project->{targets} : undef };
+  if ( $include_project && $config->project && !exists $config->project->{targets} && defined $self->project_dir_of ) {
+    my $target_dir = $self->_target_dir('project');
+    my $lock_path = path_join( $target_dir, 'skilletor.lock.json' );
+    my $in_use = grep { -e encode_text($_) } map { path_join( $target_dir, $_ ) } qw( skilletor.json skilletor.local.json skilletor.lock.json );
+    $wanted->{project_evidence} = detect_project_harnesses( $self->project_dir_of, read_lock($lock_path) ) if $in_use;
+  }
   my $targets = eval { select_targets( $wanted, detect_harnesses($markers), $markers ) };
   unless ($targets) {
     die $@ if $self->require_harness;
@@ -143,7 +150,7 @@ sub resolve {
       Skilletor::Source::Url->sweep_cache( $self->cache_root );
       Skilletor::Source::Git->sweep_cache( $self->cache_root );
       my ( $config, $targets );
-      unless ( eval { ( $config, $targets ) = $self->_load; 1 } ) {
+      unless ( eval { ( $config, $targets ) = $self->_load( $sel ne 'user' ); 1 } ) {
         my $err = $@;
         die $err if $opts{throw};
         return { scopes => [], error => _message($err) };

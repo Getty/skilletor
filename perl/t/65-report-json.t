@@ -5,7 +5,8 @@
 # bytes. The key order is pinned here as engine.ts builds it; with node, every sync, check and
 # status step of the shared conformance cases runs twice, in two copies of the case's machine –
 # the reference's (../src through maint/ts-run.mjs) and the port's – and the bytes of each step
-# must be equal once the temp paths are placeholders.
+# must be equal once the temp paths are placeholders. A `cli` step between them runs on each
+# machine through that engine's CLI.
 use strict;
 use warnings;
 use utf8;
@@ -14,6 +15,7 @@ use FindBin;
 use lib "$FindBin::Bin/lib";
 use SkilletorTest qw( write_json );
 use SkilletorTest::Conformance qw( abstract case_names read_case setup_case with_case_env );
+use SkilletorTest::ParityCLI qw( clis run_cli skip_reason );
 
 use IPC::Open2 qw( open2 );
 use JSON::MaybeXS ();
@@ -108,7 +110,7 @@ my $why_not =
   : !grep( { -x path( $_, 'node' ) } split /:/, $ENV{PATH} // '' )                     ? 'needs node'
   : !path( $FindBin::Bin, '..', '..', 'node_modules', 'nunjucks' )->exists             ? "needs the reference's node_modules"
   : !@cases                                                                           ? 'needs the shared conformance cases (../conformance)'
-  :                                                                                     undef;
+  :                                                                                     skip_reason();    # the CLIs of the cli steps
 
 sub ts {
   my ( $req ) = @_;
@@ -127,21 +129,35 @@ sub ts {
 
 my %ENGINE_OP = map { ( $_ => 1 ) } qw( resolve sync check status );
 my %COMPARED  = map { ( $_ => 1 ) } qw( sync check status );
+my %CLI       = map { ( $_->[0] => $_->[1] ) } clis();
 
-# The steps both engines run: the case's engine calls, up to the first step of another op (a `cli`
-# step: what it leaves only that op reproduces) or the first one the port skips; none of a case the
-# port skips.
+# The steps both engines run: the case's engine calls and the `cli` steps between them, up to the
+# first step of another op or the first one the port skips; none of a case the port skips. The
+# runners run every step on one machine, so what a cli step's command leaves – a sync's lock, state
+# files, cache and installed files – the next engine call reads (24-conflicts-force: force after
+# cli-sync). A cli step after the last engine call has nothing to feed.
 sub steps_of {
   my ( $c ) = @_;
   my $perl = ( $c->{engines} // {} )->{perl} // {};
   return () if defined $perl->{skip};
   my @steps;
   for my $step ( @{ $c->{steps} } ) {
-    last unless $ENGINE_OP{ $step->{op} };
+    last unless $ENGINE_OP{ $step->{op} } || $step->{op} eq 'cli';
     last if defined( ( ( $perl->{steps} // {} )->{ $step->{id} } // {} )->{skip} );
     push @steps, $step;
   }
+  pop @steps while @steps && $steps[-1]{op} eq 'cli';
   return @steps;
+}
+
+# A `cli` step on one engine's machine, through that engine's CLI: the reference's bundle or
+# bin/skilletor (SkilletorTest::ParityCLI, as t/54 runs them). Only what it leaves counts here.
+sub run_cli_step {
+  my ( $which, $m, $step ) = @_;
+  path( $m->{tmp}, 'cwd' )->mkpath;    # its cwd without a project (README: cli)
+  my $got = run_cli( $CLI{$which}, $m, $step );
+  die "step $step->{id}: the $which CLI $got->{failed}\n" if defined $got->{failed};
+  return undef;
 }
 
 sub run_case {
@@ -150,14 +166,25 @@ sub run_case {
   plan skip_all => 'no sync, check or status step to compare' unless grep { $COMPARED{ $_->{op} } } @steps;
 
   my $ts_machine = setup_case($name);
-  my $ts_out = with_case_env(
+  my @ts_out = with_case_env(
     $ts_machine,
     sub {
-      ts( {
-        op => 'steps', home => $ts_machine->{home}, projectDir => $ts_machine->{project},
-        host => { name => 'conformance', os => 'linux' }, user => { name => 'conformance', home => $ts_machine->{home} },
-        steps => [ map { js_ordered( op => $_->{op}, scope => $_->{scope} // 'all', force => $_->{force} ? JSON::MaybeXS::true() : JSON::MaybeXS::false() ) } @steps ],
-      } );
+      my ( @out, @batch );
+      my $flush = sub {    # the engine calls since the last cli step, on one context
+        push @out, @{ ts( {
+          op => 'steps', home => $ts_machine->{home}, projectDir => $ts_machine->{project},
+          host => { name => 'conformance', os => 'linux' }, user => { name => 'conformance', home => $ts_machine->{home} },
+          steps => [ map { js_ordered( op => $_->{op}, scope => $_->{scope} // 'all', force => $_->{force} ? JSON::MaybeXS::true() : JSON::MaybeXS::false() ) } @batch ],
+        } ) } if @batch;
+        @batch = ();
+      };
+      for my $step (@steps) {
+        if ( $step->{op} ne 'cli' ) { push @batch, $step; next }
+        $flush->();
+        push @out, run_cli_step( ts => $ts_machine, $step );
+      }
+      $flush->();
+      @out;
     }
   );
 
@@ -170,6 +197,7 @@ sub run_case {
         ( $m->{project} ? ( project_dir => $m->{project} ) : () ),
         state_root       => "$m->{home}/.claude/skilletor",
         codex_home       => "$m->{home}/.codex",
+        hermes_home      => "$m->{home}/.hermes",
         require_harness  => 1,
         is_git_work_tree => sub { 0 },
         git_tracked      => sub { [] },
@@ -179,7 +207,8 @@ sub run_case {
       map {
         my %opts = ( scope => $_->{scope} // 'all' );
         my $report =
-            $_->{op} eq 'resolve' ? $sk->resolve(%opts)
+            $_->{op} eq 'cli'     ? run_cli_step( perl => $m, $_ )
+          : $_->{op} eq 'resolve' ? $sk->resolve(%opts)
           : $_->{op} eq 'sync'    ? $sk->sync( %opts, force => $_->{force} ? 1 : 0 )
           : $_->{op} eq 'check'   ? $sk->check(%opts)
           :                         $sk->status(%opts);
@@ -190,7 +219,7 @@ sub run_case {
 
   for my $i ( 0 .. $#steps ) {
     next unless $COMPARED{ $steps[$i]{op} };
-    is( abstract( $perl_out[$i], $m ), abstract( $ts_out->[$i], $ts_machine ), "step $steps[$i]{id}: the --json bytes" );
+    is( abstract( $perl_out[$i], $m ), abstract( $ts_out[$i], $ts_machine ), "step $steps[$i]{id}: the --json bytes" );
   }
 }
 

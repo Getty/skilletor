@@ -1,0 +1,16 @@
+{
+  "agents/rev": {
+    "source": "mine",
+    "version": "local",
+    "files": {
+      "agents/.local.rev.md": "sha256:a1ab602be6383992ed78618d71d0ff762501eb1e894c6628bfe76381dd6f9cac"
+    }
+  },
+  "codex:agents/rev": {
+    "source": "mine",
+    "version": "local",
+    "files": {
+      "agents/.local.rev.toml": "sha256:41b07b98c2016cf37e987f7851c7b11e8e0659ceeacf8bd19a67e5ee0cdcf65b"
+    }
+  }
+}

@@ -10,7 +10,7 @@ import { backendLabel, displaySafe, reportJson, reportText, type SyncReport } fr
 import {
   cmdAdd, cmdAvailable, cmdInstall, cmdSourceList, cmdSourceRemove, cmdTrust, cmdUninstall, configPath, type Prompter,
 } from "./commands.ts";
-import { projectRootOf, runHook, type HookContext, type HookInput } from "./hooks.ts";
+import { hookInputOf, projectRootOf, runHook, type HookContext, type HookInput } from "./hooks.ts";
 
 declare const __SKILLETOR_VERSION__: string;
 const VERSION =
@@ -376,7 +376,7 @@ async function runHookCommand(args: string[]): Promise<number> {
     let input: HookInput = {};
     try {
       const raw = await readStdin();
-      if (raw.trim()) input = JSON.parse(raw) as HookInput;
+      if (raw.trim()) input = hookInputOf(JSON.parse(raw));
     } catch {
       // ignore malformed hook input
     }

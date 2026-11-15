@@ -1,0 +1,1 @@
+skilletor: warning: r1@shared removed, but the wildcard rule:*@shared in the user config still installs it on the next sync. To drop it, uninstall the wildcard (skilletor uninstall 'rule:*@shared'), or keep it and gate the item via vars if its template renders empty for some value (an empty render is skipped).

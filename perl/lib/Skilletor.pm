@@ -1,6 +1,7 @@
 package Skilletor;
 # ABSTRACT: Install skills, agents and rules from remote sources – the Perl port of skilletor
 
+use utf8;
 use Moo;
 use Carp qw( croak );
 use Skilletor::Engine;

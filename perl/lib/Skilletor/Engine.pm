@@ -36,7 +36,7 @@ use Skilletor::Source::Local;
 use Skilletor::Source::Url;
 use Skilletor::State;
 use Skilletor::Targets qw(
-  all_roots default_hermes_home detect_harnesses is_block_type is_local_type lacks_local_prefix lock_key
+  all_roots default_hermes_home detect_harnesses detect_project_harnesses is_block_type is_local_type lacks_local_prefix lock_key
   place_output receivers root_of root_of_key select_targets served_via supports target_gaps
 );
 use Sys::Hostname ();
@@ -84,7 +84,7 @@ has hermes_home => (
 # `CLAUDE_PLUGIN_ROOT`: the running plugin's install, naming skilletor's marketplace (spec §6.8).
 has plugin_root => (
   is      => 'lazy',
-  builder => sub { $ENV{CLAUDE_PLUGIN_ROOT} },
+  builder => sub { defined $ENV{CLAUDE_PLUGIN_ROOT} ? decode_utf8_lossy( $ENV{CLAUDE_PLUGIN_ROOT} ) : undef },
 );
 
 # The render context's `host` (spec §5). Default: this machine's name and OS, as Node names them.
@@ -211,13 +211,21 @@ sub _shell_word {
 
 #### Loading #################################################################
 
-# Config and targets as a sync needs them: no harness is a config error.
+# Config and targets as a sync needs them: no harness is a config error. A user-only operation
+# passes false so a malformed project lock cannot affect it.
 sub _load_strict {
-  my ( $self ) = @_;
+  my ( $self, $include_project ) = @_;
+  $include_project //= 1;
   my $config  = Skilletor::Config->load( home => $self->home, claude_config_dir => $self->claude_config_dir, project_dir => $self->project_dir_of );
   my $markers = $self->markers;
-  my $targets = select_targets( { user => $config->user->{targets}, project => $config->project ? $config->project->{targets} : undef },
-    detect_harnesses($markers), $markers );
+  my $wanted = { user => $config->user->{targets}, project => $config->project ? $config->project->{targets} : undef };
+  if ( $include_project && $config->project && !exists $config->project->{targets} && defined $self->project_dir_of ) {
+    my $target_dir = $self->_target_dir('project');
+    my $lock_path = $self->_lock_path('project');
+    my $in_use = grep { -e encode_text($_) } map { path_join( $target_dir, $_ ) } qw( skilletor.json skilletor.local.json skilletor.lock.json );
+    $wanted->{project_evidence} = detect_project_harnesses( $self->project_dir_of, read_lock($lock_path) ) if $in_use;
+  }
+  my $targets = select_targets( $wanted, detect_harnesses($markers), $markers );
   return ( $config, $targets );
 }
 
@@ -237,7 +245,7 @@ sub _scopes_of {
 sub hermes_opt_in_hint {
   my ( $self ) = @_;
   my ( $config, $targets );
-  return undef unless eval { ( $config, $targets ) = $self->_load_strict; 1 };
+  return undef unless eval { ( $config, $targets ) = $self->_load_strict(0); 1 };
   my @machine = @{ $targets->{user} };
   return undef if grep { $_ eq 'hermes' } @machine;
   my $wanted = join ', ', map {"\"$_\""} @machine, 'hermes';
@@ -392,13 +400,20 @@ sub sync {
         return js_ordered( scopes => [] ) if !$chk->{changed} && !( defined $chk->{error} && length $chk->{error} );    # an error: the sync reports it
       }
       my ( $config, $targets );
-      return js_ordered( scopes => [], error => _message($@) ) unless eval { ( $config, $targets ) = $self->_load_strict; 1 };
+      return js_ordered( scopes => [], error => _message($@) )
+        unless eval { ( $config, $targets ) = $self->_load_strict( $sel ne 'user' ); 1 };
       my @scopes = _scopes_of( $config, $sel );
       my $run = {};
       my $no_copy = [];    # what an active harness got no copy of, named once per run
       my $out = js_ordered( scopes => [] );
       for my $s (@scopes) {
         my ( $scope, $scope_cfg ) = @$s;
+        if ( $scope eq 'project' && $targets->{project_unresolved} ) {
+          my $rep = empty_scope_report('project');
+          push @{ $rep->{warnings} }, @{ $targets->{warnings} };
+          push @{ $out->{scopes} }, $rep;
+          next;
+        }
         my $rep = $self->_sync_scope( $config, $scope_cfg, $scope, $targets->{$scope}, \%opts, $state, $run, $no_copy );
         # The record lives while Hermes is a target (spec §16.2); its entries went with it.
         $state->put_hermes_home(undef) if $scope eq 'user' && !grep { $_ eq 'hermes' } @{ $targets->{user} };
@@ -485,9 +500,10 @@ sub _sync_scope_run {
         my $key = lock_key( $h, $item->{target} );
         my ( $output, $executable );
         my $ok = eval {
-          my $context = $self->_render_context( $inputs_of->(), $scope, $h, root_of( $rc, $h, $item->{type} ), $item,
-            $cat->{meta}{vars}, $extra->{bundleVars} );
-          $output = build( $ci, $r->{dir}, $context );
+          $output = build( $ci, $r->{dir}, sub {
+            $self->_render_context( $inputs_of->(), $scope, $h, root_of( $rc, $h, $item->{type} ), $item,
+              $cat->{meta}{vars}, $extra->{bundleVars} );
+          } );
           # A skill's scripts keep their source's executable bit (k99); an agent or rule never.
           $executable = $item->{type} eq 'skill' ? executables( $ci, $r->{dir} ) : {};
           1;
@@ -611,7 +627,8 @@ sub _sync_scope_run {
   }
 
   # The plugin requirement in the committed `.claude/settings.json` (spec §6.8): add-only.
-  if ( my $settings = $self->_claude_settings_plan( $scope, $scope_cfg, $harnesses ) ) {
+  my $final_lock = read_lock($lock_path);
+  if ( my $settings = $self->_claude_settings_plan( $config, $scope, $harnesses, $final_lock ) ) {
     my $file  = $self->_settings_file;
     my $label = _scope_label( $scope, $base, $file );
     push @$warnings, @{ $settings->{warnings} };
@@ -659,7 +676,6 @@ sub _sync_scope_run {
   }
 
   # Briefing check (spec §6.7): every agent the lock holds now, from its installed file.
-  my $final_lock = read_lock($lock_path);
   my @briefing = $self->_briefing_of( $scope, $final_lock );
   push @$warnings, briefing_warning( parse_lock_key( $_->{key} )->{name}, $_->{harness}, $_->{missing} ) for @briefing;
   $out->{briefingMissing} = \@briefing if @briefing;
@@ -674,7 +690,7 @@ sub _sync_scope_run {
     return 0 unless $resolved{$name};
     return ( exists $catalogs{$name} && !defined $catalogs{$name} ) ? 0 : 1;
   };
-  my @drift = $self->_scope_drift( $scope, $scope_cfg, $harnesses, $final_lock, $info->{served} );
+  my @drift = $self->_scope_drift( $config, $scope, $harnesses, $final_lock, $info->{served} );
   $state->put_unreached( $lock_path, [ map { $_->{id} } grep { my $d = $_; !grep { !$reachable->($_) } @{ $d->{sources} } } @drift ] );
   my $before = $state->sources_read($lock_path);
   my %read;
@@ -842,21 +858,36 @@ sub _worktree_include_entries {
 sub _settings_file { my ( $self ) = @_; return path_join( $self->_target_dir('project'), 'settings.json' ) }
 
 # What a sync adds to the project's `.claude/settings.json` (spec §6.8), or undef when the file is
-# not skilletor's to touch. Never throws.
+# not skilletor's to touch. A proposed write must preserve implicit targets. $lock owns the files
+# currently on disk (the new lock after apply, not the pre-sync lock). Never throws.
 sub _claude_settings_plan {
-  my ( $self, $scope, $scope_cfg, $harnesses ) = @_;
+  my ( $self, $config, $scope, $harnesses, $lock ) = @_;
   return undef unless $scope eq 'project';
+  my $scope_cfg = $config->project;
   return undef if js_type( $scope_cfg->{claudeSettings} ) eq 'boolean' && !$scope_cfg->{claudeSettings};
   return undef unless grep { $_ eq 'claude' } @$harnesses;
   return undef unless -e encode_text( path_join( $self->_target_dir($scope), 'skilletor.json' ) );
   my $file  = $self->_settings_file;
   my $label = _scope_label( $scope, $self->project_dir_of, $file );
   my $plan  = eval {
-    plan_claude_settings(
+    my $proposed = plan_claude_settings(
       file => $file, label => $label, project_dir => $self->project_dir_of,
       claude_dir => $self->claude_dir,
       plugin_root => ( defined $self->plugin_root && length $self->plugin_root ) ? $self->plugin_root : undef,
     );
+    if ( defined $proposed->{next} && !exists $scope_cfg->{targets} ) {
+      my $projected = select_targets(
+        { user => $config->user->{targets}, project_evidence => detect_project_harnesses( $self->project_dir_of, $lock, $proposed->{next} ) },
+        detect_harnesses( $self->markers ),
+      );
+      if ( $projected->{project_unresolved} || join( ',', @{ $projected->{project} } ) ne join( ',', @$harnesses ) ) {
+        $proposed = { enabled => [], declared => [], warnings => [ @{ $proposed->{warnings} },
+          $label.' not updated: the plugin requirement would change implicitly selected project targets; '
+            .'set "targets" in the project\'s .claude/skilletor.json or .claude/skilletor.local.json, then sync',
+        ] };
+      }
+    }
+    $proposed;
   };
   return $plan // { enabled => [], declared => [], warnings => [ $label.' not updated: '._message($@) ] };
 }
@@ -925,7 +956,8 @@ my $SKILL_GITIGNORE_HASH = hash_bytes( encode_text(SKILL_GITIGNORE) );
 
 # Every drift of a scope: targets, layout, declarations, each { kind, id, sources }.
 sub _scope_drift {
-  my ( $self, $scope, $scope_cfg, $harnesses, $lock, $served_by ) = @_;
+  my ( $self, $config, $scope, $harnesses, $lock, $served_by ) = @_;
+  my $scope_cfg = $scope eq 'project' ? $config->project : $config->user;
   my @out;
   for my $g ( @{ target_gaps( [ keys %$lock ], $harnesses, $scope ) } ) {
     my $source = $lock->{ $g->{key} }{source};
@@ -940,7 +972,7 @@ sub _scope_drift {
     my $home = $self->_hermes_home_of;
     push @out, { kind => 'targets', id => 'hermes-home:'.$home, sources => [] } unless same_path( $home, $self->_recorded_hermes_home );
   }
-  my $settings = $self->_claude_settings_plan( $scope, $scope_cfg, $harnesses );
+  my $settings = $self->_claude_settings_plan( $config, $scope, $harnesses, $lock );
   push @out, { kind => 'layout', id => 'layout:claude-settings', sources => [] } if $settings && defined $settings->{next};
   return ( @out, $self->_layout_drift( $scope, $scope_cfg, $lock ), _declared_drift( $scope_cfg, $scope, $harnesses, $lock, $served_by ) );
 }
@@ -1056,16 +1088,19 @@ sub check {
   my ( $self, %opts ) = @_;
   my $sel = $opts{scope} // 'all';
   my ( $config, $targets );
-  unless ( eval { ( $config, $targets ) = $self->_load_strict; 1 } ) {
+  unless ( eval { ( $config, $targets ) = $self->_load_strict( $sel ne 'user' ); 1 } ) {
     return js_ordered( changed => _false, sources => [], warnings => [], error => _message($@) );
   }
   my @scopes = _scopes_of( $config, $sel );
   my $state = Skilletor::State->new( root => $self->state_root );
   my $out = js_ordered( changed => _false, sources => [], warnings => [] );
   my %field = ( targets => 'targetsChanged', layout => 'layoutChanged', declared => 'declaredChanged' );
+  push @{ $out->{warnings} }, @{ $targets->{warnings} }
+    if $targets->{project_unresolved} && grep { $_->[0] eq 'project' } @scopes;
 
   for my $s (@scopes) {
     my ( $scope, $scope_cfg ) = @$s;
+    next if $scope eq 'project' && $targets->{project_unresolved};
     my $lock_path = $self->_lock_path($scope);
     my $old_lock  = read_lock($lock_path);
     my %trust;
@@ -1084,7 +1119,7 @@ sub check {
     my @open = grep {
       my $d = $_;
       !$unreached{ $d->{id} } && !grep { !$trusted->($_) } @{ $d->{sources} };
-    } $self->_scope_drift( $scope, $scope_cfg, $targets->{$scope}, $old_lock );
+    } $self->_scope_drift( $config, $scope, $targets->{$scope}, $old_lock );
     for my $kind (qw( targets layout declared )) {
       next unless grep { $_->{kind} eq $kind } @open;
       $out->{changed} = _true;
@@ -1128,10 +1163,13 @@ sub status {
   my ( $self, %opts ) = @_;
   my $sel = $opts{scope} // 'all';
   my ( $config, $targets );
-  return js_ordered( scopes => [], error => _message($@) ) unless eval { ( $config, $targets ) = $self->_load_strict; 1 };
+  return js_ordered( scopes => [], error => _message($@) )
+    unless eval { ( $config, $targets ) = $self->_load_strict( $sel ne 'user' ); 1 };
   my @scopes = _scopes_of( $config, $sel );
   my $state = Skilletor::State->new( root => $self->state_root );
   my $out = js_ordered( scopes => [] );
+  $out->{warnings} = [ @{ $targets->{warnings} } ]
+    if $targets->{project_unresolved} && grep { $_->[0] eq 'project' } @scopes;
   my $given = $self->project_dir;
   $out->{projectIsHome} = _true if $sel ne 'user' && defined $given && length $given && !defined $self->project_dir_of;
 
@@ -1200,7 +1238,7 @@ sub status {
     );
   }
   my $trust = $self->_hook_trust_warning($targets);
-  $out->{warnings} = [$trust] if defined $trust;
+  push @{ $out->{warnings} //= [] }, $trust if defined $trust;
   return $out;
 }
 

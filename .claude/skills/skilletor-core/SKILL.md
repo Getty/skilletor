@@ -82,17 +82,15 @@ claudesettings.ts  plan the project settings.json plugin requirement (§6.8); en
   needs to `extraKnownMarketplaces`; no existing key changes (a `false` stays). Never
   `~/.claude/settings.json` or `settings.local.json`. `<m>` and its source are read, never
   written, from `<home>/.claude/plugins/`; a non-remote source (directory, file, local git
-  path) never enters the committed file — a warning. A missing addition is `check`
-  layout drift (`layout:claude-settings`).
+  path) never enters the committed file — a warning. Its virtual result must preserve implicit project targets; if not, this skips only settings (unlike an unresolved project scope) while items sync normally, with a warning to set explicit project `targets` then sync; neither targets nor provenance are written.
+  Only an actionable plan with `SettingsPlan.next` is `check` layout drift (`layout:claude-settings`); warning-only and target-preservation-guarded plans are not.
 - **Item names ignore case** on every platform (one directory on macOS/Windows): a new
   comparison or map key of item names goes through `nameKey()` (`config.ts`).
-- **Targets:** machine set = user `targets` ?? detected markers (empty → config
-  error, nothing touched); a project can only narrow it. Only Claude and Codex are
-  detected; Hermes (skills only, spec `2026-10-04-hermes-target-design.md`) is a target
-  only when user `targets` names it — give it no markers. Its home is `$HERMES_HOME`
-  else `defaultHermesHome()` (`targets.ts`; `%LOCALAPPDATA%\hermes` on Windows). Every
-  item renders once per active target with `harness` in the context; empty render
-  skips per target.
+- **Targets:** machine set = user `targets` ?? detected markers (empty → config error, nothing touched); it is the user-scope set and a project allowlist, not every project's targets.
+  Project order is local explicit `targets` > committed explicit `targets` > genuine local harness evidence, intersected with it. Skilletor-generated output, empty settings, and settings with only skilletor-generated plugin/marketplace declarations are never evidence.
+  No evidence bootstraps a sole machine target; with several, leave project output unchanged and warn for explicit project `targets`. Explicit project targets, including a deliberate dual-harness list, decide fresh checkouts.
+  Hook event and invoking harness never affect selection. Only Claude and Codex have machine-detection markers; Hermes (skills only, spec `2026-10-04-hermes-target-design.md`) needs user-level explicit opt-in, then genuine project `.hermes` evidence may select it.
+  Its home is `$HERMES_HOME` else `defaultHermesHome()` (`targets.ts`; `%LOCALAPPDATA%\hermes` on Windows). Every item renders once per active target with `harness` in the context; empty render skips per target.
 - **Managed blocks follow the layout, never items or targets.** The `.gitignore` blocks
   and the project's `.worktreeinclude` block (`worktreeIncludeEntries`, `engine.ts`) list
   every harness's roots, so committed files agree across machines; a `.worktreeinclude`

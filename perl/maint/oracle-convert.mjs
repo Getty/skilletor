@@ -189,8 +189,8 @@ const targets = [
   ["codex", "agent", "x", [["agents/x.md", hex("---\ndescription: d\n---\n") + "ff20c328e282eda080c0afe080aff4908080" + hex(" tail\n")]]],
   ["codex", "agent", "x", [["agents/x.md", hex(md([D], "日本語 🎉\n"))], ["agents/other.txt", hex("extra")]]],
   ["codex", "agent", "Ünï", [["agents/Ünï.md", hex(md([D], "B\n"))]]],
-  // a lone surrogate from a YAML escape is written as U+FFFD
-  ["codex", "agent", "x", [["agents/x.md", hex(md(['description: "\\uD800 lone"', "briefing:", '  skills: ["\\uDFFF"]']))]]],
+  // Escaped UTF-16 pairs join before output; lone, reversed and separated halves stay replacement characters.
+  ["codex", "agent", "x", [["agents/x.md", hex(md(['description: "\\uD83D\\uDE00 pair \\uD83D lone \\uDE00 reversed \\uDE00\\uD83D mixed \\uD83D\\uD83D\\uDE00 separated \\uD83D x \\uDE00 upper \\U0000D83D\\U0000DE00 lower-upper \\uD83D\\U0000DE00 upper-lower \\U0000D83D\\uDE00"', "briefing:", '  skills: ["\\uDFFF"]']))]]],
   ["codex", "rule", "r", [["rules/r.md", hex("---\npaths: [a]\n---\nR\n")]]],
   ["codex", "rule", "r", [["rules/r.md", hex("\n")]]],
   ["codex", "rule", "r", [["rules/q.md", hex("R\n")]]],

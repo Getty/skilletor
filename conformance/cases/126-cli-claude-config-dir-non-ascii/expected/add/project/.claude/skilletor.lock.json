@@ -1,0 +1,10 @@
+{
+  "skills/bar": {
+    "source": "mine",
+    "version": "local",
+    "files": {
+      "skills/bar/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/bar/SKILL.md": "sha256:49bf487b2a7830a29ae7cb760ace2a6af59e6f0875d5d6b195f3b7d1e9e28b3d"
+    }
+  }
+}

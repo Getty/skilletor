@@ -1,0 +1,4 @@
+---
+description: Sample skill
+---
+Sample.

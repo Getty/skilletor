@@ -31,7 +31,7 @@ types under the same roof.
 | **Type** | `skill`, `agent`, `rule` – a fixed table in code, not config-extensible |
 | **Scope** | `user` (`~/.claude/`) or `project` (`<project>/.claude/`) |
 | **Lock** | Per scope: what skilletor installed, with output hashes |
-| **Target** | A harness installed for: `claude` or `codex` (§14) |
+| **Target** | A harness installed for: `claude`, `codex` or `hermes` (§14, §16) |
 
 ## 3. Config
 
@@ -104,8 +104,10 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
   project file does not switch back on. The user scope has no such file.
 - `checkInterval` (user only, seconds, default 1800 = 30 min): throttle for the
   in-session check. `0` or a negative value disables it (SessionStart still syncs).
-- `targets` (optional, user, project or local): which agent harnesses to install for,
-  `["claude"]`, `["codex"]` or both. Default: auto-detected. Merge rule in §14.
+- `targets` (optional, user, project or local): the machine allowlist in the user config,
+  explicit project selection in the project/local config. Known names are `claude`, `codex`
+  and `hermes`. Without a project selection, genuine project-local usage determines its
+  subset of machine targets (§14.1, k229).
 - Duplicate target names within one type and scope (`foo@shared` + `foo@team`) are a
   config error. Names equal ignoring case are one name here, as everywhere an item name meets
   a directory (§4.1, k135): `Foo@shared` + `foo@team` install into one directory on macOS and
@@ -618,6 +620,10 @@ repository at its directory, never on one an exported `GIT_DIR` names (a git hoo
   typos do not silently produce empty skills.
 - Includes/imports/macros resolve relative to the root of their source and may not
   leave it.
+- Render context is constructed lazily on the first `.njk` file of an item and reused for
+  its remaining templates (k161), including companions of a plain main file. Plain items
+  copy without OS username lookup. No fallback username is invented; template context
+  failures retain the whole-item error/keep behavior.
 
 **Context:**
 
@@ -688,6 +694,14 @@ unprefixed Claude keys that is the scope's `.claude/` directory (`skills/perl-mo
 `agents/.local.reviewer.md`), for another harness's key (`codex:…`, `hermes:…`) that
 harness's root. So the lock names every file a sync may overwrite or delete without knowing
 the item's layout.
+
+An existing lock must be a JSON object whose entries are non-array objects (k222).
+A null, scalar or array entry is refused with a `LockError` naming the entry; corrupt
+inventory is not silently filtered. Each entry must also contain a non-null, non-array
+`files` object whose values are strings (k236), before ownership or serialization uses it.
+Empty maps and arbitrary string hashes remain valid; no hash-prefix or path validation is
+implied. Other historical/unknown-harness object fields remain lenient, and existing `via`
+validation keeps its error precedence.
 
 An item that rendered empty (§5) keeps a lock entry with no files and
 `"skipped": "renders-empty"`. It owns no path, so a file someone else put at its target
@@ -1023,6 +1037,15 @@ therefore keeps two things in that file:
   `skilletor.local.json` alone is this machine's and gitignored), `claude` is a target of the
   project, and `claudeSettings` (§3) is not `false`. The user scope's `~/.claude/settings.json`
   is never read or written, nor is `settings.local.json` (per machine, never committed).
+- **Preserve inferred project targets** (k234). Before applying a settings plan for implicit
+  project targets, project its proposed content through the same target selector using
+  current ownership (the post-apply lock during sync). If the write would change the selected
+  targets or make them unresolved, keep the settings file byte-identical and warn to set
+  explicit project `targets`, then sync. Item reconciliation continues for the stable targets;
+  only the settings write is skipped. Do not write and roll back as a probe, record
+  provenance, or silently insert target choices. Explicit project targets, sole-machine
+  bootstrap and other stable evidence retain normal add-only updates. A guarded plan is no
+  layout drift for `check`, so it cannot trigger perpetual retries.
 - **Which marketplace.** From Claude Code's plugin state, read-only. `<claude dir>` is
   `$CLAUDE_CONFIG_DIR` (empty counts as unset; `EngineContext.claudeConfigDir`), else
   `<home>/.claude`; it is also the user scope's `.claude` (§14.6).
@@ -1162,6 +1185,10 @@ argument starting with `-`) that the command does not accept is a usage error: e
 message naming the option, nothing touched.
 
 ## 8. Hooks and messages
+
+Project work in every hook follows §14.1, not the invoking harness. A fresh checkout whose
+project targets are ambiguous remains untouched; explicit project `targets` makes a
+metadata-only checkout unambiguous on a machine with several harnesses.
 
 | Event | Behavior |
 |---|---|
@@ -1342,7 +1369,7 @@ dependency is Nunjucks (bundled); user requirements: `node ≥ 18`, `git`. Its o
 `claude --plugin-dir .`.
 
 **From a plain shell** (`install.sh`, POSIX sh, k141): outside a Claude Code session the
-plugin's `bin/` is not on `PATH`. With `claude` on `PATH` the script adds `Getty/marketplace`
+plugin's `bin/` is not on `PATH`. With Node ≥ 18 and `claude` on `PATH`, the script adds `Getty/marketplace`
 when `claude plugin marketplace list --json` lacks `getty` (else `marketplace update getty`),
 installs `skilletor@getty` in user scope when `claude plugin list --json` has no user-scope
 entry (else `plugin update --scope user`), and writes `<bin dir>/skilletor` (default
@@ -1357,6 +1384,22 @@ replaces only its own script or a symlink in the bin dir, never uses `sudo`, and
 command on `/dev/null` (under `curl … | sh` stdin is the script). `npm install -g
 github:Getty/skilletor` is not a supported path: npm 11 (seen with 11.17) links a git
 package's temporary clone instead of copying it unless `--install-links` is given.
+
+**Prepared no-Node path** (k230): without `node`, the installer neither invokes `claude` nor
+parses its plugin metadata. It uses a CLI-only checkout, runs `bin/skilletor-start --version`
+as a preflight, and links that starter only on success. Updating an installer-managed
+checkout uses a separate candidate; failed provisioning leaves the prior command, checkout
+and local files intact. Earlier checkouts are retained. A binary must match checksums pinned
+in that checkout; without an available verified binary or usable source-Perl fallback the
+preflight fails safely. No Python, jq or system Perl is required for the binary route itself.
+
+The prepared starter (k231) rechecks a cached binary's hash. Only explicit CLI commands and
+SessionStart may provision; other hooks do not download. Failed SessionStart provisioning
+backs off for 900 seconds per version/platform, with explicit CLI retry allowed immediately.
+Malformed retry timestamps do not break the hook's exit-0 contract. Binary startup requires
+`sha256sum` or `shasum`, provisioning also `curl` or `wget`. These are tested local paths,
+not default runtime activation: plugin hook/launcher wiring and platform-binary verification
+remain gated by k191, including Windows and the startup-cost checks.
 
 ## 11. Tests
 
@@ -1439,19 +1482,39 @@ Codex writes `installation_id` on its first run of any kind; Claude Code writes
 `~/.claude.json` on its first run. The marker lists are injectable (`EngineContext.markers`)
 so tests never look at the real machine.
 
-The optional config key `targets` overrides detection. Merge rule – the simplest honest
-one:
+The optional user `targets` overrides machine detection. Project selection is independent of
+which harness invokes the CLI or hook (k229, 2026-11-15):
 
 1. **Machine targets** = `targets` from the user config if set, else the detected set.
    If that is empty, `sync`, `check` and `status` fail with a config-style error that names
    the markers and tells the user to set `targets` in `~/.claude/skilletor.json`
-   (nothing is touched).
-2. **User scope** installs for the machine targets.
-3. **Project scope** installs for the machine targets, restricted to the project's
-   `targets` if one is set: `skilletor.local.json` `targets` if present, else
-   `skilletor.json` `targets`, intersected with the machine targets. A project can only
-   narrow, never add a harness the machine does not use. An empty intersection installs
-   nothing for the project and warns once.
+   (nothing is touched). Hermes still requires explicit user opt-in (§16).
+2. **User scope** installs for the machine targets. A user-only operation does not inspect
+   project evidence or the project lock; a damaged project lock cannot block it.
+3. **Project scope** first uses explicit `targets` from `skilletor.local.json`, otherwise
+   `skilletor.json`, intersected with machine targets. A project can only narrow, never add
+   a machine-disallowed harness. An empty explicit intersection installs nothing and warns.
+4. **Without explicit project targets**, infer the project's subset from its own harness
+   files, even when user `targets` is explicit. Claude instructions/settings/items indicate
+   Claude; own `.agents` skills or `.codex` files indicate Codex; own `.hermes` files can
+   indicate Hermes only after machine-level opt-in. Generic `AGENTS.md` alone identifies no
+   single harness. A skill directory needs a `SKILL.md` or an explicit user-owned link;
+   foreign auxiliary files left after removing a managed skill cannot reactivate it.
+5. **Generated artifacts are not evidence:** skilletor config/state/lock, lock-owned files,
+   `.local.*` items, installed-skill markers, fixed rules/pointer/ignore blocks, and settings
+   containing only generated plugin/marketplace declarations. An empty settings object is
+   likewise insufficient. Adding skilletor's settings must not change the inferred set.
+6. **No reliable evidence:** use the sole machine target when there is exactly one. With
+   multiple machine targets, preserve the entire project scope and emit an actionable
+   warning to set project `targets`. This unresolved state is not an empty target selection
+   that removes existing files; user-scope work may continue.
+
+The inference is read-only, never follows arbitrary symlink trees or executes project files,
+and is the same in TypeScript and Perl. Repeated syncs and alternating harness hooks must
+not change targets merely because skilletor wrote or removed its own artifacts. A definite
+selection reconciles only owned outputs (§14.3); unknown lock prefixes and foreign files
+remain untouched. Details and rationale:
+[`2026-11-15-project-targets-design.md`](2026-11-15-project-targets-design.md).
 
 `targets` must be a non-empty array of known harness names without duplicates.
 
@@ -1581,7 +1644,8 @@ once per target and names the targets in the scope header when they are not just
 ### 14.5 Plugin wiring for Codex
 
 - `.codex-plugin/plugin.json` (name `skilletor`, same version as `package.json` and
-  `.claude-plugin/plugin.json`, enforced by a test) points at `./skills/` and
+  `hermes/skilletor/plugin.yaml`, enforced by a test; `.claude-plugin/plugin.json` carries
+  no version) points at `./skills/` and
   `./hooks/codex-hooks.json`. Codex has the same `SessionStart`/`UserPromptSubmit` events and
   hook JSON shape and sets `CLAUDE_PLUGIN_ROOT` for plugin hook commands; the Codex file
   differs from `./hooks/hooks.json` only by `--harness codex` on each command,
@@ -1593,7 +1657,8 @@ once per target and names the targets in the scope header when they are not just
   hook input's `cwd` (else `cwd` itself) as the project root, so a session started in a
   subdirectory still finds `<repo>/.claude/skilletor.json`.
 - Plugin hooks run in Codex only after the user trusts them (`/hooks`). Codex cannot put a
-  plugin's `bin/` on `PATH`, so the CLI is not on the model's `PATH` there.
+  plugin's `bin/` on `PATH`; a separately installed CLI may still be there and is usable.
+  Otherwise use the plugin launcher by absolute path (currently Node-based).
 
 ### 14.6 Known warts (phase 1)
 

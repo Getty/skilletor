@@ -83,9 +83,11 @@ Hooks run it, in every harness the plugin supports:
 | Hermes | `on_session_start` | `pre_llm_call` | the next `pre_llm_call`, awaited |
 
 So a worktree made with plain `git worktree add`, which has the committed config but none of
-the gitignored items, completes itself: the `cd` into it (Claude Code), or the next turn there
-(Codex, Hermes), syncs that checkout. Worktrees Claude Code creates itself get the items
-copied through [`.worktreeinclude`](#git--your-own-skills).
+the gitignored items, can complete itself: the `cd` into it (Claude Code), or the next turn
+there (Codex, Hermes), syncs that checkout using its project targets. Commit explicit project
+`targets` for a metadata-only checkout on a multi-harness machine; an ambiguous project is
+left untouched. Worktrees Claude Code creates itself get the items copied through
+[`.worktreeinclude`](#git--your-own-skills).
 
 - **Session start** — check every source (5s timeout each) and compare the config with what
   is installed; on a change, sync and report. An untrusted project source is named every
@@ -602,6 +604,12 @@ add the marketplace and install the plugin; the first session then syncs the pro
   A `settings.json` that does not parse is left alone with a warning.
 - `"claudeSettings": false` in the project's `skilletor.json` (or `skilletor.local.json`, or
   `~/.claude/skilletor.json` for every project) turns it off.
+- **Inferred targets stay stable.** If the proposed settings addition would change the
+  project's inferred targets — for example, make genuine marketplace-only settings look
+  generated — skilletor leaves the settings file unchanged and warns. Items still sync to
+  the stable selected targets; only the plugin-settings update is skipped. Set explicit project
+  `targets` and sync again to allow the normal update. It does not invent target choices or
+  store provenance; this skipped settings update is not perpetual drift for `check`.
 
 Running the standalone CLI without the plugin, skilletor knows no marketplace to enable;
 add it by hand (merge the keys into the existing file):
@@ -626,20 +634,22 @@ harnesses, even on a Codex-only machine.
 
 ### Which harnesses: detection and `targets`
 
-Without a `targets` key skilletor installs for every harness it finds, by files the
-harness itself creates (never `~/.claude/` alone — skilletor's own config lives there):
+Without user `targets`, skilletor detects the harnesses available on the machine from
+files the harness itself creates (never `~/.claude/` alone — skilletor's own config lives
+there). These are the user-scope targets and the allowlist for project targets, not a request
+to install every harness into every project:
 
 | Harness | In use when any of these exists |
 |---|---|
 | `claude` | `~/.claude.json`, `~/.claude/settings.json`, `~/.claude/projects/` |
 | `codex` | in `$CODEX_HOME` (default `~/.codex`): `config.toml`, `auth.json`, `sessions/`, `installation_id` |
 
-**Hermes Agent is never detected.** `hermes` is a target only when the `targets` of
-`~/.claude/skilletor.json` names it.
+**Hermes Agent is never auto-detected as a machine target.** `hermes` is available only
+when the `targets` of `~/.claude/skilletor.json` names it.
 
-`"targets"` – any of `"claude"`, `"codex"`, `"hermes"` – replaces detection completely, so
-list every harness you want, not just the one you add. To add Hermes on a machine with
-Claude Code and Codex:
+User `"targets"` – any of `"claude"`, `"codex"`, `"hermes"` – replaces machine detection,
+so list every harness available for use, not just the one you add. To allow Hermes on a
+machine with Claude Code and Codex:
 
 ```json
 { "targets": ["claude", "codex", "hermes"] }
@@ -652,15 +662,32 @@ The rules:
    error naming the markers, and nothing is touched — set `targets` in
    `~/.claude/skilletor.json`.
 2. **User scope** installs for the machine targets.
-3. **Project scope** installs for the machine targets, narrowed by the project's `targets`
-   (`skilletor.local.json` if it has one, else `skilletor.json`). A project can only
-   narrow, never add a harness the machine does not use; an empty intersection installs
-   nothing for the project and warns.
+3. **Project scope** first uses explicit project `targets` (`skilletor.local.json` before
+   `skilletor.json`), intersected with the machine allowlist. A project cannot enable a
+   machine-disallowed harness; an empty explicit intersection installs nothing and warns.
+4. **Without project `targets`, the project decides:** its own Claude instructions, settings
+   or items select Claude; own `.agents` skills or `.codex` files select Codex; genuine use
+   of both selects both. Own `.hermes` files can select Hermes after its machine-level
+   opt-in; `.agents` alone never selects Hermes. Global `targets: ["claude", "codex"]` alone
+   therefore does not put Codex files into a Claude-only project.
+5. **Skilletor's own files do not opt a project in.** Its configuration, lock/state, generated
+   settings, `.local.*` items and installed-skill markers are excluded. Empty settings and
+   empty leftover directories do not count either; a skill needs `SKILL.md` or a user-owned
+   link. Generic `AGENTS.md` alone is not specific to Codex.
+6. **No clear project evidence:** with one machine target, use that target. With several,
+   leave the project scope untouched and warn to set project `targets`; user-scope work
+   continues. This avoids guessing a target or deleting existing project files.
+
+To make a fresh checkout unambiguous, add `"targets": ["claude"]` (or the desired subset)
+to its existing `.claude/skilletor.json`; use `skilletor.local.json` for a machine-local
+choice. This also makes an intentional multi-harness project explicit. The choice does not
+change with the harness that invokes the next hook.
 
 Detection runs on every sync, so a harness that disappears (say `~/.codex` is deleted) has
-its items removed on the next sync — pin `targets` if that is not what you want. Items of
-a harness that is switched off are removed the same way. What `hermes` gets is in
-[Hermes Agent](#hermes-agent).
+its items removed on the next sync — pin user `targets` if that is not what you want. A
+project's definite selection likewise removes only skilletor-owned outputs of deselected
+targets, leaving foreign files alone; ambiguous projects are preserved instead. What
+`hermes` gets is in [Hermes Agent](#hermes-agent).
 
 ### Where items go
 
@@ -843,17 +870,19 @@ skilletor also installs for NousResearch [Hermes Agent](https://github.com/NousR
 (`hermes`), on Linux: **skills**, in both scopes, from the same sources and the same
 `skilletor.json`.
 
-**Hermes is opt-in.** It is never detected; name it in the `targets` of
-`~/.claude/skilletor.json`, together with every other harness you use, since `targets`
-replaces detection ([above](#which-harnesses-detection-and-targets)):
+**Hermes is opt-in.** It is never auto-detected on the machine; name it in the `targets`
+of `~/.claude/skilletor.json`, together with every other harness you use, since user
+`targets` replaces machine detection ([above](#which-harnesses-detection-and-targets)):
 
 ```json
 { "targets": ["claude", "hermes"] }
 ```
 
-A project's `targets` can leave Hermes out, but cannot add it. Until you opt in, the
-[plugin](#the-plugin-under-hermes) adds one line to the report at each Hermes session start,
-saying what to set. Remove `hermes` from `targets` again, and the next sync removes the
+A project's `targets` can select Hermes only from that machine allowlist. Without explicit
+project targets, its own harness files (or the sole-machine-target fallback) decide; opting
+Hermes in globally does not by itself enable it in every project. Until the machine opts in,
+the [plugin](#the-plugin-under-hermes) adds one line at each Hermes session start saying
+what to set. Remove `hermes` from user `targets` again, and the next sync removes the
 skills it installed for Hermes.
 
 | Type | Hermes |
@@ -1073,8 +1102,9 @@ must resolve skills, agents and rules the way skilletor does, without Node.
 [langertha-raider](https://github.com/Getty/langertha-raider) uses it to load a
 skill or agent straight from its source. It reads the same config files, fetches
 into the same cache (`~/.claude/skilletor/cache`, so one fetch serves both), takes the
-same sync lock and keeps the same trust records. For the Claude target it also
-syncs, checks and reports status, writing the same files and the same lock.
+same sync lock and keeps the same trust records. It syncs, checks and reports status
+for Claude Code, Codex and Hermes Agent, with the same target layouts and lock format
+(Hermes receives skills only).
 
 ```perl
 use Skilletor;
@@ -1088,13 +1118,21 @@ files, lock, check and status they should produce. Both
 `test/conformance.test.ts` and `perl/t/60-conformance.t` run them, and
 `SKILLETOR_CONFORMANCE_UPDATE=1 npm test` regenerates them from TypeScript.
 
-The Perl port does not render `.njk` templates; it reports them as unsupported.
-It only syncs to the Claude target. See [`perl/README.md`](perl/README.md) for the
-API and [`docs/perl.md`](docs/perl.md) for the design decisions.
+Sync renders `.njk` templates through `Text::Nunjucks`. The source-file lookup helpers
+(`resolve_skill` and its siblings) still refuse templated items rather than serving
+unrendered templates. Running the port from source requires Perl ≥ 5.40 and the dependencies
+in `perl/cpanfile`; its CLI is `perl/bin/skilletor`.
+
+The plugin launchers still use Node. The standalone Perl-binary starter is being prepared;
+platform verification and default-runtime activation remain pending. See
+[`perl/README.md`](perl/README.md) for the API and [`docs/perl.md`](docs/perl.md) for the
+design decisions.
 
 ## Requirements
 
-- Node.js ≥ 18 and `git`. The only bundled runtime dependency is Nunjucks.
+- The current default plugin launcher needs Node.js ≥ 18 and `git`; its only bundled runtime
+  dependency is Nunjucks. The [Perl port](#perl-port) and prepared
+  [no-Node installer path](#from-the-command-line) have separate runtime requirements.
 - Windows: the same, without Git Bash. Claude Code starts the hooks through
   `bin/skilletor.exe`, a small launcher next to the sh script that runs the bundle with
   the first `node.exe` on `PATH` (without one it exits silently). It is also the

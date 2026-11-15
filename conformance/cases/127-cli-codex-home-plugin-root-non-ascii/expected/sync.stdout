@@ -1,0 +1,8 @@
+skilletor: user scope
+  + agents/rev (active after /reload-plugins or restart)
+  + codex:agents/rev (active from the next Codex session)
+skilletor: project scope
+  .claude/.gitignore updated — commit it
+  .worktreeinclude updated — commit it
+  .claude/settings.json updated (enables skilletor@getty; declares marketplace getty) — commit it
+skilletor: warning: Codex has not trusted skilletor's SessionStart hook (no trusted_hash for it in ${TMP}/codex-ü/config.toml); until you trust it with /hooks in Codex, Codex sessions get no syncs and no rules

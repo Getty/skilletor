@@ -1,0 +1,8 @@
+{
+  "sources": {
+    "Mine": { "local": "${HOME}/dev/Mine" }
+  },
+  "install": {
+    "skills": ["bAz@Mine"]
+  }
+}

@@ -106,7 +106,7 @@ sub start_cli {
   my $cwd = encode_text( defined $step->{cwd} ? concrete( $step->{cwd}, $m ) : $m->{project} // "$m->{tmp}/cwd" );
   my $env = cli_env( $m, $step );
   my $stdin =
-      !defined $step->{stdin}                ? ''
+      !exists $step->{stdin}                  ? ''
     : js_type( $step->{stdin} ) eq 'string' ? concrete( $step->{stdin}, $m )
     :                                         js_stringify( _concrete_deep( $step->{stdin}, $m ) );
   my $dir = tempdir;
