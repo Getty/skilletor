@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-11-15T19:28:35Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:35Z
+created: 2026-11-13T20:13:30Z
+id: 159
+priority: high
+started: 2026-11-15T04:57:17Z
+status: done
+tags:
+- perl
+- ci
+title: Perl CI cannot install Text::Nunjucks; minimum Perl now 5.40
+updated: 2026-11-15T19:28:35Z
+---
+
+Found on k158. perl/cpanfile now requires Text::Nunjucks 0.001 (and Hash::Ordered). Text::Nunjucks is not on CPAN and requires perl 5.040, so .github/workflows/perl.yml (cpanm -nq --installdeps . in perl:5.36/5.38/5.40 containers) goes red: installdeps cannot find it, and 5.36/5.38 cannot run it at all. Skilletor itself still declares requires perl 5.020, which no longer installs below 5.40.
+
+Decide: drop 5.36/5.38 from the matrix (or Text::Nunjucks lowers its minimum); raise Skilletor minimum perl to 5.040 or not; until the CPAN release, install it in CI first, e.g. git clone --depth 1 https://github.com/Getty/p5-text-nunjucks /tmp/tn, cpanm -nq --installdeps /tmp/tn, PERL5LIB=/tmp/tn/lib for installdeps and prove (a dzil dist has no Makefile.PL, so a git-URL cpanm install likely fails). Once Text::Nunjucks is on CPAN the cpanfile pin covers it.
+
+From k189: .github/workflows/perl.yml runs cpanm --installdeps ., which most likely cannot install Text::Nunjucks (not on CPAN); release-binaries.yml checks it out from Getty/p5-text-nunjucks at a pinned commit (1a9a608) instead - the same could serve perl.yml until it is on CPAN.
+
+Selected as an independent prerequisite for the maintainer-requested safe Perl-first migration. Local implementation only: align Perl minimum and CI dependency provisioning with current Text::Nunjucks requirements. No release/CI dispatch, no publication. Keep engine/target files untouched while k229 is implemented in parallel. Main serializes board writes.
+
+Implemented and independently reviewed: perl/cpanfile minimum 5.040, CI matrix 5.40, immutable Text::Nunjucks checkout plus PERL5LIB and prerequisite install order. Main reran 2 CI-contract tests and 61 Perl load tests: all pass, no skips; Python PyYAML parsed the workflow and scoped diff --check passed. No GitHub Actions dispatch, network install or actual CI run; those remain explicitly unverified. Full integration suites wait for active k229 changes. No commit.
+
+Committed as a58940b. Final independent local gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, check-dist and diff-check all passed; full Perl 49 files/2692 tests passed with only the existing documented TODO/skips and no dependency skips. Remote GitHub Actions, cross-platform binary execution, release dispatch and publication were not run; existing platform and activation gates remain.
