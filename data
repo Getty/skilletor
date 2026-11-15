@@ -1,0 +1,44 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-13T20:43:18Z
+depends_on:
+- 177
+id: 178
+priority: medium
+started: 2026-11-14T04:32:00Z
+status: done
+tags:
+- perl
+- cli
+- commands
+title: 'Perl CLI: install (wildcards, bundles, missing sources)'
+updated: 2026-11-15T19:28:14Z
+---
+
+Part of the Perl CLI strand (see the strand card).
+
+Port cmdInstall (commands.ts:381-539): planItem, checkBundle, the wildcard and bundle entries, and missingSources.
+
+Without a TTY:
+- the message `bundle X needs sources you don't have yet; nothing was changed. Add them, then install again:` followed by the add commands;
+- exit 1;
+- shared as a case.
+
+With a TTY (both stdin and stderr): readline-style questions on stderr. Each engine tests this in-process with an injected prompter (commands.test.ts:1723, :1745, :1820). An optional Linux pty smoke test may use `script -qec`.
+
+Cases: cli.test.ts :81, :135, :180, :219, :268 (the install halves).
+
+Done: both runners are green with both CLIs.
+
+From k174: carry cli.test.ts:926 (its install end, k87 escaping) and :431 (install --project on a home project) as cli cases here.
+
+2026-11-14 04:41 Ported cmdInstall into Skilletor::Commands::install (planItem, checkBundle, missingSources, parseItemSpec) and the CLI's install with a TTY prompter (stdin and stderr terminals; Ctrl+D/Ctrl+C abort as Node's readline: 'Aborted with Ctrl+D/C', exit 1). servingSource reused as Skilletor::Resolver::_serving_source (Engine.pm already calls Resolver privates; Resolver.pm untouched, k198's file). parseItemSpec ported once as _parse_item_spec, for uninstall (k179) too; trustDef as _trust_def, add now uses it. Next: conformance cases 130-139, t/77 in-process prompter tests, t/68 quick list.
+
+2026-11-15 autonomous Perl-first continuation: recover and review the existing unfinished install implementation in the isolated integration worktree, not in the original checkout. Original selected files/cases snapshotted to /tmp/skilletor-32ca6570-k178-snapshot.tar.gz (SHA256 3577931ebba1571b0e85721d16ebcad6bcda166d8510ad0170f8559b4d3ccb00), manifest alongside. Import only HEAD-identical destination files, merge conformance README additively, preserve concurrent k229 changes. Original checkout and nytprof.out stay untouched. Then finish scoped install regression/parity checks before k179.
+
+Recovered verified 415-file snapshot into integration worktree without editing original checkout. Main independently reviewed Commands/CLI diff against cmdInstall and parseItemSpec; ran perl/t/68-cli.t + t/77 (14 top-level subtests PASS), shared cases130–139 against reference CLI (10/10) and Perl CLI (10/10), no skips. Original pending implementation reused unchanged; ten README rows merged additively. Full combined suites/check-dist wait for concurrent k229 source changes; no commit. Ready for dependent uninstall implementation in the same worktree, not done/published.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
