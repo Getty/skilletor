@@ -34,7 +34,8 @@ skilletor add Getty && skilletor install getty-perl-moo@getty
 ```
 
 Outside a Claude Code session the plugin's `bin/` is not on `PATH`; `install.sh` gives you a
-`skilletor` command that is. With `claude` on `PATH` it runs `claude plugin marketplace add
+`skilletor` command that is. With Node.js ≥ 18 and `claude` on `PATH` it runs
+`claude plugin marketplace add
 Getty/marketplace` (or `marketplace update getty` when it is known) and `claude plugin install
 skilletor@getty` in user scope (or `plugin update` when it is installed), then writes
 `~/.local/bin/skilletor`: a small script that looks up the plugin's current user-scope
@@ -43,6 +44,15 @@ updates do not break it. Without Claude Code (Codex or Hermes only), or with `--
 clones this repository into `~/.local/share/skilletor` (`$XDG_DATA_HOME/skilletor`) and links
 the clone's `bin/skilletor` there instead. Run it again to update either one.
 
+**Without Node:** the installer leaves Claude Code's plugin state untouched and uses a
+CLI-only checkout. It first runs `bin/skilletor-start --version`, then installs a link to
+that starter only if the check succeeds. A downloaded binary must match a checksum pinned
+in the checkout. Updates are checked in a separate candidate checkout; a failed download or
+preflight leaves the existing command and its checkout working. Previous checkouts are kept.
+This path is prepared for the Perl-binary rollout, not a claim that platform binaries are
+already available: without a pinned usable binary or a working source-Perl fallback,
+installation fails safely. The default plugin hooks have not switched away from Node.
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh -s -- --no-plugin --bin-dir ~/bin
 sh install.sh               # in a clone: the same, but the CLI-only path links this clone
@@ -50,8 +60,10 @@ sh install.sh               # in a clone: the same, but the CLI-only path links 
 
 `--bin-dir DIR` (`SKILLETOR_BIN_DIR`) puts the command elsewhere, `--no-plugin`
 (`SKILLETOR_NO_PLUGIN=1`) leaves Claude Code alone, `SKILLETOR_REPO` clones another URL (a
-fork, a mirror). It needs Node.js ≥ 18 and `git`, never
-uses `sudo`, says what it did, warns when the directory is not on your `PATH`, and replaces
+fork, a mirror). The normal plugin path needs Node.js ≥ 18 and `git`; the no-Node path
+needs `git` and a usable starter runtime. Binary startup requires `sha256sum` or `shasum`;
+provisioning additionally needs `curl` or `wget`. It never uses `sudo`, says what it did,
+warns when the directory is not on your `PATH`, and replaces
 no `skilletor` there that it did not write itself (a symlink excepted). Installing the plugin
 yourself (`claude plugin install …` in a dotfiles script, say)? Run the script afterwards
 for the command; it finds the plugin installed and only updates it.
@@ -852,10 +864,12 @@ is on disk at once but listed by Codex only from the next session.
   the per-scope `warnings` of `sync` are unchanged). An update that changes the hook file
   makes Codex mark the hook as modified; trust it again in `/hooks`. skilletor does not
   detect that case — the entry is still there.
-- **The CLI is not on `PATH`** inside Codex (Codex cannot add a plugin's `bin/` to it). The
-  bundled skill tells the model to run it by absolute path, from the plugin's cache
-  directory: `$CODEX_HOME/plugins/cache/<marketplace>/skilletor/<version>/bin/skilletor`.
-  In your own shell, [`install.sh`](#from-the-command-line) puts a `skilletor` on `PATH`;
+- **Codex does not add a plugin's `bin/` to `PATH`.** A separately installed `skilletor`
+  can still be available there; use that CLI when present, including a verified no-Node
+  starter installation. Otherwise the bundled skill locates the current plugin's launcher
+  by absolute path: `$CODEX_HOME/plugins/cache/<marketplace>/skilletor/<version>/bin/skilletor`
+  (the default plugin launcher still needs Node). In your own shell,
+  [`install.sh`](#from-the-command-line) puts a `skilletor` on `PATH`;
   or put that file or a clone of this repository there yourself, by a symlink
   (`ln -s ~/src/skilletor/bin/skilletor ~/.local/bin/skilletor`) or an alias
   (`alias skilletor=~/src/skilletor/bin/skilletor`) — `dist/` is committed, no `npm install`
@@ -953,10 +967,11 @@ and enables it (without `--enable` it asks, or — not on a terminal — leaves 
 `hermes plugins remove skilletor` takes it out. It is a custom source to Hermes, not a
 catalog entry, so Hermes says "custom (unreviewed) source"; its install-time scan passes it.
 
-**The plugin needs the CLI** (Node.js ≥ 18), which it does not bring: `$SKILLETOR_BIN`, else
-`skilletor` on `PATH`; without one it does nothing. [`install.sh`](#from-the-command-line)
-puts one into `~/.local/bin` (a clone's launcher, or on a machine with Claude Code the
-plugin's). Hermes reads `$HERMES_HOME/.env` into its environment, so name it there once:
+**The plugin needs the CLI**, which it does not bring: `$SKILLETOR_BIN`, else `skilletor`
+on `PATH`; without one it does nothing. The default plugin launcher still needs Node.js ≥ 18.
+[`install.sh`](#from-the-command-line) can place a checkout launcher, a preflighted starter,
+or the Node-backed plugin command in `~/.local/bin`. Hermes reads `$HERMES_HOME/.env` into
+its environment, so name the CLI there once:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh

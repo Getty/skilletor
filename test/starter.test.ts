@@ -30,6 +30,13 @@ const ASSET = `skilletor-${VERSION}-${OS}-${ARCH}`;
 const HOOK_INPUT = '{"cwd":"/nowhere","prompt":"hi"}';
 const CLI_ARGS = ["status", "--json"];
 const HOOK_ARGS = ["hook", "user-prompt-submit"];
+const SESSION_START_ARGS = ["hook", "session-start"];
+const NON_START_HOOK_ARGS = [
+  HOOK_ARGS,
+  ["hook", "__sync-background"],
+  ["hook", "cwd-changed"],
+  ["hook", "post-tool-use"],
+];
 
 /** What every case's PATH holds: the starter's own tools, and cat for the stub binary. */
 const BASE_TOOLS = ["uname", "mkdir", "mv", "rm", "rmdir", "chmod", "env", "readlink", "dirname", "cat"];
@@ -257,10 +264,10 @@ function start(file: string, args: string[], env: NodeJS.ProcessEnv, input = "")
   });
 }
 
-/** A hook start, then a CLI start, of the same plugin on the same machine. */
-async function hookThenCli(root: string, m: Machine): Promise<[Run, Run]> {
-  const hook = await start(starter(root), HOOK_ARGS, m.env, HOOK_INPUT);
+/** An explicit CLI start, then a prompt hook start, of the same plugin on the same machine. */
+async function cliThenHook(root: string, m: Machine): Promise<[Run, Run]> {
   const cli = await start(starter(root), CLI_ARGS, m.env);
+  const hook = await start(starter(root), HOOK_ARGS, m.env, HOOK_INPUT);
   return [hook, cli];
 }
 
@@ -278,6 +285,7 @@ function assertBoth([hook, cli]: [Run, Run], engine: string) {
 
 const versionDir = (m: Machine) => join(m.config, "skilletor", "bin", VERSION);
 const cachedName = (sum: string) => `${ASSET}-${sum}`;
+const retryFile = (m: Machine) => join(versionDir(m), `.${ASSET}.failed-at`);
 
 /** The binary cache holds exactly the binary and its unpacked files: no temp file. */
 function assertCached(m: Machine, sum: string, body: string) {
@@ -321,19 +329,127 @@ test("without pinned checksums it runs Node and fetches nothing", { skip }, asyn
   const root = makePlugin();
   const s = serve(BINARY);
   const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
-  assertBoth(await hookThenCli(root, m), "node");
+  assertBoth(await cliThenHook(root, m), "node");
   assert.equal(s.hits(), 0);
   assert.ok(!existsSync(join(m.config, "skilletor")), "no binary cache");
 });
 
 // --- the binary ------------------------------------------------------------------------------
 
+test("non-start hooks never provision a missing binary", { skip: noBinary }, async () => {
+  const sum = sha256(BINARY);
+  const root = makePlugin({ pinned: pinned(sum) });
+  const s = serve(BINARY);
+  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  for (const args of NON_START_HOOK_ARGS) {
+    assertEngine(await start(starter(root), args, m.env, HOOK_INPUT), "node", args, HOOK_INPUT);
+  }
+  assert.equal(s.hits(), 0);
+  assert.ok(!existsSync(join(m.config, "skilletor")), "a non-start hook leaves no cache state");
+});
+
+test("a verified cached binary runs before fallbacks and clears a failed SessionStart state", { skip: noBinary }, async () => {
+  const sum = sha256(BINARY);
+  const root = makePlugin({ pinned: pinned(sum) });
+  const s = serve(BINARY);
+  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  mkdirSync(versionDir(m), { recursive: true });
+  writeFileSync(join(versionDir(m), cachedName(sum)), BINARY);
+  chmodSync(join(versionDir(m), cachedName(sum)), 0o755);
+  writeFileSync(retryFile(m), "1000\n");
+  const r = await start(starter(root), HOOK_ARGS, m.env, HOOK_INPUT);
+  assertEngine(r, "binary", HOOK_ARGS, HOOK_INPUT);
+  assert.equal(s.hits(), 0);
+  assert.ok(!existsSync(retryFile(m)), "a verified cache clears stale retry state");
+});
+
+test("a non-start hook refuses an unverified cache even with malformed retry state", { skip: noBinary }, async () => {
+  const sum = sha256(BINARY);
+  const root = makePlugin({ pinned: pinned(sum) });
+  const s = serve(BINARY);
+  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  mkdirSync(versionDir(m), { recursive: true });
+  writeFileSync(join(versionDir(m), cachedName(sum)), BINARY.replace("warm", "evil"));
+  chmodSync(join(versionDir(m), cachedName(sum)), 0o755);
+  mkdirSync(retryFile(m));
+  assertEngine(await start(starter(root), HOOK_ARGS, m.env, HOOK_INPUT), "node", HOOK_ARGS, HOOK_INPUT);
+  assert.equal(s.hits(), 0);
+});
+
+test("a failed SessionStart provision backs off by version and platform while CLI retries immediately", { skip: noBinary }, async () => {
+  const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
+  const s = serve(BINARY.replace("warm", "evil"));
+  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url, SKILLETOR_STARTER_NOW: "1000" });
+  const session = (now: string) => ({ ...m.env, SKILLETOR_STARTER_NOW: now });
+
+  assertEngine(await start(starter(root), SESSION_START_ARGS, session("1000"), HOOK_INPUT), "node", SESSION_START_ARGS, HOOK_INPUT);
+  assert.equal(s.hits(), 1);
+  assert.equal(readFileSync(retryFile(m), "utf8"), "1000\n");
+
+  assertEngine(await start(starter(root), SESSION_START_ARGS, session("1001"), HOOK_INPUT), "node", SESSION_START_ARGS, HOOK_INPUT);
+  assert.equal(s.hits(), 1, "a repeated SessionStart is backed off");
+
+  assertEngine(await start(starter(root), CLI_ARGS, session("1001")), "node", CLI_ARGS, "");
+  assert.equal(s.hits(), 2, "an explicit CLI command retries immediately");
+
+  assertEngine(await start(starter(root), SESSION_START_ARGS, session("1900"), HOOK_INPUT), "node", SESSION_START_ARGS, HOOK_INPUT);
+  assert.equal(s.hits(), 3, "the 15-minute backoff expires without a sleep");
+});
+
+test("noncanonical retry timestamps never crash SessionStart hooks", { skip: noBinary }, async () => {
+  for (const [failedAt, now] of [["08", "1000"], ["1000", "08"]]) {
+    const sum = sha256(BINARY);
+    const root = makePlugin({ pinned: pinned(sum) });
+    const s = serve(BINARY);
+    const m = machine(makeTools(["node", "curl", SUM]), {
+      SKILLETOR_BINARY_BASE_URL: s.url,
+      SKILLETOR_STARTER_NOW: now,
+    });
+    mkdirSync(versionDir(m), { recursive: true });
+    writeFileSync(retryFile(m), `${failedAt}\n`);
+
+    const r = await start(starter(root), SESSION_START_ARGS, m.env, HOOK_INPUT);
+    assertEngine(r, "binary", SESSION_START_ARGS, HOOK_INPUT);
+    assert.equal(s.hits(), 1, `${failedAt}/${now} permits a verified retry`);
+    assert.ok(!existsSync(retryFile(m)), "a successful retry clears malformed state");
+  }
+});
+
+test("a directory retry state cannot break a failed SessionStart fallback", { skip: noBinary }, async () => {
+  const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
+  const s = serve(BINARY.replace("warm", "evil"));
+  const m = machine(makeTools(["node", "curl", SUM]), {
+    SKILLETOR_BINARY_BASE_URL: s.url,
+    SKILLETOR_STARTER_NOW: "1000",
+  });
+  mkdirSync(versionDir(m), { recursive: true });
+  mkdirSync(retryFile(m));
+
+  assertEngine(await start(starter(root), SESSION_START_ARGS, m.env, HOOK_INPUT), "node", SESSION_START_ARGS, HOOK_INPUT);
+  assert.equal(s.hits(), 1);
+  assert.ok(statSync(retryFile(m)).isDirectory(), "bad retry state is left alone when it cannot be replaced");
+});
+
+test("a successful explicit provision clears a failed SessionStart state and serves later hooks from cache", { skip: noBinary }, async () => {
+  const sum = sha256(BINARY);
+  const root = makePlugin({ pinned: pinned(sum) });
+  const s = serve(BINARY);
+  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url, SKILLETOR_STARTER_NOW: "1000" });
+  mkdirSync(versionDir(m), { recursive: true });
+  writeFileSync(retryFile(m), "1000\n");
+
+  assertEngine(await start(starter(root), CLI_ARGS, m.env), "binary", CLI_ARGS, "");
+  assert.ok(!existsSync(retryFile(m)), "successful provision clears retry state");
+  assertEngine(await start(starter(root), HOOK_ARGS, m.env, HOOK_INPUT), "binary", HOOK_ARGS, HOOK_INPUT);
+  assert.equal(s.hits(), 1, "the prompt hook uses the verified cache");
+});
+
 test("a pinned binary is downloaded once, checked, warmed and then run from the cache", { skip: noBinary }, async () => {
   const sum = sha256(BINARY);
   const root = makePlugin({ pinned: pinned(sum) });
   const s = serve(BINARY);
   const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
-  const [hook, cli] = await hookThenCli(root, m);
+  const [hook, cli] = await cliThenHook(root, m);
   assertBoth([hook, cli], "binary");
   assertWarmBinary(hook, m, sum);
   assertWarmBinary(cli, m, sum);
@@ -347,7 +463,7 @@ test("a file:// release works with curl", { skip: noBinary }, async () => {
   const release = fresh("release");
   writeFileSync(join(release, ASSET), BINARY);
   const m = machine(makeTools(["curl", SUM]), { SKILLETOR_BINARY_BASE_URL: pathToFileURL(release).href });
-  assertBoth(await hookThenCli(root, m), "binary");
+  assertBoth(await cliThenHook(root, m), "binary");
   assertCached(m, sum, BINARY);
 });
 
@@ -356,7 +472,7 @@ test("without curl it downloads with wget", { skip: noWget }, async () => {
   const root = makePlugin({ pinned: pinned(sum) });
   const s = serve(BINARY);
   const m = machine(makeTools(["wget", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
-  assertBoth(await hookThenCli(root, m), "binary");
+  assertBoth(await cliThenHook(root, m), "binary");
   assert.equal(s.hits(), 1);
   assertCached(m, sum, BINARY);
 });
@@ -366,7 +482,7 @@ test("without sha256sum it checks with shasum -a 256", { skip: noShasum }, async
   const root = makePlugin({ pinned: pinned(sum), dist: false, perl: false });
   const s = serve(BINARY);
   const m = machine(makeTools(["curl", "shasum", ...(realPerl ? ["perl"] : [])]), { SKILLETOR_BINARY_BASE_URL: s.url });
-  assertBoth(await hookThenCli(root, m), "binary");
+  assertBoth(await cliThenHook(root, m), "binary");
   assertCached(m, sum, BINARY);
 });
 
@@ -379,7 +495,7 @@ test("a binary already cached runs without a download, PAR_GLOBAL_TEMP beside it
   mkdirSync(versionDir(m), { recursive: true });
   writeFileSync(join(versionDir(m), cachedName(sum)), BINARY);
   chmodSync(join(versionDir(m), cachedName(sum)), 0o755);
-  const [hook, cli] = await hookThenCli(root, m);
+  const [hook, cli] = await cliThenHook(root, m);
   assertBoth([hook, cli], "binary");
   assert.equal(hook.stdout.split("\n")[1], `par ${join(versionDir(m), `${cachedName(sum)}.par`)} cold`);
   assert.equal(s.hits(), 0);
@@ -394,7 +510,7 @@ test("a binary cached for other bytes of the same version is not run: the pinned
   mkdirSync(versionDir(m), { recursive: true });
   writeFileSync(join(versionDir(m), cachedName(sha256(stale))), stale);
   chmodSync(join(versionDir(m), cachedName(sha256(stale))), 0o755);
-  assertBoth(await hookThenCli(root, m), "binary");
+  assertBoth(await cliThenHook(root, m), "binary");
   assert.equal(s.hits(), 1);
 });
 
@@ -405,7 +521,7 @@ test("a symlink to the starter finds the pinned checksums beside the real file",
   const m = machine(makeTools(["curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
   const link = join(fresh("links"), "skilletor");
   symlinkSync(starter(root), link);
-  assertEngine(await start(link, HOOK_ARGS, m.env, HOOK_INPUT), "binary", HOOK_ARGS, HOOK_INPUT);
+  assertEngine(await start(link, CLI_ARGS, m.env), "binary", CLI_ARGS, "");
 });
 
 test("two first starts at once each download into a temp file of their own; one binary remains", { skip: noBinary }, async () => {
@@ -414,11 +530,11 @@ test("two first starts at once each download into a temp file of their own; one 
   const s = serve(BINARY, { hold: 2 });
   const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
   const runs = await Promise.all([
-    start(starter(root), HOOK_ARGS, m.env, HOOK_INPUT),
-    start(starter(root), HOOK_ARGS, m.env, HOOK_INPUT),
+    start(starter(root), CLI_ARGS, m.env),
+    start(starter(root), CLI_ARGS, m.env),
   ]);
   for (const r of runs) {
-    assertEngine(r, "binary", HOOK_ARGS, HOOK_INPUT);
+    assertEngine(r, "binary", CLI_ARGS, "");
     assertWarmBinary(r, m, sum);
   }
   assert.equal(s.hits(), 2, "both were inside their download at once");
@@ -427,12 +543,15 @@ test("two first starts at once each download into a temp file of their own; one 
 
 // --- a download that does not happen or fails: Node, nothing left behind ---------------------
 
-test("a start stopped inside its download removes its temp file; a hook still exits 0", { skip: noBinary }, async () => {
+test("a stopped SessionStart download removes its temp file, backs off and still exits 0", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve(BINARY, { stall: true });
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", "curl", SUM]), {
+    SKILLETOR_BINARY_BASE_URL: s.url,
+    SKILLETOR_STARTER_NOW: "1000",
+  });
   // Its own process group: stopped as a harness stops a hook that ran out of time, curl with it.
-  const child = spawn(starter(root), HOOK_ARGS, { cwd: tmp.dir, env: m.env, detached: true });
+  const child = spawn(starter(root), SESSION_START_ARGS, { cwd: tmp.dir, env: m.env, detached: true });
   const closed = new Promise<number | null>((resolve) => child.on("close", resolve));
   child.stdin.end(HOOK_INPUT);
   const temp = () => (existsSync(versionDir(m)) ? readdirSync(versionDir(m)) : []).filter((f) => f.endsWith(".tmp"));
@@ -443,14 +562,15 @@ test("a start stopped inside its download removes its temp file; a hook still ex
   process.kill(-child.pid!, "SIGTERM");
   assert.equal(await closed, 0);
   assert.ok(!existsSync(versionDir(m)) || temp().length === 0, "no temp file left");
+  assert.equal(readFileSync(retryFile(m), "utf8"), "1000\n", "a stopped SessionStart backs off the next provision");
 });
 
 test("a checksum mismatch is refused, leaves nothing behind, and Node runs", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve(BINARY.replace("warm", "evil"));
   const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
-  assertBoth(await hookThenCli(root, m), "node");
-  assert.equal(s.hits(), 2, "refused at each start, never cached");
+  assertBoth(await cliThenHook(root, m), "node");
+  assert.equal(s.hits(), 1, "the explicit CLI start refused it; the prompt hook did not provision");
   assert.ok(!existsSync(versionDir(m)), "no binary, no temp file, no empty version directory");
 });
 
@@ -468,14 +588,14 @@ test("a binary that does not run here is not cached, and Node runs", { skip: noB
   const root = makePlugin({ pinned: pinned(sha256(BROKEN_BINARY)) });
   const s = serve(BROKEN_BINARY);
   const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
-  assertBoth(await hookThenCli(root, m), "node");
+  assertBoth(await cliThenHook(root, m), "node");
   assert.ok(!existsSync(versionDir(m)));
 });
 
 test("offline: the download fails, Node runs, nothing is left", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: await offlineUrl() });
-  assertBoth(await hookThenCli(root, m), "node");
+  assertBoth(await cliThenHook(root, m), "node");
   assert.ok(!existsSync(versionDir(m)));
 });
 
@@ -483,7 +603,7 @@ test("neither curl nor wget: no download, Node runs", { skip: noBinary }, async 
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve(BINARY);
   const m = machine(makeTools(["node", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
-  assertBoth(await hookThenCli(root, m), "node");
+  assertBoth(await cliThenHook(root, m), "node");
   assert.ok(!existsSync(versionDir(m)));
 });
 
@@ -491,7 +611,7 @@ test("neither sha256sum nor shasum: nothing is fetched that cannot be checked", 
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve(BINARY);
   const m = machine(makeTools(["node", "curl"]), { SKILLETOR_BINARY_BASE_URL: s.url });
-  assertBoth(await hookThenCli(root, m), "node");
+  assertBoth(await cliThenHook(root, m), "node");
   assert.equal(s.hits(), 0);
 });
 
@@ -504,7 +624,7 @@ test("no pinned line for this platform, or a malformed one: no download, Node ru
     pinned(sha256(BINARY), `skilletor-..-${OS}-${ARCH}`),
   ]) {
     const m = machine(tools, { SKILLETOR_BINARY_BASE_URL: s.url });
-    assertBoth(await hookThenCli(makePlugin({ pinned: file }), m), "node");
+    assertBoth(await cliThenHook(makePlugin({ pinned: file }), m), "node");
     assert.ok(!existsSync(join(m.config, "skilletor")));
   }
   assert.equal(s.hits(), 0);
@@ -522,19 +642,19 @@ test("no HOME and no CLAUDE_CONFIG_DIR: no binary cache, Node runs", { skip: noB
 
 test("no Node: Perl runs once its modules load", { skip: noPerl }, async () => {
   const m = machine(makeTools([], { perl: PERL_540 }));
-  assertBoth(await hookThenCli(makePlugin(), m), "perl");
+  assertBoth(await cliThenHook(makePlugin(), m), "perl");
 });
 
 test("Node too old, or dist/ missing: Perl runs", { skip: noPerl }, async () => {
   const old = machine(makeTools([], { perl: PERL_540, node: NODE_16 }));
-  assertBoth(await hookThenCli(makePlugin(), old), "perl");
+  assertBoth(await cliThenHook(makePlugin(), old), "perl");
   const unbuilt = machine(makeTools(["node"], { perl: PERL_540 }));
-  assertBoth(await hookThenCli(makePlugin({ dist: false }), unbuilt), "perl");
+  assertBoth(await cliThenHook(makePlugin({ dist: false }), unbuilt), "perl");
 });
 
 /** The line: on stderr with exit 1; on a hook its one warning line on stdout, with exit 0. */
 async function assertLine(root: string, m: Machine, line: string) {
-  const [hook, cli] = await hookThenCli(root, m);
+  const [hook, cli] = await cliThenHook(root, m);
   assert.equal(cli.status, 1);
   assert.equal(cli.stdout, "");
   assert.equal(cli.stderr, line + "\n");
@@ -588,7 +708,7 @@ test("this machine's own perl: the starter reads its version", { skip: noPerl },
   const root = makePlugin();
   const recent = execFileSync(realPerl!, ["-e", "print $] >= 5.040 ? 1 : 0"], { encoding: "utf8" }) === "1";
   if (recent) {
-    assertBoth(await hookThenCli(root, m), "perl");
+    assertBoth(await cliThenHook(root, m), "perl");
   } else {
     const found = execFileSync(realPerl!, ["-e", 'printf "%vd", $^V'], { encoding: "utf8" });
     await assertLine(

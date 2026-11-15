@@ -1,6 +1,13 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - `install.sh` has a fail-safe CLI-only path for machines without Node. It
+    preflights a candidate checkout's verified binary or source-Perl starter,
+    leaves Claude plugin metadata untouched, and preserves the working command
+    and checkout on failure (k230).
+  - The prepared starter keeps per-prompt hooks offline, backs off failed
+    session-start provisioning for 15 minutes, and rechecks cached binaries
+    before execution. It remains unwired from the default plugin hooks (k231).
   - The source Perl port now requires Perl 5.40. Perl CI tests that version and
     reproducibly provisions its pinned Text::Nunjucks dependency (k159).
   - The prepared binary workflow resolves its template dependency repository

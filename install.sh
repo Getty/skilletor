@@ -10,9 +10,10 @@
 # (adding the Getty/marketplace marketplace first) and writes a small `skilletor` script into
 # the bin dir that runs whichever version of that install is current, so it survives plugin
 # updates. Without Claude Code, or with --no-plugin, it clones the repository (or uses the
-# clone it is run from) and links the clone's bin/skilletor into the bin dir. Running it again
-# updates: the plugin, or the clone. It never uses sudo and touches nothing outside the bin
-# dir, the clone and what `claude plugin` itself writes.
+# clone it is run from) and links the clone's bin/skilletor into the bin dir. Without Node.js,
+# it leaves Claude Code's plugin state untouched and instead preflights then links the clone's
+# bin/skilletor-start. Running it again updates: the plugin, or the clone. It never uses sudo
+# and touches nothing outside the bin dir, the clone and what `claude plugin` itself writes.
 #
 # Everything runs from main() on the last line, so a download cut short runs nothing.
 set -u
@@ -44,7 +45,8 @@ With `claude` on PATH: adds the Getty/marketplace marketplace, installs (or upda
 plugin skilletor@getty in user scope, and writes a command that runs that install.
 Without it (or with --no-plugin): clones the repository into
 ${XDG_DATA_HOME:-~/.local/share}/skilletor (SKILLETOR_REPO names another one) or uses the
-clone this script is run from, and links its bin/skilletor. Run it again to update.
+clone this script is run from, and links its bin/skilletor. Without Node.js it leaves the
+plugin untouched and preflights then links bin/skilletor-start instead. Run it again to update.
 EOF
 }
 
@@ -190,22 +192,38 @@ place_link() {
 # The checkout this script is run from (`sh install.sh` in a clone), if any. Under
 # `curl … | sh` $0 is the shell, not a file named install.sh.
 own_clone() {
+  launcher=${1:-bin/skilletor}
   [ -f "$0" ] || return 1
   case "$0" in */install.sh | install.sh) ;; *) return 1 ;; esac
   dir=$(CDPATH='' cd -P -- "$(dirname -- "$0")" && pwd) || return 1
-  [ -f "$dir/bin/skilletor" ] && [ -f "$dir/dist/skilletor.js" ] || return 1
+  [ -f "$dir/$launcher" ] || return 1
+  if [ "$launcher" = bin/skilletor ] && [ ! -f "$dir/dist/skilletor.js" ]; then return 1; fi
   printf '%s' "$dir"
 }
 
 install_clone() {
-  if clone=$(own_clone); then
+  launcher=${1:-bin/skilletor}
+  if clone=$(own_clone "$launcher"); then
     say "using the clone this script runs from: $clone (update it with git pull)."
   else
     clone=${XDG_DATA_HOME:-$HOME/.local/share}/skilletor
     repo=${SKILLETOR_REPO:-$DEFAULT_REPO}
     if [ -d "$clone/.git" ]; then
-      say "updating the clone in $clone."
-      quiet_stdin git -C "$clone" pull --ff-only --quiet || die "\`git pull\` in $clone failed; update it by hand or move it away."
+      if [ "$launcher" = bin/skilletor-start ]; then
+        repo=$(quiet_stdin git -C "$clone" remote get-url origin) ||
+          die "could not find the source remote for $clone; update it by hand or move it away."
+        candidate=$clone.next.$$
+        while [ -e "$candidate" ] || [ -L "$candidate" ]; do
+          candidate=$candidate.next
+        done
+        say "cloning an update of $clone into $candidate."
+        quiet_stdin git clone --quiet -- "$repo" "$candidate" ||
+          die "\`git clone\` into $candidate failed."
+        clone=$candidate
+      else
+        say "updating the clone in $clone."
+        quiet_stdin git -C "$clone" pull --ff-only --quiet || die "\`git pull\` in $clone failed; update it by hand or move it away."
+      fi
     elif [ -e "$clone" ]; then
       die "$clone exists but is not a git clone; move it away."
     else
@@ -214,8 +232,13 @@ install_clone() {
       quiet_stdin git clone --quiet -- "$repo" "$clone" || die "\`git clone $repo\` failed."
     fi
   fi
-  [ -f "$clone/bin/skilletor" ] || die "$clone has no bin/skilletor."
-  place_link "$clone/bin/skilletor"
+  [ -f "$clone/$launcher" ] || die "$clone has no $launcher."
+  if [ "$launcher" = bin/skilletor-start ]; then
+    [ -x "$clone/$launcher" ] || die "$clone/$launcher is not executable."
+    starter_version=$(quiet_stdin "$clone/$launcher" --version 2>&1) ||
+      die "$clone/$launcher --version failed: $starter_version"
+  fi
+  place_link "$clone/$launcher"
 }
 
 main() {
@@ -251,23 +274,31 @@ main() {
   # commands at another repository.
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE GIT_PREFIX
 
-  check_node
+  node=
+  if command -v node >/dev/null 2>&1; then
+    check_node
+    node=1
+  fi
   command -v git >/dev/null 2>&1 || die "git is required but was not found on PATH."
   mkdir -p -- "$bin_dir" || die "could not create $bin_dir."
   target=$bin_dir/skilletor
 
   plugin=
-  if [ -z "$no_plugin" ] && command -v claude >/dev/null 2>&1; then
+  if [ -n "$node" ] && [ -z "$no_plugin" ] && command -v claude >/dev/null 2>&1; then
     plugin=1
     install_plugin
     place_shim
   else
-    if [ -n "$no_plugin" ]; then
+    if [ -z "$node" ]; then
+      say "Node.js not found: installing the CLI only from a clone; Claude Code plugin untouched."
+      install_clone bin/skilletor-start
+    elif [ -n "$no_plugin" ]; then
       say "--no-plugin: installing the CLI only, from a clone."
+      install_clone
     else
       say "Claude Code not found (no claude on PATH): installing the CLI only, from a clone."
+      install_clone
     fi
-    install_clone
   fi
 
   version=$(quiet_stdin "$target" --version 2>&1) || die "$target --version failed: $version"
