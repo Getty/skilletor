@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-11-15T19:28:14Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:14Z
+created: 2026-11-13T21:54:42Z
+id: 195
+priority: low
+started: 2026-11-15T05:38:08Z
+status: done
+tags:
+- perl
+- frontmatter
+- bug
+title: 'Perl: frontmatter joins a surrogate pair written as two \u escapes'
+updated: 2026-11-15T19:28:14Z
+---
+
+Found on k183 (2026-11-13). A character written as two \u escapes in a double-quoted frontmatter value ("😀") stays two lone halves in Perl (Frontmatter.pm _unescape_double) and is written as two U+FFFD; TS joins them into one character (U+1F600). Shows up in a Codex agent's description and briefing line. Done: _unescape_double joins a high+low pair as JS does (a lone half stays U+FFFD as in TS), with a test against node; add the case to perl/maint/oracle-convert.mjs (left out on k183).
+
+Main reviewed surrogate joining and reference-oracle diff. Review corrected an initially pre-decoded emoji test input; test now constructs literal backslash sequences and asserts source bytes, with documented HEAD-scratch red (two U+FFFD vs one codepoint), corrected report and mixed u/U coverage. Independent focused Perl tests PASS with no skips; main regenerated oracle via Node into a separate temp file and cmp matched stored expectations exactly; scoped diff-check clean. No commit.
+
+Committed as a4f3b14. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, matched dist, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 include-syntax TODO and 102 t65 no-engine-step cases (204 skip annotations), with no dependency skips. No real-home migration, binary activation, push, tag, release or publication.
