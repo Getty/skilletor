@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-11-15T19:28:55Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:55Z
+created: 2026-11-15T05:02:21Z
+id: 230
+priority: high
+started: 2026-11-15T19:28:55Z
+status: done
+tags:
+- perl
+- installer
+- binary
+title: Provide an installer path that does not require Node
+updated: 2026-11-15T19:28:55Z
+---
+
+Required by the 2026-11-15 maintainer request for Perl-primary operation on systems without JavaScript. install.sh currently requires Node and uses JavaScript to inspect plugin installation metadata, so the prepared Perl binary does not make installation Node-independent. Implement a supported no-Node installation path using the existing pinned-binary/starter trust contract; preserve existing user files and the current supported path. Test in disposable HOME/PATH environments without node, covering CLI-only and plugin-adjacent cases. Do not activate an unverified platform, fetch release assets during development, change public resources, or silently weaken checksum trust. Sequence and gates: docs/superpowers/plans/2026-11-15-perl-first-readiness.md; k166/k191.
+
+Coordinator selected minimal no-Node path from read-only audit: reuse install_clone/CLI-only checkout; when Node is absent, do not invoke claude or parse installed_plugins.json, explicitly report plugin untouched. Preflight checkout bin/skilletor-start --version and link only on success. Use prepared starter directly only for this path; preserve existing Node/plugin branch. Failed/mismatched/no-pin provisioning must not replace existing command or metadata. Test no Node/no system Perl via fake tool PATH and locally served verified fixture; no actual release download or real-home install. This prepares support; real binaries/checksum activation remain gated by k191.
+
+Independent review caught and fixed an in-place-update regression: the no-Node path now preflights a candidate checkout before switching the CLI link, leaving the previously active checkout and user files intact on failure. Main reran installer suite: 15/15 pass, including no Node/no Perl, plugin metadata untouched, cache reuse and failed-update old-command execution. Restricted parent PATH without hash/download tools: existing 12 tests pass, only 3 new Linux binary-proof tests explicitly skip. sh -n and scoped diff-check pass. Only local fake binaries/repositories used; actual releases, macOS no-Perl proof, Windows and default hook activation remain unverified/gated. No commit.
+
+Root README now describes the no-Node CLI-only path, preflight/checksum requirement, candidate-checkout updates and retained prior checkouts, while explicitly stating that production binary/default-hook activation remains pending. Runtime requirements distinguish the current Node plugin launcher from source Perl and the prepared binary path. Documentation diff-check passed.
+
+Final Sol review found a possible retained candidate-directory collision because install.sh names candidates only with $$. Returned for a focused reproduction, regression and collision-free allocation; no backlog expansion. Work is now integrated on finish/review-2026-11-15; source snapshot remains preserved.
+
+Confirmed retained PID-candidate collision with a red regression, then fixed candidate allocation to skip existing files/directories/symlinks using .next suffixes without deleting retained checkouts. Worker installer suite:16 pass/0 fail/0 skip. Main independently reviewed exact install.sh/test delta and reran the new regression:1 pass/0 fail/0 skip; diff-check clean. Final full Node/build gates running; Perl code unchanged since independently passing49 files2692 tests. No publication or activation.
+
+Committed as 4f5a187. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, check-dist and diff-check all passed; installer and starter regressions are included in that run. No public asset download, real-home install, platform activation or default-hook switch was performed; the prepared rollout remains gated.
