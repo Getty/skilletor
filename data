@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-11-15T19:27:48Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:27:48Z
+created: 2026-11-10T17:07:25Z
+id: 148
+priority: medium
+started: 2026-11-15T08:43:04Z
+status: done
+tags:
+- build
+- ci
+title: Build refuses a bundle from another checkout's node_modules
+updated: 2026-11-15T19:27:48Z
+---
+
+Found while fixing k146. f9f2139 (k144), 73f0f26 (k142) and 7e71bb1 (k145) were built in `.claude/worktrees/<name>` checkouts without their own `npm ci`: Node resolved nunjucks from the main checkout's `node_modules`, and esbuild wrote `../../../node_modules/...` paths into `dist/skilletor.js`. `check-dist` in the same worktree resolved the same way and passed locally; CI (own `node_modules`) failed.
+
+## Proposal
+
+`scripts/esbuild.config.mjs` (and so `check-dist`) refuses to build when nunjucks or esbuild resolve from outside the repo's own `node_modules`, and says to run `npm ci`.
+
+## Done when
+
+A build in a worktree without `node_modules` fails locally with that message, the same way CI would; a normal build is unchanged; a test covers it.
+
+Autonomous follow-up after reviewed k220: explicit local node_modules symlinks remain supported (preserveSymlinks already fixed). Reject accidental ancestor dependency/tool resolution, including a missing runtime transitive dependency falling back outside the checkout, rather than normalizing away bundle differences. Work only shared build helper and focused tests; no source/engine changes. Main owns final integration checks while k234 fixes the independent settings-write guard.
+
+Main reviewed revised helper/tests and independently ran all6 build regressions (0 skips), typecheck, build, exact pre/post bundle SHA comparison, check-dist and scoped diff-check: PASS. Review caught and corrected physical-path false positives for explicit package links and a symlinked ancestor dependency bypass. Build now loads the explicitly local package and rejects lexically external bundled inputs before writing output; k220 strict normal/link byte equality preserved. No commit.
+
+Committed as 72d77c6. Final independent gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, check-dist and diff-check all passed. Full Perl: 49 files/2692 tests passed; only the existing t53 TODO and t65 no-engine-step skips, with no dependency skips. No push, tag, release or publication.
