@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-11-15T19:28:35Z
+claimed_by: skilletor-finish-review
+class: standard
+completed: 2026-11-15T19:28:35Z
+created: 2026-11-14T02:52:15Z
+id: 219
+priority: low
+started: 2026-11-15T11:25:29Z
+status: done
+tags:
+- perl
+- binary
+- test
+title: 'Binary smoke and CLI parity: cover the commands ported after k173'
+updated: 2026-11-15T19:28:35Z
+---
+
+From k176. perl/scripts/smoke-binary.sh runs sync, check, status and the hooks in the packed binary; trust, source list/remove (k175) and add (k176, a local path; the probe needs no network for a local spec) are not smoked there yet, nor in later ports (available, install, uninstall). perl/t/54-parity-cli.t could gain an add/trust step that compares the trust.json bytes both CLIs write (conformance does not compare state). Done when: the smoke transcript covers each ported command once in the binary, and t/54 compares trust.json after add.
+
+Implementation started: adding red-first coverage for seven packed-binary CLI actions, explicit trust.json byte parity after add/trust, and isolated runtime PATH/PAR temp handling. Scope restricted to the approved smoke, t70, t54, transcript, and local fixture files.
+
+Implemented the bounded smoke/trust-parity scope. smoke-binary.sh now executes add, trust, source list/remove, available, install and uninstall against a unique local fixture, guards successful semantics, records deterministic trust/install/removal evidence, isolates HOME/harness homes/git/temp/PAR under its workdir, drops ambient config/project/plugin roots, credentials and PERL5LIB via env -i, and supports SKILLETOR_SMOKE_PATH. t/70 poisons every ambient root and runs the fake smoke with an empty runtime PATH; the hand-reviewed transcript was updated only after the red assertions. t/54 compares raw trust.json bytes after add and trust and checks canonical backend semantics. Green: bash -n smoke-binary.sh; prove -lv t/54-parity-cli.t t/70-smoke-binary.t => Files=2, Tests=27, Result PASS (62s). No pp build, Docker, download, installer, source/runtime/target/env-module/skill edits. Remaining reviewer gates: real isolated pp build, verify-binary.sh, then packed smoke with an empty SKILLETOR_SMOKE_PATH; keep local Linux host proof separate from release ABI/platform gates.
+
+Main independently reviewed and ran t54/t70:27 tests PASS, no skips; syntax/check-dist/diff-check PASS. Then built the real local PAR binary in scrubbed temporary HOME/TMP/PAR (9.1M,181 modules), verified byte equality against source Perl including local git and loopback HTTPS, module-set/CA inclusion and excluded families: verify OK. Actual binary passed every extended command/hook smoke with EMPTY runtime PATH and no inherited PERL5LIB. End-to-end local installer fixture using that real binary + pinned SHA also passed with no node/perl on client PATH: plugin metadata untouched, CLI version and template sync correct. Artifact /tmp/skilletor-k219-packed.Lk170R/out/skilletor-local SHA2568958af3e2de22f42f8f0dcdf87239191edbf3e9712ff29b3518b40f8ff515a8b. Linux-host proof only; no real user install, published asset, default activation, release ABI or cross-platform claim. No commit.
+
+Final independent combined v5 after smoke changes: Node1313 passed/1 opt-in Hermes install skip, typecheck/build/check-dist/diff-check PASS; Perl49 files2687 tests PASS. Existing t53 syntax-error TODO and t65 no-engine-step case skips remain, no dependency skip. Real packed binary and real local installer/starter proof are separately recorded above; no activation/publication.
+
+Committed as a58940b. Final independent local gate: typecheck, Node 1319 pass/0 fail with one deliberate opt-in Hermes network/runtime-download skip, build, check-dist and diff-check all passed; full Perl 49 files/2692 tests passed with only the existing documented TODO/skips and no dependency skips. Remote GitHub Actions, cross-platform binary execution, release dispatch and publication were not run; existing platform and activation gates remain.
