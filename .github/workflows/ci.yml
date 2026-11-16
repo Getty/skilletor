@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # TEMP (k242): probe runs from ack-paket; drop before merging
+    branches: [main, ack-paket]
   pull_request:
 
 jobs:

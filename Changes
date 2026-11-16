@@ -1,6 +1,13 @@
-Revision history for skilletor
+Revision history for skilletor and Skilletor, its Perl distribution
 
 {{$NEXT}}
+  - The Perl distribution Skilletor moves from perl/ to the repository root
+    and is released with dzil; its version 0.008 is the plugin's 0.8.0, which
+    the Perl CLI now reports. Standalone binaries for linux-x86_64,
+    linux-arm64, macos-arm64 and windows-x86_64 come from the house
+    dzil-binary workflow, with OpenSSL linked statically; the smoke proves an
+    https url source. skilletor is licensed under the Artistic License 2.0
+    from this release (k242).
   - The plugin's hooks and bin/skilletor run bin/skilletor-start: a cached
     release binary verified against checksums pinned in the plugin, else
     Node.js >= 18, else Perl >= 5.40 from source. Without pinned checksums
@@ -193,6 +200,234 @@ Revision history for skilletor
     warning line, and no longer runs `git rev-parse` on the process cwd when
     its project is known. `hook ... --scope bogus` exits 0 too: the hook is
     dispatched before the option checks.
+  - The Perl CLI loads each module by the first call that needs it:
+    --version, --help and a usage error in ASCII load Skilletor::CLI alone
+    (180 -> 19 ms with perl -Ilib), and the prompt hook with nothing due no
+    longer loads Skilletor::Report and what it stands on. Output and exit
+    codes are unchanged. t/68-cli.t pins what the argument layer loads,
+    t/69-hooks.t the modules of the prompt hook's fast path (k199).
+  - Skilletor::Frontmatter::Float and Skilletor::TOML::Float are hidden from
+    the PAUSE indexer: inner value classes without a .pm of their own, no
+    longer listed in META's provides (k202).
+  - `skilletor available [source] [--json]` in the Perl CLI
+    (Skilletor::Commands::available, after cmdAvailable): every trusted
+    source - or the one named - resolved and scanned under the sync lock, the
+    caches swept first; an item marked installed when either scope declares it
+    or either lock holds it for that source (any target, not a skipped entry),
+    a bundle when either config declares it; an item's error, a bundle's
+    sorted members, `(no items)` or its expansion error on a second line;
+    --json the list; an untrusted source skipped. A lock entry that is no
+    object marks nothing installed, where the reference throws a TypeError
+    (k222). Skilletor::Error::Command's POD names add's and available's
+    refusals. Conformance cases 93 to 97, t/76-commands-available.t (k177).
+  - The Perl engine now syncs, checks and reports the Hermes target as the
+    reference does (spec section 16): skills only, in the Hermes home's
+    skills ($HERMES_HOME, else the recorded home, else ~/.hermes) and
+    <project>/.hermes/skills, with no managed .gitignore block. It is never
+    detected, a target only through the user config's "targets"; in a project
+    with Codex active, the Codex copy serves Hermes. One home per user-scope
+    lock, recorded in hermes-home.json: a sync under another home removes the
+    old home's items with a warning and installs anew, and check counts it as
+    targetsChanged. Once hermes is no target, a sync removes its entries from
+    the recorded home and drops the record. Skilletor::Engine has a new
+    hermes_home attribute and a hermes_opt_in_hint method. Under --harness
+    hermes, SessionStart ends with the opt-in line while hermes is no target,
+    and the prompt hook follows a move, naming `hermes skills trust <dir>`
+    once a skill Hermes loads landed (k152). Tested in t/74-engine-hermes.t
+    and t/75-hooks-hermes.t (k185).
+  - A Skilletor::Error stringifies to its message, as its documentation says:
+    an error no one catches prints the message, not
+    Skilletor::Error::Config=HASH(0x...). namespace::clean removed the subs
+    that hold Error.pm's overload table; the overload is now declared after
+    it. The CLI and the hooks print what they did before - they ask an error
+    for its message (k213).
+  - `skilletor add [name] <spec> [--project]` in the Perl CLI
+    (Skilletor::Commands::add, after cmdAdd): the same checks in the same
+    order - the k95 name, no project scope, the spec, the k110 definition, the
+    k101 taken name, the k119 ref, the k126 path, the k116 kept entry. It then
+    trusts the source and syncs, prints the added or kept line, and prints the
+    k103 saved lines when the sync fails (k176).
+  - New Skilletor::Probe: `git ls-remote -- url` (5 s), then an in-process
+    HEAD on url.tar.gz through HTTP::Tiny with fetch's headers, so a packed
+    binary needs neither Node nor Perl for it. Tested in t/31-probe.t (k176).
+  - The Codex target in the Perl engine: sync, check and status install
+    skills in .agents/skills, agents as TOML and rules as sections of one
+    skilletor-rules.md with the pointer block in the Codex AGENTS.md - its
+    warnings (malformed markers, a link, a directory or Claude Code's
+    CLAUDE.md in its place, AGENTS.override.md, project_doc_max_bytes) and the
+    migration of a first-design rules block as the reference has them - and
+    warn while Codex has not trusted skilletor's SessionStart hook
+    (Skilletor::AgentsMD, after agentsmd.ts; Skilletor::Error::Block).
+    Hermes followed in k185. The hooks under --harness codex: a new
+    session's context starts with the rules files, and the prompt hook syncs
+    the checkout a session moved into, its answer joined with a pending
+    report (k184).
+  - `skilletor trust`, `skilletor source list [--json]` and `skilletor source
+    remove <name> [--project] [--force]` in the Perl CLI (Skilletor::Commands,
+    after the reference's commands.ts): the same checks in the same order (an
+    undeclared name and where else it is declared, an entry other files'
+    overrides still need, the one entry config load refuses removed, installed
+    items without --force), the same messages and exit codes, the config
+    rewritten as two-space JSON in its key order. Skilletor::Config gains
+    has_source_entry (an entry written as null is declared). New conformance
+    cases 72 to 82 hold both CLIs to the same bytes.
+  - t/54-parity-cli.t runs the reference CLI (node dist/skilletor.js) and
+    bin/skilletor on one machine, in the same paths, and holds the port to the
+    same bytes: exit codes, both streams, installed trees, the lock and the
+    state files (render-inputs, sources-read, unreached, the hooks' marks and
+    records), over five conformance cases, git's failure wording, the real
+    host and user in templates, and one sync lock that either CLI holds while
+    the other's sync and SessionStart wait or time out. It skips without node
+    or the bundle.
+  - Skilletor::Process runs programs on Windows: stdin, stdout and stderr as
+    temp files on the standard handles of a P_NOWAIT spawn, the program found
+    on PATH as Node finds it (never in the cwd first, never a .bat or .cmd),
+    its arguments quoted for the C runtime, a timeout terminating it
+    (reported as signal 15, as Node does there); spawn_detached starts the
+    hooks' background through Win32::Process (new Windows-only dependency)
+    with no inherited handle and a console without a window.
+    Skilletor::State refreshes the sync lock on Windows while it waits on a
+    program, and stamps times with the core utime there (Time::HiRes has
+    none). Untested on real Windows (exercised on Linux through an injected
+    seam).
+  - `skilletor hook cwd-changed|post-tool-use` for Claude Code: a session
+    that moves into another checkout gets that checkout's project scope
+    synced – its git top level, never CLAUDE_PROJECT_DIR – when its lock no
+    longer matches its config (a local check, no source asked), with a 20 s
+    deadline past which nothing is written and a wait on the sync lock up to
+    it; one line names the checkout and what to run there, PostToolUse adds
+    a context for the model. New conformance cases 60 to 64 hold both CLIs
+    to the same bytes.
+  - `skilletor hook session-start|user-prompt-submit` for Claude Code: the
+    SessionStart check and sync, the prompt's interval check with a detached
+    background sync (a packed binary re-runs itself via PAR_PROGNAME), and
+    pending reports. Every failure is one warning line with exit 0, and a
+    prompt with nothing due never loads the engine. New conformance cases 50
+    to 59 hold both CLIs to the same hook output.
+  - Renders Nunjucks templates as the reference does, through Text::Nunjucks
+    (a Perl port of Nunjucks 3.2.4, not on CPAN yet; new dependency, Perl
+    5.40): a sync installs .njk items rendered with the reference's context,
+    skips an item whose main template renders empty and words template errors
+    the same. resolve_skill and its siblings still refuse a templated item.
+  - The sync, check and status reports keep the reference's key order, and
+    Skilletor::Report's new report_json writes them byte for byte as
+    skilletor sync|check|status --json prints them.
+  - A command line, bin/skilletor over Skilletor::CLI: the reference's usage
+    text, version (the plugin's, provisional), option checks, usage errors and
+    exit codes, byte for byte; a command not ported yet says so and exits 1.
+    Skilletor::Process::run_command feeds stdin through a
+    pipe when given one.
+  - The engine options the hooks set, as the reference has them: check's local
+    (no source asked), the sync's if_changed (a local check under the sync
+    lock), deadline and a per-call lock_timeout_ms. Skilletor::State keeps
+    pending-report.json and session-cwd.json (the 256 sessions recorded last)
+    byte for byte as the reference does, and gains due_again;
+    Skilletor::Report's new report_hook words a sync report as the hooks do.
+    report_text gives an item with an unknown harness prefix its type's
+    activation hint.
+  - Skilletor::Convert and Skilletor::TOML port the reference's Codex
+    conversion: an agent as a Codex agent-role TOML file (the codex:
+    passthrough, its warnings, the # briefing: skills line), a rule as its
+    section of the Codex rules file, and the per-target mapping of an item's
+    output, byte for byte; not yet used by a sync.
+  - The CLI runs sync, check and status as the reference does: the report
+    text and --json, check's exit 0, 1 or 2, status with the target naming,
+    --scope, --force and --project-dir; the project root is the git top level
+    of the working directory (2 s, else the directory itself). The
+    conformance runner's cli steps hold it to the reference's bytes.
+  - scripts/ builds bin/skilletor into one standalone executable with
+    PAR::Packer (build-binary.sh), proves it byte for byte against perl -Ilib
+    (verify-binary.sh), checks its shared libraries and glibc floor
+    (check-binary-libs.sh), and runs the shared conformance cases' cli steps
+    against it in a container with neither perl nor node (container-proof.sh);
+    scripts/ stays out of the CPAN tarball.
+  - scripts/smoke-binary.sh runs a packed binary through a sync, check and
+    status of the t/data/smoke fixture on a clean machine without Perl
+    (t/70-smoke-binary.t), and the Claude Code hooks, the detached
+    background sync included (k205); verify-binary.sh now also works with
+    git before 2.32. scripts/loaded-modules.pl packs Win32::Process on
+    MSWin32 and runs on Windows, and the release-binaries Windows leg runs the
+    full smoke (k210).
+
+0.001     2026-10-24 03:08:52Z
+  - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's
+    .claude (config, lock, roots, state dir, markers, briefing lookup); a
+    source's non-object vars, a lock via that is no array of strings and a
+    truncated url tarball are errors.
+  - Initial release: the Perl port of skilletor, beside the TypeScript
+    reference in the same repository, sharing its config files, its
+    ~/.claude/skilletor/cache and its trust.json.
+  - Skilletor::Config loads the user, project and local config with the
+    reference's merge and precedence rules (per-field source merge with
+    origins, author mode, entries without a backend, "ref": null, vars,
+    gitignore, claudeSettings, targets), reports the same errors in the same
+    order, and edits a config file as `add`/`install`/`uninstall` do.
+  - Skilletor::Entry parses [type:]name@source, patterns and
+    [bundle:]name@source; Skilletor::Spec resolves `add` shorthands (forge
+    links, scp-like and transport::address forms, probed generic hosts).
+  - Sources: Skilletor::Source::Local, ::Git (shallow fetch, refs, SHA pins,
+    offline cache reuse, repair and restore after killed runs, lock-file
+    sweep) and ::Url (https tarball, ETag or sha256 version, staged swap,
+    sweep). Skilletor::Cache names cache directories as the reference does,
+    so both implementations share one fetch.
+  - Skilletor::Backend picks a source's backend (author mode) for trust and
+    fetch alike; Skilletor::State reads and writes trust.json;
+    Skilletor::Targets detects harnesses and merges targets.
+  - Skilletor::JSON parses like JSON.parse (key order, V8's messages) and
+    writes like JSON.stringify(value, null, 2), byte for byte;
+    Skilletor::URL, ::Gzip, ::Tar, ::JSString and ::FSUtil carry the Node
+    behaviour that reaches a name, a byte or a message.
+  - Skilletor resolves skills, agents and rules as a sync would install
+    them, without installing: resolve_skill, resolve_agent, resolve_rule
+    and resolve_rules give the main file in the source tree or the shared
+    cache, resolve_item, resolve_items and items the whole record. Both
+    scopes declaring a name follow Claude Code's precedence: the personal
+    skill wins, the project's agent wins, rules of both scopes apply (the
+    user's first) – resolve_rule throws Skilletor::Error::Ambiguous rather
+    than hide one. fetch => always, missing or never
+    picks the network use; no agent harness is needed (require_harness
+    restores the reference's check). An item with a .njk file is flagged
+    templated and refused as an include (Skilletor::Error::Unsupported):
+    the port renders no templates.
+  - Skilletor::Resolver ports the reference's resolveItems: trust, sources
+    into the cache, catalogs, wildcards, bundles with their vars and
+    entries of other sources, the overlap rules and the lock's kept
+    offers, with the reference's warnings and report, under its sync lock.
+  - Skilletor::Catalog scans a source tree (layout, plugin.json, the
+    Claude project layout, a source's path, item errors),
+    Skilletor::Bundles parses and expands bundle files, and
+    Skilletor::Frontmatter reads the reference's YAML subset, with its
+    error messages. Skilletor::Lock reads lock files.
+  - Skilletor::State takes the sync lock (sync.lock/) as the reference
+    does, so the two exclude each other; the git, url and local sources
+    gain cached, their cache without the network.
+  - Skilletor::Tar refuses a header whose size field is no non-negative
+    number as a corrupt archive ("corrupt tar entry (size): <name>"), as
+    the reference now does: a url source falls back to its cache.
+  - Skilletor->sync, ->check and ->status (Skilletor::Engine) port the
+    reference's commands for the Claude Code target: the same installed
+    files and executable bits, lock, .gitignore blocks, .worktreeinclude
+    and .claude/settings.json plugin requirement (k140), conflicts and
+    force, removal of what is no longer declared, partial entries after a
+    failed write, the briefing check, the same JSON reports and the same
+    state records (render-inputs.json, sources-read.json, unreached.json),
+    so either implementation's check accepts what the other synced. A
+    scope targeting Codex or Hermes, or a sync where the CLI left their
+    state, is refused with nothing touched. A .njk item is never installed
+    unrendered: the sync warns, keeps what the CLI installed, and leaves the
+    scope open for the CLI's next sync.
+  - Skilletor::Apply, ::Render (copy only), ::Gitignore, ::ClaudeSettings,
+    ::Briefing and ::Report port apply.ts, the copy half of render.ts,
+    gitignore.ts, claudesettings.ts, briefing.ts and report.ts (with the
+    CLI's status text and exit codes); Skilletor::Lock writes locks,
+    Skilletor::State keeps the records check reads, Skilletor::Targets has
+    the layout table, Skilletor::JSON takes a string indent.
+  - t/60-conformance.t runs every step of the shared conformance cases;
+    t/52-parity-sync.t has the reference and the port sync one machine and
+    compares every byte they leave.
+  - Tests replay oracles recorded from the reference (t/data) and, in a
+    checkout with node, drive the reference and the port against the same
+    remotes and cache (t/50-parity.t).
 
 0.7.0     2026-10-16 20:00:22Z
   - The plugin, package and README descriptions name Hermes Agent as the third

@@ -1,11 +1,12 @@
-# The Perl port (perl/, a [@Author::GETTY] dist of its own). Separate from ci.yml, which
-# builds and tests the TypeScript reference. Node is installed too: t/50-parity.t drives the
-# reference in src/ against the port; without node it would skip.
+# The Perl dist Skilletor (lib/, script/, t/ at the root, a [@Author::GETTY] dist; dist.ini).
+# Separate from ci.yml, which builds and tests the TypeScript reference. Node is installed too:
+# t/50-parity.t drives the reference in src/ against the port; without node it would skip.
 name: Perl
 
 on:
   push:
-    branches: [main]
+    # TEMP (k242): probe runs from ack-paket; drop before merging
+    branches: [main, ack-paket]
   pull_request:
 
 jobs:
@@ -18,7 +19,8 @@ jobs:
     container:
       image: perl:${{ matrix.perl-version }}-bookworm
     env:
-      # Text::Nunjucks is not on CPAN, so CI checks out this immutable revision and adds its lib/.
+      # Text::Nunjucks is not on CPAN, so CI checks out this immutable revision and adds its lib/
+      # (the same commit scripts/binary-prepare.sh installs for the binaries; TEMP, k243).
       TEXT_NUNJUCKS_REPO: Getty/p5-text-nunjucks
       TEXT_NUNJUCKS_REF: 1a9a608ad90270a7ae0d15a92466fc186fda00fd
       PERL_CPANM_OPT: --mirror https://cpan.metacpan.org --mirror-only
@@ -40,10 +42,8 @@ jobs:
       - name: Put Text::Nunjucks on PERL5LIB
         run: echo "PERL5LIB=$GITHUB_WORKSPACE/_deps/p5-text-nunjucks/lib" >> "$GITHUB_ENV"
       - name: Install dependencies
-        working-directory: perl
         run: |
-          cpanm -nq --installdeps ../_deps/p5-text-nunjucks
+          cpanm -nq --installdeps ./_deps/p5-text-nunjucks
           cpanm -nq --installdeps .
       - name: prove
-        working-directory: perl
         run: prove -lr -j4 t

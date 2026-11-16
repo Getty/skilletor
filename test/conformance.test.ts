@@ -25,8 +25,15 @@ import { makeTmpDir } from "./helpers/tmp.ts";
 
 const ROOT = fileURLToPath(new URL("../conformance/cases", import.meta.url));
 const UPDATE = process.env.SKILLETOR_CONFORMANCE_UPDATE === "1";
-/** The version a `cli` step that asks for it writes as `${VERSION}` (README: placeholders). */
-const VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
+/**
+ * The version a `cli` step that asks for it writes as `${VERSION}` (README: placeholders), in either
+ * spelling: the plugin's (package.json, 0.8.0), which this CLI reports, and the Perl dist's
+ * (`$VERSION` in lib/Skilletor.pm, 0.008), which the Perl CLI reports.
+ */
+const VERSIONS = [
+  (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version,
+  /^our \$VERSION = '([^']+)';$/m.exec(readFileSync(new URL("../lib/Skilletor.pm", import.meta.url), "utf8"))![1]!,
+];
 /** The CLI of `cli` steps as a JSON argv prefix; unset, this checkout's bundle (README: which CLI). */
 const CLI_OVERRIDE = process.env.SKILLETOR_CONFORMANCE_CLI;
 const CLI_TIMEOUT_MS = 30_000;
@@ -551,7 +558,7 @@ function abstractBytes(bytes: Buffer, r: Roots, version: boolean): Buffer {
     text = replaceExactWhere(text, escaped, name, inJsonString);
     text = replaceExactWhere(text, raw, name, (value, at) => !inJsonString(value, at));
   }
-  if (version) text = text.split(VERSION).join("${VERSION}");
+  if (version) for (const v of VERSIONS) text = text.split(v).join("${VERSION}");
   return Buffer.from(text, "latin1");
 }
 

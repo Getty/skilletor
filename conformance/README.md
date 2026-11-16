@@ -1,7 +1,7 @@
 # skilletor conformance cases
 
 Shared cases that every skilletor engine runs, so the TypeScript engine (`src/`, the
-reference) and the Perl port (`perl/`, namespace `Skilletor`) resolve and install the same
+reference) and the Perl port (the dist `Skilletor`: `lib/`, `t/`, `script/skilletor`) resolve and install the same
 way. Each case is a config, a few source trees and what an engine must make of them: the
 items each scope resolves to and, for sync cases, the files written for the selected targets,
 the lock bytes and what `check` and `status` say afterwards; for `cli` steps, what a
@@ -10,11 +10,11 @@ command line prints and exits with, byte for byte.
 Runners:
 
 - TypeScript: `test/conformance.test.ts` (part of `npm test`).
-- Perl: `perl/t/60-conformance.t` (every step; the Perl engine syncs for Claude Code, Codex and
+- Perl: `t/60-conformance.t` (every step; the Perl engine syncs for Claude Code, Codex and
   Hermes).
 
 Both run the `cli` steps against their own CLI by default and against any other on request
-(below), so one set of expectations holds the TS bundle, `perl/bin/skilletor` and, later, a
+(below), so one set of expectations holds the TS bundle, `script/skilletor` and, later, a
 packed binary to the same bytes.
 
 The format is plain JSON and plain file trees, nothing language-specific: a runner needs a
@@ -229,9 +229,11 @@ any case.
   escapes (`\\n`, `\\t`, `\\uNNNN`), formatting, ordering and all unrelated bytes remain exact;
   no stream or file is parsed and reserialized. Replacement runs first `${HOME}`, then
   `${PROJECT}`, then `${TMP}`, so the longer, nested paths win.
-- **`${VERSION}`** stands for the version in `package.json`, and only in the stdout and
-  stderr of a `cli` step with `"version": true`: there every occurrence of it is replaced,
-  after the paths. Anywhere else a version-shaped string stays as it is.
+- **`${VERSION}`** stands for the version the CLI reports, in either spelling: the plugin's
+  (`package.json`, `0.8.0`) or the Perl dist's (`$VERSION` in `lib/Skilletor.pm`, `0.008`) –
+  and only in the stdout and stderr of a `cli` step with `"version": true`: there every
+  occurrence of either is replaced, after the paths. Anywhere else a version-shaped string
+  stays as it is.
 
 ## Operations
 
@@ -286,14 +288,14 @@ Unset, each runner runs its own:
 
 - TS: `node` and the bundle `buildToString` (`scripts/esbuild.config.mjs`) makes of this
   checkout, as `test/cli.test.ts` does;
-- Perl: `[$^X, "-I<checkout>/perl/lib", "<checkout>/perl/bin/skilletor"]`.
+- Perl: `[$^X, "-I<checkout>/lib", "<checkout>/script/skilletor"]`.
 
 Either runner runs any CLI against the same expectations – the other's, a packed binary:
 
 ```bash
-SKILLETOR_CONFORMANCE_CLI='["perl", "-I'"$PWD"'/perl/lib", "'"$PWD"'/perl/bin/skilletor"]' \
+SKILLETOR_CONFORMANCE_CLI='["perl", "-I'"$PWD"'/lib", "'"$PWD"'/script/skilletor"]' \
   node --test --import ./test/setup.ts test/conformance.test.ts
-cd perl && SKILLETOR_CONFORMANCE_CLI='["node", "'"$(dirname "$PWD")"'/dist/skilletor.js"]' prove -l t/60-conformance.t
+SKILLETOR_CONFORMANCE_CLI='["node", "'"$PWD"'/dist/skilletor.js"]' prove -l t/60-conformance.t
 ```
 
 (A Perl CLI needs its modules in `PERL5LIB`, which the runner passes on.) The variable is not
@@ -637,5 +639,5 @@ a `CLAUDE.md` that is the Codex `AGENTS.md`, an `AGENTS.md` that is a link (the 
 `t/72-engine-codex.t` syncs those with both engines) –, and a sync that fails midway
 (`partial`; `67` starts from the lock one left). Starting a CLI from an already-removed
 working directory is covered by child-process tests in `test/cli.test.ts` and
-`perl/t/68-cli.t` (k192, k193); the shared case format does not remove the running process's
+`t/68-cli.t` (k192, k193); the shared case format does not remove the running process's
 cwd.

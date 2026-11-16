@@ -20,3 +20,21 @@ __pycache__/
 
 # Devel::NYTProf profile output
 nytprof.out
+
+# The Perl dist Skilletor (dist.ini): dzil build, its local binary check, make
+/.build/
+/Skilletor-*
+_build/
+blib/
+/Build
+/Makefile
+/Makefile.old
+/pm_to_blib
+/MANIFEST.bak
+/MYMETA.*
+/cover_db/
+
+# Carton
+/local/
+/.carton/
+/cpanfile.snapshot

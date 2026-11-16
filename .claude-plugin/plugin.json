@@ -7,7 +7,7 @@
   },
   "homepage": "https://github.com/Getty/skilletor",
   "repository": "https://github.com/Getty/skilletor",
-  "license": "MIT",
+  "license": "Artistic-2.0",
   "keywords": ["skills", "agents", "rules", "sync", "templates", "claude-code", "plugin", "nunjucks"],
   "hooks": "./hooks/hooks.json",
   "skills": "./skills"
