@@ -1,6 +1,18 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - An included template's syntax error is now a synchronous item warning
+    rather than a delayed crash; unaffected items still install (k160).
+  - Skill install paths no longer consult the process cwd. Commands that need
+    a project context can run from a removed cwd when given `--project-dir`;
+    without one they exit 1 with an actionable diagnostic instead of a stack
+    trace (k192, k193).
+  - SessionStart now gives source checking, lock waiting and source resolution
+    a 20-second pre-apply budget. The per-scope guard names the late scope
+    without implying that earlier scope writes were rolled back (k151).
+  - Frontmatter parsing, Codex agent conversion and hook state preserve
+    prototype-named keys as own data without inherited collisions or prototype
+    mutation (k194).
   - `install.sh` has a fail-safe CLI-only path for machines without Node. It
     preflights a candidate checkout's verified binary or source-Perl starter,
     leaves Claude plugin metadata untouched, and preserves the working command

@@ -109,8 +109,9 @@ const agents = [
   // codex that is no mapping
   ...["codex:", "codex: null", "codex: 'x'", "codex: [a]", "codex: 1.5", "codex: 3", "codex: true", "codex: {}"]
     .map((c) => [[D, c]]),
-  // a key an object inherits (the reference asks `key in top`)
-  [[D, "codex:", "  constructor:", "    x: 1", "  toString: s", "  valueOf:", "    y: 2", "  hasOwnProperty: h"]],
+  // Object-prototype names are ordinary own keys, including tables.
+  [[D, "codex:", "  constructor:", "    x: 1", "  toString:", "    s: text", "  valueOf:", "    y: 2",
+    "  __proto__:", "    z: 3", "  hasOwnProperty: h"]],
   // briefing skill names
   [[D, "briefing:", "  skills:", "    - 日本語", "    - with space", "    - 'has #hash'", "    - \"it's\"", "    - a:b@c",
     "    - \"\\u0085\"", "    - \"\\u2028\"", "    - x[y", "    - 🎉"]],

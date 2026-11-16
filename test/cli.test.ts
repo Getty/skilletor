@@ -802,6 +802,34 @@ test("k149: hook user-prompt-submit --harness codex syncs the worktree the sessi
   assert.deepEqual([again.status, again.stdout], [0, ""]);
 });
 
+// ---- k160: template failures stay ordinary sync warnings ------------------------------
+
+test("k160: an included template's syntax error warns without crashing; later items install", () => {
+  const home = join(tmp.dir, "k160-home");
+  const src = join(tmp.dir, "k160-src");
+  const proj = join(tmp.dir, "k160-proj");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(src, "skills", "bad"), { recursive: true });
+  mkdirSync(join(src, "skills", "good"), { recursive: true });
+  mkdirSync(join(src, "parts"), { recursive: true });
+  mkdirSync(proj);
+  writeFileSync(join(src, "skills", "bad", "SKILL.md.njk"), "A\n{% include \"parts/p.md\" %}\n");
+  writeFileSync(join(src, "parts", "p.md"), "{% for %}");
+  writeFileSync(join(src, "skills", "good", "SKILL.md"), "GOOD\n");
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({
+    sources: { s: { local: src } },
+    install: { skills: ["bad@s", "good@s"] },
+  }));
+
+  const r = runCli(["sync", "--scope", "user", "--project-dir", proj], claudeOnlyEnv(home));
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, "");
+  assert.match(r.stdout, /warning: template error in skill bad: .*unexpected token: %}/);
+  assert.match(r.stdout, /\+ skills\/good/);
+  assert.equal(existsSync(join(home, ".claude", "skills", "bad", "SKILL.md")), false);
+  assert.equal(readFileSync(join(home, ".claude", "skills", "good", "SKILL.md"), "utf8"), "GOOD\n");
+});
+
 // ---- k164: a hook exits 0 whatever its own setup meets (spec §8) ----------------------
 
 /** Run the bundle from a cwd that is gone: `sh` enters `dir`, removes it and execs node there
@@ -814,22 +842,53 @@ function runCliFromRemovedCwd(dir: string, args: string[], env: NodeJS.ProcessEn
 
 const noRemovedCwd = process.platform === "win32" && "Windows cannot remove a process's cwd";
 
+// k192/k193: run each probe in its own shell child so removing its cwd cannot affect the test
+// runner. An explicit project root lets a sync install a skill and commit its lock state; without
+// one, a normal command exits 1 with the CLI's actionable diagnostic and no internal stack.
+test("removed cwd: explicit --project-dir syncs a skill; otherwise the CLI gives a clean error", { skip: noRemovedCwd }, () => {
+  const home = join(tmp.dir, "removed-home");
+  const src = join(tmp.dir, "removed-src");
+  const proj = join(tmp.dir, "removed-proj");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(src, "skills", "foo"), { recursive: true });
+  mkdirSync(proj);
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), "FOO\n");
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({
+    sources: { s: { local: src } },
+    install: { skills: ["foo@s"] },
+  }));
+  const env = claudeOnlyEnv(home);
+
+  const synced = runCliFromRemovedCwd(join(tmp.dir, "removed-explicit"),
+    ["sync", "--scope", "user", "--project-dir", proj], env, "");
+  assert.deepEqual([synced.status, synced.stderr], [0, ""], synced.stderr);
+  assert.equal(readFileSync(join(home, ".claude", "skills", "foo", "SKILL.md"), "utf8"), "FOO\n");
+  const lock = JSON.parse(readFileSync(join(home, ".claude", "skilletor.lock.json"), "utf8"));
+  assert.deepEqual(Object.keys(lock), ["skills/foo"]);
+  assert.deepEqual(Object.keys(lock["skills/foo"].files), ["skills/foo/.gitignore", "skills/foo/SKILL.md"]);
+
+  const missing = runCliFromRemovedCwd(join(tmp.dir, "removed-default"), ["status"], env, "");
+  assert.deepEqual([missing.status, missing.stdout], [1, ""]);
+  assert.equal(missing.stderr, "skilletor: the current directory no longer exists; pass --project-dir <dir>\n");
+  assert.doesNotMatch(missing.stderr, /\n\s+at\s|node:internal|uv_cwd/);
+});
+
 // Asserts: through the built bundle, run from a cwd that no longer exists (a session whose
 // worktree was removed), every hook exits 0 with nothing on stderr. With a project to go by – the
 // payload's cwd, or CLAUDE_PROJECT_DIR naming the removed directory itself – it does its work: the
 // user scope syncs, then nothing is left to say. With none, the one place left to look is the
-// process cwd, and the hook says in one warning line that it is gone. The item is a rule: a
-// skill's install path still reads the cwd in render.ts (noted on k164, its own fix).
+// process cwd, and the hook says in one warning line that it is gone. The skill proves rendering
+// its install path does not consult that removed cwd (k192).
 test("k164: a hook run from a removed cwd exits 0 and still syncs", { skip: noRemovedCwd }, () => {
   const home = join(tmp.dir, "k164-home");
   const src = join(tmp.dir, "k164-src");
   const proj = join(tmp.dir, "k164-proj");
   mkdirSync(join(home, ".claude"), { recursive: true });
-  mkdirSync(join(src, "rules"), { recursive: true });
+  mkdirSync(join(src, "skills", "house"), { recursive: true });
   mkdirSync(proj);
-  writeFileSync(join(src, "rules", "house.md"), "HOUSE\n");
+  writeFileSync(join(src, "skills", "house", "SKILL.md"), "HOUSE\n");
   // checkInterval 0: the prompt hook starts no background sync that would outlive the test.
-  const cfg = { sources: { s: { local: src } }, install: { rules: ["house@s"] }, checkInterval: 0 };
+  const cfg = { sources: { s: { local: src } }, install: { skills: ["house@s"] }, checkInterval: 0 };
   writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify(cfg));
   const env = claudeOnlyEnv(home);
   const gone = (n: number) => join(tmp.dir, `k164-gone-${n}`);
@@ -838,7 +897,7 @@ test("k164: a hook run from a removed cwd exits 0 and still syncs", { skip: noRe
     JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: proj }));
   assert.deepEqual([first.status, first.stderr], [0, ""], first.stderr);
   assert.match(JSON.parse(first.stdout).systemMessage, /^skilletor: 1 item\(s\) updated/);
-  assert.equal(readFileSync(join(home, ".claude", "rules", ".local.house.md"), "utf8"), "HOUSE\n");
+  assert.equal(readFileSync(join(home, ".claude", "skills", "house", "SKILL.md"), "utf8"), "HOUSE\n");
 
   for (const [n, event] of [[2, "session-start"], [3, "user-prompt-submit"]] as const) {
     const r = runCliFromRemovedCwd(gone(n), ["hook", event], { ...env, CLAUDE_PROJECT_DIR: gone(n) }, JSON.stringify({ cwd: gone(n) }));

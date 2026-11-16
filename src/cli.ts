@@ -110,10 +110,21 @@ function parseFlags(args: string[]): Flags {
 
 function makeContext(flags: Flags): EngineContext {
   const home = homedir();
+  let projectDir = flags.projectDir;
+  if (projectDir === undefined) {
+    try {
+      // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd.
+      projectDir = projectRootOf(process.cwd());
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error("the current directory no longer exists; pass --project-dir <dir>");
+      }
+      throw err;
+    }
+  }
   return {
     home,
-    // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd.
-    projectDir: flags.projectDir ?? projectRootOf(process.cwd()),
+    projectDir,
     stateRoot: join(claudeConfigDirOf(home), "skilletor"),
   };
 }
@@ -231,9 +242,8 @@ export async function run(argv: string[]): Promise<number> {
     printLines(process.stderr, [`skilletor: invalid --scope: ${flags.scope}`]);
     return 2;
   }
-  const ctx = makeContext(flags);
-
   try {
+    const ctx = makeContext(flags);
     switch (cmd) {
       case "sync": {
         const r = await sync(ctx, { scope: flags.scope, force: flags.force });

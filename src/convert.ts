@@ -19,6 +19,11 @@ export interface AgentConversion {
 
 type Scalar = string | number | boolean | TomlFloat;
 
+/** Assign a TOML key as data, including Object.prototype's setter name `__proto__`. */
+function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(record, key, { value, writable: true, enumerable: true, configurable: true });
+}
+
 /** A YAML value as a TOML scalar or string array, or a reason it cannot be one. */
 function tomlLeaf(v: YamlValue): TomlValue | { reason: string } {
   if (typeof v === "string" || typeof v === "boolean") return v;
@@ -96,7 +101,7 @@ export function codexAgentToml(markdown: string, itemName: string): AgentConvers
         throw new ConvertError("codex.briefing: would become a [briefing] table, and Codex ignores a role with one; " +
           "declare skills in the top-level briefing.skills");
       }
-      if (isMapping(v) && (key in top || key === "developer_instructions" || key in tables)) {
+      if (isMapping(v) && (Object.hasOwn(top, key) || key === "developer_instructions" || Object.hasOwn(tables, key))) {
         warnings.push(`codex.${key}: a table cannot replace the ${key} key; dropped`);
         continue;
       }
@@ -107,10 +112,10 @@ export function codexAgentToml(markdown: string, itemName: string): AgentConvers
           if (isReason(leaf)) {
             warnings.push(`codex.${key}.${sk}: ${leaf.reason}; dropped`);
           } else {
-            t[sk] = leaf;
+            setOwn(t, sk, leaf);
           }
         }
-        tables[key] = t;
+        setOwn(tables, key, t);
         continue;
       }
       const leaf = tomlLeaf(v);
@@ -119,7 +124,7 @@ export function codexAgentToml(markdown: string, itemName: string): AgentConvers
       } else if (key === "developer_instructions") {
         instructions = leaf;
       } else {
-        top[key] = leaf;
+        setOwn(top, key, leaf);
       }
     }
   }

@@ -95,16 +95,6 @@ sub _briefing_comment {
   return '# briefing: skills = ['.join( ', ', map { '"'.$_.'"' } @$skills )."]\n";
 }
 
-# What `key in obj` also finds on a plain JavaScript object: Object.prototype's properties.
-# The reference asks `key in top` and `key in tables`, so a codex table under one of these
-# names is dropped as if it collided with a derived key.
-my %INHERITED = map { ( $_ => 1 ) } qw(
-  constructor __defineGetter__ __defineSetter__ hasOwnProperty __lookupGetter__ __lookupSetter__
-  isPrototypeOf propertyIsEnumerable toString valueOf __proto__ toLocaleString
-);
-
-sub _in { exists $_[0]{ $_[1] } || $INHERITED{ $_[1] } }
-
 sub codex_agent_toml {
   my ( $markdown, $item_name ) = @_;
   my $fm = _split($markdown);
@@ -132,7 +122,7 @@ sub codex_agent_toml {
         _fail( 'codex.briefing: would become a [briefing] table, and Codex ignores a role with one; '
             .'declare skills in the top-level briefing.skills' );
       }
-      if ( _is_mapping($v) && ( _in( $top, $key ) || $key eq 'developer_instructions' || _in( $tables, $key ) ) ) {
+      if ( _is_mapping($v) && ( exists $top->{$key} || $key eq 'developer_instructions' || exists $tables->{$key} ) ) {
         push @warnings, "codex.$key: a table cannot replace the $key key; dropped";
         next;
       }

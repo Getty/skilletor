@@ -7,7 +7,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
-import { defaultBackground, runHook, type HookContext, type HookOutput } from "../src/hooks.ts";
+import { defaultBackground, MOVE_DEADLINE_MS, runHook, type HookContext, type HookOutput } from "../src/hooks.ts";
 import { State } from "../src/state.ts";
 import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
@@ -162,6 +162,82 @@ test("session-start syncs a change and reports with an activation hint", async (
     assert.match(out.hookSpecificOutput?.additionalContext ?? "", /active now/);
     assert.equal(out.hookSpecificOutput?.hookEventName, "SessionStart");
   } finally {
+    e.cleanup();
+  }
+});
+
+// k151: SessionStart's check runs before the sync lock and source resolution. Advance a
+// controlled clock while the hook is suspended at the async source check: the whole expensive
+// path has spent the 20 s budget, so the affected scope must reach no target or ownership write.
+test("k151: session-start stops a late scope before files or an ownership lock are written", async () => {
+  const e = env();
+  const realNow = Date.now;
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    let now = 1_000_000;
+    Date.now = () => now;
+    const running = runHook("session-start", { source: "startup" }, e.ctx);
+    now += MOVE_DEADLINE_MS + 1;
+    assert.deepEqual(await running, {
+      systemMessage: "skilletor: sync stopped before applying the user scope: its sources took too long",
+    });
+    assert.equal(existsSync(join(e.home, ".claude/skills")), false, "no installed files");
+    assert.equal(existsSync(join(e.home, ".claude/skilletor.lock.json")), false, "no incomplete ownership");
+    assert.equal(existsSync(join(e.home, ".claude/.gitignore")), false, "no adjacent scope write");
+  } finally {
+    Date.now = realNow;
+    e.cleanup();
+  }
+});
+
+// The deadline is per-scope at the engine's pre-apply boundary. Let the user scope commit, then
+// make the clock late as soon as its ownership lock exists: the diagnostic must name only the
+// untouched project scope, without denying the user-scope writes that remain committed.
+test("k151: a late project scope is named after the user scope was applied", async () => {
+  const e = env();
+  const realNow = Date.now;
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    localSkill(e.tmp.dir, "s", "bar");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    writeFileSync(join(e.projectDir, ".claude/skilletor.json"), JSON.stringify({ install: { skills: ["bar@mine"] } }));
+    const userLock = join(e.home, ".claude/skilletor.lock.json");
+    const started = 1_000_000;
+    Date.now = () => started + (existsSync(userLock) ? MOVE_DEADLINE_MS + 1 : 0);
+
+    assert.deepEqual(await runHook("session-start", { source: "startup" }, e.ctx), {
+      systemMessage: "skilletor: sync stopped before applying the project scope: its sources took too long",
+    });
+    assert.equal(existsSync(join(e.home, ".claude/skills/foo/SKILL.md")), true, "user file persists");
+    assert.equal(JSON.parse(readFileSync(userLock, "utf8"))["skills/foo"].source, "mine", "user ownership persists");
+    assert.equal(existsSync(join(e.projectDir, ".claude/skills")), false, "project files untouched");
+    assert.equal(existsSync(join(e.projectDir, ".claude/skilletor.lock.json")), false, "project ownership untouched");
+  } finally {
+    Date.now = realNow;
+    e.cleanup();
+  }
+});
+
+// A caller may impose less than SessionStart's 20 s allowance; the hook must not replace that
+// stricter absolute deadline with its own later one.
+test("k151: session-start preserves a stricter caller deadline", async () => {
+  const e = env();
+  const realNow = Date.now;
+  try {
+    const src = localSkill(e.tmp.dir, "s", "foo");
+    e.writeUserCfg({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } });
+    let now = 1_000_000;
+    Date.now = () => now;
+    const running = runHook("session-start", { source: "startup" }, { ...e.ctx, deadline: now + 100 });
+    now += 101;
+    assert.deepEqual(await running, {
+      systemMessage: "skilletor: sync stopped before applying the user scope: its sources took too long",
+    });
+    assert.equal(existsSync(join(e.home, ".claude/skills")), false);
+    assert.equal(existsSync(join(e.home, ".claude/skilletor.lock.json")), false);
+  } finally {
+    Date.now = realNow;
     e.cleanup();
   }
 });

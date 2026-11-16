@@ -1,0 +1,25 @@
+{
+  "scopes": [
+    {
+      "added": [
+        {
+          "key": "skills/good",
+          "name": "good",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": [
+        "template error in skill bad: skills/bad/SKILL.md.njk: (${HOME}/dev/shared/skills/bad/SKILL.md.njk)\n  Template render error: (${HOME}/dev/shared/parts/p.md) [Line 1, Column 8]\n  unexpected token: %}"
+      ]
+    }
+  ]
+}

@@ -6378,6 +6378,9 @@ var YamlFloat = class {
     this.value = value2;
   }
 };
+function setOwn(record, key, value2) {
+  Object.defineProperty(record, key, { value: value2, writable: true, enumerable: true, configurable: true });
+}
 var OPEN = /^---[ \t]*\r?\n/;
 var CLOSE = /^---[ \t]*(?:\r?\n|$)/gm;
 function splitFrontmatter(text2) {
@@ -6440,9 +6443,9 @@ var Parser = class {
       const m = KEY_RE.exec(text2);
       if (!m) fail(line, "expected `key: value`");
       const key = m[1] !== void 0 ? unescapeDouble(m[1], line) : m[2] !== void 0 ? m[2].replace(/''/g, "'") : m[3].trim();
-      if (Object.prototype.hasOwnProperty.call(obj, key)) fail(line, `duplicate key "${key}"`);
+      if (Object.hasOwn(obj, key)) fail(line, `duplicate key "${key}"`);
       const [value2, next] = this.value(m[4] ?? "", pos + 1, indent, line);
-      obj[key] = value2;
+      setOwn(obj, key, value2);
       pos = next;
     }
     return [obj, pos];
@@ -6700,7 +6703,7 @@ function inline(value2, line) {
       const key = s.slice(j, colon).trim().replace(/^(["'])(.*)\1$/, "$2");
       if (key === "" || /[,{}[\]]/.test(key)) fail(line, "bad key in a flow mapping");
       const [v, k] = flowScalar(s, colon + 1, "}", line);
-      obj[key] = v;
+      setOwn(obj, key, v);
       const [done, n] = flowSeparator(s, k, "}", line);
       j = n;
       if (done) break;
@@ -7821,6 +7824,9 @@ function stringifyToml(table, opts = {}) {
 var ConvertError = class extends Error {
   name = "ConvertError";
 };
+function setOwn2(record, key, value2) {
+  Object.defineProperty(record, key, { value: value2, writable: true, enumerable: true, configurable: true });
+}
 function tomlLeaf(v) {
   if (typeof v === "string" || typeof v === "boolean") return v;
   if (typeof v === "number") return v;
@@ -7880,7 +7886,7 @@ function codexAgentToml(markdown, itemName2) {
       if (key === "briefing") {
         throw new ConvertError("codex.briefing: would become a [briefing] table, and Codex ignores a role with one; declare skills in the top-level briefing.skills");
       }
-      if (isMapping(v) && (key in top || key === "developer_instructions" || key in tables)) {
+      if (isMapping(v) && (Object.hasOwn(top, key) || key === "developer_instructions" || Object.hasOwn(tables, key))) {
         warnings.push(`codex.${key}: a table cannot replace the ${key} key; dropped`);
         continue;
       }
@@ -7891,10 +7897,10 @@ function codexAgentToml(markdown, itemName2) {
           if (isReason(leaf2)) {
             warnings.push(`codex.${key}.${sk}: ${leaf2.reason}; dropped`);
           } else {
-            t[sk] = leaf2;
+            setOwn2(t, sk, leaf2);
           }
         }
-        tables[key] = t;
+        setOwn2(tables, key, t);
         continue;
       }
       const leaf = tomlLeaf(v);
@@ -7903,7 +7909,7 @@ function codexAgentToml(markdown, itemName2) {
       } else if (key === "developer_instructions") {
         instructions = leaf;
       } else {
-        top[key] = leaf;
+        setOwn2(top, key, leaf);
       }
     }
   }
@@ -8822,7 +8828,7 @@ import { join as join10, posix as posix3, resolve as resolvePath3, sep as sep3 }
 var RenderError = class extends Error {
   name = "RenderError";
 };
-function makeLoader(root) {
+function makeLoader(root, validate) {
   const base = resolvePath3(root);
   return {
     async: false,
@@ -8837,15 +8843,21 @@ function makeLoader(root) {
       } catch {
         return null;
       }
+      validate(src, path);
       return { src, path, noCache: true };
     }
   };
 }
 function makeEnv(sourceDir) {
-  return new import_nunjucks.default.Environment(makeLoader(sourceDir), {
+  let env;
+  const loader = makeLoader(sourceDir, (src, path) => {
+    new import_nunjucks.default.Template(src, env, path, true);
+  });
+  env = new import_nunjucks.default.Environment(loader, {
     autoescape: false,
     throwOnUndefined: true
   });
+  return env;
 }
 function build(item, sourceDir, context) {
   const env = makeEnv(sourceDir);
@@ -8880,7 +8892,7 @@ function executables(item, sourceDir) {
 function installPath(item, file) {
   if (item.dir === void 0) return file;
   const into = item.type === "skill" ? posix3.join("skills", item.name) : `${item.type}s`;
-  return posix3.join(into, posix3.relative(item.dir, file));
+  return posix3.join(into, posix3.relative(posix3.join("/", item.dir), posix3.join("/", file)));
 }
 var FRONTMATTER = /^\s*---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/;
 function rendersEmpty(item, output) {
@@ -9265,6 +9277,9 @@ var errCode = (err) => err.code;
 var SESSION_CWDS = 256;
 var LOCK = "sync.lock";
 var LEFTOVER2 = `${LOCK}.`;
+function setOwn3(record, key, value2) {
+  Object.defineProperty(record, key, { value: value2, writable: true, enumerable: true, configurable: true });
+}
 var State = class {
   root;
   constructor(root) {
@@ -9403,12 +9418,12 @@ var State = class {
   // ---- pending report -------------------------------------------------------
   putPendingReport(projectKey, report) {
     const pending = this.readJson("pending-report.json");
-    pending[projectKey] = report;
+    setOwn3(pending, projectKey, report);
     this.writeJson("pending-report.json", pending);
   }
   takePendingReport(projectKey) {
     const pending = this.readJson("pending-report.json");
-    if (!(projectKey in pending)) return void 0;
+    if (!Object.hasOwn(pending, projectKey)) return void 0;
     const report = pending[projectKey];
     delete pending[projectKey];
     this.writeJson("pending-report.json", pending);
@@ -9418,7 +9433,8 @@ var State = class {
   /** Where a Codex or Hermes session's hook last looked (spec §8, k149): the cwd of its last
    *  SessionStart or prompt. A malformed entry counts as none. */
   sessionCwd(sessionId) {
-    const entry = this.readJson("session-cwd.json")[sessionId];
+    const all = this.readJson("session-cwd.json");
+    const entry = Object.hasOwn(all, sessionId) ? all[sessionId] : void 0;
     const cwd = entry !== null && typeof entry === "object" ? entry.cwd : void 0;
     return typeof cwd === "string" ? cwd : void 0;
   }
@@ -9434,7 +9450,7 @@ var State = class {
     };
     const others = Object.keys(all).filter((id) => id !== sessionId).sort((a, b) => at(b) - at(a));
     for (const id of others.slice(SESSION_CWDS - 1)) delete all[id];
-    all[sessionId] = { cwd, at: Date.now() };
+    setOwn3(all, sessionId, { cwd, at: Date.now() });
     this.writeJson("session-cwd.json", all);
   }
   // ---- mutex ----------------------------------------------------------------
@@ -10571,7 +10587,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
     return rep;
   }
   if (ctx.deadline !== void 0 && Date.now() > ctx.deadline) {
-    throw new Error("sync stopped before writing anything: its sources took too long");
+    throw new Error(`sync stopped before applying the ${scope} scope: its sources took too long`);
   }
   const labelOf = (abs) => {
     const rel = relative4(base, abs);
@@ -11836,7 +11852,9 @@ ${report}` : rules };
   return result;
 }
 async function checkAndSync(input, ctx) {
-  const engineCtx = { ...ctx, timeoutMs: ctx.timeoutMs ?? SESSION_START_TIMEOUT_MS };
+  const budgetDeadline = Date.now() + MOVE_DEADLINE_MS;
+  const deadline = ctx.deadline === void 0 ? budgetDeadline : Math.min(ctx.deadline, budgetDeadline);
+  const engineCtx = { ...ctx, timeoutMs: ctx.timeoutMs ?? SESSION_START_TIMEOUT_MS, deadline };
   const state = new State(ctx.stateRoot);
   const key = projectKeyOf(ctx, input);
   const chk = await check(engineCtx);
@@ -12114,10 +12132,20 @@ function parseFlags(args) {
 }
 function makeContext2(flags) {
   const home = homedir();
+  let projectDir = flags.projectDir;
+  if (projectDir === void 0) {
+    try {
+      projectDir = projectRootOf(process.cwd());
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        throw new Error("the current directory no longer exists; pass --project-dir <dir>");
+      }
+      throw err;
+    }
+  }
   return {
     home,
-    // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd.
-    projectDir: flags.projectDir ?? projectRootOf(process.cwd()),
+    projectDir,
     stateRoot: join18(claudeConfigDirOf(home), "skilletor")
   };
 }
@@ -12207,8 +12235,8 @@ async function run(argv) {
     printLines(process.stderr, [`skilletor: invalid --scope: ${flags.scope}`]);
     return 2;
   }
-  const ctx = makeContext2(flags);
   try {
+    const ctx = makeContext2(flags);
     switch (cmd) {
       case "sync": {
         const r = await sync(ctx, { scope: flags.scope, force: flags.force });

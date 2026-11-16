@@ -1,0 +1,13 @@
+{
+  "sources": {
+    "shared": {
+      "local": "${HOME}/dev/shared"
+    }
+  },
+  "install": {
+    "skills": [
+      "bad@shared",
+      "good@shared"
+    ]
+  }
+}

@@ -37,8 +37,10 @@ export interface RenderContext {
 /** A render context, or a supplier evaluated only if the item has a template. */
 export type RenderContextSource = RenderContext | (() => RenderContext);
 
-/** A Nunjucks loader confined to `root`; includes may not escape it. */
-function makeLoader(root: string): nunjucks.ILoaderAny {
+/** A Nunjucks loader confined to `root`; includes may not escape it. `validate` eagerly
+ *  compiles each loaded source: Nunjucks otherwise reports a compile error in an included
+ *  template on a later tick even with a synchronous loader. */
+function makeLoader(root: string, validate: (src: string, path: string) => void): nunjucks.ILoaderAny {
   const base = resolvePath(root);
   return {
     async: false,
@@ -53,16 +55,23 @@ function makeLoader(root: string): nunjucks.ILoaderAny {
       } catch {
         return null;
       }
+      validate(src, path);
       return { src, path, noCache: true };
     },
   } as nunjucks.ILoaderAny;
 }
 
 function makeEnv(sourceDir: string): nunjucks.Environment {
-  return new nunjucks.Environment(makeLoader(sourceDir), {
+  let env: nunjucks.Environment;
+  const loader = makeLoader(sourceDir, (src, path) => {
+    // Eager compilation is validation only; the environment builds its own no-cache template.
+    new nunjucks.Template(src, env, path, true);
+  });
+  env = new nunjucks.Environment(loader, {
     autoescape: false,
     throwOnUndefined: true,
   });
+  return env;
 }
 
 /** Build one item: render `.njk` files, copy the rest verbatim. */
@@ -114,7 +123,8 @@ function installPath(item: CatalogItem, file: string): string {
   if (item.dir === undefined) return file;
   // Paths inside an item are "/"-separated on every platform (catalog.ts).
   const into = item.type === "skill" ? posix.join("skills", item.name) : `${item.type}s`;
-  return posix.join(into, posix.relative(item.dir, file));
+  // Anchor both paths: posix.relative otherwise resolves relative inputs through process.cwd().
+  return posix.join(into, posix.relative(posix.join("/", item.dir), posix.join("/", file)));
 }
 
 /** A leading YAML frontmatter block (after optional whitespace), closed by `---`. */

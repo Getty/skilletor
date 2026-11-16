@@ -19,7 +19,8 @@ use Cwd ();
 use Encode ();
 use Path::Tiny qw( path tempdir );
 use Skilletor::CLI qw( project_root_of );
-use Skilletor::JSON qw( js_ordered );
+use Skilletor::FSUtil qw( decode_utf8_lossy );
+use Skilletor::JSON qw( js_ordered js_parse js_stringify );
 use Skilletor::Process qw( run_command );
 use Skilletor::Report qw( empty_scope_report );
 
@@ -149,6 +150,52 @@ subtest "an edit's config path: the user config, the project's, no project scope
   $err = eval { $path->( $engine->( project_dir => '/h' ), 1 ); 1 } ? undef : $@;
   is( $err->message, 'no project scope: the project directory is the home directory (/h); '
       .'run from a project, pass --project-dir, or drop --project to edit the user config', 'the home as project dir' );
+};
+
+subtest 'removed cwd: an explicit project syncs a skill; otherwise the error is actionable' => sub {
+  plan skip_all => "Windows cannot remove a process's cwd" if $^O eq 'MSWin32';
+  my $tmp = tempdir->realpath;
+  my $home = path( $tmp, 'home' );
+  my $source = path( $tmp, 'source' );
+  my $project = path( $tmp, 'project' );
+  path( $home, '.claude' )->mkpath;
+  path( $source, 'skills', 'foo' )->mkpath;
+  $project->mkpath;
+  path( $home, '.claude.json' )->spew_raw("{}\n");
+  path( $source, 'skills', 'foo', 'SKILL.md' )->spew_raw("FOO\n");
+  path( $home, '.claude', 'skilletor.json' )->spew_raw( js_stringify( js_ordered(
+    sources => js_ordered( s => js_ordered( local => "$source" ) ),
+    install => js_ordered( skills => ['foo@s'] ),
+  ) ) );
+
+  my $bin = path( $FindBin::Bin, '..', 'bin', 'skilletor' )->realpath;
+  my $lib = path( $FindBin::Bin, '..', 'lib' )->realpath;
+  my %env = %ENV;
+  delete @env{qw( CLAUDE_CONFIG_DIR CLAUDE_PROJECT_DIR SKILLETOR_PROJECT_DIR HERMES_HOME )};
+  @env{qw( HOME CODEX_HOME )} = ( "$home", path( $home, '.no-codex' )->stringify );
+  my $run_removed = sub {
+    my ( $name, @args ) = @_;
+    my $gone = path( $tmp, $name );
+    $gone->mkpath;
+    return run_command(
+      cmd => [ 'sh', '-c', 'cd "$1" && rmdir "$1" && shift && exec "$@"', 'sh', "$gone", $^X, "-I$lib", "$bin", @args ],
+      env => \%env,
+    );
+  };
+
+  my $sync = $run_removed->( 'gone-explicit', 'sync', '--scope', 'user', '--project-dir', "$project" );
+  is_deeply( [ $sync->{code}, decode_utf8_lossy( $sync->{stderr} ) ], [ 0, '' ], 'an explicit project dir avoids the removed cwd' );
+  is( path( $home, '.claude', 'skills', 'foo', 'SKILL.md' )->slurp_raw, "FOO\n", 'the skill installed' );
+  my $lock = js_parse( path( $home, '.claude', 'skilletor.lock.json' )->slurp_raw );
+  is_deeply( [ sort keys %$lock ], ['skills/foo'], 'the installed skill is committed to the lock' );
+  is_deeply( [ sort keys %{ $lock->{'skills/foo'}{files} } ], [ 'skills/foo/.gitignore', 'skills/foo/SKILL.md' ], 'the lock owns both skill files' );
+
+  my $status = $run_removed->( 'gone-default', 'status' );
+  is_deeply(
+    [ $status->{code}, decode_utf8_lossy( $status->{stdout} ), decode_utf8_lossy( $status->{stderr} ) ],
+    [ 1, '', "skilletor: the current directory no longer exists; pass --project-dir <dir>\n" ],
+    'without a project dir: exit 1, one actionable CLI error, no stack'
+  );
 };
 
 done_testing;

@@ -1,0 +1,6 @@
+{
+  "description": "An included template syntax error is one ordinary render warning: the bad skill is skipped without a delayed crash, the following skill installs and the lock records only it (k160).",
+  "steps": [
+    { "id": "sync", "op": "sync", "scope": "user", "tree": true }
+  ]
+}

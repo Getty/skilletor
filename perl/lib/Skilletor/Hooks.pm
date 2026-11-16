@@ -26,8 +26,9 @@ use constant SESSION_START_TIMEOUT_MS => 5_000;
 # (checkInterval, 1800 s) is Skilletor::Config's.
 use constant DEFAULT_INTERVAL => 600;
 
-# A move's sync writes nothing once this has passed (spec §8): Claude Code kills the hook at 30 s,
-# which leaves the local rest of a sync 10 s. Its two move hooks wait for the sync lock up to it.
+# SessionStart or a move's sync writes nothing once this has passed (spec §8): Claude Code kills
+# the hook at 30 s, which leaves the local rest of a sync 10 s. The two move hooks wait for the
+# sync lock up to it as well. The exported name predates SessionStart's use of the same budget.
 use constant MOVE_DEADLINE_MS => 20_000;
 
 # State, Config and Engine are loaded by the events that use them: a prompt with nothing due
@@ -221,6 +222,10 @@ sub _read_rules {
 
 sub _check_and_sync {
   my ( $input, $ctx ) = @_;
+  # The check, sync-lock wait and source resolution all precede the engine's first-write guard,
+  # so SessionStart's write budget starts before the check. An earlier caller deadline stays so.
+  my $budget_deadline = _now_ms() + MOVE_DEADLINE_MS;
+  my $deadline = defined $ctx->{deadline} && $ctx->{deadline} < $budget_deadline ? $ctx->{deadline} : $budget_deadline;
   my $state = _state($ctx);
   my $key = _project_key( $ctx, $input );
   my $engine = _engine( $ctx, timeout_ms => SESSION_START_TIMEOUT_MS );
@@ -231,7 +236,7 @@ sub _check_and_sync {
 
   return _unchanged_output($chk) unless $chk->{changed};
   my $report;
-  unless ( eval { $report = $engine->sync; 1 } ) {
+  unless ( eval { $report = $engine->sync( deadline => $deadline ); 1 } ) {
     my $err = $@;
     $state->due_again($key) if _lock_timeout($err);
     die $err;
@@ -532,9 +537,12 @@ L<Skilletor::CLI> runs it as C<skilletor hook E<lt>eventE<gt>>.
 
 =item * C<session-start>: a L<Skilletor::Engine/check> of every source, 5 s
 each, marks the project checked; when it says changed, a sync, whose report
-(L<Skilletor::Report/report_hook>) is the answer. Nothing changed: the check's
-warnings in one line, or the trust requests as a sync would report them. A
-sync that timed out on the sync lock leaves the project due again. The input's
+(L<Skilletor::Report/report_hook>) is the answer. The sync's 20 s write
+deadline starts before the check; an earlier C<deadline> in the hook context
+wins. A scope whose sources resolve only after that deadline writes nothing.
+With nothing changed, the check's warnings in one line, or the trust requests
+as a sync would report them. A sync that timed out on the sync lock leaves the
+project due again. The input's
 C<cwd> is recorded for its session (C<session-cwd.json>). Under Codex
 (C<< harness => 'codex' >>) a new session – C<source> missing, null,
 C<startup> or C<clear> – also gets the Codex rules files
@@ -595,8 +603,9 @@ the check mark and the pending report.
 Never dies. C<%ctx>: C<home>, C<project_dir>, C<state_root>, C<harness>,
 C<claude_config_dir> (default C<CLAUDE_CONFIG_DIR>), C<self_command>,
 C<background> (a code ref called with the context instead of
-L</default_background>), C<deadline> (a move's, in epoch ms; default
-C<MOVE_DEADLINE_MS> from the hook's start) and C<engine>, more arguments of
+L</default_background>), C<deadline> (an absolute epoch ms write deadline;
+SessionStart and checkout moves default to C<MOVE_DEADLINE_MS>, without
+relaxing an earlier value) and C<engine>, more arguments of
 L<Skilletor::Engine/new> (C<markers>, C<timeout_ms>, C<lock_timeout_ms>, …),
 which win over the hook's own – a C<lock_timeout_ms> there over a move's wait
 until its deadline as well.

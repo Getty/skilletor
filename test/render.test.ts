@@ -1,6 +1,7 @@
 // Tests for building an item in memory (spec §5).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
@@ -123,6 +124,37 @@ test("an undefined variable is an error", () => {
       assert.match((e as Error).message, /SKILL\.md\.njk/);
       return true;
     });
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("an included template syntax error is synchronous and leaves no delayed uncaught exception", () => {
+  const tmp = makeTmpDir();
+  try {
+    put(tmp.dir, "skills/bad/SKILL.md.njk", 'A\n{% include "parts/p.md" %}\n');
+    put(tmp.dir, "parts/p.md", "{% for %}");
+    put(tmp.dir, "skills/good/SKILL.md", "GOOD\n");
+    const renderUrl = new URL("../src/render.ts", import.meta.url).href;
+    const script = `
+      import { build, RenderError } from ${JSON.stringify(renderUrl)};
+      const context = ${JSON.stringify(ctx({}))};
+      const bad = { type: "skill", name: "bad", dir: "skills/bad", files: ["skills/bad/SKILL.md.njk"] };
+      const good = { type: "skill", name: "good", dir: "skills/good", files: ["skills/good/SKILL.md"] };
+      let message;
+      try { build(bad, ${JSON.stringify(tmp.dir)}, context); }
+      catch (err) {
+        message = err instanceof RenderError ? err.message : err.name + ": " + err.message;
+      }
+      const rendered = build(good, ${JSON.stringify(tmp.dir)}, context).get("skills/good/SKILL.md").toString("utf8");
+      await new Promise((resolve) => setImmediate(resolve));
+      process.stdout.write(JSON.stringify({ message, rendered }) + "\\n");
+    `;
+    const child = spawnSync(process.execPath, ["--input-type=module", "--eval", script], { encoding: "utf8" });
+    assert.deepEqual([child.status, child.stderr], [0, ""], child.stderr);
+    const result = JSON.parse(child.stdout);
+    assert.match(result.message, /SKILL\.md\.njk: .*p\.md.*unexpected token: %}/s);
+    assert.equal(result.rendered, "GOOD\n");
   } finally {
     tmp.cleanup();
   }

@@ -220,7 +220,7 @@ subtest "past its deadline a move's sync writes nothing and says so" => sub {
   my $wt = main_with_worktree( $m, { skills => ['foo@mine'] } );
   my $past = int( Time::HiRes::time() * 1000 ) - 1;
   is( out( run_hook( 'cwd-changed', move( $m->{main}, $wt ), { %{ $m->{ctx} }, deadline => $past } ) ),
-    out( js_ordered( systemMessage => "skilletor: cannot sync $wt: sync stopped before writing anything: its sources took too long — run there: skilletor sync" ) ),
+    out( js_ordered( systemMessage => "skilletor: cannot sync $wt: sync stopped before applying the project scope: its sources took too long — run there: skilletor sync" ) ),
     'the line' );
   ok( !-e "$wt/.claude/skilletor.lock.json" && !-e "$wt/.claude/skills", 'nothing written' );
   is( out( run_hook( 'cwd-changed', move( $m->{main}, $wt ), $m->{ctx} ) ), out( js_ordered( systemMessage => "skilletor: 1 item(s) updated in $wt" ) ),

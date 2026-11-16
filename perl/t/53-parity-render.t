@@ -11,7 +11,6 @@ use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/lib";
 
-use File::Spec;
 use IPC::Open2 qw( open2 );
 use Path::Tiny qw( path tempdir );
 use Scalar::Util qw( blessed );
@@ -311,24 +310,10 @@ render_case( 'an agent in a plugin directory installs under agents/',
 
 run_cases();
 
-{
-  # Nunjucks 3.2.4 renders an include of a file with a syntax error asynchronously: the
-  # reference's env.render returns null, Buffer.from(null) throws a TypeError, and node then dies
-  # of the Template render error on its next tick (its stderr silenced here; it runs alone).
-  # Text::Nunjucks runs callbacks synchronously (its ADR 0003) and throws the Template render
-  # error itself.
-  render_case( 'an include of a file with a syntax error',
-    files => { 'skills/demo/SKILL.md.njk' => "A\n{% include \"p.md\" %}", 'p.md' => '{% for %}' },
-    item  => $SKILL,
-    todo  => 'deviation: the reference throws a TypeError (Buffer.from(null)) and crashes on its next tick; '
-      .'Text::Nunjucks throws the Template render error synchronously',
-  );
-  open my $stderr, '>&', \*STDERR or die "dup STDERR: $!";
-  open STDERR, '>', File::Spec->devnull or die "STDERR: $!";
-  my $ok = eval { run_cases(); 1 };
-  my $err = $@;
-  open STDERR, '>&', $stderr or die "restore STDERR: $!";
-  die $err unless $ok;
-}
+render_case( 'an include of a file with a syntax error',
+  files => { 'skills/demo/SKILL.md.njk' => "A\n{% include \"p.md\" %}", 'p.md' => '{% for %}' },
+  item  => $SKILL,
+);
+run_cases();
 
 done_testing;

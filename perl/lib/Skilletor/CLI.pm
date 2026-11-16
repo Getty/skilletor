@@ -146,9 +146,13 @@ sub _engine {
   my ( $flags ) = @_;
   require Skilletor::Engine;    # loaded for the commands that run it: --help and usage errors stay fast
   my $home = _home();
-  my $cwd  = Cwd::getcwd();
-  die "ENOENT: process.cwd failed with error no such file or directory, uv_cwd\n" unless defined $cwd;
-  return Skilletor::Engine->new( home => $home, project_dir => $flags->{project_dir} // project_root_of( decode_utf8_lossy($cwd) ) );
+  my $project_dir = $flags->{project_dir};
+  unless ( defined $project_dir ) {
+    my $cwd = Cwd::getcwd();
+    die "the current directory no longer exists; pass --project-dir <dir>\n" unless defined $cwd;
+    $project_dir = project_root_of( decode_utf8_lossy($cwd) );
+  }
+  return Skilletor::Engine->new( home => $home, project_dir => $project_dir );
 }
 
 # The sync report, or "up to date" when no scope has anything to say; run-level warnings and

@@ -79,8 +79,14 @@ sub _template_context {
 
 sub _message {
   my ( $err ) = @_;
-  return $err->message if blessed $err && $err->can('message');
-  return ( "$err" =~ s/ at \S+ line \d+\.?\n?\z//r );
+  my $message = blessed $err && $err->can('message')
+    ? $err->message
+    : ( "$err" =~ s/ at \S+ line \d+\.?\n?\z//r );
+  # Text::Nunjucks repeats the root template around this parser error in an include; Nunjucks
+  # reports that root once, then the included template. Keep the public RenderError byte-identical.
+  $message =~ s/\A(\([^\n]+\))\n\s*Template render error: \1\n/$1\n/
+    if $message =~ /\n\s*unexpected token: %}\z/;
+  return $message;
 }
 
 # The item's output: [ [ install path, bytes ], ... ] in the item's order. `X.njk` is rendered and

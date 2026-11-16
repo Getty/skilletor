@@ -557,8 +557,10 @@ sub _sync_scope_run {
 
   my ( $rep, $info ) = $self->_resolve_scope( $config, $scope_cfg, $scope, $state, $run, $hooks );
   undef $hooks;
-  # Past its deadline (spec §8): nothing of the scope is written. From here on all is local.
-  die "sync stopped before writing anything: its sources took too long\n" if defined $opts->{deadline} && _now_ms() > $opts->{deadline};
+  # Past its deadline (spec §8): this scope's apply does not begin. Earlier scopes may already
+  # have completed; from here on the scope's remaining work is local.
+  die "sync stopped before applying the $scope scope: its sources took too long\n"
+    if defined $opts->{deadline} && _now_ms() > $opts->{deadline};
   my $out = empty_scope_report($scope);
   $out->{warnings}      = [ @move_warnings, @{ $rep->{warnings} } ];
   $out->{trustRequests} = $rep->{trustRequests};
@@ -1441,9 +1443,10 @@ is C<< { scopes => [] } >>. A run that waited out another's sync of the same
 change finds nothing left.
 
 =item * C<< deadline => $epoch_ms >>: a scope whose sources are resolved only
-after it is not written; the sync dies with C<sync stopped before writing
-anything: its sources took too long>, and the scope's records are dropped as
-after any sync that stopped.
+after it does not reach its apply; the sync dies with C<sync stopped before
+applying the E<lt>scopeE<gt> scope: its sources took too long>, the scope's
+records are dropped as after any sync that stopped, and any earlier scope that
+completed remains in place.
 
 =item * C<< lock_timeout_ms => $ms >>: how long this call waits for the sync
 lock, over L<Skilletor::Resolver/lock_timeout_ms>.

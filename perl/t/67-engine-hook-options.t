@@ -28,7 +28,7 @@ use Skilletor::Report qw( report_json );
 
 delete $ENV{CLAUDE_CONFIG_DIR};
 
-my $DEADLINE_ERROR = 'sync stopped before writing anything: its sources took too long';
+my $DEADLINE_ERROR = 'sync stopped before applying the user scope: its sources took too long';
 
 sub skill { "---\ndescription: $_[0]\n---\n$_[0]\n" }
 

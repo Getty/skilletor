@@ -251,7 +251,7 @@ test("k147: past its deadline a move's sync writes nothing and says so", async (
     const wt = await mainWithWorktree(e, { skills: ["foo@mine"] });
     const out = await runHook("cwd-changed", move(e.main, wt), { ...e.ctx, deadline: Date.now() - 1 });
     assert.deepEqual(out, {
-      systemMessage: `skilletor: cannot sync ${wt}: sync stopped before writing anything: its sources took too long — run there: skilletor sync`,
+      systemMessage: `skilletor: cannot sync ${wt}: sync stopped before applying the project scope: its sources took too long — run there: skilletor sync`,
     });
     assert.equal(existsSync(join(wt, ".claude", "skilletor.lock.json")), false);
     assert.equal(existsSync(join(wt, ".claude", "skills")), false);

@@ -590,6 +590,7 @@ show it, its `description` saying which.
 | `203-cli-uninstall-scope` | a typed item declared under another type names it; an item or bundle declared in the project points to `--project`; one bad request leaves an earlier valid one untouched; `--project` removes project entries, while the home as project dir is refused |
 | `204-cli-uninstall-ambiguous` | item and lock names match ignoring case; a bare name held as both an explicit item and a bundle is ambiguous and changes nothing; prefixes then remove the bundle and item separately |
 | `205-cli-uninstall-no-harness` | k103: an undeclared item is refused before a sync; a valid user or project removal is saved, then the no-harness sync error exits 2 and names the edited config file |
+| `241-include-syntax-error` | k160: a syntax error in an included template becomes a warning without a delayed process crash; the unaffected skill is installed and owns its lock entry, while the failed skill is absent |
 
 The state files two engines on one machine share – `render-inputs.json` with its hash,
 `sources-read.json`, `unreached.json` – are not compared here: their keys are absolute lock
@@ -607,10 +608,14 @@ engine's own tests pin them); the Hermes home a user-scope lock serves as
 recorded in `hermes-home.json` (state, outside the compared trees; cases 113, 114 and 117 prove
 it through the syncs that follow, each engine's own tests pin the record); of the hooks, a due
 prompt's real background sync, the in-session interval, the sync lock held by another run – a
-move's wait on it and the race of one `cd`'s two hooks too – and a move's 20 s deadline (each
-engine's own tests pin these, the interval on an injected clock, the deadline injected); a `url`
+move's wait on it and the race of one `cd`'s two hooks too – and the 20 s pre-write deadlines
+of SessionStart and checkout moves (each engine's own tests pin these, the interval on an
+injected clock, the deadlines injected); a `url`
 source actually fetched (the engine takes `https://` only, so it needs a local TLS server), a
 source whose fetch fails (the warning quotes git's own message), symbolic links in a target –
 a `CLAUDE.md` that is the Codex `AGENTS.md`, an `AGENTS.md` that is a link (the Perl port's
 `t/72-engine-codex.t` syncs those with both engines) –, and a sync that fails midway
-(`partial`; `67` starts from the lock one left).
+(`partial`; `67` starts from the lock one left). Starting a CLI from an already-removed
+working directory is covered by child-process tests in `test/cli.test.ts` and
+`perl/t/68-cli.t` (k192, k193); the shared case format does not remove the running process's
+cwd.

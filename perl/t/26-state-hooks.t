@@ -85,6 +85,28 @@ subtest 'a pending report per project, taken once' => sub {
   is( $root->child('pending-report.json')->slurp_raw, "{}\n", 'but taken: the file is written' );
 };
 
+subtest 'prototype-named hook state keys are ordinary data' => sub {
+  my $root = tempdir;
+  my $s = Skilletor::State->new( root => "$root" );
+  is( $s->take_pending_report($_), undef, "no inherited pending report $_" ) for qw( constructor toString );
+  ok( !$root->child('pending-report.json')->exists, 'taking inherited names writes no file' );
+  for my $key (qw( __proto__ constructor toString )) {
+    $s->put_pending_report( $key, js_ordered( key => $key ) );
+  }
+  my $pending = js_parse( $root->child('pending-report.json')->slurp_utf8 );
+  ok( exists $pending->{$_}, "pending report owns $_" ) for qw( __proto__ constructor toString );
+  is( $s->take_pending_report($_)->{key}, $_, "pending report round-trips $_" ) for qw( __proto__ constructor toString );
+
+  for my $key (qw( __proto__ constructor toString )) {
+    no warnings 'redefine';
+    local *Skilletor::State::_now_ms_number = sub { 100 };
+    $s->put_session_cwd( $key, "/cwd/$key" );
+  }
+  my $sessions = js_parse( $root->child('session-cwd.json')->slurp_utf8 );
+  ok( exists $sessions->{$_}, "session cwd owns $_" ) for qw( __proto__ constructor toString );
+  is( $s->session_cwd($_), "/cwd/$_", "session cwd round-trips $_" ) for qw( __proto__ constructor toString );
+};
+
 # ---- session-cwd.json ------------------------------------------------------------------------
 
 subtest 'the cwd a session last looked at' => sub {
@@ -170,6 +192,22 @@ subtest 'a check mark dropped: the next check is due at once' => sub {
 # ---- the reference, byte for byte ------------------------------------------------------------
 
 my @sequences = (
+  [ 'prototype-named keys from empty stores' => {}, [
+      [ takePendingReport => ['constructor'] ],
+      [ takePendingReport => ['toString'] ],
+      [ putPendingReport  => [ '__proto__', js_ordered( key => '__proto__' ) ] ],
+      [ putPendingReport  => [ 'constructor', js_ordered( key => 'constructor' ) ] ],
+      [ putPendingReport  => [ 'toString', js_ordered( key => 'toString' ) ] ],
+      [ takePendingReport => ['__proto__'] ],
+      [ takePendingReport => ['constructor'] ],
+      [ takePendingReport => ['toString'] ],
+      [ putSessionCwd     => [ '__proto__', '/cwd/__proto__' ], 100 ],
+      [ putSessionCwd     => [ 'constructor', '/cwd/constructor' ], 101 ],
+      [ putSessionCwd     => [ 'toString', '/cwd/toString' ], 102 ],
+      [ sessionCwd        => ['__proto__'] ],
+      [ sessionCwd        => ['constructor'] ],
+      [ sessionCwd        => ['toString'] ],
+    ] ],
   [ 'pending reports: put, replace, take, take again' => {}, [
       [ takePendingReport => ['/p'] ],
       [ putPendingReport  => [ '/p', $report_a ] ],

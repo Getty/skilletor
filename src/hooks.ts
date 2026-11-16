@@ -67,10 +67,11 @@ const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined)
 
 const SESSION_START_TIMEOUT_MS = 5_000;
 const DEFAULT_INTERVAL = 600;
-/** A move's sync writes nothing once this has passed (spec §8): `hooks/hooks.json` and
- *  `hooks/codex-hooks.json` kill the hook at 30 s, which leaves the local rest of a sync 10 s;
- *  the Hermes plugin at 25 s (`PROMPT_S`), below Hermes' own 30 s. Claude Code's two move hooks
- *  wait for the sync lock up to it as well. */
+/** SessionStart or a move's sync writes nothing once this has passed (spec §8): `hooks/hooks.json`
+ *  and `hooks/codex-hooks.json` kill the hook at 30 s, which leaves the local rest of a sync
+ *  10 s; the Hermes plugin at 25 s (`PROMPT_S`), below Hermes' own 30 s. Claude Code's two
+ *  move hooks wait for the sync lock up to it as well. The exported name predates SessionStart's
+ *  use of the same budget. */
 export const MOVE_DEADLINE_MS = 20_000;
 
 function projectKeyOf(ctx: HookContext, input: HookInput): string {
@@ -190,7 +191,11 @@ function withCodexRules(out: HookOutput, ctx: HookContext): HookOutput {
 }
 
 async function checkAndSync(input: HookInput, ctx: HookContext): Promise<HookOutput> {
-  const engineCtx: HookContext = { ...ctx, timeoutMs: ctx.timeoutMs ?? SESSION_START_TIMEOUT_MS };
+  // The check, sync-lock wait and source resolution all precede the engine's first-write guard,
+  // so SessionStart's write budget starts before the check. An earlier caller deadline stays so.
+  const budgetDeadline = Date.now() + MOVE_DEADLINE_MS;
+  const deadline = ctx.deadline === undefined ? budgetDeadline : Math.min(ctx.deadline, budgetDeadline);
+  const engineCtx: HookContext = { ...ctx, timeoutMs: ctx.timeoutMs ?? SESSION_START_TIMEOUT_MS, deadline };
   const state = new State(ctx.stateRoot);
   const key = projectKeyOf(ctx, input);
 

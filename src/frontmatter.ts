@@ -25,6 +25,11 @@ export interface Frontmatter {
   body: string;
 }
 
+/** Assign a mapping key as data, including Object.prototype's setter name `__proto__`. */
+function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(record, key, { value, writable: true, enumerable: true, configurable: true });
+}
+
 const OPEN = /^---[ \t]*\r?\n/;
 const CLOSE = /^---[ \t]*(?:\r?\n|$)/gm;
 
@@ -111,9 +116,9 @@ class Parser {
       const m = KEY_RE.exec(text);
       if (!m) fail(line, "expected `key: value`");
       const key = m[1] !== undefined ? unescapeDouble(m[1], line) : m[2] !== undefined ? m[2].replace(/''/g, "'") : m[3]!.trim();
-      if (Object.prototype.hasOwnProperty.call(obj, key)) fail(line, `duplicate key "${key}"`);
+      if (Object.hasOwn(obj, key)) fail(line, `duplicate key "${key}"`);
       const [value, next] = this.value(m[4] ?? "", pos + 1, indent, line);
-      obj[key] = value;
+      setOwn(obj, key, value);
       pos = next;
     }
     return [obj, pos];
@@ -373,7 +378,7 @@ function inline(value: string, line: Line): YamlValue {
       const key = s.slice(j, colon).trim().replace(/^(["'])(.*)\1$/, "$2");
       if (key === "" || /[,{}[\]]/.test(key)) fail(line, "bad key in a flow mapping");
       const [v, k] = flowScalar(s, colon + 1, "}", line);
-      obj[key] = v;
+      setOwn(obj, key, v);
       const [done, n] = flowSeparator(s, k, "}", line);
       j = n;
       if (done) break;

@@ -65,6 +65,11 @@ const LOCK = "sync.lock";
 /** What a lock leaves beside it: a broken lock's tombstone, a released lock on its way out. */
 const LEFTOVER = `${LOCK}.`;
 
+/** Assign a state key as data, including Object.prototype's setter name `__proto__`. */
+function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(record, key, { value, writable: true, enumerable: true, configurable: true });
+}
+
 /** What a waiter saw of a lock it judged stale: the stat of its owner record, or of the dir
  *  itself when it has none. */
 interface StaleLock {
@@ -238,13 +243,13 @@ export class State {
 
   putPendingReport(projectKey: string, report: unknown): void {
     const pending = this.readJson("pending-report.json");
-    pending[projectKey] = report;
+    setOwn(pending, projectKey, report);
     this.writeJson("pending-report.json", pending);
   }
 
   takePendingReport(projectKey: string): unknown {
     const pending = this.readJson("pending-report.json");
-    if (!(projectKey in pending)) return undefined;
+    if (!Object.hasOwn(pending, projectKey)) return undefined;
     const report = pending[projectKey];
     delete pending[projectKey];
     this.writeJson("pending-report.json", pending);
@@ -256,7 +261,8 @@ export class State {
   /** Where a Codex or Hermes session's hook last looked (spec §8, k149): the cwd of its last
    *  SessionStart or prompt. A malformed entry counts as none. */
   sessionCwd(sessionId: string): string | undefined {
-    const entry = this.readJson("session-cwd.json")[sessionId];
+    const all = this.readJson("session-cwd.json");
+    const entry = Object.hasOwn(all, sessionId) ? all[sessionId] : undefined;
     const cwd = entry !== null && typeof entry === "object" ? (entry as Record<string, unknown>).cwd : undefined;
     return typeof cwd === "string" ? cwd : undefined;
   }
@@ -273,7 +279,7 @@ export class State {
     };
     const others = Object.keys(all).filter((id) => id !== sessionId).sort((a, b) => at(b) - at(a));
     for (const id of others.slice(SESSION_CWDS - 1)) delete all[id];
-    all[sessionId] = { cwd, at: Date.now() };
+    setOwn(all, sessionId, { cwd, at: Date.now() });
     this.writeJson("session-cwd.json", all);
   }
 

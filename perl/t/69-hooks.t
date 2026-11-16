@@ -20,8 +20,9 @@ use POSIX ();
 use Path::Tiny qw( path tempdir );
 use Time::HiRes ();
 use Skilletor::CLI ();
+use Skilletor::Engine ();
 use Skilletor::FSUtil qw( encode_text );
-use Skilletor::Hooks qw( run_hook default_background );
+use Skilletor::Hooks qw( run_hook default_background MOVE_DEADLINE_MS );
 use Skilletor::JSON qw( js_ordered js_parse js_stringify );
 use Skilletor::Process qw( run_command spawn_detached );
 use Skilletor::State;
@@ -96,6 +97,55 @@ subtest 'session-start: silent with nothing declared; a change synced and report
     '{"systemMessage":"skilletor: 1 item(s) updated","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"skilletor synced items:\n- skill foo@mine: active now"}}',
     'the line, and the context with the activation hint' );
   ok( -f "$m->{home}/.claude/skills/foo/SKILL.md", 'installed' );
+};
+
+# k151: the hook clock is read before check; the engine clock stands after check, lock acquisition
+# and source resolution. Past the default or a stricter supplied deadline, no target or ownership
+# write of the affected scope may begin.
+subtest 'session-start: a late scope writes neither files nor an ownership lock' => sub {
+  no warnings 'redefine';
+  my ( $hook_now, $engine_now ) = ( 1_000_000, 1_000_000 + MOVE_DEADLINE_MS + 1 );
+  local *Skilletor::Hooks::_now_ms  = sub { $hook_now };
+  local *Skilletor::Engine::_now_ms = sub { $engine_now };
+
+  my $m = machine();
+  user_config( $m, { sources => { mine => { local => local_source( $m, 'foo' ) } }, install => { skills => ['foo@mine'] } } );
+  is( out( run_hook( 'session-start', { source => 'startup' }, $m->{ctx} ) ),
+    '{"systemMessage":"skilletor: sync stopped before applying the user scope: its sources took too long"}',
+    'the 20 s SessionStart budget is measured from before check' );
+  ok( !-e "$m->{home}/.claude/skills" && !-e "$m->{home}/.claude/skilletor.lock.json" && !-e "$m->{home}/.claude/.gitignore",
+    'no installed file, incomplete ownership or adjacent scope write' );
+
+  my $strict = machine();
+  user_config( $strict,
+    { sources => { mine => { local => local_source( $strict, 'foo' ) } }, install => { skills => ['foo@mine'] } } );
+  $engine_now = $hook_now + 101;
+  is( out( run_hook( 'session-start', { source => 'startup' }, { %{ $strict->{ctx} }, deadline => $hook_now + 100 } ) ),
+    '{"systemMessage":"skilletor: sync stopped before applying the user scope: its sources took too long"}',
+    'a stricter caller deadline is not relaxed to 20 s' );
+  ok( !-e "$strict->{home}/.claude/skills" && !-e "$strict->{home}/.claude/skilletor.lock.json", 'nothing owned or installed' );
+};
+
+# Once the first scope's ownership lock exists, make only the next scope late. The earlier scope
+# remains committed, and the diagnostic must not claim that the whole sync wrote nothing.
+subtest 'session-start: a late project scope is named after the user scope was applied' => sub {
+  no warnings 'redefine';
+  my $m = machine();
+  my $src = local_source( $m, qw( foo bar ) );
+  user_config( $m, { sources => { mine => { local => $src } }, install => { skills => ['foo@mine'] } } );
+  write_json( "$m->{project}/.claude/skilletor.json", { install => { skills => ['bar@mine'] } } );
+  my $user_lock = "$m->{home}/.claude/skilletor.lock.json";
+  my $started = 1_000_000;
+  local *Skilletor::Hooks::_now_ms = sub { $started };
+  local *Skilletor::Engine::_now_ms = sub { $started + ( -e $user_lock ? MOVE_DEADLINE_MS + 1 : 0 ) };
+
+  is( out( run_hook( 'session-start', { source => 'startup' }, $m->{ctx} ) ),
+    '{"systemMessage":"skilletor: sync stopped before applying the project scope: its sources took too long"}',
+    'only the late project scope is named' );
+  ok( -f "$m->{home}/.claude/skills/foo/SKILL.md", 'the user file persists' );
+  is( js_parse( path($user_lock)->slurp_utf8 )->{'skills/foo'}{source}, 'mine', 'the user ownership persists' );
+  ok( !-e "$m->{project}/.claude/skills" && !-e "$m->{project}/.claude/skilletor.lock.json",
+    'project files and ownership are untouched' );
 };
 
 subtest 'session-start marks the project checked and records the session cwd' => sub {

@@ -116,6 +116,48 @@ test("pending report is taken once and separated per project", () => {
   }
 });
 
+test("pending reports ignore inherited properties and round-trip prototype-named keys", () => {
+  const tmp = makeTmpDir();
+  try {
+    const state = new State(tmp.dir);
+    const absent = ["constructor", "toString"].map((key) => state.takePendingReport(key));
+    const absentWroteFile = existsSync(join(tmp.dir, "pending-report.json"));
+    for (const key of ["__proto__", "constructor", "toString"]) state.putPendingReport(key, { key });
+    const stored = JSON.parse(readFileSync(join(tmp.dir, "pending-report.json"), "utf8")) as Record<string, unknown>;
+    const ownKeys = ["__proto__", "constructor", "toString"].map((key) => Object.hasOwn(stored, key));
+    const taken = ["__proto__", "constructor", "toString"].map((key) => state.takePendingReport(key));
+    assert.deepEqual({ absent, absentWroteFile, ownKeys, taken }, {
+      absent: [undefined, undefined], absentWroteFile: false, ownKeys: [true, true, true],
+      taken: [{ key: "__proto__" }, { key: "constructor" }, { key: "toString" }],
+    });
+    assert.deepEqual(JSON.parse(readFileSync(join(tmp.dir, "pending-report.json"), "utf8")), {});
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("session cwd round-trips prototype-named keys from an empty store", () => {
+  const tmp = makeTmpDir();
+  try {
+    const state = new State(tmp.dir);
+    const keys = ["__proto__", "constructor", "toString"];
+    assert.deepEqual(keys.map((key) => state.sessionCwd(key)), [undefined, undefined, undefined]);
+    for (const key of keys) state.putSessionCwd(key, `/cwd/${key}`);
+    const stored = JSON.parse(readFileSync(join(tmp.dir, "session-cwd.json"), "utf8")) as Record<string, unknown>;
+    assert.equal(Object.getPrototypeOf(stored), Object.prototype);
+    assert.deepEqual(
+      keys.map((key) => ({ own: Object.hasOwn(stored, key), cwd: state.sessionCwd(key) })),
+      [
+        { own: true, cwd: "/cwd/__proto__" },
+        { own: true, cwd: "/cwd/constructor" },
+        { own: true, cwd: "/cwd/toString" },
+      ],
+    );
+  } finally {
+    tmp.cleanup();
+  }
+});
+
 // ---- mutex ------------------------------------------------------------------
 // `sync.lock/` (spec §6.5, k81): a lock counts as stale once its owner record has not been
 // refreshed for the stale age – a holder refreshes it while it runs – or once its owner died

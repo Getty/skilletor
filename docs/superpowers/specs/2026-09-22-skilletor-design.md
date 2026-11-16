@@ -1125,7 +1125,10 @@ config error.
 The project root is `--project-dir`, else the git top level of the current directory, else
 the current directory – the resolution the hooks use without `CLAUDE_PROJECT_DIR` (§14.5),
 so the CLI run from a subdirectory sees the same project as the session. A root that is
-`~` itself has no project scope (§3).
+`~` itself has no project scope (§3). Without an explicit project path, a current directory
+that no longer exists is a command error (exit 1): `skilletor: the current directory no
+longer exists; pass --project-dir <dir>`, never a stack trace. A valid explicit
+`--project-dir` is sufficient and must not read the removed current directory.
 
 `uninstall` removes explicit entries from that one config only: `type:name@source` from
 that type's list, `name@source` from every list. The name matches ignoring case (k136: one
@@ -1196,6 +1199,15 @@ metadata-only checkout unambiguous on a machine with several harnesses.
 | `UserPromptSubmit` | Codex and Hermes first: a session whose cwd is not the one its hook last looked at syncs the checkout it moved into, awaited (below). Then: not due → return immediately. Due → start a detached background `sync` (`windowsHide`: no console window on Windows, k133), return at once. If a `pending-report.json` exists → emit it as `additionalContext` and delete it |
 | `CwdChanged` (Claude Code only) | not awaited: the session moved into another checkout: compare that checkout's lock with its config, locally; on a difference, `sync` its project scope (below) |
 | `PostToolUse` (Claude Code only; matcher `Bash`, `"if": "Bash(cd *)"`) | awaited, after a Bash call with a `cd`: the same for the checkout of the cwd the call left, when the session's record names another cwd (below) |
+
+`SessionStart` has the same 20 s write budget beneath its configured 30 s hook timeout as a
+checkout move. Its absolute deadline is set before `check`, because that source check, waiting
+for the sync lock and resolving sources all precede the engine's first-write guard and therefore
+consume the budget; an earlier caller-supplied deadline is never relaxed. A scope whose sources
+are not resolved by then does not reach its apply; any earlier scope already applied remains in
+place. From the guard onward the work is local; the remaining 10 s is an intended safety margin that reduces, but cannot eliminate, the chance that
+Claude Code's hard timeout kills the process during a large or slow local apply. It adds no
+rollback or per-scope atomicity against that hard kill.
 
 **A move into another checkout** (k147). Claude Code's hooks name the session's project in
 `CLAUDE_PROJECT_DIR`, which stays where the session started; a session that moves – a `cd` into

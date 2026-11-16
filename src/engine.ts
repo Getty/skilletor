@@ -74,9 +74,10 @@ export interface EngineContext {
   /** `CLAUDE_CONFIG_DIR` (k142): Claude Code's config dir, where its plugin state lives; default
    *  from the env, else `<home>/.claude`. Only that state is read from it (spec §6.8). */
   claudeConfigDir?: string;
-  /** Epoch ms (the checkout-move hook, spec §8): a scope whose sources are not resolved by then
-   *  is not written – the sync stops with an error before its first write there. What follows
-   *  that point is local, so a caller killed at a later timeout never stops it midway. */
+  /** Epoch ms (the hooks, spec §8): a scope whose sources are not resolved by then does not
+   *  reach its apply – the sync stops there before the scope's primary writes; earlier scopes may
+   *  already have completed. What follows that point is local, reducing the chance that a caller
+   *  killed at a later timeout stops it midway. */
   deadline?: number;
 }
 
@@ -1018,9 +1019,10 @@ async function syncScopeRun(
     collectSources(collect, ctx, sources, resolved, catalogs, rep);
     return rep;
   }
-  // Past its deadline (spec §8): nothing of the scope is written. From here on all is local.
+  // Past its deadline (spec §8): this scope's apply does not begin. Earlier scopes may already
+  // have completed; from here on the scope's remaining work is local.
   if (ctx.deadline !== undefined && Date.now() > ctx.deadline) {
-    throw new Error("sync stopped before writing anything: its sources took too long");
+    throw new Error(`sync stopped before applying the ${scope} scope: its sources took too long`);
   }
 
   /** A path for the report: relative to the scope base when under it, else absolute. */

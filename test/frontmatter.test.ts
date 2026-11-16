@@ -102,6 +102,25 @@ test("sequences and nested mappings (the briefing and codex shapes)", () => {
   assert.deepEqual(data.flow_map, { a: 1, b: "two" });
 });
 
+test("block mappings keep __proto__ as own data without changing their prototype", () => {
+  const { data } = fm("__proto__:\n  description: nested\ndescription: top");
+  assert.equal(Object.getPrototypeOf(data), Object.prototype);
+  assert.equal(Object.hasOwn(data, "__proto__"), true);
+  assert.deepEqual(data.__proto__, { description: "nested" });
+  assert.equal(Object.hasOwn(data, "description"), true);
+  assert.equal(data.description, "top");
+});
+
+test("flow mappings keep prototype-named scalar keys as own data", () => {
+  const { data } = fm("flow: {__proto__: kept, constructor: ctor, toString: text}");
+  const flow = data.flow as Record<string, unknown>;
+  assert.equal(Object.getPrototypeOf(flow), Object.prototype);
+  for (const [key, value] of [["__proto__", "kept"], ["constructor", "ctor"], ["toString", "text"]]) {
+    assert.equal(Object.hasOwn(flow, key), true, key);
+    assert.equal(flow[key], value, key);
+  }
+});
+
 test("outside the subset: a FrontmatterError naming the line", () => {
   for (const bad of [
     "a: &anchor x",

@@ -181,6 +181,23 @@ test("a codex: table cannot collide with a derived key (no duplicate TOML keys)"
   assert.match(r.warnings[0] ?? "", /^codex\.description: a table cannot replace/);
 });
 
+test("codex: keeps prototype-named tables as ordinary own keys", () => {
+  const r = codexAgentToml([
+    "---", "description: d", "codex:",
+    "  constructor:", "    own: ctor",
+    "  toString:", "    own: text",
+    "  __proto__:", "    own: proto",
+    "---", "B",
+  ].join("\n"), "a");
+  assert.deepEqual(r.warnings, []);
+  const parsed = toml(r.toml);
+  assert.equal(Object.getPrototypeOf(parsed), Object.prototype);
+  for (const [key, value] of [["constructor", "ctor"], ["toString", "text"], ["__proto__", "proto"]]) {
+    assert.equal(Object.hasOwn(parsed, key), true, key);
+    assert.deepEqual(parsed[key], { own: value }, key);
+  }
+});
+
 // ---- rules -> a section of the Codex rules file (spec §14.8) ----------------------
 
 test("a rule becomes its body, frontmatter removed; paths become a leading line", () => {
