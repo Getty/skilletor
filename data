@@ -1,0 +1,39 @@
+---
+claimed_at: 2026-11-16T10:18:42Z
+claimed_by: skilletor-sol-windows-ci
+class: standard
+completed: 2026-11-16T10:18:42Z
+created: 2026-11-16T04:12:07Z
+id: 238
+priority: high
+started: 2026-11-16T10:18:42Z
+status: done
+tags:
+- windows
+- bug
+- paths
+title: 'Windows: treat 8.3 and long project paths as one identity'
+updated: 2026-11-16T10:18:42Z
+---
+
+Observed in the user-authorized native CI follow-up for Draft PR https://github.com/Getty/skilletor/pull/2 at cba4cda. Git reports long Windows paths while fixtures/callers can supply 8.3 aliases such as RUNNER~1. Failures include a home checkout being treated as a separate project and hook pending/check state missing equivalent path keys. Relevant boundary: src/fsutil.ts and immediate hook/state callers. Do not hide a runtime identity defect by canonicalizing only test fixtures.
+
+Done when: reproduce and pin equivalent existing Windows path identities at the public runtime boundary; use a justified native path mechanism while preserving existing missing-path/error semantics; verify home/project classification and pending/check records agree across aliases; include spaces/non-ASCII paths and observed native Windows evidence. Mirror portable semantics in Perl or explicitly record an unverified platform divergence. No new runtime dependency, binary activation or Perl-root migration without separate agreement. Source changes ship with rebuilt dist. This is a necessary scoped CI-correction follow-up already authorized by the user, not a broad filesystem refactor.
+
+Worker implemented Windows native realpath and absolute pending/check-key canonicalization, with a native regression that bypasses normalized tmp helpers and requires distinct raw8.3/Git-long paths. Local contracts pass; the native test is explicitly skipped on Linux. Native Windows proof remains required before done. Perl Windows Cwd::abs_path alias behavior remains unproven and is not claimed as passing. Independent review and main full suites are running; no follow-up commit yet.
+
+Independent review blocks current candidate: TS state-key canonicalization also runs on POSIX, invalidating persisted symlink-spelled keys; Perl still uses raw keys, a definite policy divergence beyond unknown Cwd behavior. Return for Windows-only TS guard, POSIX persisted-key regression and mirrored Windows Perl policy if supportable (otherwise exact divergence must be explicit). Native test must precisely skip when distinct aliases are unavailable, while hosted CI acceptance still requires this named test to PASS, not skip.
+
+Scoped re-review approved Windows-only TS and Perl state-key policy, persisted POSIX key preservation and precise native-alias availability handling. No missing-policy divergence remains; actual Windows Perl canonical API proof is still unverified. Hosted Node acceptance must show the named8.3 test PASS, not skip. Current full Perl2703 tests PASS on identical runtime; fresh Node gates running after test-only assertion correction. No closure before native CI.
+
+Windows path-identity implementation and tests committed as 7dda9e3 after both scoped fix rounds were approved with no open local findings. Fresh local proof: Node 1339 pass, 0 fail, 4 explicit skips; typecheck, build, check-dist and diff-check passed. Retained Perl proof on byte-identical runtime and inputs: 50 files, 2703 tests, 0 TODO. Native Windows Perl API behavior remains unclaimed.
+
+Main verified commit7dda9e3 against all25 tested file hashes/modes plus Changes, exact26-path scope and footer; only foreign nytprof.out remains untracked. User-authorized normal follow-up push completed to the existing PR2 branch. New native CI run https://github.com/Getty/skilletor/actions/runs/43815639211 is registered and running; Perl run43815639237 also registered. Named8.3 test must PASS rather than availability-skip; no card closure yet. No merge/release/activation/migration.
+
+Observed native PASS for test/windows-path-identity.test.ts in Windows job133126933867, run43815639211. It was not an availability skip. Basic Windows version/Unicode hook probes also PASS. No additional path/state implementation change is planned without a new concrete defect; native Windows Perl underlying API remains unverified.
+
+Residual harness follow-up committed as 6911d0d with current-file Node, Perl, typecheck, build, check-dist and diff-check gates passing. The named raw 8.3 and Git-long native probe already passed at 7dda9e3 and was not reworked. Source Windows Perl API behavior remains unproven.
+
+Main independently verified local commit6911d0d: exact12 paths (11 tested manifest+Changes), all tested hashes/modes unchanged, required footer, only foreign profiler untracked. User-authorized normal follow-up push completed. New CI run https://github.com/Getty/skilletor/actions/runs/43836868631 and Perl run43836868425 are registered for this exact head. Local latest-file proof: Node1341pass/4 explicit skips, Perl51 files2705pass/0TODOs. No native acceptance inferred; no merge/release/activation/migration.
+
+Native acceptance verified at head 845ee04 in Windows job 133225221919, matrix run 43845708032. The raw 8.3 and Git-long identity regression from commit 7dda9e3 passed by name and was not skipped. Windows job: 1249 pass, 0 fail, 97 explicit skips, 0 TODO; check-dist was up to date. Source Windows Perl API behavior and standalone Perl binaries remain unproven.
