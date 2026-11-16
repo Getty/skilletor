@@ -1,0 +1,53 @@
+---
+claimed_at: 2026-11-16T18:55:32Z
+claimed_by: skilletor-worker-k167
+class: standard
+completed: 2026-11-16T22:35:31Z
+created: 2026-11-13T20:41:59Z
+id: 167
+priority: high
+started: 2026-11-16T18:49:13Z
+status: done
+tags:
+- decision
+- perl
+- binary
+title: 'Decision: version and build vehicle of the Perl binaries'
+updated: 2026-11-16T22:35:31Z
+---
+
+Decision for the maintainer: options and a recommendation, not decided here.
+
+1. Version string of the Perl CLI (`--version`, usage header line `skilletor <ver>`).
+   (a) The skilletor version it follows (package.json, 0.7.0 today), tied to package.json by a test.
+   (b) The Perl dist's own $VERSION (perl/lib/Skilletor.pm: 0.002); the CLI parity cases then normalise the version per engine.
+   Recommendation: (a). The starter downloads the binary of the plugin's version, so the binary must report that version. Whether the CPAN dist follows the plugin version too is a separate question.
+   Provisional (reversible): the Perl CLI prints the package.json version through one constant, pinned by a test. Switching to (b) means changing that constant and adding a normalisation.
+
+2. Build vehicle for the binaries.
+   (a) The Author::GETTY `binary` keys plus the reusable `dzil-binary.yml@binary-v1`. Covers five platforms including windows-x86_64, SHA256SUMS, install.sh and install.ps1. Costs:
+       - it builds from the CPAN tarball of a `dzil release`, so Skilletor (and Text::Nunjucks, k159) must be on CPAN;
+       - it needs its own dist release and tag in this repo, beside the plugin's vX.Y.Z tags;
+       - the binary carries the dist version.
+   (b) This repo's own workflow after skill perl-par-binary-release (getty source). It is triggered by the plugin tag vX.Y.Z, builds from the checkout (no CPAN), and is versioned with the plugin. It needs a Windows leg (Strawberry Perl), because the skill covers Linux and macOS only.
+   Recommendation: (b) now. Revisit (a) once Skilletor and Text::Nunjucks are on CPAN and the versions are one.
+
+3. Platforms.
+   Options: linux-x86_64, linux-arm64, macos-arm64, windows-x86_64; macos-x86_64 optional.
+   Recommendation: the first four. Add macos-x86_64 only on request.
+
+From k188: a binary built on Debian 13 (glibc 2.41 host) needs glibc 2.38 (POSIX.so, MIME/Base64.so, libperl.so.5.40); the house ceiling is 2.31. Building on bullseye instead links OpenSSL 1.1, which Debian 12+ and Ubuntu 22.04+ no longer ship, so an https url source would need libssl bundled (untested). Part of option 2/3: which build image per platform.
+
+From k189 (Linux x86_64 leg run locally in perl:5.40-bullseye): glibc floor 2.29, but it links OpenSSL 1.1 (libssl.so.1.1/libcrypto.so.1.1), which Debian 12+ and Ubuntu 22.04+ do not ship and RHEL 9 only as compat-openssl11 - an https url source would fail there; no smoke proves TLS either way. Options: bundle libssl with pp -l, a newer build image (higher glibc floor), or Net::SSLeay against a static OpenSSL. Unknown: how Net::SSLeay links OpenSSL on macOS, and whether the Windows binary carries Strawberry's OpenSSL DLLs.
+
+2026-11-16 18:49 Maintainer decision 2026-11-16 (via the perl-developer hub, design ~/dev/perl-developer/docs/superpowers/specs/2026-11-16-ack-paket-design.md): the recommendations hold. 1(a) the binary and Perl CLI report the plugin version. 2(b) this repo's release-binaries.yml builds from the checkout, triggered by the plugin tag vX.Y.Z; no CPAN needed. 3 platforms linux-x86_64, linux-arm64, macos-arm64, windows-x86_64. Linux OpenSSL ABI: resolve (bundle libssl or link statically) and prove HTTPS in an isolated target.
+
+2026-11-16 (main): the decision above is superseded by the maintainer's later amendment (brief-skilletor.md, amendment 2026-11-16): 1(b)/2(a) instead. The dist version 0.008 (= v0.8.0) is reported by the CLI; binaries come from the house route ([@Author::GETTY] binary keys, dzil-binary.yml@binary-v1); our own release-binaries.yml and TLS work go. The work continues on k242. The k167 worker's tree (own release-binaries.yml legs, static OpenSSL, smoke changes) was stopped unfinished and dropped from the worktree; a patch of it lies in the job's scratch dir only (not durable). It is not meant to land.
+
+Findings worth keeping for k242 and the hub:
+- Baseline probe 43942781724 (old workflow, before any k167 change) failed on two legs: macOS "The configuration 'macos-14-arm64-us-default' is not supported" (runner image retired, macos-15 is the replacement); Windows cpanm "Module 'ExtUtils::MakeMaker' is not installed" (most likely Git Bash's MSYS perl shadows Strawberry on PATH). Both concern our own workflow and go with it.
+- TLS: HTTP::Tiny verify_SSL uses IO::Socket::SSL's default CA lookup (SSL_CERT_FILE/SSL_CERT_DIR, then OPENSSLDIR, then Mozilla::CA). Skilletor::Url maps status 599 to "fetch failed", so only a real https url sync proves TLS; a smoke without one proves nothing.
+- Stock linkage needs a shared OpenSSL the targets lack: bullseye links OpenSSL 1.1 (absent on Debian 12+, Ubuntu 22.04+, RHEL 9 without compat-openssl11); macOS links the tool cache's dylibs; Strawberry ships libssl-3-x64__.dll, libcrypto-3-x64__.dll and zlib1__.dll and bakes in an OPENSSLDIR under the build path.
+- Net::SSLeay against a static OpenSSL 3 (OPENSSLDIR=/etc/ssl), local docker proof of an x86_64 build: rockylinux:9 5/5 pass; debian:12 pass via the Mozilla::CA fallback; ubuntu:22.04 public https works; glibc floor 2.29 by symbol versions; RHEL needs libxcrypt-compat (libcrypt.so.1). This matches the p5-mcp-hub binary_prepare pattern that k242 adopts.
+
+Superseded 2026-11-16 by the house-route decision; carried out in k242 (70f7d5c).
