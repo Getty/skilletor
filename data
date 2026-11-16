@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-11-16T02:05:48Z
+claimed_by: skilletor-sol-render-cli
+class: standard
+completed: 2026-11-16T02:05:48Z
+created: 2026-11-13T20:13:38Z
+id: 160
+priority: medium
+started: 2026-11-16T00:12:16Z
+status: done
+tags:
+- render
+- bug
+title: Reference crashes on an include of a template with a syntax error
+updated: 2026-11-16T02:05:48Z
+---
+
+Found on k158 (perl/t/53-parity-render.t TODO). Template A\n{% include "p.md" %} where p.md is {% for %}: nunjucks 3.2.4 under src/render.ts first throws a TypeError ("The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array or an Array-like Object. Received null"), then on the next tick the process dies (exit 1) on the uncaught "Template render error: (...SKILL.md.njk)\n  Template render error: (.../p.md) [Line 1, Column 8]\n  unexpected token: %}". A sync or hook dies mid-run. The Perl port (Text::Nunjucks) gives a clean RenderError instead. Done: the reference reports such a template as a template error warning like any other and keeps running; the t/53 TODO becomes a plain parity case.
+
+Worker implemented eager included-template compilation with clean RenderError propagation and added shared case241; reported RED child-process crash and focused GREEN TS/Perl parity with the old t53 TODO removed. Independent task review now running; final integrated build/tests and commit remain pending. No activation/publication.
+
+Independent task review: spec compliant and quality approved, no findings. Main independently reran5 focused Node regressions and35 Perl tests across t53/t68: all PASS,0 skips,0 TODOs; diff-check clean. Historical individual k193 RED remains unrecorded, but review confirms the exact diagnostic assertion rejects the previous stack path. Coordinator added case241 index and documented the deleted-cwd fixture limitation. Final combined gates/dist refresh and commit still pending.
+
+Committed as d392166 after implementation review and final corrected-code approval. Gates passed: Node 1332 pass, 0 fail, 3 explicit skips; Perl 49 files and 2699 tests, 0 TODO; typecheck, build, check-dist and diff-check passed.
