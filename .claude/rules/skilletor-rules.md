@@ -22,7 +22,8 @@ code, comments, docs, skills — are English. Read first: exports, immediate cal
 | Commits, `Changes`, card → done, pre-release audit | `skilletor-release-manager` |
 | Read-only research, audit, gap analysis | `skilletor-worker` ("read-only, change nothing") |
 
-Behavior-relevant = anything under `src/`, `test/`, `hooks/`, `bin/`, `dist/`, `scripts/`, the
+Behavior-relevant = anything under `src/`, `test/`, `hooks/`, `bin/`, `dist/`, `scripts/`,
+`lib/`, `script/`, `t/`, `maint/`, `cpanfile`, `dist.ini`, `.github/workflows/`, the
 plugin manifest, and the text of any skill, agent or rule file (this repo's `.claude/` set and
 `skills/skilletor`). `README.md`, `docs/` and ticket notes are not.
 
@@ -30,6 +31,8 @@ plugin manifest, and the text of any skill, agent or rule file (this repo's `.cl
 
 `npm test`, `npm run build`, `npm run check-dist` are fine anytime. Any edit to
 `Getty/marketplace` is under the publish gate too, like `git tag`, a push and `gh release`.
+`dzil release` tags, pushes and creates the GitHub release: it is under the publish gate.
+`DZIL_BINARY_SKIP=1 dzil build` is fine anytime.
 
 ## Hazards
 
@@ -41,5 +44,10 @@ plugin manifest, and the text of any skill, agent or rule file (this repo's `.cl
   and `CODEX_HOME`.
 - **Agent files: `tools:`, not `allowed-tools`** — Claude Code ignores unknown agent fields
   silently, so a misnamed key hands an auditor write access.
+- **dzil gathers git-tracked files only** — `git add` a new file before `dzil build`, or the
+  tarball lacks it.
+- **One version line** — lib `$VERSION` 0.00N is package.json 0.N.0; after `dzil release` lib is
+  one ahead until the next release prepares package.json (`t/02-version.t` accepts both,
+  `maint/version-tie.pl` gates the release).
 - **Eval runs are billed** (`claude plugin eval` spawns full sessions) — start one only when the
   ticket or the user asks.
