@@ -80,8 +80,11 @@ before(() => {
   pluginSrc = join(tmp.dir, "plugin-src");
   mkdirSync(join(pluginSrc, "bin"), { recursive: true });
   mkdirSync(join(pluginSrc, "dist"));
-  copyFileSync(join(repo, "bin", "skilletor"), join(pluginSrc, "bin", "skilletor"));
-  chmodSync(join(pluginSrc, "bin", "skilletor"), 0o755);
+  // bin/skilletor runs the starter beside it (k191); never this checkout's pinned checksums.
+  for (const file of ["skilletor", "skilletor-start"]) {
+    copyFileSync(join(repo, "bin", file), join(pluginSrc, "bin", file));
+    chmodSync(join(pluginSrc, "bin", file), 0o755);
+  }
   writeFileSync(join(pluginSrc, "dist", "skilletor.js"),
     'console.log(JSON.stringify({ root: require("path").dirname(__dirname), args: process.argv.slice(2) }));\n');
 });

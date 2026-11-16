@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
@@ -333,7 +333,7 @@ test("fail open where os.killpg is missing (Windows): a CLI that hangs is still 
   }
 });
 
-test("on Windows the checkout's CLI is bin/skilletor.exe, which runs without a shell", { skip }, () => {
+test("on Windows the checkout's CLI is bin/skilletor.exe, which runs without a shell – only beside dist/", { skip }, () => {
   const f = fixture();
   try {
     // A checkout of its own: the plugin in it, dist/ and only the Windows launcher in bin/.
@@ -351,6 +351,80 @@ test("on Windows the checkout's CLI is bin/skilletor.exe, which runs without a s
     const cli = drive({ mode: "adapter", plugin, environ, windows: true, steps: [] }).cli;
     assert.equal(typeof cli === "string" ? realpathSync(cli) : cli, realpathSync(join(checkout, "bin", "skilletor.exe")));
     assert.equal(drive({ mode: "adapter", plugin, environ, windows: false, steps: [] }).cli, null);
+    // bin/skilletor.exe runs node with dist/skilletor.js and nothing else (k169): without it, no CLI.
+    rmSync(join(checkout, "dist", "skilletor.js"));
+    assert.equal(drive({ mode: "adapter", plugin, environ, windows: true, steps: [] }).cli, null);
+  } finally {
+    f.cleanup();
+  }
+});
+
+/** A checkout of its own with this one's plugin, bin/skilletor and starter (never its pinned
+ *  checksums), and a bundle that answers a hook with what it was called with; and PATHs with
+ *  the tools bin/skilletor needs, node only when asked. */
+function starterCheckout(f: ReturnType<typeof fixture>, opts: { dist?: boolean } = {}) {
+  const checkout = join(f.tmp.dir, "starter checkout");
+  const plugin = join(checkout, "hermes", "skilletor");
+  mkdirSync(plugin, { recursive: true });
+  writeFileSync(join(plugin, "__init__.py"), readFileSync(join(PLUGIN, "__init__.py")));
+  mkdirSync(join(checkout, "bin"));
+  for (const file of ["skilletor", "skilletor-start"]) {
+    writeFileSync(join(checkout, "bin", file), readFileSync(join(root, "bin", file)));
+    chmodSync(join(checkout, "bin", file), 0o755);
+  }
+  if (opts.dist !== false) {
+    mkdirSync(join(checkout, "dist"));
+    writeFileSync(join(checkout, "dist", "skilletor.js"), [
+      'require("node:fs").readFileSync(0);',
+      'const context = `node ${process.argv.slice(2).join(" ")}`;',
+      "process.stdout.write(JSON.stringify({ hookSpecificOutput: { additionalContext: context } }) + \"\\n\");",
+      "",
+    ].join("\n"));
+  }
+  const tools = (withNode: boolean) => {
+    const dir = join(f.tmp.dir, withNode ? "tools-node" : "tools");
+    mkdirSync(dir);
+    for (const name of ["dirname", "readlink"]) {
+      const found = (process.env.PATH ?? "").split(":").map((d) => join(d, name)).find((p) => existsSync(p));
+      assert.ok(found, `${name} on PATH`);
+      symlinkSync(found, join(dir, name));
+    }
+    if (withNode) symlinkSync(process.execPath, join(dir, "node"));
+    return dir;
+  };
+  return { checkout, plugin, tools };
+}
+
+// k191: in a checkout, bin/skilletor runs the starter, which picks the engine. find_cli no longer
+// asks for dist/ beside it on POSIX: the starter may run the release binary or Perl without one.
+test("on POSIX a checkout's bin/skilletor is the CLI with or without dist/: the starter picks the engine", { skip }, () => {
+  const f = fixture();
+  try {
+    const { checkout, plugin, tools } = starterCheckout(f, { dist: false });
+    const environ = { PATH: tools(false), HOME: f.tmp.dir };
+    const cli = drive({ mode: "adapter", plugin, environ, windows: false, steps: [] }).cli;
+    assert.equal(typeof cli === "string" ? realpathSync(cli) : cli, realpathSync(join(checkout, "bin", "skilletor")));
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("through the starter: Node's answer reaches the model; with nothing to run, the starter's one line does", { skip }, () => {
+  const f = fixture();
+  try {
+    const { plugin, tools } = starterCheckout(f);
+    const steps = [START(), TURN(), TURN("s1", { is_first_turn: false })];
+    const node = drive({ mode: "adapter", plugin, environ: { PATH: tools(true), HOME: f.tmp.dir }, cwd: f.cwd, steps });
+    assert.deepEqual(node.results.map((r) => r.ret), [
+      null,
+      { context: "node hook session-start --harness hermes" },
+      { context: "node hook user-prompt-submit --harness hermes" },
+    ]);
+    // No node, no perl, no pinned binary: the starter exits 0 with its line as a systemMessage.
+    const none = drive({ mode: "adapter", plugin, environ: { PATH: tools(false), HOME: f.tmp.dir }, cwd: f.cwd, steps });
+    const line = "skilletor: Node.js is required but was not found on PATH (need >= 18); " +
+      "perl was not found on PATH (need >= 5.40); no binary checksums are pinned in the plugin.";
+    assert.deepEqual(none.results.map((r) => r.ret), [null, { context: line }, { context: line }]);
   } finally {
     f.cleanup();
   }

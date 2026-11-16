@@ -129,3 +129,14 @@ test("native Windows launcher runs a real hook inside isolated Unicode harness r
     assert.ok(output.systemMessage?.includes(config), output.systemMessage ?? "hook emitted no systemMessage");
   });
 });
+
+// Runs everywhere: what bin/skilletor.exe reads. winlaunch takes its directives from the first 64
+// lines of the script beside it (tools/winlaunch in the windows-developer hub), and k191 put the
+// starter's hand-over in front of the old Node check. Windows stays on Node (k169): one run line,
+// node with the committed bundle.
+test("bin/skilletor's one winlaunch directive is within the 64 lines winlaunch reads: node with dist/", () => {
+  const lines = readFileSync(join(repo, "bin", "skilletor"), "utf8").split("\n");
+  const directives = lines.flatMap((line, i) => (line.startsWith("# winlaunch: ") ? [[i, line] as const] : []));
+  assert.deepEqual(directives.map(([, line]) => line), ["# winlaunch: run node {root}/dist/skilletor.js"]);
+  assert.ok(directives[0]![0] < 64, `line ${directives[0]![0] + 1}`);
+});

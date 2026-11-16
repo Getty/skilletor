@@ -1,7 +1,7 @@
 # skilletor
 
-The plugin runs the **skilletor CLI** (Node.js >= 18): `$SKILLETOR_BIN`, else `skilletor`
-on `PATH`. Without one it does nothing. skilletor's `install.sh` puts one into
+The plugin runs the **skilletor CLI**: `$SKILLETOR_BIN`, else `skilletor` on `PATH`.
+Without one it does nothing. skilletor's `install.sh` puts one into
 `~/.local/bin` (https://github.com/Getty/skilletor#from-the-command-line); name it, or the
 `bin/skilletor` of a clone, in the Hermes home's `.env` (`~/.hermes/.env` by default):
 

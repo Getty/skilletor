@@ -29,12 +29,13 @@ and skips it for a minute; a child that runs into ours is killed.
 
 The CLI is $SKILLETOR_BIN if set – then that or nothing; Hermes loads the
 Hermes home's .env into the environment, so it can be set there. Else
-bin/skilletor of the checkout this directory is a symlink into (on Windows
-bin/skilletor.exe, the launcher Claude Code starts there: bin/skilletor is a sh
-script); else `skilletor` on PATH. A copy `hermes plugins install` made is no
-checkout's: it has the first and the last. The child runs with the session's
-Hermes home as HERMES_HOME, and skilletor takes the project from the `cwd` it
-is sent.
+bin/skilletor of the checkout this directory is a symlink into – it runs the
+starter, which picks the engine (the release binary, Node, Perl); on Windows
+bin/skilletor.exe, the launcher Claude Code starts there (bin/skilletor is a sh
+script), which runs node with dist/skilletor.js, so only beside that – else
+`skilletor` on PATH. A copy `hermes plugins install` made is no checkout's: it
+has the first and the last. The child runs with the session's Hermes home as
+HERMES_HOME, and skilletor takes the project from the `cwd` it is sent.
 
 Importing this module and register() start nothing and read nothing.
 """
@@ -76,7 +77,10 @@ def find_cli(environ, here, windows=WINDOWS):
         return named if os.path.isfile(named) and os.access(named, os.X_OK) else None
     root = os.path.dirname(os.path.dirname(os.path.realpath(here)))
     shim = os.path.join(root, "bin", "skilletor.exe" if windows else "skilletor")
-    if os.access(shim, os.X_OK) and os.path.isfile(os.path.join(root, "dist", "skilletor.js")):
+    # bin/skilletor runs the starter, which picks the engine there itself (the release binary,
+    # Node, Perl). bin/skilletor.exe runs node with dist/skilletor.js only (k169).
+    if os.path.isfile(shim) and os.access(shim, os.X_OK) and (
+            not windows or os.path.isfile(os.path.join(root, "dist", "skilletor.js"))):
         return shim
     return shutil.which("skilletor", path=environ.get("PATH"))
 

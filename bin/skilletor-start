@@ -1,36 +1,39 @@
 #!/bin/sh
-# skilletor starter (k190): run skilletor with what this machine has, first match wins:
+# skilletor starter (k190, wired by k191): run skilletor with what this machine has, first
+# match wins:
 #   1. the release binary of the plugin's version for this platform, cached under
 #      <claudeConfigDir>/skilletor/bin/<version>/ and rechecked against its pinned checksum;
 #   2. else that binary, downloaded only by an explicit CLI command or a SessionStart hook
 #      (curl, else wget), checked against the checksum pinned in the plugin (sha256sum, else
 #      `shasum -a 256`), then cached;
-#   3. else Node.js >= 18 with dist/skilletor.js, as bin/skilletor runs it;
+#   3. else Node.js >= 18 with dist/skilletor.js;
 #   4. else Perl >= 5.40 with perl/lib, once its modules load;
-#   5. else one line saying why: on stderr with exit 1, as bin/skilletor's messages - for
-#      `hook ...` the hook's one warning line on stdout instead, with exit 0 (spec §8).
+#   5. else one line saying why: on stderr with exit 1, Node's message first - for `hook ...`
+#      the hook's one warning line on stdout instead, with exit 0 (spec §8).
 # An engine it starts is exec'd with this process's arguments, stdin and stdout untouched; on
 # a `hook` call that engine keeps the hook contract itself, as the Node CLI does.
 # A failed SessionStart provision backs off for 15 minutes per version/platform. An explicit CLI
 # command can retry at once; non-start hooks never provision.
 #
-# The no-Node CLI-only installer preflights this prepared starter and links it. Default plugin
-# hooks, the Windows launcher and the Hermes checkout fallback still run bin/skilletor. Not
-# covered here:
-#   - Windows: bin/skilletor.exe (winlaunch) runs node directly; how it gets the binary is
-#     decision k169;
+# Who starts it: bin/skilletor execs it - the command every plugin hook (hooks/hooks.json,
+# hooks/codex-hooks.json), the Hermes adapter in a checkout, npm, and install.sh's shim or link
+# run - and install.sh's no-Node CLI-only install links it directly. Not covered here:
+#   - Windows: bin/skilletor.exe (winlaunch) runs node with dist/ directly; it stays on Node
+#     until winlaunch can try several programs in turn (k169);
 #   - a platform with no pinned binary (macOS x86_64, FreeBSD, ...): straight to Node, Perl;
 #   - sweeping old versions out of the binary cache;
 # Without the pinned checksum file - the state of the repository until a release writes it -
-# there is no version to look for, so neither step 1 nor 2 runs: nothing is downloaded
-# before activation (k191).
+# there is no version to look for, so neither step 1 nor 2 runs: nothing is downloaded and
+# the plugin runs Node, else Perl, as before the wiring.
 #
 # No `set -e`/`set -u`: each step falls through to the next, and a hook must exit 0 on every
 # path - an unset variable under -u exits 2, which a UserPromptSubmit hook reads as "block".
 
-# --- Provisional settings: the dispatcher's choice after the recommendations of k168 (cache
-# location b, trust anchor a) and k167 (asset names, platforms). They hold until the
-# maintainer decides k168 and k169; lower case, so none of them reaches a child's environment.
+# --- Settings. The maintainer chose the cache location (b) and the trust anchor (a) on k168.
+# Provisional until the house binary route replaces them (k167's names): the pinned file's name
+# and format, the release URL, and the asset scheme skilletor-<version>-<os>-<arch> that
+# find_binary builds (os linux|macos, arch x86_64|arm64). Lower case, so none of them reaches
+# a child's environment.
 
 # Trust anchor: the checksums pinned in the plugin, a file next to this starter that the
 # release writes - sha256sum lines "<sha256>  skilletor-<version>-<os>-<arch>", one per
@@ -55,7 +58,7 @@ download_max_time=60
 # A failed SessionStart provision is retried after this modest fixed backoff. Tests inject
 # SKILLETOR_STARTER_NOW rather than sleeping; normal starts use `date +%s`.
 retry_backoff_seconds=900
-# --- end of the provisional settings.
+# --- end of the settings.
 
 fail_status=1
 [ "${1-}" = hook ] && fail_status=0 # a hook never fails (spec §8)
@@ -329,7 +332,7 @@ drop_download() {
   why_binary=$1
 }
 
-# Step 3, with bin/skilletor's checks and messages.
+# Step 3, with the checks and messages bin/skilletor had before it ran this file (k191).
 find_node() {
   if ! command -v node >/dev/null 2>&1; then
     why_node="Node.js is required but was not found on PATH (need >= 18)"

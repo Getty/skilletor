@@ -1,10 +1,13 @@
 // The sh launcher bin/skilletor (spec §10): reached through a symlink – one on PATH, npm link,
 // npm install -g – it still finds dist/ next to the checkout's bin/, not next to the link
-// (k139). Windows starts bin/skilletor.exe instead; these cases are POSIX only.
+// (k139). Since k191 it does so through the starter beside it, bin/skilletor-start (its own
+// cases: test/starter.test.ts). Every case runs a copy without this checkout's pinned
+// checksums: with them the starter would fetch and run the release binary, not dist/.
+// Windows starts bin/skilletor.exe instead; these cases are POSIX only.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { homeEnv } from "./helpers/harness.ts";
@@ -14,20 +17,28 @@ const repo = fileURLToPath(new URL("..", import.meta.url));
 const skip = process.platform === "win32" ? "the sh launcher does not run on Windows" : false;
 
 let tmp: TmpDir;
-// A copy of the launcher in a checkout whose path has a space, with a stub bundle that
-// names itself and echoes its arguments.
+// A copy of the launcher and its starter in a checkout whose path has a space, with a stub
+// bundle that names itself and echoes its arguments.
 let checkout: string;
 let launcher: string;
+
+/** This checkout's bin/skilletor and bin/skilletor-start in `dir`/bin – never its pinned
+ *  checksums (bin/skilletor-binaries.sha256), whether or not a release has written them. */
+function copyLaunchers(dir: string): void {
+  mkdirSync(join(dir, "bin"), { recursive: true });
+  for (const file of ["skilletor", "skilletor-start"]) {
+    copyFileSync(join(repo, "bin", file), join(dir, "bin", file));
+    chmodSync(join(dir, "bin", file), 0o755);
+  }
+}
 
 before(() => {
   tmp = makeTmpDir();
   checkout = join(tmp.dir, "my clone");
-  mkdirSync(join(checkout, "bin"), { recursive: true });
+  copyLaunchers(checkout);
   mkdirSync(join(checkout, "dist"));
   launcher = join(checkout, "bin", "skilletor");
-  copyFileSync(join(repo, "bin", "skilletor"), launcher);
   writeFileSync(join(checkout, "dist", "skilletor.js"), 'console.log(JSON.stringify(["stub", ...process.argv.slice(2)]));\n');
-  chmodSync(launcher, 0o755);
 });
 
 after(() => tmp?.cleanup());
@@ -81,10 +92,17 @@ test("a symlink to the bin/ directory finds the checkout's dist/, not one beside
   assertStub(join(dir, "skilletor-bin", "skilletor"));
 });
 
-test("this checkout's launcher, linked, prints the package version", { skip }, () => {
+test("this checkout's launcher and bundle, linked, print the package version", { skip }, () => {
+  // A copy: the real dist/ and package.json, the launchers without the pinned checksums.
+  const real = join(tmp.dir, "real checkout");
+  copyLaunchers(real);
+  mkdirSync(join(real, "dist"));
+  copyFileSync(join(repo, "dist", "skilletor.js"), join(real, "dist", "skilletor.js"));
+  copyFileSync(join(repo, "package.json"), join(real, "package.json"));
+  assert.ok(!existsSync(join(real, "bin", "skilletor-binaries.sha256")));
   const dir = join(tmp.dir, "real");
   mkdirSync(dir);
-  symlinkSync(join(repo, "bin", "skilletor"), join(dir, "skilletor"));
+  symlinkSync(join(real, "bin", "skilletor"), join(dir, "skilletor"));
   const r = run(join(dir, "skilletor"), ["--version"]);
   assert.equal(r.status, 0, r.stderr);
   const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")) as { version: string };

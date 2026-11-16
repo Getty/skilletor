@@ -1,11 +1,13 @@
-// The plugin starter bin/skilletor-start (k190), prepared and not wired: the release binary
-// cached for the plugin's version, else downloaded once and checked against the checksum
-// pinned in the plugin, else Node, else Perl, else one line – on `hook …` the hook's warning
-// line with exit 0. Every start gets an environment of its own: a temp HOME and
+// The plugin starter bin/skilletor-start (k190): the release binary cached for the plugin's
+// version, else downloaded once and checked against the checksum pinned in the plugin, else
+// Node, else Perl, else one line – on `hook …` the hook's warning line with exit 0. Wired by
+// k191: bin/skilletor, which every hook command names, execs it; the last section starts it the
+// way the harnesses do. Every start gets an environment of its own: a temp HOME and
 // CLAUDE_CONFIG_DIR, and a PATH of symlinked tools, so a case decides which of curl, wget,
 // sha256sum, shasum, node and perl exist. The "binary" is a sh script served by a local HTTP
-// server (or file://); the engines are stubs that print their name, arguments and stdin.
-// POSIX only: Windows starts bin/skilletor.exe (decision k169).
+// server (or file://); the engines are stubs that print their name, arguments and stdin. Every
+// case runs a temp plugin copy, so a pinned checksum file in this checkout changes nothing here.
+// POSIX only: Windows starts bin/skilletor.exe, which runs Node (decision k169).
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
@@ -165,20 +167,32 @@ interface PerlOpts {
 }
 
 interface PluginOpts {
+  /** The plugin directory's name (default "my plugin": its path has a space). */
+  name?: string;
   /** Contents of bin/skilletor-binaries.sha256; absent = no file. */
   pinned?: string;
+  /** bin/skilletor-start: there (default), gone, or there but not executable. */
+  starter?: "missing" | "not-executable";
   /** dist/skilletor.js present (default true). */
   dist?: boolean;
   /** The stub port under perl/ (default: one that loads); false = no perl/. */
   perl?: PerlOpts | false;
 }
 
-/** A plugin checkout – its path has a space – with the real starter and stub engines. */
+/** A plugin checkout – its path has a space – with the real bin/skilletor, starter and hook
+ *  files, and stub engines. Never this checkout's pinned checksums: only `pinned` writes them. */
 function makePlugin(opts: PluginOpts = {}): string {
-  const root = join(fresh("plugin"), "my plugin");
+  const root = join(fresh("plugin"), opts.name ?? "my plugin");
   mkdirSync(join(root, "bin"), { recursive: true });
-  copyFileSync(join(repo, "bin", "skilletor-start"), join(root, "bin", "skilletor-start"));
-  chmodSync(join(root, "bin", "skilletor-start"), 0o755);
+  mkdirSync(join(root, "hooks"));
+  for (const file of ["skilletor", "skilletor-start"]) {
+    if (file === "skilletor-start" && opts.starter === "missing") continue;
+    copyFileSync(join(repo, "bin", file), join(root, "bin", file));
+    chmodSync(join(root, "bin", file), file === "skilletor-start" && opts.starter ? 0o644 : 0o755);
+  }
+  for (const file of ["hooks.json", "codex-hooks.json"]) {
+    copyFileSync(join(repo, "hooks", file), join(root, "hooks", file));
+  }
   if (opts.pinned !== undefined) writeFileSync(join(root, "bin", "skilletor-binaries.sha256"), opts.pinned);
   if (opts.dist !== false) {
     mkdirSync(join(root, "dist"));
@@ -303,24 +317,32 @@ function assertWarmBinary(r: Run, m: Machine, sum: string) {
 
 // --- the file itself -------------------------------------------------------------------------
 
-test("the starter is POSIX sh: it parses under sh -n (and dash, shellcheck when present)", { skip }, () => {
-  const file = starter(repo);
-  execFileSync("sh", ["-n", file]);
-  const dash = ["/bin/dash", "/usr/bin/dash"].find((p) => existsSync(p));
-  if (dash) execFileSync(dash, ["-n", file]);
-  if (spawnSync("shellcheck", ["--version"]).status === 0) {
-    const r = spawnSync("shellcheck", ["-s", "sh", file], { encoding: "utf8" });
-    assert.equal(r.status, 0, r.stdout);
+test("the starter and bin/skilletor are POSIX sh: they parse under sh -n (and dash, shellcheck when present)", { skip }, () => {
+  for (const file of [starter(repo), join(repo, "bin", "skilletor")]) {
+    execFileSync("sh", ["-n", file]);
+    const dash = ["/bin/dash", "/usr/bin/dash"].find((p) => existsSync(p));
+    if (dash) execFileSync(dash, ["-n", file]);
+    if (spawnSync("shellcheck", ["--version"]).status === 0) {
+      const r = spawnSync("shellcheck", ["-s", "sh", file], { encoding: "utf8" });
+      assert.equal(r.status, 0, r.stdout);
+    }
   }
 });
 
-test("prepared, not wired: no hook, launcher, adapter or package entry starts it (k191 wires it)", () => {
+// k190 asserted that nothing wired named the starter. k191 wires it through bin/skilletor: the
+// hooks, npm and the Hermes adapter keep naming bin/skilletor – on Windows a command naming it
+// starts its .exe twin, which the starter has not – and bin/skilletor execs the starter beside
+// it. That every wired entry really ends in the starter, the "wired:" cases below show.
+test("wired (k191): hooks, package and adapter name bin/skilletor, never the starter; bin/skilletor runs the starter", () => {
   for (const file of [
-    "hooks/hooks.json", "hooks/codex-hooks.json", "bin/skilletor", "hermes/skilletor/__init__.py",
+    "hooks/hooks.json", "hooks/codex-hooks.json", "hermes/skilletor/__init__.py",
     "package.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json",
   ]) {
     assert.ok(!readFileSync(join(repo, file), "utf8").includes("skilletor-start"), file);
   }
+  const launcher = readFileSync(join(repo, "bin", "skilletor"), "utf8");
+  assert.match(launcher, /^start=.*\/skilletor-start$/m);
+  assert.match(launcher, /^if \[ -x "\$start" \]; then exec "\$start" "\$@"; fi$/m);
 });
 
 // --- no pinned checksums: Node, nothing fetched ------------------------------------------------
@@ -663,7 +685,7 @@ async function assertLine(root: string, m: Machine, line: string) {
   assert.equal(hook.stdout, JSON.stringify({ systemMessage: line }) + "\n");
 }
 
-test("nothing to run: one line, bin/skilletor's Node message first; exit 1, a hook exit 0", { skip }, async () => {
+test("nothing to run: one line, Node's message first; exit 1, a hook exit 0", { skip }, async () => {
   await assertLine(
     makePlugin(),
     machine(makeTools()),
@@ -717,5 +739,152 @@ test("this machine's own perl: the starter reads its version", { skip: noPerl },
       "skilletor: Node.js is required but was not found on PATH (need >= 18); " +
         `Perl >= 5.40 is required, but found ${found}; no binary checksums are pinned in the plugin.`,
     );
+  }
+});
+
+// --- the wired entry points (k191) ------------------------------------------------------------
+// What a harness or a user starts: every hook of hooks/hooks.json as Claude Code runs it (exec
+// form, ${CLAUDE_PLUGIN_ROOT} replaced, no shell), every hook of hooks/codex-hooks.json as Codex
+// runs it (a shell command, CLAUDE_PLUGIN_ROOT in its environment; under a root without a space,
+// as the command does not quote it), bin/skilletor as a CLI, and bin/skilletor through a link on
+// PATH (npm link, install.sh). The Hermes adapter's way: test/hermes-plugin.test.ts.
+
+interface Entry { label: string; hook: boolean; session: boolean; args: string[]; input: string; run: (env: NodeJS.ProcessEnv) => Promise<Run> }
+
+type HookFile = Record<string, { hooks: { command: string; args?: string[] }[] }[]>;
+const hookFile = (root: string, file: string) =>
+  (JSON.parse(readFileSync(join(root, "hooks", file), "utf8")) as { hooks: HookFile }).hooks;
+
+/** Two plugin copies made with `opts` – one with a space in its path, one for Codex without –
+ *  and every entry point into them, in the order of the hook files. */
+function wiredEntries(opts: PluginOpts = {}): Entry[] {
+  const claudeRoot = makePlugin(opts);
+  const codexRoot = makePlugin({ ...opts, name: "plugin" });
+  const out: Entry[] = [];
+  for (const [event, groups] of Object.entries(hookFile(claudeRoot, "hooks.json"))) {
+    for (const h of groups.flatMap((g) => g.hooks)) {
+      const file = h.command.replace("${CLAUDE_PLUGIN_ROOT}", claudeRoot);
+      const args = h.args ?? [];
+      out.push({
+        label: `hooks.json ${event}`, hook: true, session: event === "SessionStart", args, input: HOOK_INPUT,
+        run: (env) => start(file, args, { ...env, CLAUDE_PLUGIN_ROOT: claudeRoot }, HOOK_INPUT),
+      });
+    }
+  }
+  for (const [event, groups] of Object.entries(hookFile(codexRoot, "codex-hooks.json"))) {
+    for (const h of groups.flatMap((g) => g.hooks)) {
+      out.push({
+        label: `codex-hooks.json ${event}`, hook: true, session: event === "SessionStart",
+        args: h.command.split(" ").slice(1), input: HOOK_INPUT,
+        run: (env) => start("/bin/sh", ["-c", h.command], { ...env, CLAUDE_PLUGIN_ROOT: codexRoot }, HOOK_INPUT),
+      });
+    }
+  }
+  const cli = join(claudeRoot, "bin", "skilletor");
+  const link = join(fresh("on-path"), "skilletor");
+  symlinkSync(cli, link);
+  for (const [label, file] of [["bin/skilletor", cli], ["bin/skilletor linked on PATH", link]]) {
+    out.push({ label, hook: false, session: false, args: CLI_ARGS, input: "", run: (env) => start(file, CLI_ARGS, env) });
+  }
+  return out;
+}
+
+/** Tools as makeTools gives them, and a curl and a wget that only write down that they ran. */
+function fetchRecorder(links: string[] = [], scripts: Record<string, string> = {}) {
+  const record = join(fresh("fetched"), "calls");
+  const shim = `#!/bin/sh\nprintf '%s\\n' "$0 $*" >> '${record}'\nexit 7\n`;
+  const tools = makeTools(links, { ...scripts, curl: shim, wget: shim });
+  const fetched = () => (existsSync(record) ? readFileSync(record, "utf8").split("\n").filter(Boolean) : []);
+  return { tools, fetched };
+}
+
+/** A hook: exit 0, the one line as its systemMessage on stdout. The CLI: exit 1, the line on stderr. */
+function assertFailOpen(r: Run, e: Entry, line: string | RegExp) {
+  if (e.hook) {
+    assert.equal(r.status, 0, `${e.label}: a hook never fails`);
+    assert.equal(r.stderr, "", e.label);
+    const answer = JSON.parse(r.stdout) as Record<string, unknown>;
+    assert.deepEqual(Object.keys(answer), ["systemMessage"], e.label);
+    assert.match(r.stdout, /^\{.*\}\n$/, `${e.label}: one line`);
+    if (typeof line === "string") assert.equal(answer.systemMessage, line, e.label);
+    else assert.match(answer.systemMessage as string, line, e.label);
+  } else {
+    assert.equal(r.status, 1, e.label);
+    assert.equal(r.stdout, "", e.label);
+    if (typeof line === "string") assert.equal(r.stderr, line + "\n", e.label);
+    else assert.match(r.stderr, line, e.label);
+  }
+}
+
+test("wired: without pinned checksums every hook and the CLI run Node, and nothing is fetched", { skip }, async () => {
+  const recorder = fetchRecorder(["node", ...(noBinary ? [] : [SUM])]);
+  const m = machine(recorder.tools);
+  const entries = wiredEntries();
+  assert.equal(entries.length, 8, entries.map((e) => e.label).join(", "));
+  for (const e of entries) assertEngine(await e.run(m.env), "node", e.args, e.input);
+  assert.deepEqual(recorder.fetched(), []);
+  assert.ok(!existsSync(join(m.config, "skilletor")), "no binary cache");
+});
+
+// The state after the first release, while the binary is not cached yet: a pin in the plugin
+// changes nothing a non-start hook does or answers. Only SessionStart and an explicit CLI
+// command may try a download (here one that fails); they answer as without a pin too.
+test("wired: a pinned binary that is not cached – non-start hooks fetch nothing, and every answer is as without a pin", { skip: noBinary }, async () => {
+  const recorder = fetchRecorder(["node", SUM]);
+  const m = machine(recorder.tools, { SKILLETOR_STARTER_NOW: "1000" });
+  const unpinned = wiredEntries();
+  const pinnedEntries = wiredEntries({ pinned: pinned(sha256(BINARY)) });
+  for (const [i, e] of pinnedEntries.entries()) {
+    const without = await unpinned[i]!.run(m.env);
+    const before = recorder.fetched().length;
+    const withPin = await e.run(m.env);
+    assertEngine(withPin, "node", e.args, e.input);
+    assert.deepEqual(withPin, without, e.label);
+    if (e.hook && !e.session) assert.equal(recorder.fetched().length, before, `${e.label} fetched`);
+  }
+  const fetched = recorder.fetched();
+  assert.ok(fetched.length > 0, "SessionStart or the CLI tried the release");
+  for (const call of fetched) assert.ok(call.includes(`https://github.com/Getty/skilletor/releases/download/v${VERSION}/${ASSET}`), call);
+});
+
+test("wired: without Node every hook and the CLI run Perl, and nothing is fetched", { skip: noPerl }, async () => {
+  const recorder = fetchRecorder([], { perl: PERL_540 });
+  const m = machine(recorder.tools);
+  for (const e of wiredEntries()) assertEngine(await e.run(m.env), "perl", e.args, e.input);
+  assert.deepEqual(recorder.fetched(), []);
+});
+
+test("wired: with neither Node nor Perl on PATH a cached, verified binary runs every hook and the CLI", { skip: noBinary }, async () => {
+  const sum = sha256(BINARY);
+  const recorder = fetchRecorder([SUM]);
+  const m = machine(recorder.tools);
+  mkdirSync(versionDir(m), { recursive: true });
+  writeFileSync(join(versionDir(m), cachedName(sum)), BINARY);
+  chmodSync(join(versionDir(m), cachedName(sum)), 0o755);
+  for (const e of wiredEntries({ pinned: pinned(sum) })) assertEngine(await e.run(m.env), "binary", e.args, e.input);
+  assert.deepEqual(recorder.fetched(), []);
+});
+
+test("wired: with nothing to run every hook exits 0 with the one warning line; the CLI exits 1", { skip }, async () => {
+  const recorder = fetchRecorder();
+  const m = machine(recorder.tools, { SKILLETOR_STARTER_NOW: "1000" });
+  const line = "skilletor: Node.js is required but was not found on PATH (need >= 18); " +
+    "perl was not found on PATH (need >= 5.40); no binary checksums are pinned in the plugin.";
+  for (const e of wiredEntries()) assertFailOpen(await e.run(m.env), e, line);
+  assert.deepEqual(recorder.fetched(), []);
+  if (noBinary) return;
+  // Pinned but not cached, and the download fails: the line ends with why, a hook still exits 0.
+  const pinnedRecorder = fetchRecorder([SUM]);
+  const pm = machine(pinnedRecorder.tools, { SKILLETOR_STARTER_NOW: "1000" });
+  const why = /^skilletor: Node\.js is required [^;]*; perl was not found [^;]*; (the pinned binary is not cached|the download of|the last SessionStart binary provision failed).*\.\n?$/;
+  for (const e of wiredEntries({ pinned: pinned(sha256(BINARY)) })) assertFailOpen(await e.run(pm.env), e, why);
+  assert.ok(pinnedRecorder.fetched().length > 0, "SessionStart or the CLI tried the release");
+});
+
+test("wired: bin/skilletor without a runnable starter still exits 0 on every hook, with one line", { skip }, async () => {
+  const m = machine(makeTools(["node"]));
+  const line = "skilletor: bin/skilletor-start is missing or not executable; reinstall skilletor.";
+  for (const starterState of ["missing", "not-executable"] as const) {
+    for (const e of wiredEntries({ starter: starterState })) assertFailOpen(await e.run(m.env), e, line);
   }
 });

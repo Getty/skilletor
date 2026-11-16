@@ -1,31 +1,19 @@
 #!/bin/sh
-# skilletor launcher: require Node.js >= 18, then run the bundled CLI.
+# skilletor: the command the plugin's hooks (hooks/hooks.json, hooks/codex-hooks.json), the
+# Hermes adapter in a checkout, npm and a link on PATH run. It hands over to bin/skilletor-start
+# beside it, which picks the engine: the cached release binary, else Node.js >= 18 with dist/,
+# else Perl >= 5.40 with perl/ (k191). The hooks keep naming this file because Windows starts
+# its .exe twin for it, and the starter has none.
 #
-# On Windows, Claude Code and PowerShell/cmd start bin/skilletor.exe (winlaunch)
-# instead, which runs the bundle with the first node.exe on PATH:
+# On Windows, Claude Code and PowerShell/cmd start bin/skilletor.exe (winlaunch) instead, which
+# runs the bundle with the first node.exe on PATH - Windows stays on Node until winlaunch can try
+# several programs in turn (k169):
 # winlaunch: run node {root}/dist/skilletor.js
-set -eu
+#
+# No `set -e`/`set -u`: a hook exits 0 on every path (spec §8), as in the starter.
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "skilletor: Node.js is required but was not found on PATH (need >= 18)." >&2
-  exit 1
-fi
-
-major=$(node -e 'process.stdout.write(String(process.versions.node.split(".")[0]))' 2>/dev/null || true)
-case "$major" in
-  '' | *[!0-9]*)
-    echo "skilletor: could not determine the Node.js version (need >= 18)." >&2
-    exit 1
-    ;;
-esac
-
-if [ "$major" -lt 18 ]; then
-  echo "skilletor: Node.js >= 18 is required, but found $(node --version)." >&2
-  exit 1
-fi
-
-# Follow our own symlink chain (a link on PATH, npm link, npm install -g) to the real
-# file: dist/ sits next to the checkout's bin/, not the link's. No `readlink -f` (macOS
+# Follow our own symlink chain (a link on PATH, npm link, npm install -g) to the real file: the
+# starter sits next to the checkout's bin/skilletor, not the link's. No `readlink -f` (macOS
 # sh has none); a relative target is relative to the directory of the link naming it.
 self=$0
 while [ -L "$self" ]; do
@@ -35,6 +23,15 @@ while [ -L "$self" ]; do
     *) self=$(dirname -- "$self")/$target ;;
   esac
 done
+start=$(CDPATH='' cd -P -- "$(dirname -- "$self")" && pwd)/skilletor-start
+if [ -x "$start" ]; then exec "$start" "$@"; fi
 
-root=$(CDPATH= cd -P -- "$(dirname -- "$self")/.." && pwd)
-exec node "$root/dist/skilletor.js" "$@"
+# A plugin without its starter: the starter's own last resort - on `hook ...` the hook's one
+# warning line on stdout with exit 0, else the line on stderr with exit 1.
+message="skilletor: bin/skilletor-start is missing or not executable; reinstall skilletor."
+if [ "${1-}" = hook ]; then
+  printf '{"systemMessage":"%s"}\n' "$message"
+  exit 0
+fi
+printf '%s\n' "$message" >&2
+exit 1
