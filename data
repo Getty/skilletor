@@ -1,0 +1,34 @@
+---
+class: standard
+completed: 2026-11-16T18:49:52Z
+created: 2026-11-13T20:42:04Z
+id: 168
+priority: high
+started: 2026-11-16T18:49:18Z
+status: done
+tags:
+- decision
+- binary
+- starter
+title: 'Decision: where the starter keeps the binary, which checksum it trusts'
+updated: 2026-11-16T18:49:52Z
+---
+
+Decision for the maintainer: options and a recommendation, not decided here.
+
+The plugin starter downloads the release binary once and runs it from then on, at every SessionStart and every UserPromptSubmit.
+
+1. Trust anchor for the checksum.
+   (a) Checksums pinned in the plugin. The release writes them into the plugin after the binary build: one line per platform, for version X. The plugin a user installs then names the exact bytes it will run.
+       Cost: a two-step release (tag vX, build, commit the checksums, marketplace entry at that commit). Without reproducible builds the tag itself does not contain them.
+   (b) SHA256SUMS fetched from the same GitHub release. This checks integrity only: whoever can replace the release assets can replace both files. GitHub's immutable releases make that harder.
+   (c) (b) plus an artifact attestation check. It needs `gh` on the user's machine, so no.
+   Recommendation: (a). A hook that downloads and runs a binary on every machine should run only bytes the installed plugin commit names.
+
+2. Where the binary lives.
+   (a) $CLAUDE_PLUGIN_DATA. Claude Code's per-plugin data dir; winlaunch knows it as {data}. But Codex and Hermes start the same bin/skilletor and may not set it.
+   (b) <claudeConfigDir>/skilletor/bin/<version>/, beside the state and the cache, shared by every harness.
+   (c) Next to the starter in the plugin dir. Replaced on every plugin update, and possibly read-only.
+   Recommendation: (b). Old versions are swept like the cache.
+
+2026-11-16 18:49 Maintainer decision 2026-11-16 (via the perl-developer hub, design ~/dev/perl-developer/docs/superpowers/specs/2026-11-16-ack-paket-design.md): (a) checksums pinned in the plugin (two-step release), (b) cache <claudeConfigDir>/skilletor/bin/<version>/.
