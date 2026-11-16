@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-16T02:06:32Z
+claimed_by: skilletor-sol-render-cli
+class: standard
+completed: 2026-11-16T02:06:32Z
+created: 2026-11-13T21:02:59Z
+id: 193
+priority: low
+started: 2026-11-16T00:12:26Z
+status: done
+tags:
+- cli
+- bug
+- ts
+title: Non-hook commands from a removed cwd exit 1 with a stack trace
+updated: 2026-11-16T02:06:32Z
+---
+
+Found on k164 (2026-11-13). Any command without --project-dir (e.g. skilletor status) run from a cwd that no longer exists exits 1 with a stack trace: makeContext (src/cli.ts) calls projectRootOf(process.cwd()) outside run()'s try. Decide the wording (e.g. "skilletor: the current directory no longer exists; pass --project-dir"), exit code per the k170 contract, a black-box test; the Perl CLI mirrors it.
+
+Worker moved context creation into the CLI error boundary and selected: skilletor: the current directory no longer exists; pass --project-dir <dir>. GREEN assertions reported in Node/Perl. Individual pre-fix RED was not recorded because the combined regression stopped at k192; this evidence limitation is explicit in the review report. Independent review and final integration gates pending; no commit yet.
+
+Independent task review: spec compliant and quality approved, no findings. Main independently reran5 focused Node regressions and35 Perl tests across t53/t68: all PASS,0 skips,0 TODOs; diff-check clean. Historical individual k193 RED remains unrecorded, but review confirms the exact diagnostic assertion rejects the previous stack path. Coordinator added case241 index and documented the deleted-cwd fixture limitation. Final combined gates/dist refresh and commit still pending.
+
+Committed as d392166 after implementation review and final corrected-code approval. Commands needing project context now report a removed cwd cleanly while early --help and --version handling remains outside that path. Gates passed: Node 1332 pass, 0 fail, 3 explicit skips; Perl 49 files and 2699 tests, 0 TODO; typecheck, build, check-dist and diff-check passed.
