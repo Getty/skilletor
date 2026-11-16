@@ -1,12 +1,16 @@
 // The plugin starter bin/skilletor-start (k190): the release binary cached for the plugin's
-// version, else downloaded once and checked against the checksum pinned in the plugin, else
-// Node, else Perl, else one line – on `hook …` the hook's warning line with exit 0. Wired by
-// k191: bin/skilletor, which every hook command names, execs it; the last section starts it the
-// way the harnesses do. Every start gets an environment of its own: a temp HOME and
-// CLAUDE_CONFIG_DIR, and a PATH of symlinked tools, so a case decides which of curl, wget,
-// sha256sum, shasum, node and perl exist. The "binary" is a sh script served by a local HTTP
-// server (or file://); the engines are stubs that print their name, arguments and stdin. Every
-// case runs a temp plugin copy, so a pinned checksum file in this checkout changes nothing here.
+// version, else downloaded once – by a CLI command, by SessionStart in the background, never by
+// --version – and checked against the checksum pinned in the plugin (the house route's
+// SHA256SUMS), else Node, else Perl (lib/, script/skilletor), else one line – on `hook …` the
+// hook's warning line with exit 0. Wired by k191: bin/skilletor, which every hook command names,
+// execs it; the last section starts it the way the harnesses do. Every start gets an
+// environment of its own: a temp HOME and CLAUDE_CONFIG_DIR, and a PATH of symlinked tools, so
+// a case decides which of curl, wget, sha256sum, shasum, setsid, node and perl exist (with
+// neither setsid nor perl a SessionStart provision is a plain background start). A case that
+// starts one waits for what it leaves before it ends. The "binary" is a sh script served by a
+// local HTTP server (or file://); the engines are stubs that print their name, arguments and
+// stdin. Every case runs a temp plugin copy, so a pinned checksum file in this checkout changes
+// nothing here.
 // POSIX only: Windows starts bin/skilletor.exe, which runs Node (decision k169).
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -27,7 +31,8 @@ const skip = process.platform === "win32" ? "the sh starter does not run on Wind
 const OS = process.platform === "linux" ? "linux" : process.platform === "darwin" ? "macos" : "";
 const ARCH = process.arch === "x64" ? "x86_64" : process.arch === "arm64" ? "arm64" : "";
 const noBinary = skip || (!OS || !ARCH ? `no binary is built for ${process.platform}-${process.arch}` : false);
-const VERSION = "9.8.7";
+/** A dist version, as the house binary route names its assets with. */
+const VERSION = "9.876";
 const ASSET = `skilletor-${VERSION}-${OS}-${ARCH}`;
 const HOOK_INPUT = '{"cwd":"/nowhere","prompt":"hi"}';
 const CLI_ARGS = ["status", "--json"];
@@ -63,10 +68,11 @@ const noShasum = noBinary || (findOnPath("shasum") ? false : "no shasum on PATH"
 /** The checksum tool the cases link: sha256sum, else (macOS) shasum. */
 const SUM = findOnPath("sha256sum") ? "sha256sum" : "shasum";
 
-/** The stand-in for the PAR binary: `--version` "unpacks" into $PAR_GLOBAL_TEMP (a marker), a
- *  run says whether it found the unpacked files there – `warm` – or had to unpack – `cold`. */
+/** The stand-in for the PAR binary: `--version` (or `-v`) "unpacks" into $PAR_GLOBAL_TEMP (a
+ *  marker) and prints the version, a run says whether it found the unpacked files there – `warm`
+ *  – or had to unpack – `cold`. */
 const BINARY = `#!/bin/sh
-if [ "$1" = --version ]; then mkdir -p "$PAR_GLOBAL_TEMP" && : >"$PAR_GLOBAL_TEMP/unpacked"; echo ${VERSION}; exit 0; fi
+case $1 in --version | -v) mkdir -p "$PAR_GLOBAL_TEMP" && : >"$PAR_GLOBAL_TEMP/unpacked"; echo ${VERSION}; exit 0 ;; esac
 if [ -f "$PAR_GLOBAL_TEMP/unpacked" ]; then state=warm; else state=cold; fi
 printf 'binary %s | %s\\npar %s %s\\n' "$*" "$(cat)" "$PAR_GLOBAL_TEMP" "$state"
 `;
@@ -85,10 +91,11 @@ const fresh = (name: string) => {
 
 // --- the server: one route per case, a hit count per route; a `hold` route answers only once
 // that many requests wait (or after 5 s), so two starts are inside their downloads at once; a
-// `stall` route sends the first bytes and then nothing.
+// `gate` route answers only once the case releases it; a `stall` route sends the first bytes
+// and then nothing.
 let server: Server;
 let base: string;
-interface Route { body: string; hold?: number; stall?: boolean; waiting: (() => void)[] }
+interface Route { body: string; hold?: number; gate?: boolean; stall?: boolean; waiting: (() => void)[] }
 const routes = new Map<string, Route>();
 const hits = new Map<string, number>();
 
@@ -109,6 +116,10 @@ before(async () => {
       return;
     }
     const send = (): ServerResponse => res.end(route.body);
+    if (route.gate) {
+      route.waiting.push(send);
+      return;
+    }
     if (!route.hold) return send();
     route.waiting.push(send);
     const flush = () => route.waiting.splice(0).forEach((f) => f());
@@ -127,11 +138,25 @@ after(async () => {
   tmp?.cleanup();
 });
 
-/** Serve `body` as this case's asset; returns the base URL to give the starter, and its hits. */
-function serve(body: string, how: { hold?: number; stall?: boolean } = {}) {
+/** Serve `body` as this case's asset; returns the base URL to give the starter, its hits, and
+ *  `release` for a gate: the waiting requests are answered, later ones at once. */
+function serve(body: string, how: { hold?: number; gate?: boolean; stall?: boolean } = {}) {
   const prefix = `/case-${++n}`;
-  routes.set(`${prefix}/${ASSET}`, { body, ...how, waiting: [] });
-  return { url: base + prefix, hits: () => hits.get(`${prefix}/${ASSET}`) ?? 0 };
+  const route: Route = { body, ...how, waiting: [] };
+  routes.set(`${prefix}/${ASSET}`, route);
+  const release = () => {
+    route.gate = false;
+    route.waiting.splice(0).forEach((f) => f());
+  };
+  return { url: base + prefix, hits: () => hits.get(`${prefix}/${ASSET}`) ?? 0, release };
+}
+
+/** Wait until `done()` holds – what a background provision leaves once it ends – or fail. */
+async function until(done: () => boolean, what: string, ms = 10_000): Promise<void> {
+  for (let waited = 0; !done(); waited += 20) {
+    assert.ok(waited < ms, `${what}: not within ${ms} ms`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }
 
 /** A base URL nothing listens on: the machine is offline. */
@@ -143,14 +168,15 @@ async function offlineUrl(): Promise<string> {
   return `http://127.0.0.1:${port}`;
 }
 
-/** The pinned file: the tarball's line first (skipped) and another platform's, then ours. */
+/** The platforms the house binary route builds for skilletor, in its order. */
+const PLATFORMS = ["linux-x86_64", "linux-arm64", "macos-arm64", "windows-x86_64"];
+
+/** The pinned file as the release's SHA256SUMS is: a line per binary, in the house order, the
+ *  Windows one with .exe; `sum` on this machine's line, named `asset` (ours by default). */
 function pinned(sum: string, asset = ASSET): string {
-  return [
-    `${sha256("tarball")}  ${asset}.tar.gz`,
-    `${sha256("windows")}  skilletor-${VERSION}-windows-x86_64.exe`,
-    `${sum}  ${asset}`,
-    "",
-  ].join("\n");
+  const names = PLATFORMS.map((p) => `skilletor-${VERSION}-${p}${p.startsWith("windows") ? ".exe" : ""}`);
+  if (!names.includes(ASSET)) names.unshift(ASSET); // a platform the route does not build (macOS x86_64)
+  return names.map((name) => (name === ASSET ? `${sum}  ${asset}` : `${sha256(name)}  ${name}`)).join("\n") + "\n";
 }
 
 /** The stub port's cpanfile: core modules at runtime, and a test-phase module that is nowhere –
@@ -162,7 +188,7 @@ const CPANFILE =
 interface PerlOpts {
   /** The port module that does not compile: a dependency of its own is missing. */
   broken?: "Skilletor::CLI" | "Skilletor::Engine";
-  /** perl/cpanfile; null = none (default CPANFILE). */
+  /** cpanfile; null = none (default CPANFILE). */
   cpanfile?: string | null;
 }
 
@@ -175,7 +201,8 @@ interface PluginOpts {
   starter?: "missing" | "not-executable";
   /** dist/skilletor.js present (default true). */
   dist?: boolean;
-  /** The stub port under perl/ (default: one that loads); false = no perl/. */
+  /** The stub port at the root – lib/, script/skilletor, cpanfile – (default: one that loads);
+   *  false = none of them. */
   perl?: PerlOpts | false;
 }
 
@@ -203,23 +230,23 @@ function makePlugin(opts: PluginOpts = {}): string {
   }
   const perl = opts.perl ?? {};
   if (perl) {
-    mkdirSync(join(root, "perl", "bin"), { recursive: true });
-    mkdirSync(join(root, "perl", "lib", "Skilletor"), { recursive: true });
+    mkdirSync(join(root, "script"));
+    mkdirSync(join(root, "lib", "Skilletor"), { recursive: true });
     writeFileSync(
-      join(root, "perl", "bin", "skilletor"),
+      join(root, "script", "skilletor"),
       "use strict;\nuse warnings;\nuse Skilletor::CLI;\nexit Skilletor::CLI::run(@ARGV);\n",
     );
     const head = (module: string) =>
       `package ${module};\nuse strict;\nuse warnings;\n` +
       (perl.broken === module ? "use Skilletor::Some::Missing::Dependency;\n" : "");
     writeFileSync(
-      join(root, "perl", "lib", "Skilletor", "CLI.pm"),
+      join(root, "lib", "Skilletor", "CLI.pm"),
       head("Skilletor::CLI") +
         "sub run { my $in = do { local $/; <STDIN> }; $in = '' unless defined $in; print \"perl @_ | $in\\n\"; return 0 }\n1;\n",
     );
     // The CLI loads it only for a command that runs it, as the real port does.
-    writeFileSync(join(root, "perl", "lib", "Skilletor", "Engine.pm"), head("Skilletor::Engine") + "1;\n");
-    if (perl.cpanfile !== null) writeFileSync(join(root, "perl", "cpanfile"), perl.cpanfile ?? CPANFILE);
+    writeFileSync(join(root, "lib", "Skilletor", "Engine.pm"), head("Skilletor::Engine") + "1;\n");
+    if (perl.cpanfile !== null) writeFileSync(join(root, "cpanfile"), perl.cpanfile ?? CPANFILE);
   }
   return root;
 }
@@ -403,11 +430,15 @@ test("a failed SessionStart provision backs off by version and platform while CL
   const s = serve(BINARY.replace("warm", "evil"));
   const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url, SKILLETOR_STARTER_NOW: "1000" });
   const session = (now: string) => ({ ...m.env, SKILLETOR_STARTER_NOW: now });
+  const failedAt = (now: string) => () => existsSync(retryFile(m)) && readFileSync(retryFile(m), "utf8") === `${now}\n`;
 
+  // The download runs in the background: the hook has answered by then, the failure is recorded
+  // when it ends.
   assertEngine(await start(starter(root), SESSION_START_ARGS, session("1000"), HOOK_INPUT), "node", SESSION_START_ARGS, HOOK_INPUT);
+  await until(failedAt("1000"), "the background provision records its failure");
   assert.equal(s.hits(), 1);
-  assert.equal(readFileSync(retryFile(m), "utf8"), "1000\n");
 
+  // Backed off before anything starts: nothing runs in the background to wait for.
   assertEngine(await start(starter(root), SESSION_START_ARGS, session("1001"), HOOK_INPUT), "node", SESSION_START_ARGS, HOOK_INPUT);
   assert.equal(s.hits(), 1, "a repeated SessionStart is backed off");
 
@@ -415,7 +446,8 @@ test("a failed SessionStart provision backs off by version and platform while CL
   assert.equal(s.hits(), 2, "an explicit CLI command retries immediately");
 
   assertEngine(await start(starter(root), SESSION_START_ARGS, session("1900"), HOOK_INPUT), "node", SESSION_START_ARGS, HOOK_INPUT);
-  assert.equal(s.hits(), 3, "the 15-minute backoff expires without a sleep");
+  await until(failedAt("1900"), "the 15-minute backoff expires without a sleep");
+  assert.equal(s.hits(), 3);
 });
 
 test("noncanonical retry timestamps never crash SessionStart hooks", { skip: noBinary }, async () => {
@@ -431,9 +463,11 @@ test("noncanonical retry timestamps never crash SessionStart hooks", { skip: noB
     writeFileSync(retryFile(m), `${failedAt}\n`);
 
     const r = await start(starter(root), SESSION_START_ARGS, m.env, HOOK_INPUT);
-    assertEngine(r, "binary", SESSION_START_ARGS, HOOK_INPUT);
-    assert.equal(s.hits(), 1, `${failedAt}/${now} permits a verified retry`);
-    assert.ok(!existsSync(retryFile(m)), "a successful retry clears malformed state");
+    assertEngine(r, "node", SESSION_START_ARGS, HOOK_INPUT);
+    await until(() => existsSync(join(versionDir(m), cachedName(sum))) && !existsSync(retryFile(m)),
+      `${failedAt}/${now} permits a verified retry, which clears the malformed state`);
+    assert.equal(s.hits(), 1);
+    assertEngine(await start(starter(root), HOOK_ARGS, m.env, HOOK_INPUT), "binary", HOOK_ARGS, HOOK_INPUT);
   }
 });
 
@@ -448,6 +482,8 @@ test("a directory retry state cannot break a failed SessionStart fallback", { sk
   mkdirSync(retryFile(m));
 
   assertEngine(await start(starter(root), SESSION_START_ARGS, m.env, HOOK_INPUT), "node", SESSION_START_ARGS, HOOK_INPUT);
+  // The failure's record ends inside the directory (mv into it): the provision is over.
+  await until(() => readdirSync(retryFile(m)).length > 0, "the background provision ends");
   assert.equal(s.hits(), 1);
   assert.ok(statSync(retryFile(m)).isDirectory(), "bad retry state is left alone when it cannot be replaced");
 });
@@ -476,6 +512,19 @@ test("a pinned binary is downloaded once, checked, warmed and then run from the 
   assertWarmBinary(hook, m, sum);
   assertWarmBinary(cli, m, sum);
   assert.equal(s.hits(), 1, "downloaded once");
+  assertCached(m, sum, BINARY);
+});
+
+test("the release's SHA256SUMS as is: another binary of the dist and the .exe line are passed over", { skip: noBinary }, async () => {
+  const sum = sha256(BINARY);
+  // Sorted by name, as the house route writes it, a dist's second binary would follow ours –
+  // here it comes first, for this platform too, and is still not taken.
+  const other = `skilletor-helper-${VERSION}-${OS}-${ARCH}`;
+  const root = makePlugin({ pinned: `${sha256(other)}  ${other}\n` + pinned(sum) });
+  const s = serve(BINARY);
+  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  assertEngine(await start(starter(root), CLI_ARGS, m.env), "binary", CLI_ARGS, "");
+  assert.equal(s.hits(), 1);
   assertCached(m, sum, BINARY);
 });
 
@@ -565,26 +614,93 @@ test("two first starts at once each download into a temp file of their own; one 
 
 // --- a download that does not happen or fails: Node, nothing left behind ---------------------
 
-test("a stopped SessionStart download removes its temp file, backs off and still exits 0", { skip: noBinary }, async () => {
+/** Start bin/skilletor's SessionStart hook as Hermes does – a process group of its own – and
+ *  collect its answer; fails if it has not answered within `ms`. */
+async function sessionStartInGroup(root: string, env: NodeJS.ProcessEnv, ms = 10_000) {
+  const child = spawn(join(root, "bin", "skilletor"), SESSION_START_ARGS, { cwd: tmp.dir, env, detached: true });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (d: string) => (stdout += d));
+  child.stderr.setEncoding("utf8").on("data", (d: string) => (stderr += d));
+  child.stdin.end(HOOK_INPUT);
+  let timer: NodeJS.Timeout | undefined;
+  const status = await Promise.race([
+    new Promise<number | null>((resolve) => child.on("close", resolve)),
+    new Promise<"late">((resolve) => (timer = setTimeout(() => resolve("late"), ms))),
+  ]);
+  clearTimeout(timer);
+  assert.notEqual(status, "late", `the SessionStart hook did not answer within ${ms} ms`);
+  return { group: child.pid!, run: { status: status as number | null, stdout, stderr } };
+}
+
+/** How the starter leaves a SessionStart provision running: [label, the tools it needs, whether
+ *  it is out of the hook's process group]. null: this machine has not the tool. */
+const DETACHERS: [string, string[] | null, boolean][] = [
+  ["setsid(1)", findOnPath("setsid") ? ["setsid"] : null, true],
+  ["perl's setsid()", realPerl ? ["perl"] : null, true],
+  ["neither: a plain background start", [], false],
+];
+
+// The SessionStart budget (k191): the download may take download_max_time and the warm-up more,
+// against hook limits of 30 s (Hermes 20 s) that the sync shares. So the hook never waits: it
+// starts the provision in the background and answers with Node; the binary runs from the next
+// start on. Here the download is held open until the hook has answered – a hook that waited for
+// it would not answer at all – and then the hook's process group is killed, as Hermes kills a
+// hook that ran out of time.
+test("SessionStart provisions in the background: the hook answers first; out of its process group the provision survives a kill of it", { skip: noBinary }, async () => {
+  for (const [label, detacher, survives] of DETACHERS) {
+    if (!detacher) continue; // this machine has not the tool: the other detachers still run
+    const sum = sha256(BINARY);
+    const root = makePlugin({ pinned: pinned(sum) });
+    const s = serve(BINARY, { gate: true });
+    const m = machine(makeTools(["node", "curl", SUM, ...detacher]), { SKILLETOR_BINARY_BASE_URL: s.url });
+    const { group, run } = await sessionStartInGroup(root, m.env);
+    assertEngine(run, "node", SESSION_START_ARGS, HOOK_INPUT);
+    await until(() => s.hits() === 1, `${label}: the background download asks for the asset`);
+    try {
+      process.kill(-group, "SIGKILL");
+    } catch {
+      // the group is empty: nothing of the hook is left in it
+    }
+    s.release();
+    if (survives) {
+      await until(() => existsSync(join(versionDir(m), cachedName(sum))), `${label}: the provision completes`);
+    } else {
+      // Gone with the hook: no binary, no backoff recorded - the next SessionStart tries again.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.ok(!existsSync(join(versionDir(m), cachedName(sum))), `${label}: killed with the hook's group`);
+      assert.ok(!existsSync(retryFile(m)), `${label}: a killed provision records no backoff`);
+      assertEngine(await start(starter(root), SESSION_START_ARGS, m.env, HOOK_INPUT), "node", SESSION_START_ARGS, HOOK_INPUT);
+      await until(() => existsSync(join(versionDir(m), cachedName(sum))), `${label}: the next SessionStart provisions`);
+      assert.equal(s.hits(), 2, label);
+    }
+    await until(() => readdirSync(versionDir(m)).length === 2, `${label}: the provision ends`);
+    assertCached(m, sum, BINARY);
+    const next = await start(starter(root), HOOK_ARGS, m.env, HOOK_INPUT);
+    assertEngine(next, "binary", HOOK_ARGS, HOOK_INPUT);
+    assertWarmBinary(next, m, sum);
+  }
+});
+
+test("a background provision stopped by SIGTERM removes its temp file and backs off", { skip: noBinary }, async () => {
+  const detacher = DETACHERS.find(([, tools, out]) => tools && out)?.[1];
+  if (!detacher) return; // neither setsid nor perl: the provision would share the hook's group
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve(BINARY, { stall: true });
-  const m = machine(makeTools(["node", "curl", SUM]), {
+  const m = machine(makeTools(["node", "curl", SUM, ...detacher]), {
     SKILLETOR_BINARY_BASE_URL: s.url,
     SKILLETOR_STARTER_NOW: "1000",
   });
-  // Its own process group: stopped as a harness stops a hook that ran out of time, curl with it.
-  const child = spawn(starter(root), SESSION_START_ARGS, { cwd: tmp.dir, env: m.env, detached: true });
-  const closed = new Promise<number | null>((resolve) => child.on("close", resolve));
-  child.stdin.end(HOOK_INPUT);
+  const { run } = await sessionStartInGroup(root, m.env);
+  assertEngine(run, "node", SESSION_START_ARGS, HOOK_INPUT);
   const temp = () => (existsSync(versionDir(m)) ? readdirSync(versionDir(m)) : []).filter((f) => f.endsWith(".tmp"));
-  for (let waited = 0; temp().length === 0; waited += 20) {
-    assert.ok(waited < 5_000, "the download never started");
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  process.kill(-child.pid!, "SIGTERM");
-  assert.equal(await closed, 0);
-  assert.ok(!existsSync(versionDir(m)) || temp().length === 0, "no temp file left");
-  assert.equal(readFileSync(retryFile(m), "utf8"), "1000\n", "a stopped SessionStart backs off the next provision");
+  await until(() => temp().length === 1, "the stalled download has its temp file");
+  // .<asset>.<pid>.tmp: the provision's own pid, which leads a session and a group of its own.
+  const pid = Number(/\.(\d+)\.tmp$/.exec(temp()[0]!)![1]);
+  process.kill(-pid, "SIGTERM"); // as a shutdown stops it, curl with it
+  await until(() => existsSync(retryFile(m)), "a stopped provision backs off the next one");
+  assert.equal(readFileSync(retryFile(m), "utf8"), "1000\n");
+  assert.deepEqual(temp(), [], "no temp file left");
 });
 
 test("a checksum mismatch is refused, leaves nothing behind, and Node runs", { skip: noBinary }, async () => {
@@ -644,6 +760,8 @@ test("no pinned line for this platform, or a malformed one: no download, Node ru
     pinned(sha256(BINARY), `skilletor-${VERSION}-plan9-mips`),
     pinned("F".repeat(64)),
     pinned(sha256(BINARY), `skilletor-..-${OS}-${ARCH}`),
+    pinned(sha256(BINARY), `skilletor-helper-${VERSION}-${OS}-${ARCH}`), // another binary's line only
+    pinned(sha256(BINARY), `skilletor-${VERSION}_-${OS}-${ARCH}`),
   ]) {
     const m = machine(tools, { SKILLETOR_BINARY_BASE_URL: s.url });
     assertBoth(await cliThenHook(makePlugin({ pinned: file }), m), "node");
@@ -712,8 +830,8 @@ test("a Perl port that cannot run – a module, a dependency or its version, a f
     // cpanfile names it.
     [{ cpanfile: CPANFILE + "requires 'Skilletor::Test::Lazy::Dependency';\n" }, "Skilletor::Test::Lazy::Dependency is missing"],
     [{ cpanfile: CPANFILE.replace("'2.0'", "'999'") }, "JSON::PP is older than 999"],
-    [{ cpanfile: null }, "perl/cpanfile is missing"],
-    [false, "perl/bin/skilletor is missing"],
+    [{ cpanfile: null }, "cpanfile is missing"],
+    [false, "script/skilletor is missing"],
   ];
   for (const [perl, problem] of cases) {
     await assertLine(
@@ -827,8 +945,10 @@ test("wired: without pinned checksums every hook and the CLI run Node, and nothi
 });
 
 // The state after the first release, while the binary is not cached yet: a pin in the plugin
-// changes nothing a non-start hook does or answers. Only SessionStart and an explicit CLI
-// command may try a download (here one that fails); they answer as without a pin too.
+// changes nothing a non-start hook does or answers. Only SessionStart (in the background) and an
+// explicit CLI command may try a download (here one that fails); they answer as without a pin
+// too. A SessionStart's background provision is waited for before the next entry runs: its
+// recorded failure is what it leaves once it ends.
 test("wired: a pinned binary that is not cached – non-start hooks fetch nothing, and every answer is as without a pin", { skip: noBinary }, async () => {
   const recorder = fetchRecorder(["node", SUM]);
   const m = machine(recorder.tools, { SKILLETOR_STARTER_NOW: "1000" });
@@ -840,11 +960,50 @@ test("wired: a pinned binary that is not cached – non-start hooks fetch nothin
     const withPin = await e.run(m.env);
     assertEngine(withPin, "node", e.args, e.input);
     assert.deepEqual(withPin, without, e.label);
+    if (e.session) await until(() => existsSync(retryFile(m)), `${e.label}: the background provision ends`);
     if (e.hook && !e.session) assert.equal(recorder.fetched().length, before, `${e.label} fetched`);
   }
   const fetched = recorder.fetched();
   assert.ok(fetched.length > 0, "SessionStart or the CLI tried the release");
-  for (const call of fetched) assert.ok(call.includes(`https://github.com/Getty/skilletor/releases/download/v${VERSION}/${ASSET}`), call);
+  // The house route tags a release with the bare version.
+  for (const call of fetched) assert.ok(call.includes(`https://github.com/Getty/skilletor/releases/download/${VERSION}/${ASSET}`), call);
+});
+
+// --version and -v answer from the runtime that runs, as it prints them – ack-doctor reads it
+// (hub finding ACK c14) – and never provision: a pin without a cached binary fetches nothing.
+test("wired: --version and -v never provision; they answer from Node, else Perl, else a cached binary, as the engine prints it", { skip: noBinary }, async () => {
+  const sum = sha256(BINARY);
+  for (const flag of ["--version", "-v"]) {
+    const root = makePlugin({ pinned: pinned(sum) });
+    const cli = join(root, "bin", "skilletor");
+    const answer = (stdout: string): Run => ({ status: 0, stdout, stderr: "" });
+
+    const withNode = fetchRecorder(["node", SUM]);
+    const m = machine(withNode.tools);
+    assert.deepEqual(await start(cli, [flag], m.env), answer(`node ${flag} | \n`), `${flag}: Node`);
+    assert.deepEqual(withNode.fetched(), [], `${flag}: nothing fetched with Node`);
+    assert.ok(!existsSync(join(m.config, "skilletor")), `${flag}: no binary cache state`);
+
+    if (realPerl) {
+      const withPerl = fetchRecorder([SUM], { perl: PERL_540 });
+      assert.deepEqual(await start(cli, [flag], machine(withPerl.tools).env), answer(`perl ${flag} | \n`), `${flag}: Perl`);
+      assert.deepEqual(withPerl.fetched(), [], `${flag}: nothing fetched with Perl`);
+    }
+
+    // Nothing to run: the line, and still no download.
+    const bare = fetchRecorder([SUM]);
+    const r = await start(cli, [flag], machine(bare.tools).env);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /; the pinned binary is not cached; a SessionStart hook or a CLI command other than --version fetches it\.\n$/);
+    assert.deepEqual(bare.fetched(), [], `${flag}: nothing fetched with nothing to run`);
+
+    // A cached, verified binary answers itself, before Node.
+    mkdirSync(versionDir(m), { recursive: true });
+    writeFileSync(join(versionDir(m), cachedName(sum)), BINARY);
+    chmodSync(join(versionDir(m), cachedName(sum)), 0o755);
+    assert.deepEqual(await start(cli, [flag], m.env), answer(`${VERSION}\n`), `${flag}: the binary`);
+    assert.deepEqual(withNode.fetched(), []);
+  }
 });
 
 test("wired: without Node every hook and the CLI run Perl, and nothing is fetched", { skip: noPerl }, async () => {
@@ -877,7 +1036,10 @@ test("wired: with nothing to run every hook exits 0 with the one warning line; t
   const pinnedRecorder = fetchRecorder([SUM]);
   const pm = machine(pinnedRecorder.tools, { SKILLETOR_STARTER_NOW: "1000" });
   const why = /^skilletor: Node\.js is required [^;]*; perl was not found [^;]*; (the pinned binary is not cached|the download of|the last SessionStart binary provision failed).*\.\n?$/;
-  for (const e of wiredEntries({ pinned: pinned(sha256(BINARY)) })) assertFailOpen(await e.run(pm.env), e, why);
+  for (const e of wiredEntries({ pinned: pinned(sha256(BINARY)) })) {
+    assertFailOpen(await e.run(pm.env), e, why);
+    if (e.session) await until(() => existsSync(retryFile(pm)), `${e.label}: the background provision ends`);
+  }
   assert.ok(pinnedRecorder.fetched().length > 0, "SessionStart or the CLI tried the release");
 });
 

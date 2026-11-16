@@ -3,17 +3,20 @@
 # match wins:
 #   1. the release binary of the plugin's version for this platform, cached under
 #      <claudeConfigDir>/skilletor/bin/<version>/ and rechecked against its pinned checksum;
-#   2. else that binary, downloaded only by an explicit CLI command or a SessionStart hook
-#      (curl, else wget), checked against the checksum pinned in the plugin (sha256sum, else
-#      `shasum -a 256`), then cached;
+#   2. else that binary, downloaded (curl, else wget), checked against the checksum pinned in
+#      the plugin (sha256sum, else `shasum -a 256`), warmed, then cached - by an explicit CLI
+#      command in the foreground, by a SessionStart hook in the background (it runs step 3 or 4
+#      meanwhile), never by another hook or by --version/-v;
 #   3. else Node.js >= 18 with dist/skilletor.js;
-#   4. else Perl >= 5.40 with perl/lib, once its modules load;
+#   4. else Perl >= 5.40 with lib/ and script/skilletor, once its modules load;
 #   5. else one line saying why: on stderr with exit 1, Node's message first - for `hook ...`
 #      the hook's one warning line on stdout instead, with exit 0 (spec §8).
 # An engine it starts is exec'd with this process's arguments, stdin and stdout untouched; on
-# a `hook` call that engine keeps the hook contract itself, as the Node CLI does.
+# a `hook` call that engine keeps the hook contract itself, as the Node CLI does. --version and
+# -v answer from that engine as it prints them - the binary and Perl the dist version, Node
+# package.json's - with nothing of the starter's added (ack-doctor reads it).
 # A failed SessionStart provision backs off for 15 minutes per version/platform. An explicit CLI
-# command can retry at once; non-start hooks never provision.
+# command can retry at once.
 #
 # Who starts it: bin/skilletor execs it - the command every plugin hook (hooks/hooks.json,
 # hooks/codex-hooks.json), the Hermes adapter in a checkout, npm, and install.sh's shim or link
@@ -29,22 +32,23 @@
 # No `set -e`/`set -u`: each step falls through to the next, and a hook must exit 0 on every
 # path - an unset variable under -u exits 2, which a UserPromptSubmit hook reads as "block".
 
-# --- Settings. The maintainer chose the cache location (b) and the trust anchor (a) on k168.
-# Provisional until the house binary route replaces them (k167's names): the pinned file's name
-# and format, the release URL, and the asset scheme skilletor-<version>-<os>-<arch> that
-# find_binary builds (os linux|macos, arch x86_64|arm64). Lower case, so none of them reaches
-# a child's environment.
+# --- Settings. The maintainer chose the cache location (b) and the trust anchor (a) on k168, and
+# the house binary route (dzil-binary.yml@binary-v1) for the assets: skilletor-<version>-<platform>
+# with the dist version, <platform> one of linux-x86_64, linux-arm64, macos-arm64 and
+# windows-x86_64 (.exe) - find_binary maps uname to os linux|macos, arch x86_64|arm64. Lower
+# case, so none of them reaches a child's environment.
 
-# Trust anchor: the checksums pinned in the plugin, a file next to this starter that the
-# release writes - sha256sum lines "<sha256>  skilletor-<version>-<os>-<arch>", one per
-# platform asset (the release's skilletor-<version>-checksums.txt as is: other names are
-# ignored). The version comes from the asset names, so this file is the one place a release
-# names what the plugin runs.
+# Trust anchor: the checksums pinned in the plugin, a file next to this starter - the release's
+# SHA256SUMS committed as is: sha256sum lines "<sha256>  <name>-<version>-<platform>", sorted,
+# binaries only. Lines of other names, versions that are not one segment starting with a digit
+# and the .exe line are passed over. The version comes from the asset name, so this file is the
+# one place a release names what the plugin runs.
 pinned_sums=skilletor-binaries.sha256
-# Where the assets of v<version> are: this prefix, then <version>/<asset>.
-# SKILLETOR_BINARY_BASE_URL replaces "<prefix><version>" (the tests serve a binary locally).
-# That is safe from any source: nothing is kept or run unless its checksum is the pinned one.
-release_url_prefix=https://github.com/Getty/skilletor/releases/download/v
+# Where the assets of release <version> are - its tag is the bare version (tag_format %v): this
+# prefix, then <version>/<asset>. SKILLETOR_BINARY_BASE_URL replaces "<prefix><version>" (the
+# tests serve a binary locally). That is safe from any source: nothing is kept or run unless its
+# checksum is the pinned one.
+release_url_prefix=https://github.com/Getty/skilletor/releases/download/
 # The binary cache: <claudeConfigDir>/skilletor/bin/<version>/ - beside skilletor's state,
 # shared by every harness that starts this file.
 cache_subdir=skilletor/bin
@@ -62,20 +66,35 @@ retry_backoff_seconds=900
 
 fail_status=1
 [ "${1-}" = hook ] && fail_status=0 # a hook never fails (spec §8)
-# Prompt, background and move/tool hooks must not spend their hook budget provisioning. Only a
-# SessionStart hook may do that; a command entered explicitly at the CLI remains an immediate retry.
-can_provision=yes
+# Who provisions, and how: a command entered at the CLI in the foreground, an immediate retry;
+# --version/-v never, it answers from what is there; a SessionStart hook in the background, so
+# no hook waits for the network or the warm-up - the download alone may take download_max_time,
+# beyond the hooks' limits (30 s, Hermes 20 s, shared with the sync); other hooks never.
+# `hook __provision-binary` is that background start: internal, as `hook __sync-background` is
+# to the engines; it provisions and exits 0, running no engine.
+provision=foreground
 session_start=
-if [ "${1-}" = hook ]; then
-  can_provision=
-  if [ "${2-}" = session-start ]; then
-    can_provision=yes
-    session_start=yes
-  fi
-fi
+provisioner=
+case ${1-} in
+  --version | -v) provision= ;;
+  hook)
+    provision=
+    case ${2-} in
+      session-start)
+        provision=background
+        session_start=yes
+        ;;
+      __provision-binary)
+        provision=foreground
+        session_start=yes
+        provisioner=yes
+        ;;
+    esac
+    ;;
+esac
 
-# Follow our own symlink chain to the real file, as bin/skilletor does: dist/, perl/ and the
-# pinned checksums sit next to the plugin's bin/, not the link's.
+# Follow our own symlink chain to the real file, as bin/skilletor does: dist/, lib/, script/ and
+# the pinned checksums sit next to the plugin's bin/, not the link's.
 self=$0
 while [ -L "$self" ]; do
   target=$(readlink -- "$self")
@@ -209,6 +228,10 @@ find_binary() {
     esac
     version=${line_name#skilletor-}
     version=${version%-"$os-$arch"}
+    # As the house route names a binary: <name>-<digit, then no dash>-<platform>. Another
+    # binary of the dist (skilletor-<other>-<version>-...) is not ours.
+    case $version in [0-9]*) ;; *) continue ;; esac
+    case $version in *-*) continue ;; esac
     sum=$line_sum
     break
   done <"$root/bin/$pinned_sums"
@@ -216,11 +239,10 @@ find_binary() {
     why_binary="no binary checksum is pinned for $os-$arch"
     return 1
   fi
-  # 64 lower-case hex digits, as sha256sum writes them; a version that starts with a digit
-  # and names one path segment.
+  # 64 lower-case hex digits, as sha256sum writes them; a version that names one path segment
+  # (it starts with a digit, so it is never "..").
   case $sum in *[!0-9a-f]*) sum= ;; esac
-  case $version in [0-9]*) ;; *) version= ;; esac
-  case $version in *[!0-9A-Za-z.+-]*) version= ;; esac
+  case $version in *[!0-9A-Za-z.+]*) version= ;; esac
   if [ "${#sum}" -ne 64 ] || [ -z "$version" ]; then
     why_binary="the pinned binary checksum line for $os-$arch is malformed"
     return 1
@@ -246,12 +268,17 @@ find_binary() {
     clear_failed_session_start
     return 0
   fi
-  if [ "$can_provision" != yes ]; then
-    why_binary="the pinned binary is not cached; provisioning is only available at session start or from the CLI"
+  if [ -z "$provision" ]; then
+    why_binary="the pinned binary is not cached; a SessionStart hook or a CLI command other than --version fetches it"
     return 1
   fi
   if retry_backoff_active; then
     why_binary="the last SessionStart binary provision failed; retrying after $retry_backoff_seconds seconds"
+    return 1
+  fi
+  if [ "$provision" = background ]; then
+    provision_in_background
+    why_binary="the pinned binary is not cached; it is being fetched in the background"
     return 1
   fi
   if fetch_binary; then
@@ -260,6 +287,27 @@ find_binary() {
   fi
   record_failed_session_start
   return 1
+}
+
+# A SessionStart hook's provision: this starter again, as `hook __provision-binary`, left running
+# on its own - as the engines start their background sync (spec §8): a session of its own, so a
+# harness that kills the hook's process group on a timeout (Hermes) spares it; stdio on
+# /dev/null, so no harness waits for it; never waited for. setsid(1) (Linux), else perl's
+# setsid() (macOS has no setsid(1)), else a plain background start - SIGHUP ignored, which the
+# started sh keeps: a closing terminal does not end it, a kill of the hook's group does, and the
+# next SessionStart tries again.
+provision_in_background() {
+  if command -v setsid >/dev/null 2>&1; then
+    set -- setsid
+  elif command -v perl >/dev/null 2>&1; then
+    set -- perl -MPOSIX=setsid -e 'setsid(); exec @ARGV or exit 127'
+  else
+    set --
+  fi
+  (
+    trap '' HUP
+    exec "$@" "$root/bin/skilletor-start" hook __provision-binary
+  ) </dev/null >/dev/null 2>&1 &
 }
 
 # Step 2: download, check, warm, then rename into place - two starts at once each use a temp
@@ -374,11 +422,11 @@ find_perl() {
     why_perl="Perl >= 5.40 is required, but found $(shown "${perl_version#* }")"
     return 1
   fi
-  if [ ! -f "$root/perl/bin/skilletor" ]; then
-    why_perl="skilletor's Perl port cannot run: perl/bin/skilletor is missing"
+  if [ ! -f "$root/script/skilletor" ]; then
+    why_perl="skilletor's Perl port cannot run: script/skilletor is missing"
     return 1
   fi
-  problem=$(perl -I"$root/perl/lib" -e "$perl_check" "$root/perl/cpanfile" </dev/null 2>/dev/null) && return 0
+  problem=$(perl -I"$root/lib" -e "$perl_check" "$root/cpanfile" </dev/null 2>/dev/null) && return 0
   case $problem in
     '' | *[!0-9A-Za-z_:./\ -]*) problem="a dependency does not load" ;;
   esac
@@ -386,7 +434,7 @@ find_perl() {
   return 1
 }
 
-# What find_perl runs: every runtime requirement in perl/cpanfile, at its minimum version -
+# What find_perl runs: every runtime requirement in cpanfile, at its minimum version -
 # the port loads some of them only when a command needs them (Text::Nunjucks with the first
 # template, so loading the CLI proves nothing about it) - then the port's own CLI and engine,
 # which its commands load. Prints what is wrong, exits 1. Costs 0.6-1.3 s on a busy host, on
@@ -398,8 +446,8 @@ my @need;
 sub requires { push @need, [@_] }
 sub on { $_[1]->() if $_[0] eq "runtime" }
 sub recommends {} sub suggests {} sub conflicts {} sub feature {}
-open my $fh, "<", $file or do { print "perl/cpanfile is missing"; exit 1 };
-eval join("", <$fh>) . "\n1" or do { print "perl/cpanfile does not read"; exit 1 };
+open my $fh, "<", $file or do { print "cpanfile is missing"; exit 1 };
+eval join("", <$fh>) . "\n1" or do { print "cpanfile does not read"; exit 1 };
 for (@need) {
   my ($module, $min) = @$_;
   next if $module eq "perl";
@@ -413,9 +461,13 @@ for my $module ("Skilletor::CLI", "Skilletor::Engine") {
 }
 '
 
+if [ "$provisioner" = yes ]; then
+  find_binary
+  exit 0
+fi
 if find_binary; then exec env "$par_temp_var=$par_dir" "$bin_file" "$@"; fi
 if find_node; then exec node "$root/dist/skilletor.js" "$@"; fi
-if find_perl; then exec perl -I"$root/perl/lib" "$root/perl/bin/skilletor" "$@"; fi
+if find_perl; then exec perl -I"$root/lib" "$root/script/skilletor" "$@"; fi
 
 # Step 5. Every part of the line is fixed text, shown() or a checked $problem: nothing in it
 # needs JSON escaping.

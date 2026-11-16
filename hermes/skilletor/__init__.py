@@ -169,9 +169,10 @@ class Adapter:
         try:
             out, _ = proc.communicate(json.dumps(payload).encode("utf-8"), timeout=limit)
         except subprocess.TimeoutExpired:
-            # The shim and its node, not the detached background sync (a session of
-            # its own). Not waited for beyond a moment: Hermes has a limit too. Without
-            # process groups (Windows) the launcher alone; its node finds the pipes closed.
+            # The shim and its engine, not the detached background sync or the
+            # starter's background binary provision (each a session of its own). Not
+            # waited for beyond a moment: Hermes has a limit too. Without process
+            # groups (Windows) the launcher alone; its node finds the pipes closed.
             try:
                 if not hasattr(os, "killpg"):
                     raise OSError

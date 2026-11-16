@@ -2,7 +2,7 @@
 # skilletor: the command the plugin's hooks (hooks/hooks.json, hooks/codex-hooks.json), the
 # Hermes adapter in a checkout, npm and a link on PATH run. It hands over to bin/skilletor-start
 # beside it, which picks the engine: the cached release binary, else Node.js >= 18 with dist/,
-# else Perl >= 5.40 with perl/ (k191). The hooks keep naming this file because Windows starts
+# else Perl >= 5.40 with lib/ (k191). The hooks keep naming this file because Windows starts
 # its .exe twin for it, and the starter has none.
 #
 # On Windows, Claude Code and PowerShell/cmd start bin/skilletor.exe (winlaunch) instead, which

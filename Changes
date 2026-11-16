@@ -9,11 +9,14 @@ Revision history for skilletor and Skilletor, its Perl distribution
     https url source. skilletor is licensed under the Artistic License 2.0
     from this release (k242).
   - The plugin's hooks and bin/skilletor run bin/skilletor-start: a cached
-    release binary verified against checksums pinned in the plugin, else
-    Node.js >= 18, else Perl >= 5.40 from source. Without pinned checksums
-    nothing is downloaded. Windows stays on Node through bin/skilletor.exe.
-    The Hermes adapter takes a checkout's bin/skilletor without dist/ on
-    POSIX (k191).
+    release binary verified against the release's SHA256SUMS pinned in the
+    plugin, else Node.js >= 18, else Perl >= 5.40 from source. Without pinned
+    checksums nothing is downloaded. A SessionStart hook fetches the binary in
+    the background and never waits for it; --version and -v never fetch and
+    answer from the engine that runs. Windows stays on Node through
+    bin/skilletor.exe. The Hermes adapter takes a checkout's bin/skilletor
+    without dist/ on POSIX, and install.sh's no-Node preflight runs --help
+    (k191).
   - Conformance path comparison permits exactly one additional JSON-
     stringification layer only within complete paired escaped-quote intervals
     in one complete outer scalar. Wrong depths, unbalanced quotes, payload or

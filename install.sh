@@ -235,8 +235,10 @@ install_clone() {
   [ -f "$clone/$launcher" ] || die "$clone has no $launcher."
   if [ "$launcher" = bin/skilletor-start ]; then
     [ -x "$clone/$launcher" ] || die "$clone/$launcher is not executable."
-    starter_version=$(quiet_stdin "$clone/$launcher" --version 2>&1) ||
-      die "$clone/$launcher --version failed: $starter_version"
+    # A command that provisions: the starter fetches and verifies the pinned binary for it, which
+    # --version never does (k191). Its stderr is what a failure says.
+    starter_out=$(quiet_stdin "$clone/$launcher" --help 2>&1 >/dev/null) ||
+      die "$clone/$launcher --help failed: $starter_out"
   fi
   place_link "$clone/$launcher"
 }
