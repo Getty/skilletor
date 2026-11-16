@@ -8,8 +8,8 @@ import {
 } from "node:fs";
 import type { Stats } from "node:fs";
 import { hostname } from "node:os";
-import { join } from "node:path";
-import { atomicWrite } from "./fsutil.ts";
+import { isAbsolute, join } from "node:path";
+import { atomicWrite, realOrResolved } from "./fsutil.ts";
 
 /** What trust is stored for (spec §4.3): the backend in use – its kind and its effective
  *  address (a `local` path as an absolute real path). */
@@ -70,6 +70,12 @@ function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
   Object.defineProperty(record, key, { value, writable: true, enumerable: true, configurable: true });
 }
 
+/** Last-check and pending-report keys are project paths (or legacy non-path labels in tests).
+ * Canonicalize absolute Windows keys so 8.3 aliases agree; POSIX keeps persisted raw spellings. */
+function projectStateKey(key: string): string {
+  return process.platform === "win32" && isAbsolute(key) ? realOrResolved(key) : key;
+}
+
 /** What a waiter saw of a lock it judged stale: the stat of its owner record, or of the dir
  *  itself when it has none. */
 interface StaleLock {
@@ -126,12 +132,14 @@ export class State {
   // ---- last-check -----------------------------------------------------------
 
   isDue(scopeKey: string, intervalSeconds: number): boolean {
+    scopeKey = projectStateKey(scopeKey);
     const last = this.readJson("last-check.json")[scopeKey];
     if (typeof last !== "number") return true;
     return Date.now() - last >= intervalSeconds * 1000;
   }
 
   markChecked(scopeKey: string): void {
+    scopeKey = projectStateKey(scopeKey);
     const checks = this.readJson("last-check.json");
     checks[scopeKey] = Date.now();
     this.writeJson("last-check.json", checks);
@@ -139,6 +147,7 @@ export class State {
 
   /** Drop a mark: the next check is due at once. */
   clearChecked(scopeKey: string): void {
+    scopeKey = projectStateKey(scopeKey);
     const checks = this.readJson("last-check.json");
     if (!(scopeKey in checks)) return;
     delete checks[scopeKey];
@@ -242,12 +251,14 @@ export class State {
   // ---- pending report -------------------------------------------------------
 
   putPendingReport(projectKey: string, report: unknown): void {
+    projectKey = projectStateKey(projectKey);
     const pending = this.readJson("pending-report.json");
     setOwn(pending, projectKey, report);
     this.writeJson("pending-report.json", pending);
   }
 
   takePendingReport(projectKey: string): unknown {
+    projectKey = projectStateKey(projectKey);
     const pending = this.readJson("pending-report.json");
     if (!Object.hasOwn(pending, projectKey)) return undefined;
     const report = pending[projectKey];

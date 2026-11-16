@@ -20,6 +20,8 @@ import {
   TargetError,
 } from "../src/targets.ts";
 
+const regexEscape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 function env(harnesses: Harness[]) {
   const tmp = makeTmpDir();
   const home = join(tmp.dir, "home");
@@ -116,7 +118,7 @@ test("default Hermes home: Hermes' own, %LOCALAPPDATA%\\hermes on native Windows
 test("lock keys and roots: hermes: prefix; the Hermes home for the user scope, <repo>/.hermes for a project", () => {
   assert.equal(lockKey("hermes", "skills/foo"), "hermes:skills/foo");
   assert.deepEqual(parseLockKey("hermes:skills/foo"), { harness: "hermes", target: "skills/foo", type: "skill", name: "foo" });
-  assert.equal(rootOfKey({ base: "/h", scope: "user" }, "hermes:skills/foo"), join("/h", ".hermes"));
+  assert.equal(rootOfKey({ base: "/h", scope: "user" }, "hermes:skills/foo"), defaultHermesHome("/h"));
   assert.equal(rootOfKey({ base: "/h", scope: "user", hermesHome: "/srv/hermes" }, "hermes:skills/foo"), "/srv/hermes");
   assert.equal(rootOfKey({ base: "/p", scope: "project", hermesHome: "/srv/hermes" }, "hermes:skills/foo"), join("/p", ".hermes"));
   // No counterpart for agents and rules (spec §16.2): such a key has no root.
@@ -528,7 +530,7 @@ test("another Hermes home: check reports it, the sync moves the items and takes 
     assert.deepEqual(r.scopes[0]!.conflicts, [{ path: join(b, "skills/bar/SKILL.md") }]);
     assert.deepEqual(r.scopes[0]!.added.map((i) => i.key), ["hermes:skills/foo"]);
     assert.match(r.scopes[0]!.warnings.join("\n"),
-      new RegExp(`Hermes home changed from ${a} to ${b}: 2 item\\(s\\) removed from the old home`));
+      new RegExp(`Hermes home changed from ${regexEscape(a)} to ${regexEscape(b)}: 2 item\\(s\\) removed from the old home`));
     assert.equal(e.state().hermesHome(), b);
     assert.deepEqual(Object.keys(userLock(e)).sort(), ["hermes:skills/foo", "skills/bar", "skills/foo"]);
     // Settled: the conflict is what the last sync could not reach (spec §14.3).

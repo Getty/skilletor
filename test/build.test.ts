@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
@@ -165,14 +165,15 @@ test("k148: build refuses an ancestor package link whose target is outside node_
 test("k220: regular and intentionally linked node_modules produce identical bundles", { skip: NO_SYMLINKS }, async () => {
   const tmp = makeTmpDir();
   try {
-    const regular = join(tmp.dir, "regular");
-    const linked = join(tmp.dir, "linked");
-    makePackage(regular);
-    mkdirSync(join(linked, "src"), { recursive: true });
-    cpSync(join(regular, "src", "entry.ts"), join(linked, "src", "entry.ts"));
-    symlinkSync(join(regular, "node_modules"), join(linked, "node_modules"));
+    const checkout = join(tmp.dir, "checkout");
+    makePackage(checkout);
+    const regular = await bundle(checkout);
+    const modules = join(checkout, "node_modules");
+    const target = join(tmp.dir, "linked-node_modules");
+    renameSync(modules, target);
+    symlinkSync(target, modules, "dir");
 
-    assert.equal(await bundle(linked), await bundle(regular));
+    assert.equal(await bundle(checkout), regular);
   } finally {
     tmp.cleanup();
   }

@@ -6,7 +6,8 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import {
-  CODEX_ENTRIES, gitTracked, hasBlock, isGitWorkTree, PROJECT_CLAUDE_ENTRIES, SKILL_GITIGNORE, updateGitignore, withSkillGitignore,
+  blockEntries, CODEX_ENTRIES, gitTracked, hasBlock, isGitWorkTree, PROJECT_CLAUDE_ENTRIES, SKILL_GITIGNORE,
+  updateGitignore, updateWorktreeInclude, withSkillGitignore,
 } from "../src/gitignore.ts";
 
 const BEGIN = "# >>> skilletor >>>";
@@ -85,6 +86,62 @@ test("no entries: the block is removed and no file is created (spec §6.4)", () 
     updateGitignore({ dir: tmp.dir, entries: CODEX_ENTRIES, enabled: true });
     assert.equal(updateGitignore({ dir: tmp.dir, entries: [], enabled: true }), "removed");
     assert.equal(existsSync(join(tmp.dir, ".gitignore")), false);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("CRLF managed blocks stay idempotent and preserve unrelated bytes on update and removal", () => {
+  const tmp = makeTmpDir();
+  try {
+    const consumers = [
+      { name: ".gitignore", update: updateGitignore },
+      { name: ".worktreeinclude", update: updateWorktreeInclude },
+    ];
+    for (const { name, update } of consumers) {
+      const dir = join(tmp.dir, name.slice(1));
+      mkdirSync(dir);
+      const path = join(dir, name);
+      const before = `before\r\n  keep exactly \t\r\n${BEGIN}\r\nold\r\n${END}\r\nafter\r\n`;
+      writeFileSync(path, before);
+      const inode = statSync(path).ino;
+
+      assert.deepEqual(blockEntries(path), ["old"], `${name}: entries`);
+      if (name === ".gitignore") assert.equal(hasBlock(dir), true);
+      assert.equal(update({ dir, entries: ["old"], enabled: true }), "unchanged", `${name}: unchanged`);
+      assert.equal(readFileSync(path, "utf8"), before, `${name}: unchanged bytes`);
+      assert.equal(statSync(path).ino, inode, `${name}: unchanged file was not replaced`);
+
+      assert.equal(update({ dir, entries: ["new"], enabled: true }), "changed", `${name}: changed`);
+      assert.equal(readFileSync(path, "utf8"),
+        `before\r\n  keep exactly \t\r\n${BEGIN}\r\nnew\r\n${END}\r\nafter\r\n`, `${name}: changed bytes`);
+      assert.equal((readFileSync(path, "utf8").match(/# >>> skilletor >>>/g) ?? []).length, 1, `${name}: one block`);
+
+      assert.equal(update({ dir, entries: [], enabled: true }), "removed", `${name}: removed`);
+      assert.equal(readFileSync(path, "utf8"), "before\r\n  keep exactly \t\r\nafter\r\n", `${name}: unrelated bytes`);
+      assert.deepEqual(blockEntries(path), [], `${name}: entries removed`);
+      if (name === ".gitignore") assert.equal(hasBlock(dir), false);
+    }
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("removing a CRLF block at EOF retains user-owned blank lines for both consumers", () => {
+  const tmp = makeTmpDir();
+  try {
+    const consumers = [
+      { name: ".gitignore", update: updateGitignore },
+      { name: ".worktreeinclude", update: updateWorktreeInclude },
+    ];
+    for (const { name, update } of consumers) {
+      const dir = join(tmp.dir, `eof-${name.slice(1)}`);
+      mkdirSync(dir);
+      const path = join(dir, name);
+      writeFileSync(path, `foreign\r\n\r\n${BEGIN}\r\nold\r\n${END}\r\n`);
+      assert.equal(update({ dir, entries: [], enabled: true }), "removed", `${name}: removed`);
+      assert.equal(readFileSync(path, "utf8"), "foreign\r\n\r\n", `${name}: outside blank line retained`);
+    }
   } finally {
     tmp.cleanup();
   }

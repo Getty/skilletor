@@ -213,12 +213,14 @@ any case.
 `${HOME}`, `${PROJECT}` and `${TMP}` stand for the temp paths above.
 
 - **Inputs:** every file copied from `home/` and `project/` has each placeholder replaced by
-  its path (configs naming a local path, a plugin state's `installPath`), and so has every
-  string of a `cli` step's `argv`, `cwd`, `env` and `stdin`, and of the case's `env`. Source
-  trees and git trees are copied byte for byte.
+  its path (configs naming a local path, a plugin state's `installPath`; inside a JSON file the
+  inserted path is JSON-escaped), and so has every string of a `cli` step's `argv`, `cwd`, `env`
+  and `stdin`, and of the case's `env`. Source trees and git trees are copied byte for byte.
 - **Outputs:** before comparing, every occurrence of a temp path in the step's JSON (in
   every string), in a `cli` step's stdout and stderr and in every compared file is replaced
-  by its placeholder – first `${HOME}`, then `${PROJECT}`, then `${TMP}`, so the longer,
+  by its placeholder – plain and JSON-escaped path spellings both count. Only a path separator
+  immediately after that exact path is normalized to `/`; unrelated backslashes stay bytes.
+  Replacement runs first `${HOME}`, then `${PROJECT}`, then `${TMP}`, so the longer,
   nested paths win.
 - **`${VERSION}`** stands for the version in `package.json`, and only in the stdout and
   stderr of a `cli` step with `"version": true`: there every occurrence of it is replaced,
@@ -261,9 +263,13 @@ no newline or encoding normalised.
 The CLI's environment is built from nothing: `PATH`, `PERL5LIB` when the runner has one (a
 Perl CLI's modules), `HOME` = `${HOME}`, `CODEX_HOME` = `${HOME}/.codex`, `GIT_CONFIG_GLOBAL` =
 `${TMP}/gitconfig`, `GIT_CONFIG_NOSYSTEM=1` and `LC_ALL=C`; then the case's `env`; then the
-step's. Nothing else of the runner's environment reaches it – no `CLAUDE_PROJECT_DIR`,
-`SKILLETOR_PROJECT_DIR`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_CONFIG_DIR`, `HERMES_HOME`, `GIT_DIR` or
-`SKILLETOR_BIN`. It runs with its own defaults: state root
+step's. On Windows it also sets `USERPROFILE` = `${HOME}`, `LOCALAPPDATA` under `${HOME}`, and
+`TEMP`/`TMP` = `${TMP}`: the native home and temporary-directory APIs must stay inside the case.
+The child runtime may add only its documented/platform execution values (macOS
+`__CF_USER_TEXT_ENCODING`; Windows logon/system-root identity values). The runner checks that
+no other parent variable or credential sentinel leaks – in particular no `CLAUDE_PROJECT_DIR`,
+`SKILLETOR_PROJECT_DIR`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_CONFIG_DIR`, `HERMES_HOME`, `GIT_DIR`,
+`SKILLETOR_BIN` or credential value. It runs with its own defaults: state root
 `${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/skilletor`, Hermes' default home under `${HOME}`, the
 project from `--project-dir` or the git top level of its cwd, and git itself answers whether
 a directory lies in a work tree (none under `${TMP}` does, but what `gitInit` made one).
@@ -287,7 +293,11 @@ cd perl && SKILLETOR_CONFORMANCE_CLI='["node", "'"$(dirname "$PWD")"'/dist/skill
 `SKILLETOR_BIN`, which the Hermes adapter reads.
 
 A CLI that does not start, runs past the step's timeout (30 s) or dies of a signal fails the
-step. A step whose `argv` starts with `hook` must expect exit 0: a hook never fails (spec §8).
+step. Windows has no POSIX child-signal result, so only that runner self-test assertion is skipped
+there; timeout coverage still runs. A step whose `argv` starts with `hook` must expect exit 0: a
+hook never fails (spec §8). Tree comparison still runs on Windows, but its POSIX executable-bit
+assertion is skipped when a case expects executable files because the filesystem exposes no
+corresponding mode contract.
 
 A `hook user-prompt-submit` that finds its project due starts a real background sync –
 detached, outliving the step, racing the next one and the temp dir's removal – so a case keeps

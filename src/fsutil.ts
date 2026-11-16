@@ -58,7 +58,10 @@ export function atomicWrite(path: string, data: string | Buffer, executable = fa
 /** The real path of `path`, or its resolved form when it cannot be resolved (missing). */
 export function realOrResolved(path: string): string {
   try {
-    return realpathSync(path);
+    // On Windows, the native resolver uses the platform's canonical DOS path. In particular,
+    // Node 24 implements it with GetFinalPathNameByHandleW, so an existing 8.3 alias and Git's
+    // long spelling become one project identity. Keep the established resolver on POSIX.
+    return process.platform === "win32" ? realpathSync.native(path) : realpathSync(path);
   } catch {
     return resolve(path);
   }

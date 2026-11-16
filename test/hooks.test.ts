@@ -735,7 +735,8 @@ test("k64: session-start in an unused project removes 0.2.0's block though nothi
     writeFileSync(join(e.projectDir, ".codex/.gitignore"), "own\n\n# >>> skilletor >>>\nagents/x.toml\n# <<< skilletor <<<\n");
     assert.deepEqual(await runHook("session-start", { source: "startup", cwd: e.projectDir }, e.ctx), {});
     assert.equal(existsSync(gi), false);
-    assert.equal(readFileSync(join(e.projectDir, ".codex/.gitignore"), "utf8"), "own\n");
+    // Hook cleanup owns only the markers and retains the outside blank separator.
+    assert.equal(readFileSync(join(e.projectDir, ".codex/.gitignore"), "utf8"), "own\n\n");
   } finally {
     e.cleanup();
   }

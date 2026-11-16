@@ -799,7 +799,8 @@ test("k65: the project .codex block goes with the config and the last managed ag
     mkdirSync(join(p, ".codex"), { recursive: true });
     writeFileSync(join(p, ".codex/.gitignore"), "own-line\n\n" + BLOCK("agents/**/.local.*", "skilletor-rules.md"));
     const again = await sync(e.ctx);
-    assert.equal(readFileSync(join(p, ".codex/.gitignore"), "utf8"), "own-line\n");
+    // The blank line before BEGIN is outside the managed markers, so removal retains it.
+    assert.equal(readFileSync(join(p, ".codex/.gitignore"), "utf8"), "own-line\n\n");
     assert.equal(again.scopes.find((s) => s.scope === "project")!.gitignoreUpdated, undefined);
   } finally {
     e.cleanup();
@@ -841,7 +842,8 @@ test("k62: the first sync after the upgrade migrates both harnesses; the .agents
     assert.equal(readFileSync(join(p, ".claude/skills/foo/.gitignore"), "utf8"), SKILL_GITIGNORE);
     assert.deepEqual(Object.keys(readLock(join(p, ".claude/skilletor.lock.json"))["codex:agents/helper"]!.files),
       ["agents/.local.helper.toml"]);
-    assert.equal(readFileSync(join(p, ".agents/.gitignore"), "utf8"), "own-line\n");
+    // Migration removes only the marked block; its preceding blank line remains user-owned.
+    assert.equal(readFileSync(join(p, ".agents/.gitignore"), "utf8"), "own-line\n\n");
     assert.equal(readFileSync(join(p, ".codex/.gitignore"), "utf8"), BLOCK("agents/**/.local.*", "skilletor-rules.md"));
     assert.equal(readFileSync(join(p, ".claude/.gitignore"), "utf8"),
       BLOCK("agents/**/.local.*", "rules/**/.local.*", "skilletor.local.json", "skilletor.lock.json"));

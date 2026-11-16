@@ -61,13 +61,38 @@ export function updateWorktreeInclude(opts: GitignoreOptions): BlockChange {
   return updateBlockFile(join(opts.dir, WORKTREE_INCLUDE), opts);
 }
 
+/** A text line with its exact byte-preserving bounds and line ending. */
+interface TextLine {
+  text: string;
+  start: number;
+  end: number;
+  eol: string;
+}
+
+/** Lines without their CRLF/LF endings, while retaining the offsets needed for surgical edits. */
+function textLines(text: string): TextLine[] {
+  const lines: TextLine[] = [];
+  let start = 0;
+  while (start < text.length) {
+    const newline = text.indexOf("\n", start);
+    if (newline === -1) {
+      lines.push({ text: text.slice(start), start, end: text.length, eol: "" });
+      break;
+    }
+    const contentEnd = newline > start && text[newline - 1] === "\r" ? newline - 1 : newline;
+    lines.push({ text: text.slice(start, contentEnd), start, end: newline + 1, eol: text.slice(contentEnd, newline + 1) });
+    start = newline + 1;
+  }
+  return lines;
+}
+
 /** The entries of the skilletor block in the file at `path`; none for a missing or unreadable
  *  file, or one without a block (the `check` test, spec §6.4). */
 export function blockEntries(path: string): string[] {
   try {
-    const lines = readFileSync(path, "utf8").split("\n");
+    const lines = textLines(readFileSync(path, "utf8"));
     const { begin, end, hasBlock } = blockOf(lines);
-    return hasBlock ? lines.slice(begin + 1, end) : [];
+    return hasBlock ? lines.slice(begin + 1, end).map((line) => line.text) : [];
   } catch {
     return [];
   }
@@ -76,31 +101,42 @@ export function blockEntries(path: string): string[] {
 function updateBlockFile(path: string, opts: GitignoreOptions): BlockChange {
   const existed = existsSync(path);
   const existing = existed ? readFileSync(path, "utf8") : "";
-  const lines = existing.length ? existing.split("\n") : [];
-
-  const { begin, end, hasBlock } = blockOf(lines);
-  const outside = hasBlock ? [...lines.slice(0, begin), ...lines.slice(end + 1)] : lines;
-
+  const lines = textLines(existing);
+  const block = blockOf(lines);
   const entries = [...new Set(opts.entries)].sort();
   const write = opts.enabled && entries.length > 0;
-  let out: string[];
+  let result = existing;
   let change: BlockChange;
-  if (write) {
-    const block = [BEGIN, ...entries, END];
-    if (hasBlock) {
-      out = [...lines.slice(0, begin), ...block, ...lines.slice(end + 1)];
-      change = lines.slice(begin + 1, end).join("\n") === entries.join("\n") ? "unchanged" : "changed";
-    } else {
-      const trimmed = trimTrailingEmpty(outside);
-      out = trimmed.length ? [...trimmed, "", ...block] : [...block];
-      change = "created";
-    }
-  } else {
-    out = trimTrailingEmpty(outside);
-    change = hasBlock ? "removed" : "unchanged";
-  }
 
-  const result = out.length && out.some((l) => l.trim() !== "") ? out.join("\n").replace(/\n*$/, "") + "\n" : "";
+  if (block.hasBlock) {
+    const current = lines.slice(block.begin + 1, block.end).map((line) => line.text);
+    if (write && current.length === entries.length && current.every((entry, i) => entry === entries[i])) {
+      return "unchanged";
+    }
+    const first = lines[block.begin]!;
+    const last = lines[block.end]!;
+    if (write) {
+      const newline = first.eol || last.eol || lines.find((line) => line.eol)?.eol || "\n";
+      const replacement = [BEGIN, ...entries, END].join(newline) + last.eol;
+      result = existing.slice(0, first.start) + replacement + existing.slice(last.end);
+      change = "changed";
+    } else {
+      const before = existing.slice(0, first.start);
+      const after = existing.slice(last.end);
+      result = before + after;
+      change = "removed";
+    }
+  } else if (write) {
+    const newline = lines.find((line) => line.eol)?.eol || "\n";
+    let separator = "";
+    if (existing.length > 0) {
+      separator = existing.endsWith(newline + newline) ? "" : existing.endsWith(newline) ? newline : newline + newline;
+    }
+    result = existing + separator + [BEGIN, ...entries, END].join(newline) + newline;
+    change = "created";
+  } else {
+    return "unchanged";
+  }
 
   if (result === "") {
     if (existed) rmSync(path, { force: true });
@@ -111,9 +147,9 @@ function updateBlockFile(path: string, opts: GitignoreOptions): BlockChange {
 }
 
 /** The block's marker lines in a `.gitignore`'s lines; a block needs both, in order. */
-function blockOf(lines: string[]): { begin: number; end: number; hasBlock: boolean } {
-  const begin = lines.indexOf(BEGIN);
-  const end = lines.indexOf(END);
+function blockOf(lines: TextLine[]): { begin: number; end: number; hasBlock: boolean } {
+  const begin = lines.findIndex((line) => line.text === BEGIN);
+  const end = lines.findIndex((line) => line.text === END);
   return { begin, end, hasBlock: begin !== -1 && end !== -1 && end > begin };
 }
 
@@ -121,7 +157,7 @@ function blockOf(lines: string[]): { begin: number; end: number; hasBlock: boole
  *  One read; a missing or unreadable file holds none (spec §14.3, the `check` test). */
 export function hasBlock(dir: string): boolean {
   try {
-    return blockOf(readFileSync(join(dir, ".gitignore"), "utf8").split("\n")).hasBlock;
+    return blockOf(textLines(readFileSync(join(dir, ".gitignore"), "utf8"))).hasBlock;
   } catch {
     return false;
   }
@@ -137,12 +173,6 @@ export function skillGitignorePath(name: string): string {
 export function withSkillGitignore(output: Map<string, Buffer>, name: string): Map<string, Buffer> {
   const out = new Map(output);
   out.set(skillGitignorePath(name), Buffer.from(SKILL_GITIGNORE, "utf8"));
-  return out;
-}
-
-function trimTrailingEmpty(lines: string[]): string[] {
-  const out = [...lines];
-  while (out.length && out[out.length - 1]!.trim() === "") out.pop();
   return out;
 }
 

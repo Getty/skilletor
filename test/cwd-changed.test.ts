@@ -130,6 +130,26 @@ test("k147: a move into a worktree without a lock syncs it, one line names the w
   }
 });
 
+test("k239: a move hook accepts unchanged CRLF managed blocks without duplicating or reporting them", async () => {
+  const e = env();
+  try {
+    e.userCfg({ sources: { mine: { local: localSource(e) } } });
+    const wt = await mainWithWorktree(e, { skills: ["foo@mine"] });
+    const managed = [join(wt, ".claude", ".gitignore"), join(wt, ".worktreeinclude")];
+    for (const path of managed) writeFileSync(path, readFileSync(path, "utf8").replaceAll("\n", "\r\n"));
+
+    const out = await runHook("cwd-changed", move(e.main, wt), e.ctx);
+    assert.deepEqual(out, { systemMessage: `skilletor: 1 item(s) updated in ${wt}` });
+    for (const path of managed) {
+      const text = readFileSync(path, "utf8");
+      assert.match(text, /\r\n/);
+      assert.equal((text.match(/# >>> skilletor >>>/g) ?? []).length, 1);
+    }
+  } finally {
+    e.cleanup();
+  }
+});
+
 // Asserts: a move within one checkout – into a subdirectory and back – syncs nothing, even
 // though that checkout has no lock and a sync would install there: no lock, no items, silent.
 test("k147: a move within the same checkout syncs nothing", async () => {

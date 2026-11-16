@@ -2,10 +2,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
+import { NO_SYMLINKS } from "./helpers/symlink.ts";
 import { State } from "../src/state.ts";
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -111,6 +112,30 @@ test("pending report is taken once and separated per project", () => {
     assert.deepEqual(state.takePendingReport("/proj/a"), { msg: "a" });
     assert.equal(state.takePendingReport("/proj/a"), undefined); // consumed
     assert.deepEqual(state.takePendingReport("/proj/b"), { msg: "b" }); // untouched
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("POSIX persisted symlink-spelled pending and check keys retain their raw identity", {
+  skip: process.platform === "win32" ? "POSIX state keys intentionally remain raw" : NO_SYMLINKS,
+}, () => {
+  const tmp = makeTmpDir();
+  try {
+    const stateRoot = join(tmp.dir, "state");
+    const project = join(tmp.dir, "project");
+    const alias = join(tmp.dir, "project-link");
+    mkdirSync(stateRoot);
+    mkdirSync(project);
+    symlinkSync(project, alias, "dir");
+    const pending = { systemMessage: "raw POSIX alias" };
+    writeFileSync(join(stateRoot, "pending-report.json"), JSON.stringify({ [alias]: pending }));
+    writeFileSync(join(stateRoot, "last-check.json"), JSON.stringify({ [alias]: Date.now() }));
+
+    const state = new State(stateRoot);
+    assert.equal(state.isDue(alias, 600), false);
+    assert.deepEqual(state.takePendingReport(alias), pending);
+    assert.deepEqual(Object.keys(JSON.parse(readFileSync(join(stateRoot, "last-check.json"), "utf8"))), [alias]);
   } finally {
     tmp.cleanup();
   }

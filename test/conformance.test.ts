@@ -9,7 +9,7 @@
 // trees, reached through `url.<file>.insteadOf` – fetch, cache naming and `check`'s ls-remote run
 // as for a remote, offline. A `cli` step runs a CLI – this checkout's bundle, or the one
 // SKILLETOR_CONFORMANCE_CLI names (the Perl port's, say) – in an environment built from nothing.
-import { after, test } from "node:test";
+import { after, test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -17,9 +17,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildToString } from "../scripts/esbuild.config.mjs";
 import { check, resolveItems, status, sync, type EngineContext, type ResolveReport } from "../src/engine.ts";
+import { homeEnv } from "./helpers/harness.ts";
 
 const ROOT = fileURLToPath(new URL("../conformance/cases", import.meta.url));
 const UPDATE = process.env.SKILLETOR_CONFORMANCE_UPDATE === "1";
@@ -150,14 +151,42 @@ function placeholders(r: Roots): [string, string][] {
   return out;
 }
 
+const jsonStringContents = (value: string) => JSON.stringify(value).slice(1, -1);
+
 function abstract(text: string, r: Roots): string {
-  for (const [path, name] of placeholders(r)) text = text.split(path).join(name);
+  for (const [path, name] of placeholders(r)) {
+    // A path can be plain text or the contents of a JSON string, where Windows backslashes
+    // are doubled. Normalize only the separator immediately after the exact placeholder path.
+    const escaped = jsonStringContents(path);
+    text = text.split(`${escaped}\\\\`).join(`${name}/`);
+    text = text.split(`${escaped}/`).join(`${name}/`);
+    text = text.split(`${path}\\`).join(`${name}/`);
+    text = text.split(`${path}/`).join(`${name}/`);
+    text = text.split(escaped).join(name);
+    text = text.split(path).join(name);
+  }
   return text;
 }
 
 function concrete(text: string, r: Roots): string {
   for (const [path, name] of placeholders(r)) text = text.split(name).join(path);
   return text;
+}
+
+/** Placeholder substitution inside a JSON file: escape only the inserted path, not the rest. */
+function concreteJsonText(text: string, r: Roots): string {
+  for (const [path, name] of placeholders(r)) text = text.split(name).join(jsonStringContents(path));
+  return text;
+}
+
+/** Output placeholders in every string of a JSON value, before it is serialized. */
+function abstractDeep(v: unknown, r: Roots): unknown {
+  if (typeof v === "string") return abstract(v, r);
+  if (Array.isArray(v)) return v.map((x) => abstractDeep(x, r));
+  if (v !== null && typeof v === "object") {
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, abstractDeep(x, r)]));
+  }
+  return v;
 }
 
 /** A path as a case stores it (README: escaped names): every name starting with `.git` gets the
@@ -176,7 +205,8 @@ function copyInput(from: string, to: string, r: Roots): void {
   for (const rel of walk(from)) {
     const dest = join(to, unescapeName(rel));
     mkdirSync(dirname(dest), { recursive: true });
-    writeFileSync(dest, concrete(readFileSync(join(from, rel), "utf8"), r));
+    const text = readFileSync(join(from, rel), "utf8");
+    writeFileSync(dest, rel.endsWith(".json") ? concreteJsonText(text, r) : concrete(text, r));
   }
 }
 
@@ -202,7 +232,7 @@ function buildGit(caseDir: string, c: Case, r: Roots, env: NodeJS.ProcessEnv): v
       if (commit.tag) git(repo, env, "tag", commit.tag);
       if (commit.branch) git(repo, env, "branch", commit.branch);
     });
-    config.push(`[url "file://${repo}"]`, `\tinsteadOf = ${g.url}`);
+    config.push(`[url "${pathToFileURL(repo).href}"]`, `\tinsteadOf = ${g.url}`);
   }
   writeFileSync(join(r.tmp, "gitconfig"), config.join("\n") + "\n");
 }
@@ -254,12 +284,13 @@ after(() => {
 function cliEnv(c: Case, step: Step, r: Roots): Record<string, string> {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
-    HOME: r.home,
+    ...homeEnv(r.home),
     CODEX_HOME: join(r.home, ".codex"),
     GIT_CONFIG_GLOBAL: join(r.tmp, "gitconfig"),
     GIT_CONFIG_NOSYSTEM: "1",
     LC_ALL: "C",
   };
+  if (process.platform === "win32") Object.assign(env, { TEMP: r.tmp, TMP: r.tmp });
   if (process.env.PERL5LIB !== undefined) env.PERL5LIB = process.env.PERL5LIB; // a Perl CLI's modules
   for (const [k, v] of Object.entries(c.env ?? {})) env[k] = concrete(v, r);
   for (const [k, v] of Object.entries(step.env ?? {})) {
@@ -303,7 +334,16 @@ function runCli(prefix: string[], step: Step, r: Roots, env: Record<string, stri
 /** Output placeholders on raw bytes (README: placeholders), `${VERSION}` only where asked. */
 function abstractBytes(bytes: Buffer, r: Roots, version: boolean): Buffer {
   let text = bytes.toString("latin1"); // one char per byte: nothing is decoded, nothing lost
-  for (const [path, name] of placeholders(r)) text = text.split(Buffer.from(path).toString("latin1")).join(name);
+  for (const [path, name] of placeholders(r)) {
+    const raw = Buffer.from(path).toString("latin1");
+    const escaped = Buffer.from(jsonStringContents(path)).toString("latin1");
+    text = text.split(`${escaped}\\\\`).join(`${name}/`);
+    text = text.split(`${escaped}/`).join(`${name}/`);
+    text = text.split(`${raw}\\`).join(`${name}/`);
+    text = text.split(`${raw}/`).join(`${name}/`);
+    text = text.split(escaped).join(name);
+    text = text.split(raw).join(name);
+  }
   if (version) text = text.split(VERSION).join("${VERSION}");
   return Buffer.from(text, "latin1");
 }
@@ -362,12 +402,13 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, JSON.stringify(value, null, 2) + "\n");
 }
 
-async function runCase(name: string): Promise<void> {
+async function runCase(name: string, t: TestContext): Promise<void> {
   const caseDir = join(ROOT, name);
   const c = JSON.parse(readFileSync(join(caseDir, "case.json"), "utf8")) as Case;
   const live = walk(caseDir).filter((rel) => rel.split("/").some((s) => s.startsWith(".git")));
   assert.deepEqual(live, [], `${name}: fixture names starting with .git must be stored escaped (dot.gitignore)`);
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "skilletor-conformance-")));
+  const created = mkdtempSync(join(tmpdir(), "skilletor-conformance-"));
+  const tmp = process.platform === "win32" ? realpathSync.native(created) : realpathSync(created);
   const r: Roots = { tmp, home: join(tmp, "home"), cwd: join(tmp, "cwd") };
   if (existsSync(join(caseDir, "project"))) r.project = join(tmp, "project");
   const saved = { ...process.env };
@@ -435,7 +476,7 @@ async function runCase(name: string): Promise<void> {
           }
         }
       } else {
-        const actual = canonical(JSON.parse(abstract(JSON.stringify(await runStep(step, ctx)), r)));
+        const actual = canonical(abstractDeep(await runStep(step, ctx), r));
         if (UPDATE) writeJson(file, actual);
         else assert.deepEqual(actual, canonical(JSON.parse(readFileSync(file, "utf8"))), `${name}: step ${step.id}`);
       }
@@ -458,7 +499,13 @@ async function runCase(name: string): Promise<void> {
       assert.deepEqual([...have.keys()].sort(), [...want.keys()].sort(), `${name}: step ${step.id}: the files in the tree`);
       for (const [rel, text] of want) assert.equal(have.get(rel), text, `${name}: step ${step.id}: ${rel}`);
       const wantExecs = existsSync(execFile) ? JSON.parse(readFileSync(execFile, "utf8")) : [];
-      assert.deepEqual(execs, wantExecs, `${name}: step ${step.id}: the files with the executable bit`);
+      if (process.platform === "win32" && wantExecs.length > 0) {
+        await t.test(`${name}: ${step.id}: executable bits`, {
+          skip: "Windows filesystems expose no POSIX executable-bit contract",
+        });
+      } else {
+        assert.deepEqual(execs, wantExecs, `${name}: step ${step.id}: the files with the executable bit`);
+      }
     }
   } finally {
     for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
@@ -474,49 +521,99 @@ test("conformance: the cases directory holds cases", () => {
 });
 
 for (const name of cases) {
-  test(`conformance: ${name}`, () => runCase(name));
+  test(`conformance: ${name}`, (t) => runCase(name, t));
 }
+
+test("conformance: Windows-shaped placeholders escape only paths and preserve unrelated backslashes", () => {
+  const r: Roots = {
+    tmp: "C:\\Temp\\fixture",
+    home: "C:\\Temp\\fixture\\home",
+    project: "C:\\Temp\\fixture\\project",
+    cwd: "C:\\Temp\\fixture\\cwd",
+  };
+  const input = '{"path":"${HOME}/child","literal":"keep\\\\literal"}';
+  assert.deepEqual(JSON.parse(concreteJsonText(input, r)), {
+    path: `${r.home}/child`,
+    literal: "keep\\literal",
+  });
+  assert.deepEqual(abstractDeep({ path: `${r.home}\\child`, literal: "keep\\literal" }, r), {
+    path: "${HOME}/child",
+    literal: "keep\\literal",
+  });
+  const stream = abstractBytes(Buffer.from(JSON.stringify({
+    path: `${r.project}\\child`, literal: "keep\\literal",
+  })), r, false);
+  assert.deepEqual(JSON.parse(stream.toString("utf8")), {
+    path: "${PROJECT}/child",
+    literal: "keep\\literal",
+  });
+});
 
 // The harness itself (README: cli), on a stand-in CLI that reports what it got. Asserts: the
 // child's environment is exactly the fixed variables, the case's and the step's (a variable of
 // the runner – CLAUDE_PROJECT_DIR here – never leaks in, `null` unsets); argv, cwd and stdin take
 // the input placeholders; stdin is a string's bytes or a value's JSON.
 test("conformance: a cli step's CLI gets the README's environment, argv, cwd and stdin – nothing else", () => {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "skilletor-conformance-")));
+  const created = mkdtempSync(join(tmpdir(), "skilletor-conformance-"));
+  const tmp = process.platform === "win32" ? realpathSync.native(created) : realpathSync(created);
   const r: Roots = { tmp, home: join(tmp, "home"), cwd: join(tmp, "cwd") };
   mkdirSync(r.cwd);
   const echo = [process.execPath, "-e", "process.stdout.write(JSON.stringify({ argv: process.argv.slice(1), cwd: process.cwd(), env: process.env, stdin: require('node:fs').readFileSync(0, 'utf8') }))"];
   const c: Case = { description: "", env: { CLAUDE_CONFIG_DIR: "${HOME}/cfg", DROPPED: "x" }, steps: [] };
   const step: Step = { id: "echo", op: "cli", argv: ["status", "${HOME}"], env: { DROPPED: null, EXTRA: "${TMP}/e" }, stdin: { cwd: "${HOME}", n: [1] } };
-  const saved = process.env.CLAUDE_PROJECT_DIR;
-  process.env.CLAUDE_PROJECT_DIR = tmp;
+  const forbidden = ["CLAUDE_PROJECT_DIR", "SKILLETOR_BIN", "GITHUB_TOKEN"] as const;
+  const saved = Object.fromEntries(forbidden.map((name) => [name, process.env[name]])) as Record<string, string | undefined>;
+  for (const name of forbidden) process.env[name] = `conformance-forbidden-${name}`;
   try {
-    const got = JSON.parse(runCli(echo, step, r, cliEnv(c, step, r)).stdout.toString("utf8"));
+    const got = JSON.parse(runCli(echo, step, r, cliEnv(c, step, r)).stdout.toString("utf8")) as {
+      argv: string[]; cwd: string; env: Record<string, string>; stdin: string;
+    };
     assert.deepEqual(got.argv, ["status", r.home]);
     assert.equal(got.cwd, r.cwd);
     assert.equal(got.stdin, JSON.stringify({ cwd: r.home, n: [1] }));
     const want: Record<string, string> = {
-      PATH: process.env.PATH ?? "", HOME: r.home, CODEX_HOME: join(r.home, ".codex"), GIT_CONFIG_GLOBAL: join(tmp, "gitconfig"),
-      GIT_CONFIG_NOSYSTEM: "1", LC_ALL: "C", CLAUDE_CONFIG_DIR: join(r.home, "cfg"), EXTRA: join(tmp, "e"),
+      PATH: process.env.PATH ?? "", ...homeEnv(r.home), CODEX_HOME: join(r.home, ".codex"),
+      GIT_CONFIG_GLOBAL: join(tmp, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1", LC_ALL: "C",
+      CLAUDE_CONFIG_DIR: concrete("${HOME}/cfg", r), EXTRA: concrete("${TMP}/e", r),
     };
+    if (process.platform === "win32") Object.assign(want, { TEMP: r.tmp, TMP: r.tmp });
     if (process.env.PERL5LIB !== undefined) want.PERL5LIB = process.env.PERL5LIB;
-    assert.deepEqual(got.env, want);
+    const allowedRuntimeAdditions = new Set(process.platform === "darwin"
+      ? ["__CF_USER_TEXT_ENCODING"]
+      : process.platform === "win32"
+        ? ["LOGONSERVER", "SYSTEMDRIVE", "SYSTEMROOT", "USERDOMAIN", "USERNAME", "WINDIR"]
+        : []);
+    const unexpected = Object.keys(got.env).filter((name) => !(name in want) && !allowedRuntimeAdditions.has(name));
+    assert.deepEqual(unexpected, [], `unexpected child environment keys: ${unexpected.join(", ")}`);
+    const stable = Object.fromEntries(Object.entries(got.env).filter(([name]) => !allowedRuntimeAdditions.has(name)));
+    assert.deepEqual(stable, want);
+    for (const name of forbidden) assert.equal(got.env[name], undefined, `${name} does not leak`);
     const raw = { ...step, stdin: "not json ${TMP}", cwd: "${HOME}" };
     mkdirSync(r.home);
     const got2 = JSON.parse(runCli(echo, raw, r, cliEnv(c, raw, r)).stdout.toString("utf8"));
     assert.equal(got2.stdin, `not json ${tmp}`);
     assert.equal(got2.cwd, r.home);
   } finally {
-    if (saved === undefined) delete process.env.CLAUDE_PROJECT_DIR;
-    else process.env.CLAUDE_PROJECT_DIR = saved;
+    for (const name of forbidden) {
+      if (saved[name] === undefined) delete process.env[name];
+      else process.env[name] = saved[name];
+    }
     rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test("conformance: a cli step fails when its CLI dies of a signal or outlives its timeout", () => {
+test("conformance: a cli step fails when its CLI dies of a POSIX signal", {
+  skip: process.platform === "win32" ? "Windows reports process termination as an exit status, not a POSIX child signal" : false,
+}, () => {
   const r: Roots = { tmp: tmpdir(), home: tmpdir(), cwd: tmpdir() };
   const step: Step = { id: "dies", op: "cli", argv: [] };
   const env = { PATH: process.env.PATH ?? "" };
   assert.throws(() => runCli([process.execPath, "-e", "process.kill(process.pid, 'SIGKILL')"], step, r, env), /killed by SIGKILL/);
+});
+
+test("conformance: a cli step fails when its CLI outlives its timeout", () => {
+  const r: Roots = { tmp: tmpdir(), home: tmpdir(), cwd: tmpdir() };
+  const step: Step = { id: "times-out", op: "cli", argv: [] };
+  const env = { PATH: process.env.PATH ?? "" };
   assert.throws(() => runCli([process.execPath, "-e", "setTimeout(() => {}, 10000)"], step, r, env, 300), /did not run to its end.*ETIMEDOUT/);
 });

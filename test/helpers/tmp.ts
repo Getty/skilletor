@@ -1,5 +1,5 @@
 // Temp-directory fixture helper for tests.
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,7 +12,11 @@ export interface TmpDir {
 
 /** Create an isolated temp directory. Caller must call `cleanup()`. */
 export function makeTmpDir(prefix = "skilletor-test-"): TmpDir {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const created = mkdtempSync(join(tmpdir(), prefix));
+  // Git for Windows reports long canonical paths even when %TEMP% uses an 8.3 alias. Fixtures
+  // should normally use the same spelling; the native path-identity regression bypasses this
+  // helper deliberately so the product still has to handle both aliases.
+  const dir = process.platform === "win32" ? realpathSync.native(created) : created;
   return {
     dir,
     cleanup() {

@@ -19,7 +19,7 @@ use File::Spec ();
 use JSON::MaybeXS ();
 use Path::Tiny qw( path tempdir );
 use Skilletor::CLI ();
-use Skilletor::FSUtil qw( encode_text read_text );
+use Skilletor::FSUtil qw( encode_text read_text to_posix );
 use Skilletor::JSON qw( js_ordered js_parse js_sort_keys js_stringify js_type );
 use Skilletor::Engine;
 use Skilletor::Process qw( run_command );
@@ -145,9 +145,23 @@ sub placeholders {
   return ( [ $r->{home}, '${HOME}' ], ( $r->{project} ? [ $r->{project}, '${PROJECT}' ] : () ), [ $r->{tmp}, '${TMP}' ] );
 }
 
+sub _json_string_contents {
+  my ( $value ) = @_;
+  return substr( js_stringify($value), 1, -1 );
+}
+
 sub abstract {
   my ( $text, $r ) = @_;
-  $text =~ s/\Q$_->[0]\E/$_->[1]/g for placeholders($r);
+  for my $pair ( placeholders($r) ) {
+    my ( $path, $name ) = @$pair;
+    my $escaped = _json_string_contents($path);
+    my @forms = (
+      [ $escaped.'\\\\', "$name/" ], [ $escaped.'/', "$name/" ],
+      [ $path.'\\', "$name/" ],       [ $path.'/', "$name/" ],
+      [ $escaped, $name ],              [ $path, $name ],
+    );
+    $text =~ s/\Q$_->[0]\E/$_->[1]/g for @forms;
+  }
   return $text;
 }
 
@@ -155,6 +169,25 @@ sub concrete {
   my ( $text, $r ) = @_;
   $text =~ s/\Q$_->[1]\E/$_->[0]/g for placeholders($r);
   return $text;
+}
+
+sub concrete_json_text {
+  my ( $text, $r ) = @_;
+  for my $pair ( placeholders($r) ) {
+    my ( $path, $name ) = @$pair;
+    my $escaped = _json_string_contents($path);
+    $text =~ s/\Q$name\E/$escaped/g;
+  }
+  return $text;
+}
+
+sub abstract_deep {
+  my ( $v, $r ) = @_;
+  my $type = js_type($v);
+  return abstract( $v, $r ) if $type eq 'string';
+  return [ map { abstract_deep( $_, $r ) } @$v ] if $type eq 'array';
+  return js_ordered( map { ( $_ => abstract_deep( $v->{$_}, $r ) ) } keys %$v ) if $type eq 'object';
+  return $v;
 }
 
 # A path as a case stores it (README: escaped names): every name starting with `.git` gets the
@@ -168,7 +201,8 @@ sub copy_input {
   for my $rel ( walk($from) ) {
     my $dest = path( $to, unescape_name($rel) );
     $dest->parent->mkpath;
-    $dest->spew_raw( encode_text( concrete( read_text("$from/$rel"), $r ) ) );
+    my $text = read_text("$from/$rel");
+    $dest->spew_raw( encode_text( $rel =~ /\.json\z/ ? concrete_json_text( $text, $r ) : concrete( $text, $r ) ) );
   }
 }
 
@@ -181,6 +215,16 @@ sub copy_tree {
     $dest->parent->mkpath;
     $dest->spew_raw( path( $from, $rel )->slurp_raw );
   }
+}
+
+# A native filesystem path as an absolute file URL safe inside git-config's quoted value.
+sub file_url {
+  my ( $path ) = @_;
+  my $p = to_posix("$path");
+  $p = "/$p" if $^O eq 'MSWin32' && $p =~ /\A[A-Za-z]:\//;
+  my $bytes = encode_text($p);
+  $bytes =~ s{([^A-Za-z0-9\-._~/:])}{sprintf '%%%02X', ord($1)}ge;
+  return "file://$bytes";
 }
 
 # Build the case's git sources and the git config that reaches them (README: git sources).
@@ -205,7 +249,7 @@ sub build_git {
       git_ok( "$repo", 'tag', $commit->{tag} )       if defined $commit->{tag};
       git_ok( "$repo", 'branch', $commit->{branch} ) if defined $commit->{branch};
     }
-    push @config, '[url "file://'.$repo.'"]', "\tinsteadOf = ".$g->{url};
+    push @config, '[url "'.file_url($repo).'"]', "\tinsteadOf = ".$g->{url};
   }
   path( $r->{tmp}, 'gitconfig' )->spew_raw( encode_text( join( "\n", @config )."\n" ) );
 }
@@ -222,6 +266,9 @@ sub cli_env {
     GIT_CONFIG_NOSYSTEM => '1',
     LC_ALL              => 'C',
   );
+  if ( $^O eq 'MSWin32' ) {
+    @env{qw( USERPROFILE LOCALAPPDATA TEMP TMP )} = ( $r->{home}, "$r->{home}/AppData/Local", $r->{tmp}, $r->{tmp} );
+  }
   $env{PERL5LIB} = $ENV{PERL5LIB} if defined $ENV{PERL5LIB};    # a Perl CLI's modules
   $env{$_} = encode_text( concrete( $c->{env}{$_}, $r ) ) for keys %{ $c->{env} // {} };
   for my $k ( keys %{ $step->{env} // {} } ) {
@@ -271,7 +318,17 @@ sub run_cli {
 # Output placeholders on raw bytes (README: placeholders), ${VERSION} only where asked.
 sub abstract_bytes {
   my ( $bytes, $r, $version ) = @_;
-  $bytes =~ s/\Q@{[ encode_text( $_->[0] ) ]}\E/$_->[1]/g for placeholders($r);
+  for my $pair ( placeholders($r) ) {
+    my ( $path, $name ) = @$pair;
+    my $raw     = encode_text($path);
+    my $escaped = encode_text( _json_string_contents($path) );
+    my @forms = (
+      [ $escaped.'\\\\', "$name/" ], [ $escaped.'/', "$name/" ],
+      [ $raw.'\\', "$name/" ],         [ $raw.'/', "$name/" ],
+      [ $escaped, $name ],                [ $raw, $name ],
+    );
+    $bytes =~ s/\Q$_->[0]\E/$_->[1]/g for @forms;
+  }
   $bytes =~ s/\Q$VERSION\E/\${VERSION}/g if $version;
   return $bytes;
 }
@@ -386,7 +443,7 @@ sub run_case {
         : $step->{op} eq 'check'   ? $sk->check(%opts)
         : $step->{op} eq 'status'  ? $sk->status(%opts)
         :                            die "unknown op $step->{op}";
-      my $actual = canonical( js_parse( abstract( js_stringify($result), $r ) ) );
+      my $actual = canonical( abstract_deep( $result, $r ) );
       my $want   = canonical( js_parse( read_text("$expected.json") ) );
       is( js_stringify( $actual, 2 ), js_stringify( $want, 2 ), "step $id" );
     }
@@ -400,7 +457,11 @@ sub run_case {
       ( ( stat( $r->{$where}.'/'.$rel ) )[2] // 0 ) & 0100;
     } sort keys %$have;
     my $want_execs = -f "$expected.executables.json" ? js_parse( read_text("$expected.executables.json") ) : [];
-    is_deeply( \@execs, [@$want_execs], "step $id: the files with the executable bit" );
+    SKIP: {
+      skip 'Windows filesystems expose no POSIX executable-bit contract', 1
+        if $^O eq 'MSWin32' && @$want_execs;
+      is_deeply( \@execs, [@$want_execs], "step $id: the files with the executable bit" );
+    }
   }
 }
 
@@ -409,6 +470,23 @@ ok( scalar @cases, 'the cases directory holds cases' );
 for my $name (@cases) {
   subtest "conformance: $name" => sub { run_case($name) };
 }
+
+subtest 'Windows-shaped placeholders escape only paths and preserve unrelated backslashes' => sub {
+  my $r = {
+    tmp => 'C:\\Temp\\fixture', home => 'C:\\Temp\\fixture\\home',
+    project => 'C:\\Temp\\fixture\\project', cwd => 'C:\\Temp\\fixture\\cwd',
+  };
+  my $input = '{"path":"${HOME}/child","literal":"keep\\\\literal"}';
+  is_deeply( js_parse( concrete_json_text( $input, $r ) ),
+    { path => "$r->{home}/child", literal => 'keep\\literal' }, 'JSON input' );
+  is_deeply( abstract_deep( { path => "$r->{home}\\child", literal => 'keep\\literal' }, $r ),
+    { path => '${HOME}/child', literal => 'keep\\literal' }, 'structured output' );
+  my $stream = abstract_bytes( encode_text( js_stringify( {
+    path => "$r->{project}\\child", literal => 'keep\\literal',
+  } ) ), $r, 0 );
+  is_deeply( js_parse( Encode::decode( 'UTF-8', $stream ) ),
+    { path => '${PROJECT}/child', literal => 'keep\\literal' }, 'stream output' );
+};
 
 # The harness itself (README: cli), on a stand-in CLI that reports what it got. Asserts: the
 # child's environment is exactly the fixed variables, the case's and the step's (a variable of the
@@ -422,21 +500,34 @@ subtest "a cli step's CLI gets the README's environment, argv, cwd and stdin –
   my @echo = ( $^X, '-MCwd', '-e', 'local $/; my $in = <STDIN>; print join "\0", Cwd::getcwd(), -p STDIN ? "pipe" : "no pipe", $in, @ARGV, map { "$_=$ENV{$_}" } sort keys %ENV' );
   my $c = { env => { CLAUDE_CONFIG_DIR => '${HOME}/cfg', DROPPED => 'x' } };
   my $step = { id => 'echo', op => 'cli', argv => [ 'status', '${HOME}' ], env => { DROPPED => undef, EXTRA => '${TMP}/e' }, stdin => js_ordered( cwd => '${HOME}', n => [1] ) };
-  local $ENV{CLAUDE_PROJECT_DIR} = $tmp;
+  my @forbidden = qw( CLAUDE_PROJECT_DIR SKILLETOR_BIN GITHUB_TOKEN );
+  local @ENV{@forbidden} = map { "conformance-forbidden-$_" } @forbidden;
   my $got = run_cli( \@echo, $step, $r, cli_env( $c, $step, $r ) );
+  my @got = split /\0/, $got->{stdout}, -1;
+  is_deeply(
+    [ @got[ 0 .. 4 ] ],
+    [ $r->{cwd}, 'pipe', js_stringify( concrete_deep( $step->{stdin}, $r ) ), 'status', $r->{home} ],
+    'cwd, stdin as JSON through a pipe, argv'
+  );
+  my %got_env = map { split /=/, $_, 2 } @got[ 5 .. $#got ];
   my %env = (
     PATH => $ENV{PATH} // '', HOME => $r->{home}, CODEX_HOME => "$r->{home}/.codex", GIT_CONFIG_GLOBAL => "$tmp/gitconfig",
-    GIT_CONFIG_NOSYSTEM => '1', LC_ALL => 'C', CLAUDE_CONFIG_DIR => "$r->{home}/cfg", EXTRA => "$tmp/e",
+    GIT_CONFIG_NOSYSTEM => '1', LC_ALL => 'C', CLAUDE_CONFIG_DIR => concrete( '${HOME}/cfg', $r ), EXTRA => concrete( '${TMP}/e', $r ),
     ( defined $ENV{PERL5LIB} ? ( PERL5LIB => $ENV{PERL5LIB} ) : () ),
   );
-  is_deeply(
-    [ split /\0/, $got->{stdout}, -1 ],
-    [ $r->{cwd}, 'pipe', '{"cwd":"'.$r->{home}.'","n":[1]}', 'status', $r->{home}, map { "$_=$env{$_}" } sort keys %env ],
-    'cwd, stdin as JSON through a pipe, argv, the environment'
-  );
+  @env{qw( USERPROFILE LOCALAPPDATA TEMP TMP )} = ( $r->{home}, "$r->{home}/AppData/Local", $r->{tmp}, $r->{tmp} )
+    if $^O eq 'MSWin32';
+  my @allowed = $^O eq 'darwin' ? ('__CF_USER_TEXT_ENCODING')
+    : $^O eq 'MSWin32' ? qw( LOGONSERVER SYSTEMDRIVE SYSTEMROOT USERDOMAIN USERNAME WINDIR ) : ();
+  my %allowed = map { $_ => 1 } @allowed;
+  my @unexpected = grep { !exists $env{$_} && !$allowed{$_} } keys %got_env;
+  is_deeply( [ sort @unexpected ], [], 'no unknown child environment keys' );
+  delete @got_env{ keys %allowed };
+  is_deeply( \%got_env, \%env, 'the isolated environment plus known runtime additions only' );
+  ok( !exists $got_env{$_}, "$_ does not leak" ) for @forbidden;
   my $raw = { %$step, stdin => 'not json ${TMP}', cwd => '${HOME}' };
-  my @got = split /\0/, run_cli( \@echo, $raw, $r, cli_env( $c, $raw, $r ) )->{stdout}, -1;
-  is_deeply( [ @got[ 0 .. 2 ] ], [ $r->{home}, 'pipe', "not json $tmp" ], 'a string is stdin as it is; a step cwd' );
+  my @raw_got = split /\0/, run_cli( \@echo, $raw, $r, cli_env( $c, $raw, $r ) )->{stdout}, -1;
+  is_deeply( [ @raw_got[ 0 .. 2 ] ], [ $r->{home}, 'pipe', "not json $tmp" ], 'a string is stdin as it is; a step cwd' );
 
   # Capture stdin unchanged: omitted stdin is empty, but a present JSON null is the four bytes
   # `null`. Exercise the conformance runner and ParityCLI, which t/65 uses for interleaved steps.
@@ -473,7 +564,10 @@ subtest 'a cli step fails when its CLI dies of a signal or outlives its timeout'
   my $r = { tmp => $dir, home => $dir, cwd => $dir };
   my $step = { id => 'dies', op => 'cli', argv => [] };
   my %env = ( PATH => $ENV{PATH} // '' );
-  like( run_cli( [ $^X, '-e', 'kill KILL => $$' ], $step, $r, \%env )->{failed}, qr/killed by signal 9/, 'a signal' );
+  SKIP: {
+    skip 'Windows reports process termination as an exit status, not a POSIX child signal', 1 if $^O eq 'MSWin32';
+    like( run_cli( [ $^X, '-e', 'kill KILL => $$' ], $step, $r, \%env )->{failed}, qr/killed by signal 9/, 'a signal' );
+  }
   like( run_cli( [ $^X, '-e', 'sleep 10' ], $step, $r, \%env, 300 )->{failed}, qr/outlived its timeout/, 'the timeout' );
 };
 

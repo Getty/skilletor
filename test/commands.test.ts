@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { claudeOnly } from "./helpers/harness.ts";
 import { prependPath, writeRemoteHelper } from "./helpers/remote-helper.ts";
@@ -407,7 +407,11 @@ test("k118: add keeps transport::address verbatim as a git source and installs t
   const e = env();
   const restore = prependPath(join(e.tmp.dir, "bin"));
   try {
-    const address = gitRepo(e.tmp.dir, "tools", ["t-one"]).slice("file://".length);
+    const transportRoot = join(e.tmp.dir, "with~tilde");
+    mkdirSync(transportRoot);
+    const repoUrl = gitRepo(transportRoot, "tools", ["t-one"]);
+    assert.match(repoUrl, /%7E/i, "fixture proves an encoded filesystem URL");
+    const address = fileURLToPath(repoUrl);
     const log = join(e.tmp.dir, "helper.log");
     writeRemoteHelper(join(e.tmp.dir, "bin"), "k118", log);
     const spec = `k118::${address}`;

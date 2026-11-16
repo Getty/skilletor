@@ -82,7 +82,8 @@ test("k124: updateWorktreeInclude keeps the user's lines and deletes a file that
     assert.equal(updateWorktreeInclude({ dir: tmp.dir, entries: ["/a"], enabled: true }), "created");
     assert.equal(readFileSync(p, "utf8"), ".env\n\n" + BLOCK("/a"));
     assert.equal(updateWorktreeInclude({ dir: tmp.dir, entries: ["/a"], enabled: false }), "removed");
-    assert.equal(readFileSync(p, "utf8"), ".env\n");
+    // Removal owns the marked block, not the blank separator preceding BEGIN.
+    assert.equal(readFileSync(p, "utf8"), ".env\n\n");
     assert.equal(existsSync(join(tmp.dir, ".gitignore")), false); // the other file is never touched
   } finally {
     tmp.cleanup();
@@ -177,7 +178,8 @@ test("k124: own lines stay; the block goes when the project stops using skilleto
     assert.equal(readFileSync(e.wti, "utf8"), ".env\nconfig/secrets.json\n\n" + WTI_BLOCK); // still in use
     rmSync(join(e.projectDir, ".claude/skilletor.json"));
     const gone = await sync(e.ctx);
-    assert.equal(readFileSync(e.wti, "utf8"), ".env\nconfig/secrets.json\n");
+    // The separator before the managed block is outside its ownership boundary.
+    assert.equal(readFileSync(e.wti, "utf8"), ".env\nconfig/secrets.json\n\n");
     assert.equal(projectOf(gone).gitignoreUpdated, undefined);
 
     rmSync(e.wti);
@@ -237,7 +239,8 @@ test("k124: check sees a missing, edited or leftover .worktreeinclude block; the
     writeFileSync(e.wti, ".env\n\n" + WTI_BLOCK);
     assert.deepEqual(await layoutOf(e.ctx), ["project"]);
     await sync(e.ctx);
-    assert.equal(readFileSync(e.wti, "utf8"), ".env\n");
+    // Drift settlement removes only marker-owned bytes and retains the outside blank line.
+    assert.equal(readFileSync(e.wti, "utf8"), ".env\n\n");
     assert.equal(await layoutOf(e.ctx), undefined);
   } finally {
     e.cleanup();

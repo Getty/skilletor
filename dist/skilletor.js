@@ -5779,7 +5779,7 @@ function atomicWrite(path, data, executable = false) {
 }
 function realOrResolved(path) {
   try {
-    return realpathSync(path);
+    return process.platform === "win32" ? realpathSync.native(path) : realpathSync(path);
   } catch {
     return resolve(path);
   }
@@ -5818,7 +5818,7 @@ function sameFile(a, b) {
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname as hostname2, platform, userInfo } from "node:os";
 import { existsSync as existsSync11, readFileSync as readFileSync13, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync5 } from "node:fs";
-import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute2, join as join15, relative as relative4, resolve as resolvePath5, sep as sep5 } from "node:path";
+import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute3, join as join15, relative as relative4, resolve as resolvePath5, sep as sep5 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -7173,11 +7173,26 @@ var WORKTREE_INCLUDE = ".worktreeinclude";
 function updateWorktreeInclude(opts) {
   return updateBlockFile(join3(opts.dir, WORKTREE_INCLUDE), opts);
 }
+function textLines(text2) {
+  const lines = [];
+  let start = 0;
+  while (start < text2.length) {
+    const newline = text2.indexOf("\n", start);
+    if (newline === -1) {
+      lines.push({ text: text2.slice(start), start, end: text2.length, eol: "" });
+      break;
+    }
+    const contentEnd = newline > start && text2[newline - 1] === "\r" ? newline - 1 : newline;
+    lines.push({ text: text2.slice(start, contentEnd), start, end: newline + 1, eol: text2.slice(contentEnd, newline + 1) });
+    start = newline + 1;
+  }
+  return lines;
+}
 function blockEntries(path) {
   try {
-    const lines = readFileSync2(path, "utf8").split("\n");
+    const lines = textLines(readFileSync2(path, "utf8"));
     const { begin, end, hasBlock: hasBlock2 } = blockOf(lines);
-    return hasBlock2 ? lines.slice(begin + 1, end) : [];
+    return hasBlock2 ? lines.slice(begin + 1, end).map((line) => line.text) : [];
   } catch {
     return [];
   }
@@ -7185,28 +7200,41 @@ function blockEntries(path) {
 function updateBlockFile(path, opts) {
   const existed = existsSync2(path);
   const existing = existed ? readFileSync2(path, "utf8") : "";
-  const lines = existing.length ? existing.split("\n") : [];
-  const { begin, end, hasBlock: hasBlock2 } = blockOf(lines);
-  const outside = hasBlock2 ? [...lines.slice(0, begin), ...lines.slice(end + 1)] : lines;
+  const lines = textLines(existing);
+  const block = blockOf(lines);
   const entries = [...new Set(opts.entries)].sort();
   const write = opts.enabled && entries.length > 0;
-  let out;
+  let result = existing;
   let change;
-  if (write) {
-    const block = [BEGIN, ...entries, END];
-    if (hasBlock2) {
-      out = [...lines.slice(0, begin), ...block, ...lines.slice(end + 1)];
-      change = lines.slice(begin + 1, end).join("\n") === entries.join("\n") ? "unchanged" : "changed";
-    } else {
-      const trimmed = trimTrailingEmpty(outside);
-      out = trimmed.length ? [...trimmed, "", ...block] : [...block];
-      change = "created";
+  if (block.hasBlock) {
+    const current = lines.slice(block.begin + 1, block.end).map((line) => line.text);
+    if (write && current.length === entries.length && current.every((entry, i) => entry === entries[i])) {
+      return "unchanged";
     }
+    const first = lines[block.begin];
+    const last = lines[block.end];
+    if (write) {
+      const newline = first.eol || last.eol || lines.find((line) => line.eol)?.eol || "\n";
+      const replacement = [BEGIN, ...entries, END].join(newline) + last.eol;
+      result = existing.slice(0, first.start) + replacement + existing.slice(last.end);
+      change = "changed";
+    } else {
+      const before = existing.slice(0, first.start);
+      const after = existing.slice(last.end);
+      result = before + after;
+      change = "removed";
+    }
+  } else if (write) {
+    const newline = lines.find((line) => line.eol)?.eol || "\n";
+    let separator = "";
+    if (existing.length > 0) {
+      separator = existing.endsWith(newline + newline) ? "" : existing.endsWith(newline) ? newline : newline + newline;
+    }
+    result = existing + separator + [BEGIN, ...entries, END].join(newline) + newline;
+    change = "created";
   } else {
-    out = trimTrailingEmpty(outside);
-    change = hasBlock2 ? "removed" : "unchanged";
+    return "unchanged";
   }
-  const result = out.length && out.some((l) => l.trim() !== "") ? out.join("\n").replace(/\n*$/, "") + "\n" : "";
   if (result === "") {
     if (existed) rmSync2(path, { force: true });
     return change;
@@ -7215,13 +7243,13 @@ function updateBlockFile(path, opts) {
   return change;
 }
 function blockOf(lines) {
-  const begin = lines.indexOf(BEGIN);
-  const end = lines.indexOf(END);
+  const begin = lines.findIndex((line) => line.text === BEGIN);
+  const end = lines.findIndex((line) => line.text === END);
   return { begin, end, hasBlock: begin !== -1 && end !== -1 && end > begin };
 }
 function hasBlock(dir) {
   try {
-    return blockOf(readFileSync2(join3(dir, ".gitignore"), "utf8").split("\n")).hasBlock;
+    return blockOf(textLines(readFileSync2(join3(dir, ".gitignore"), "utf8"))).hasBlock;
   } catch {
     return false;
   }
@@ -7232,11 +7260,6 @@ function skillGitignorePath(name) {
 function withSkillGitignore(output, name) {
   const out = new Map(output);
   out.set(skillGitignorePath(name), Buffer.from(SKILL_GITIGNORE, "utf8"));
-  return out;
-}
-function trimTrailingEmpty(lines) {
-  const out = [...lines];
-  while (out.length && out[out.length - 1].trim() === "") out.pop();
   return out;
 }
 var LS_FILES_BATCH = 500;
@@ -9268,7 +9291,7 @@ import {
   writeFileSync as writeFileSync3
 } from "node:fs";
 import { hostname } from "node:os";
-import { join as join12 } from "node:path";
+import { isAbsolute as isAbsolute2, join as join12 } from "node:path";
 var SyncLockTimeoutError = class extends Error {
   name = "SyncLockTimeoutError";
 };
@@ -9279,6 +9302,9 @@ var LOCK = "sync.lock";
 var LEFTOVER2 = `${LOCK}.`;
 function setOwn3(record, key, value2) {
   Object.defineProperty(record, key, { value: value2, writable: true, enumerable: true, configurable: true });
+}
+function projectStateKey(key) {
+  return process.platform === "win32" && isAbsolute2(key) ? realOrResolved(key) : key;
 }
 var State = class {
   root;
@@ -9319,17 +9345,20 @@ var State = class {
   }
   // ---- last-check -----------------------------------------------------------
   isDue(scopeKey, intervalSeconds) {
+    scopeKey = projectStateKey(scopeKey);
     const last = this.readJson("last-check.json")[scopeKey];
     if (typeof last !== "number") return true;
     return Date.now() - last >= intervalSeconds * 1e3;
   }
   markChecked(scopeKey) {
+    scopeKey = projectStateKey(scopeKey);
     const checks = this.readJson("last-check.json");
     checks[scopeKey] = Date.now();
     this.writeJson("last-check.json", checks);
   }
   /** Drop a mark: the next check is due at once. */
   clearChecked(scopeKey) {
+    scopeKey = projectStateKey(scopeKey);
     const checks = this.readJson("last-check.json");
     if (!(scopeKey in checks)) return;
     delete checks[scopeKey];
@@ -9417,11 +9446,13 @@ var State = class {
   }
   // ---- pending report -------------------------------------------------------
   putPendingReport(projectKey, report) {
+    projectKey = projectStateKey(projectKey);
     const pending = this.readJson("pending-report.json");
     setOwn3(pending, projectKey, report);
     this.writeJson("pending-report.json", pending);
   }
   takePendingReport(projectKey) {
+    projectKey = projectStateKey(projectKey);
     const pending = this.readJson("pending-report.json");
     if (!Object.hasOwn(pending, projectKey)) return void 0;
     const report = pending[projectKey];
@@ -10136,7 +10167,7 @@ function checkedVersion(read, backend, lock, name) {
 }
 function userClaudeEntries(claudeDir2, stateRoot) {
   const rel = relative4(claudeDir2, stateRoot);
-  const under2 = rel !== "" && !rel.startsWith("..") && !isAbsolute2(rel);
+  const under2 = rel !== "" && !rel.startsWith("..") && !isAbsolute3(rel);
   return ["skilletor.lock.json", ...under2 ? [rel.split(sep5).join("/") + "/"] : [], ...LOCAL_ENTRIES];
 }
 function gitRemote(dir) {
@@ -10591,7 +10622,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   }
   const labelOf = (abs) => {
     const rel = relative4(base, abs);
-    return rel.startsWith("..") || isAbsolute2(rel) ? abs : toPosix(rel);
+    return rel.startsWith("..") || isAbsolute3(rel) ? abs : toPosix(rel);
   };
   const result = apply(plan, {
     targetDir,
@@ -10752,7 +10783,7 @@ function worktreeIncludeEntries(rc) {
 }
 function scopeLabel(scope, base, abs) {
   const rel = relative4(base, abs);
-  if (rel.startsWith("..") || isAbsolute2(rel)) return abs;
+  if (rel.startsWith("..") || isAbsolute3(rel)) return abs;
   const shown = rel.split(sep5).join("/");
   return scope === "user" ? `~/${shown}` : shown;
 }

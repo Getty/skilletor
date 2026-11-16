@@ -10,7 +10,7 @@ use Sys::Hostname ();
 use Time::HiRes ();
 use Skilletor::Error::LockTimeout;
 use Skilletor::Process ();
-use Skilletor::FSUtil qw( read_text write_text path_join );
+use Skilletor::FSUtil qw( is_absolute path_join read_text real_or_resolved write_text );
 use Skilletor::JSON qw( js_parse js_stringify js_ordered js_sort_keys js_type );
 use namespace::clean;
 
@@ -79,10 +79,18 @@ sub is_trusted {
 
 #### Last check (the in-session check's clock) #########################
 
+# Absolute project keys are canonical only on Windows, where an 8.3 alias and the long path
+# Git reports must share hook state. POSIX keeps persisted raw and symlink-spelled keys.
+sub _project_state_key {
+  my ( $key ) = @_;
+  return $^O eq 'MSWin32' && is_absolute($key) ? real_or_resolved($key) : $key;
+}
+
 sub _now_ms_number { 0 + int( Time::HiRes::time() * 1000 ) }
 
 sub is_due {
   my ( $self, $scope_key, $interval_seconds ) = @_;
+  $scope_key = _project_state_key($scope_key);
   my $last = $self->_read_json('last-check.json')->{$scope_key};
   return 1 unless js_type($last) eq 'number';
   return _now_ms_number() - $last >= $interval_seconds * 1000 ? 1 : 0;
@@ -90,6 +98,7 @@ sub is_due {
 
 sub mark_checked {
   my ( $self, $scope_key ) = @_;
+  $scope_key = _project_state_key($scope_key);
   my $checks = $self->_read_json('last-check.json');
   $checks->{$scope_key} = _now_ms_number();
   $self->_write_json( 'last-check.json', $checks );
@@ -97,6 +106,7 @@ sub mark_checked {
 
 sub clear_checked {
   my ( $self, $scope_key ) = @_;
+  $scope_key = _project_state_key($scope_key);
   my $checks = $self->_read_json('last-check.json');
   return unless exists $checks->{$scope_key};
   delete $checks->{$scope_key};
@@ -201,6 +211,7 @@ sub put_render_inputs {
 # A background sync's hook output for a project, for one of its next prompts to show.
 sub put_pending_report {
   my ( $self, $project_key, $report ) = @_;
+  $project_key = _project_state_key($project_key);
   my $pending = $self->_read_json('pending-report.json');
   $pending->{$project_key} = $report;
   $self->_write_json( 'pending-report.json', $pending );
@@ -209,6 +220,7 @@ sub put_pending_report {
 # A project's pending report, taken out (undef: none); the file is written only when it held one.
 sub take_pending_report {
   my ( $self, $project_key ) = @_;
+  $project_key = _project_state_key($project_key);
   my $pending = $self->_read_json('pending-report.json');
   return undef unless exists $pending->{$project_key};
   my $report = delete $pending->{$project_key};

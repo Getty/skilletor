@@ -493,12 +493,13 @@ test("k87: a git failure's message ends in git's last word, not its trailing new
 // checks out the repo, check sees the locked commit as unchanged and a new upstream commit as a
 // change, and every run of the helper got the address exactly as written.
 test("k118: a transport::address source resolves and checks through git's remote helper, as written", async () => {
-  const tmp = makeTmpDir();
+  const tmp = makeTmpDir("skilletor~transport-");
   const restore = prependPath(join(tmp.dir, "bin"));
   try {
     const repo = makeRepo(tmp);
     repo.commit("hello", "first");
-    const address = repo.url.slice("file://".length);
+    assert.match(repo.url, /%7E/i, "fixture proves an encoded filesystem URL");
+    const address = fileURLToPath(repo.url);
     const log = join(tmp.dir, "helper.log");
     writeRemoteHelper(join(tmp.dir, "bin"), "k118", log);
     const src = new GitSource({ url: `k118::${address}`, cacheRoot: join(tmp.dir, "cache") });

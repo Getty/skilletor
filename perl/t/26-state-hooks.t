@@ -85,6 +85,31 @@ subtest 'a pending report per project, taken once' => sub {
   is( $root->child('pending-report.json')->slurp_raw, "{}\n", 'but taken: the file is written' );
 };
 
+subtest 'POSIX persisted symlink-spelled pending and check keys retain their raw identity' => sub {
+  SKIP: {
+    skip 'POSIX state keys intentionally remain raw', 3 if $^O eq 'MSWin32';
+    my $tmp     = tempdir;
+    my $root    = $tmp->child('state');
+    my $project = $tmp->child('project');
+    my $alias   = $tmp->child('project-link');
+    $root->mkpath;
+    $project->mkpath;
+    symlink "$project", "$alias" or skip "symlinks unavailable: $!", 3;
+    my $pending = js_ordered( systemMessage => 'raw POSIX alias' );
+    $root->child('pending-report.json')->spew_utf8( js_stringify( js_ordered( "$alias" => $pending ) ) );
+    $root->child('last-check.json')->spew_utf8( js_stringify( js_ordered( "$alias" => 100 ) ) );
+
+    my $s = Skilletor::State->new( root => "$root" );
+    {
+      no warnings 'redefine';
+      local *Skilletor::State::_now_ms_number = sub { 200 };
+      ok( !$s->is_due( "$alias", 600 ), 'the persisted raw check key is found' );
+    }
+    is_deeply( $s->take_pending_report("$alias"), $pending, 'the persisted raw pending key is found' );
+    is_deeply( [ keys %{ js_parse( $root->child('last-check.json')->slurp_utf8 ) } ], ["$alias"], 'the raw key remains stored' );
+  }
+};
+
 subtest 'prototype-named hook state keys are ordinary data' => sub {
   my $root = tempdir;
   my $s = Skilletor::State->new( root => "$root" );

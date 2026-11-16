@@ -739,7 +739,8 @@ test("k65: a block an earlier version left in an unused project is removed witho
     writeFileSync(join(p, ".codex/.gitignore"), "own-line\n\n" + BLOCK("agents/**/.local.*", "skilletor-rules.md"));
     const r = await sync(e.ctx);
     assert.equal(existsSync(join(p, ".claude/.gitignore")), false); // only the block: the file goes
-    assert.equal(readFileSync(join(p, ".codex/.gitignore"), "utf8"), "own-line\n");
+    // The separator before the marker is outside the block and remains byte-for-byte.
+    assert.equal(readFileSync(join(p, ".codex/.gitignore"), "utf8"), "own-line\n\n");
     assert.equal(projectOf(r).gitignoreUpdated, undefined);
     assert.equal(reportText(r), "");
   } finally {
@@ -836,7 +837,8 @@ test("k65: while the lock still holds entries the block stays; an emptied lock n
     assert.equal(projectOf(r).gitignoreUpdated, undefined);
     writeFileSync(lockPath, "{}\n"); // what earlier versions left when the last entry went
     const empty = await sync(e.ctx);
-    assert.equal(readFileSync(gi, "utf8"), "own\n");
+    // Even when skilletor originally added the separator, it lies outside the owned markers.
+    assert.equal(readFileSync(gi, "utf8"), "own\n\n");
     assert.equal(existsSync(lockPath), false); // a lock without entries is deleted
     assert.equal(projectOf(empty).gitignoreUpdated, undefined);
   } finally {
@@ -962,7 +964,8 @@ test("k64: an unused project holding a skilletor block in any root is drift; the
       assert.deepEqual([chk.changed, chk.layoutChanged], [true, ["project"]], root);
       assert.equal(await layoutOf(e.ctx, "user"), undefined, root);
       const r = await sync(e.ctx);
-      assert.equal(readFileSync(join(p, root, ".gitignore"), "utf8"), "own\n", root);
+      // The blank line preceding BEGIN is outside the removable block.
+      assert.equal(readFileSync(join(p, root, ".gitignore"), "utf8"), "own\n\n", root);
       assert.equal(reportText(r), "", root);
       assert.equal((await check(e.ctx)).changed, false, root);
     }
