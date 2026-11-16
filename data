@@ -1,0 +1,35 @@
+---
+claimed_at: 2026-11-16T02:05:26Z
+claimed_by: skilletor-sol-deadline
+class: standard
+completed: 2026-11-16T02:05:26Z
+created: 2026-11-10T17:50:43Z
+id: 151
+priority: medium
+started: 2026-11-16T00:12:10Z
+status: done
+tags:
+- hooks
+title: 'SessionStart sync can be killed mid-apply: give it a deadline'
+updated: 2026-11-16T02:05:26Z
+---
+
+Found in k147. Claude Code SIGKILLs a hook's process group at its timeout (binary: `process.kill(-pid,"SIGKILL")`). A SessionStart sync killed mid-apply writes no salvage lock (`writeSalvageLock` runs only on a thrown error), so the files that landed are not in the lock, and the next sync reports them as conflicts.
+
+k147 added `EngineContext.deadline` for the move hook: a scope whose sources are not resolved by then is not written, and what follows is local. SessionStart could set one too, below its 30 s hooks.json timeout.
+
+## Done when
+
+SessionStart passes a deadline below its hook timeout; a test shows a slow source leaves nothing half-written; spec §8 says so; `dist/` rebuilt.
+
+Worker added matching TS/Perl SessionStart pre-write budgets: earlier of caller deadline and start+20s, established before source checks; existing engine boundary unchanged. Reported RED default/explicit-deadline cases, GREEN59 Node hook/move tests and45 Perl tests, typecheck/diff-check PASS. No shared case240: fixture format cannot inject a hook clock/deadline; dedicated tests cover timing. Independent Sol review and main focused reruns now running. check-dist currently FAILS as expected because workers intentionally did not rebuild shared dist; final integration must resolve it before commit. Spec8 and the coordinated Task1 spec7 diagnostic notes updated. No publication.
+
+Independent review accepts code/tests but blocks one new spec sentence claiming the host cannot kill the process midway through writes. Actual guard checks only before local apply; the remaining10s is a safety margin, not a bound or rollback guarantee. Returned for documentation-only correction. Main focused verification already PASS:2 Node +45 Perl tests,0 skips/0 TODOs. No runtime change requested.
+
+Task review approved after one documentation-only correction: the remaining10s is an intended margin, not a guarantee against hard kills or a rollback mechanism. Reviewer rechecked the exact fix and found no new breakage. Main independent focused verification:2 Node and45 Perl tests PASS,0 skips/0 TODOs; runtime unchanged by fix. Conformance README now explicitly notes timing is covered by dedicated tests. Awaiting final integrated bundle/build/suites and local commit.
+
+Final whole-branch review found an integration diagnostic defect: user scope may already be applied before a later project scope exceeds the deadline, but the current error says nothing was written. Returned for the single final fix wave: reproduce with deterministic two-scope regression; make TS/Perl diagnostic scope-specific; prove earlier scope stays committed and late scope untouched. Existing per-scope apply semantics remain unchanged. Prior complete green run belongs to the pre-fix snapshot; final gates must run again after code changes.
+
+Single final integration fix wave is independently approved: deadline diagnostic now names the late scope in TS and Perl. Deterministic two-scope RED reproduced the old false global claim; GREEN proves user file+ownership persist while project files/ownership remain absent. Worker focused tests:3 k151 Node,60 hook/move Node,46 Perl/3files PASS, no skips/TODOs; typecheck/scoped diff-check PASS. Main verified exact8-file final delta and reviewer marked finding ADDRESSED with no new breakage. Fresh full Node/build/Perl gates now running; no commit until those results are independently read. No rollback/atomicity promise.
+
+Committed as d392166 after the final scoped re-review found the corrected per-scope diagnostic addressed with no new breakage. Corrected-code gates passed: Node 1332 pass, 0 fail, 3 explicit skips; Perl 49 files and 2699 tests, 0 TODO; typecheck, build, check-dist and diff-check passed.
