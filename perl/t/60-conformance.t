@@ -162,6 +162,75 @@ sub _in_json_string {
   return $quoted;
 }
 
+sub _nested_json_intervals {
+  my ( $text ) = @_;
+  my ( @intervals, @tokens );
+  my $outer = 0;
+  my $finish_outer = sub {
+    for ( my $i = 0; $i + 1 < @tokens; ) {
+      my ( $open, $close ) = @tokens[ $i, $i + 1 ];
+      my $before = $open->{slash} > 0 ? substr( $text, $open->{slash} - 1, 1 ) : '';
+      my $after = substr( $text, $close->{quote} + 1, 1 );
+      my $opening = $open->{slash} == 0 || $before =~ /[\s:=,(\[{'`]/;
+      my $closing = $close->{quote} + 1 >= length($text) || $after =~ /[\s,.;:)\]}"'`]/;
+      if ( $opening && $closing ) {
+        push @intervals, [ $open->{quote} + 1, $close->{slash} ];
+        $i += 2;
+      }
+      else { $i++ }
+    }
+    @tokens = ();
+  };
+
+  for ( my $i = 0; $i < length($text); ) {
+    my $c = substr( $text, $i, 1 );
+    if (!$outer) {
+      $outer = 1 if $c eq '"';
+      $i++;
+      next;
+    }
+    if ( $c eq '\\' ) {
+      my $end = $i + 1;
+      $end++ while $end < length($text) && substr( $text, $end, 1 ) eq '\\';
+      if ( substr( $text, $end, 1 ) eq '"' && ( $end - $i ) % 2 == 1 ) {
+        push @tokens, { slash => $i, quote => $end } if $end - $i == 1;
+        $i = $end + 1;
+        next;
+      }
+      $i = $end;
+      next;
+    }
+    if ( $c eq '"' ) {
+      $finish_outer->();
+      $outer = 0;
+    }
+    $i++;
+  }
+  return @intervals;
+}
+
+sub _in_nested_json_string {
+  my ( $text, $offset ) = @_;
+  for my $interval ( _nested_json_intervals($text) ) {
+    return 1 if $offset >= $interval->[0] && $offset < $interval->[1];
+  }
+  return 0;
+}
+
+sub _encoded_root {
+  my ( $path, $depth ) = @_;
+  my $encoded = $path;
+  $encoded = _json_string_contents($encoded) for 1 .. $depth;
+  return $encoded;
+}
+
+sub _expected_root_depth {
+  my ( $expected, $offset, $encoding ) = @_;
+  return 0 if $encoding eq 'decoded';
+  return 0 if $encoding eq 'stream' && !_in_json_string( $expected, $offset );
+  return 1 + ( _in_nested_json_string( $expected, $offset ) ? 1 : 0 );
+}
+
 sub _replace_exact_where {
   my ( $text, $needle, $replacement, $accept ) = @_;
   my ( $out, $from ) = ( '', 0 );
@@ -216,13 +285,21 @@ sub _ends_path {
 }
 
 sub oracle_path_equal {
-  my ( $actual, $expected, $encoding ) = @_;
+  my ( $actual, $expected, $encoding, $roots ) = @_;
   my ( $a, $e, $in_path, $close ) = ( 0, 0, 0, undef );
   while ( $e < length $expected ) {
     my $placeholder = _placeholder_at( $expected, $e );
     if ( defined $placeholder ) {
-      return 0 unless substr( $actual, $a, length($placeholder) ) eq $placeholder;
-      $a += length($placeholder);
+      my $consumed = length($placeholder);
+      if ( substr( $actual, $a, length($placeholder) ) ne $placeholder ) {
+        return 0 unless $roots;
+        my ($pair) = grep { $_->[1] eq $placeholder } placeholders($roots);
+        return 0 unless $pair;
+        my $candidate = _encoded_root( $pair->[0], _expected_root_depth( $expected, $e, $encoding ) );
+        return 0 unless substr( $actual, $a, length($candidate) ) eq $candidate;
+        $consumed = length($candidate);
+      }
+      $a += $consumed;
       $e += length($placeholder);
       $in_path = substr( $expected, $e, 1 ) eq '/' ? 1 : 0;
       $close = $in_path ? _path_close( $expected, $e - length($placeholder) ) : undef;
@@ -231,11 +308,12 @@ sub oracle_path_equal {
     my $wanted = substr( $expected, $e, 1 );
     $in_path = 0 if $in_path && _ends_path( $wanted, $close );
     if ( $in_path && $wanted eq '/' ) {
-      my $json = $encoding eq 'json' || ( $encoding eq 'stream' && _in_json_string( $expected, $e ) );
       if ( substr( $actual, $a, 1 ) eq '/' ) { $a++ }
-      elsif ( $json && substr( $actual, $a, 2 ) eq '\\\\' ) { $a += 2 }
-      elsif ( !$json && substr( $actual, $a, 1 ) eq '\\' ) { $a++ }
-      else { return 0 }
+      else {
+        my $separator = '\\' x ( 2 ** _expected_root_depth( $expected, $e, $encoding ) );
+        return 0 unless substr( $actual, $a, length($separator) ) eq $separator;
+        $a += length($separator);
+      }
       $e++;
       next;
     }
@@ -247,8 +325,8 @@ sub oracle_path_equal {
 }
 
 sub actual_text_for_expected {
-  my ( $actual, $expected, $encoding ) = @_;
-  return oracle_path_equal( $actual, $expected, $encoding ) ? $expected : $actual;
+  my ( $actual, $expected, $encoding, $roots ) = @_;
+  return oracle_path_equal( $actual, $expected, $encoding, $roots ) ? $expected : $actual;
 }
 
 sub _assign_array_item {
@@ -563,7 +641,7 @@ sub run_case {
       for my $stream (qw( stdout stderr )) {
         my $actual = abstract_bytes( $got->{$stream}, $r, $step->{version} );
         my $want_stream = read_stream("$expected.$stream");
-        is( actual_text_for_expected( $actual, $want_stream, 'stream' ), $want_stream, "step $id: $stream" );
+        is( actual_text_for_expected( $actual, $want_stream, 'stream', $r ), $want_stream, "step $id: $stream" );
       }
     }
     else {
@@ -584,7 +662,7 @@ sub run_case {
     is_deeply( [ sort keys %$have ], [ sort keys %want ], "step $id: the files in the tree" );
     for my $rel ( sort keys %want ) {
       my $encoding = $rel =~ /\.json\z/ ? 'json' : 'decoded';
-      is( actual_text_for_expected( $have->{$rel}, $want{$rel}, $encoding ), $want{$rel}, "step $id: $rel" );
+      is( actual_text_for_expected( $have->{$rel}, $want{$rel}, $encoding, $r ), $want{$rel}, "step $id: $rel" );
     }
     my @execs = grep {
       my ( $where, $rel ) = unescape_name($_) =~ m{\A(home|project|cwd)/(.*)\z}s;
@@ -629,6 +707,40 @@ subtest 'expected oracles distinguish native paths from literal escapes' => sub 
   } ) ), $r, 0 );
   my $stream_expected = encode_text( js_stringify( { path => '${PROJECT}/child/deep', literal => 'keep\\literal' } ) );
   is( actual_text_for_expected( $stream, $stream_expected, 'stream' ), $stream_expected, 'stream output' );
+
+  my $rejected_ref = "--upload-pack=touch '$r->{project}\\dash-pwned'";
+  my $rejected_message = "skilletor: $r->{project}\\.claude\\skilletor.json: sources.team.ref ".js_stringify($rejected_ref)
+    .' must not start with '.js_stringify('-').' (git would read it as an option)';
+  my $hook_actual = abstract_bytes( encode_text( js_stringify( js_ordered( systemMessage => $rejected_message ) )."\n" ), $r, 0 );
+  my $portable_ref = q{--upload-pack=touch '${PROJECT}/dash-pwned'};
+  my $portable_message = '${PROJECT}/.claude/skilletor.json: sources.team.ref '.js_stringify($portable_ref)
+    .' must not start with '.js_stringify('-').' (git would read it as an option)';
+  $portable_message = 'skilletor: '.$portable_message;
+  my $hook_expected = encode_text( js_stringify( js_ordered( systemMessage => $portable_message ) )."\n" );
+  is( actual_text_for_expected( $hook_actual, $hook_expected, 'stream', $r ), $hook_expected,
+    'ordinary and nested JSON-stringified paths compare without changing the rejected payload' );
+  my $nested_root = encode_text( _encoded_root( $r->{project}, 2 ) );
+  ok( index( $hook_actual, $nested_root ) >= 0, 'fixture contains exactly two root-encoding layers' );
+  for my $depth ( 0, 1, 3 ) {
+    my $wrong = $hook_actual;
+    my $at = index( $wrong, $nested_root );
+    substr( $wrong, $at, length($nested_root) ) = encode_text( _encoded_root( $r->{project}, $depth ) );
+    ok( !oracle_path_equal( $wrong, $hook_expected, 'stream', $r ), "nested root at wrong encoding depth $depth fails" );
+  }
+  ( my $changed_payload = $hook_actual ) =~ s/--upload-pack=touch/--upload-pack=remove/;
+  ok( !oracle_path_equal( $changed_payload, $hook_expected, 'stream', $r ), 'changed rejected payload fails' );
+  ( my $changed_quote = $hook_actual ) =~ s/\\"--upload-pack/"--upload-pack/;
+  ok( !oracle_path_equal( $changed_quote, $hook_expected, 'stream', $r ), 'changed nested quoting fails' );
+  ( my $missing_open_actual = $hook_actual ) =~ s/\\"--upload-pack/--upload-pack/;
+  ( my $missing_open_expected = $hook_expected ) =~ s/\\"--upload-pack/--upload-pack/;
+  ( my $missing_close_actual = $hook_actual ) =~ s/dash-pwned'\\"/dash-pwned'/;
+  ( my $missing_close_expected = $hook_expected ) =~ s/dash-pwned'\\"/dash-pwned'/;
+  isnt( $missing_open_expected, $hook_expected, 'opening-quote fixture changed' );
+  isnt( $missing_close_expected, $hook_expected, 'closing-quote fixture changed' );
+  ok( !oracle_path_equal( $missing_open_actual, $missing_open_expected, 'stream', $r ),
+    'unmatched expected closing quote gives no nested provenance' );
+  ok( !oracle_path_equal( $missing_close_actual, $missing_close_expected, 'stream', $r ),
+    q{later quoted '-' cannot close an unmatched expected opener} );
 
   my $raw_json = '{"message":"${HOME}/child\\nnext","tab":"${HOME}/child\\tnext","unicode":"${HOME}/child\\u1234",'
     .'"path":"${HOME}\\\\nested\\\\u-part","literal":"keep\\\\literal"}';

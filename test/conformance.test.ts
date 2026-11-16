@@ -177,6 +177,73 @@ function inJsonString(text: string, offset: number): boolean {
   return quoted;
 }
 
+/** Complete escaped-quote scalar intervals inside each outer JSON string. A delimiter is
+ * exactly `\\"` (deeper escaped quotes are content), and a closing delimiter must end a value. */
+function nestedJsonIntervals(text: string): [number, number][] {
+  const intervals: [number, number][] = [];
+  let outer = false;
+  let tokens: { slash: number; quote: number }[] = [];
+  const finishOuter = () => {
+    const openingBoundary = (at: number) => at === 0 || /[\s:=,(\[{'`]/.test(text[at - 1]!);
+    const closingBoundary = (at: number) => at >= text.length || /[\s,.;:)\]}"'`]/.test(text[at]!);
+    for (let i = 0; i + 1 < tokens.length;) {
+      const open = tokens[i]!;
+      const close = tokens[i + 1]!;
+      if (openingBoundary(open.slash) && closingBoundary(close.quote + 1)) {
+        intervals.push([open.quote + 1, close.slash]);
+        i += 2;
+      } else {
+        i++;
+      }
+    }
+    tokens = [];
+  };
+
+  for (let i = 0; i < text.length;) {
+    const c = text[i]!;
+    if (!outer) {
+      if (c === '"') outer = true;
+      i++;
+      continue;
+    }
+    if (c === "\\") {
+      let end = i + 1;
+      while (text[end] === "\\") end++;
+      if (text[end] === '"' && (end - i) % 2 === 1) {
+        if (end - i === 1) tokens.push({ slash: i, quote: end });
+        i = end + 1;
+        continue;
+      }
+      i = end;
+      continue;
+    }
+    if (c === '"') {
+      finishOuter();
+      outer = false;
+    }
+    i++;
+  }
+  // An unterminated outer JSON string has no proven nested intervals.
+  if (outer) tokens = [];
+  return intervals;
+}
+
+function inNestedJsonString(text: string, offset: number): boolean {
+  return nestedJsonIntervals(text).some(([start, end]) => offset >= start && offset < end);
+}
+
+function encodedRoot(path: string, depth: number): string {
+  let encoded = path;
+  for (let i = 0; i < depth; i++) encoded = jsonStringContents(encoded);
+  return encoded;
+}
+
+function expectedRootDepth(expected: string, offset: number, encoding: EncodingContext): number {
+  if (encoding === "decoded") return 0;
+  if (encoding === "stream" && !inJsonString(expected, offset)) return 0;
+  return 1 + (inNestedJsonString(expected, offset) ? 1 : 0);
+}
+
 function replaceExactWhere(
   text: string, needle: string, replacement: string, accept: (text: string, offset: number) => boolean,
 ): string {
@@ -227,7 +294,7 @@ function endsPath(c: string, close: string | undefined): boolean {
 
 /** Exact comparison except for separators explicitly designated by `/` inside an expected
  * placeholder-rooted path token. JSON strings require an encoded `\\`; decoded text requires `\`. */
-function oraclePathEqual(actual: string, expected: string, encoding: EncodingContext): boolean {
+function oraclePathEqual(actual: string, expected: string, encoding: EncodingContext, roots?: Roots): boolean {
   let a = 0;
   let e = 0;
   let inPath = false;
@@ -235,8 +302,15 @@ function oraclePathEqual(actual: string, expected: string, encoding: EncodingCon
   while (e < expected.length) {
     const placeholder = placeholderAt(expected, e);
     if (placeholder !== undefined) {
-      if (!actual.startsWith(placeholder, a)) return false;
-      a += placeholder.length;
+      let consumed = placeholder.length;
+      if (!actual.startsWith(placeholder, a)) {
+        const concrete = roots && placeholders(roots).find(([, name]) => name === placeholder)?.[0];
+        if (concrete === undefined) return false;
+        const candidate = encodedRoot(concrete, expectedRootDepth(expected, e, encoding));
+        if (!actual.startsWith(candidate, a)) return false;
+        consumed = candidate.length;
+      }
+      a += consumed;
       e += placeholder.length;
       inPath = expected[e] === "/";
       close = inPath ? pathClose(expected, e - placeholder.length) : undefined;
@@ -245,11 +319,12 @@ function oraclePathEqual(actual: string, expected: string, encoding: EncodingCon
     const wanted = expected[e]!;
     if (inPath && endsPath(wanted, close)) inPath = false;
     if (inPath && wanted === "/") {
-      const json = encoding === "json" || (encoding === "stream" && inJsonString(expected, e));
       if (actual[a] === "/") a++;
-      else if (json && actual.startsWith("\\\\", a)) a += 2;
-      else if (!json && actual[a] === "\\") a++;
-      else return false;
+      else {
+        const separator = "\\".repeat(2 ** expectedRootDepth(expected, e, encoding));
+        if (!actual.startsWith(separator, a)) return false;
+        a += separator.length;
+      }
       e++;
       continue;
     }
@@ -260,8 +335,8 @@ function oraclePathEqual(actual: string, expected: string, encoding: EncodingCon
   return a === actual.length;
 }
 
-function actualTextForExpected(actual: string, expected: string, encoding: EncodingContext): string {
-  return oraclePathEqual(actual, expected, encoding) ? expected : actual;
+function actualTextForExpected(actual: string, expected: string, encoding: EncodingContext, roots?: Roots): string {
+  return oraclePathEqual(actual, expected, encoding, roots) ? expected : actual;
 }
 
 function valuesEquivalent(actual: unknown, expected: unknown): boolean {
@@ -605,7 +680,7 @@ async function runCase(name: string, t: TestContext): Promise<void> {
           assert.deepEqual(canonical({ exit: got.exit }), canonical(want), `${name}: step ${step.id}: the exit code; stderr: ${stderr}`);
           for (const [stream, bytes] of [["stdout", stdout], ["stderr", stderr]] as const) {
             const wantBytes = readStream(`${base}.${stream}`);
-            const actualText = actualTextForExpected(bytes.toString("latin1"), wantBytes.toString("latin1"), "stream");
+            const actualText = actualTextForExpected(bytes.toString("latin1"), wantBytes.toString("latin1"), "stream", r);
             const comparable = Buffer.from(actualText, "latin1");
             assert.equal(comparable.toString("utf8"), wantBytes.toString("utf8"), `${name}: step ${step.id}: ${stream}`);
             assert.ok(comparable.equals(wantBytes), `${name}: step ${step.id}: ${stream}, byte for byte`);
@@ -640,7 +715,7 @@ async function runCase(name: string, t: TestContext): Promise<void> {
         const actual = have.get(rel);
         assert.equal(typeof actual, "string", `${name}: step ${step.id}: ${rel}`);
         const encoding: EncodingContext = rel.endsWith(".json") ? "json" : "decoded";
-        assert.equal(actualTextForExpected(actual!, text, encoding), text, `${name}: step ${step.id}: ${rel}`);
+        assert.equal(actualTextForExpected(actual!, text, encoding, r), text, `${name}: step ${step.id}: ${rel}`);
       }
       const wantExecs = existsSync(execFile) ? JSON.parse(readFileSync(execFile, "utf8")) : [];
       if (process.platform === "win32" && wantExecs.length > 0) {
@@ -700,6 +775,39 @@ test("conformance: expected oracles distinguish native paths from literal escape
   })), r, false).toString("latin1");
   const streamExpected = JSON.stringify({ path: "${PROJECT}/child/deep", literal: "keep\\literal" });
   assert.equal(actualTextForExpected(stream, streamExpected, "stream"), streamExpected);
+
+  const rejectedRef = `--upload-pack=touch '${r.project}\\dash-pwned'`;
+  const rejectedMessage = `skilletor: ${r.project}\\.claude\\skilletor.json: sources.team.ref ${JSON.stringify(rejectedRef)}` +
+    ` must not start with ${JSON.stringify("-")} (git would read it as an option)`;
+  const hookActual = abstractBytes(Buffer.from(JSON.stringify({ systemMessage: rejectedMessage }) + "\n"), r, false).toString("latin1");
+  const portableRef = "--upload-pack=touch '${PROJECT}/dash-pwned'";
+  const portableMessage = `skilletor: ${"${PROJECT}"}/.claude/skilletor.json: sources.team.ref ${JSON.stringify(portableRef)}` +
+    ` must not start with ${JSON.stringify("-")} (git would read it as an option)`;
+  const hookExpected = JSON.stringify({ systemMessage: portableMessage }) + "\n";
+  assert.equal(actualTextForExpected(hookActual, hookExpected, "stream", r), hookExpected,
+    "ordinary and nested JSON-stringified paths compare without changing the rejected payload");
+  const nestedRoot = encodedRoot(r.project!, 2);
+  assert.ok(hookActual.includes(nestedRoot), "fixture contains exactly two root-encoding layers");
+  for (const depth of [0, 1, 3]) {
+    assert.equal(oraclePathEqual(hookActual.replace(nestedRoot, encodedRoot(r.project!, depth)), hookExpected, "stream", r), false,
+      `nested root at wrong encoding depth ${depth} fails`);
+  }
+  assert.equal(oraclePathEqual(hookActual.replace("--upload-pack=touch", "--upload-pack=remove"), hookExpected, "stream", r), false,
+    "changed rejected payload fails");
+  assert.equal(oraclePathEqual(hookActual.replace('\\"--upload-pack', '"--upload-pack'), hookExpected, "stream", r), false,
+    "changed nested quoting fails");
+  const removeOpening = (text: string) => text.replace('\\"--upload-pack', "--upload-pack");
+  const removeClosing = (text: string) => text.replace("dash-pwned'\\\"", "dash-pwned'");
+  const missingOpeningActual = removeOpening(hookActual);
+  const missingOpeningExpected = removeOpening(hookExpected);
+  const missingClosingActual = removeClosing(hookActual);
+  const missingClosingExpected = removeClosing(hookExpected);
+  assert.notEqual(missingOpeningExpected, hookExpected, "opening-quote fixture changed");
+  assert.notEqual(missingClosingExpected, hookExpected, "closing-quote fixture changed");
+  assert.equal(oraclePathEqual(missingOpeningActual, missingOpeningExpected, "stream", r), false,
+    "unmatched expected closing quote gives no nested provenance");
+  assert.equal(oraclePathEqual(missingClosingActual, missingClosingExpected, "stream", r), false,
+    "later quoted '-' cannot close an unmatched expected opener");
 
   const rawJson = '{"message":"${HOME}/child\\nnext","tab":"${HOME}/child\\tnext","unicode":"${HOME}/child\\u1234",' +
     '"path":"${HOME}\\\\nested\\\\u-part","literal":"keep\\\\literal"}';

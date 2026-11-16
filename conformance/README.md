@@ -222,7 +222,10 @@ any case.
   stream or a compared file is replaced by its placeholder; plain and JSON-escaped root
   spellings remain distinct. The existing expected oracle then supplies path provenance: only
   a `/` inside its explicitly delimited placeholder-rooted path token may match a native
-  separator. Decoded strings use one backslash; raw JSON string bytes require two. Single JSON
+  separator. Decoded strings use one backslash; raw JSON string bytes require two. A root inside
+  one fully paired escaped-quote scalar inside the same outer JSON string may use exactly one
+  additional encoding layer; unmatched delimiters never borrow a quote from another scalar or a
+  later quoted value, and missing, extra or arbitrary depths fail. Single JSON
   escapes (`\\n`, `\\t`, `\\uNNNN`), formatting, ordering and all unrelated bytes remain exact;
   no stream or file is parsed and reserialized. Replacement runs first `${HOME}`, then
   `${PROJECT}`, then `${TMP}`, so the longer, nested paths win.

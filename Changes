@@ -1,6 +1,10 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - Conformance path comparison permits exactly one additional JSON-
+    stringification layer only within complete paired escaped-quote intervals
+    in one complete outer scalar. Wrong depths, unbalanced quotes, payload or
+    formatting changes and unrelated bytes still fail (k237).
   - Published-layout catalog entries use platform-independent UTF-8 byte
     ordering, matching Linux and Perl instead of native directory order or
     JavaScript UTF-16 order (k240).
