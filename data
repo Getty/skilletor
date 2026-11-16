@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-16T02:06:10Z
+claimed_by: skilletor-sol-render-cli
+class: standard
+completed: 2026-11-16T02:06:10Z
+created: 2026-11-13T21:02:54Z
+id: 192
+priority: medium
+started: 2026-11-16T00:12:21Z
+status: done
+tags:
+- render
+- bug
+- ts
+title: A skill's install path reads the process cwd (render.ts:111)
+updated: 2026-11-16T02:06:10Z
+---
+
+Found on k164 (2026-11-13). installPath() calls posix.relative(item.dir, file) on two relative paths, which resolves them against process.cwd(). From a removed cwd every item with a dir (every skill) fails as "template error in skill foo: ENOENT … uv_cwd" - in a hook (exit 0, one warning, the item stays at its old state) and in sync --project-dir X alike. Fix: relative paths need no cwd (posix.relative("/" + item.dir, "/" + file), or slicing off the prefix); then switch the k164 removed-cwd test (test/cli.test.ts) from a rule to a skill. Perl: check File::Spec->abs2rel/rel2abs on relative paths in Render.pm/Engine.pm for the same cwd read.
+
+Worker implemented cwd-independent skill install paths and explicit-project context construction; reported RED missing skill and focused GREEN Node/Perl removed-cwd regressions. Shared fixture242 was not added because the fixture driver cannot represent a deleted process cwd without schema extension; dedicated child-process tests cover it. Independent review and final integration gates pending.
+
+Independent task review: spec compliant and quality approved, no findings. Main independently reran5 focused Node regressions and35 Perl tests across t53/t68: all PASS,0 skips,0 TODOs; diff-check clean. Historical individual k193 RED remains unrecorded, but review confirms the exact diagnostic assertion rejects the previous stack path. Coordinator added case241 index and documented the deleted-cwd fixture limitation. Final combined gates/dist refresh and commit still pending.
+
+Committed as d392166 after implementation review and final corrected-code approval. Gates passed: Node 1332 pass, 0 fail, 3 explicit skips; Perl 49 files and 2699 tests, 0 TODO; typecheck, build, check-dist and diff-check passed.
