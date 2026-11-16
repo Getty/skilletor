@@ -1,0 +1,19 @@
+---
+class: standard
+created: 2026-11-14T00:42:56Z
+id: 208
+priority: low
+status: backlog
+tags:
+- ts
+- windows
+title: 'TS on Windows: background git calls may flash a console; readdir order is
+  NTFS order'
+updated: 2026-11-16T07:04:46Z
+---
+
+From k186 (Perl Windows process layer), src/ untouched.
+1. The detached background sync runs git through execFile without windowsHide; on Windows each git call may pop a console window. Set windowsHide: true on the execFile/spawn calls the hooks reach.
+2. catalog.ts:230 relies on readdirSync order. libuv sorts with strcmp on Linux/macOS, but on Windows readdirSync returns NTFS order (case-insensitive) unsorted, so `available`, the "unknown item ... (available: ...)" list and wildcard expansion can order differently there than on Linux - and than the Perl port, which sorts bytewise everywhere. Sorting by bytes (Buffer.compare on the names) there makes Windows deterministic and leaves Linux unchanged; pin it with a case holding names that differ only in case and names with [ \ ] ^ _ or a backtick.
+
+The catalog-order portion now has concrete native CI evidence (PR2 case152 at7dda9e3) and is tracked narrowly as k240. Its acceptance preserves the UTF-8 byte ordering described here. This card remains backlog for background Git console behavior and any remaining ordering concern; no console fix or closure is implied.
