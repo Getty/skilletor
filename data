@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-11-16T10:19:26Z
+claimed_by: skilletor-sol-windows-ci
+class: standard
+completed: 2026-11-16T10:19:26Z
+created: 2026-11-16T07:04:19Z
+id: 240
+priority: high
+started: 2026-11-16T10:19:26Z
+status: done
+tags:
+- windows
+- bug
+- catalog
+- ci
+title: Make published catalog order independent of filesystem enumeration
+updated: 2026-11-16T10:19:26Z
+---
+
+Observed in authorized PR2 native CI at7dda9e3: case152 exposes published-layout enumeration order depending on Windows NTFS order. This is the concrete catalog-order portion of existing k208; background Git console behavior stays outside this follow-up.
+
+Preserve the existing Linux/Perl reference: order filesystem names by UTF-8 bytes, as k208 specifies, not JavaScript UTF-16 code units. The currently prepared code-unit sort would unnecessarily change non-ASCII Linux ordering and must be corrected before acceptance. Do not reorder declared source paths or manifest lists.
+
+Done when: published catalog iteration is deterministic across Linux/macOS/Windows with matching TypeScript/Perl behavior; tests cover mixed case, relevant punctuation, and a legal non-ASCII pair distinguishing UTF-8 byte order from UTF-16 code-unit order (or explain the name grammar limitation); existing conformance expectations remain unchanged; native case152 passes. Keep source and rebuilt dist together. No unrelated console changes, dependency/version changes, activation or source relocation. This is a necessary scoped CI correction covered by user authorization.
+
+Preflight corrected the prepared UTF-16 sort to the existing k208 UTF-8 byte-order contract. Published catalog now sorts bytewise; Perl implementation restored unchanged because its readdir already provides byte order. Legal mixed-case/punctuation/U+E000/U+10000 tests failed under wrong code-unit candidate and pass under byte order in both engines; case152 focused PASS. Declarative ordering and oracles untouched. Independent review/full local gates running; native case152 still required.
+
+Platform-independent UTF-8 byte catalog ordering committed as 6911d0d with matching TypeScript and Perl regressions and rebuilt dist. Current-file gates passed: Node 1341 pass, 0 fail, 4 explicit skips; Perl 51 files and 2705 tests, 0 TODO; typecheck, build, check-dist and diff-check passed. Native success is not claimed.
+
+Main independently verified local commit6911d0d: exact12 paths (11 tested manifest+Changes), all tested hashes/modes unchanged, required footer, only foreign profiler untracked. User-authorized normal follow-up push completed. New CI run https://github.com/Getty/skilletor/actions/runs/43836868631 and Perl run43836868425 are registered for this exact head. Local latest-file proof: Node1341pass/4 explicit skips, Perl51 files2705pass/0TODOs. No native acceptance inferred; no merge/release/activation/migration.
+
+Native acceptance verified at head 845ee04 in Windows job 133225221919, matrix run 43845708032. The UTF-8 byte catalog ordering regression from commit 6911d0d passed by name. Windows job: 1249 pass, 0 fail, 97 explicit skips, 0 TODO; check-dist was up to date. The unrelated k208 console behavior remains outside this card.
