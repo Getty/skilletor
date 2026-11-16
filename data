@@ -1,0 +1,75 @@
+---
+claimed_at: 2026-11-16T10:19:55Z
+claimed_by: skilletor-sol-windows-ci
+class: standard
+completed: 2026-11-16T10:19:55Z
+created: 2026-11-15T23:42:40Z
+depends_on:
+- 238
+- 239
+- 240
+id: 237
+priority: high
+started: 2026-11-16T00:12:36Z
+status: done
+tags:
+- ci
+- windows
+- node
+title: 'CI: exercise the current Node launcher and hooks on native Windows'
+updated: 2026-11-16T10:19:55Z
+---
+
+Platform-readiness review found that .github/workflows/ci.yml runs Node 24 typecheck/tests/check-dist on Ubuntu and macOS only. The shipped Windows launcher still invokes Node; the prepared manual Perl binary workflow is not coverage for this current user path. No existing open card covers adding native Windows Node CI (k216 concerns Perl binary verification instead).
+
+Done when:
+- A native Windows PR/push CI job exercises the supported Node runtime, typecheck, tests and check-dist, with platform-specific skips explicitly reported rather than silently counted as coverage.
+- Black-box tests invoke bin/skilletor.exe --version and a hook through the shipped launcher against temporary HOME/USERPROFILE and isolated harness directories; no real user config or credentials are used.
+- At least one real temporary-path flow covers spaces and non-ASCII path components, or any concrete unsupported case remains an explicit release blocker on its owning card.
+- Observed CI evidence is recorded separately from merely adding the workflow. No release, binary activation, push or public publication is authorized by this card.
+
+This is a backlog readiness gap, not authorization to begin work. The last local Linux Node/Perl test results do not establish Windows compatibility.
+
+User explicitly selected stability fixes plus Windows CI for implementation on 2026-11-16. Local implementation is now authorized; an observed native Windows run is still required for completion, and no push/publication or binary activation is authorized.
+
+Prepared windows-latest in the unchanged PR/main-push CI matrix with Node24 typecheck/tests/check-dist, plus portable contract and real bin/skilletor.exe Unicode/space-path version+hook probes using isolated HOME/USERPROFILE/harness/plugin/Git roots and a minimal environment. Main independently ran new tests on Linux:1 contract PASS,2 explicit native-Windows SKIPs,0 failures. Independent task review and full local integration gates are running. Native Windows execution is NOT proven; this card must remain open until the Windows leg and both executable probes actually pass. Workflow has no manual trigger; branch push alone is insufficient without a PR. No push/PR/Actions/activation authorization has been granted.
+
+Local Windows CI preparation committed as cba4cda after scoped review approval. The corrected-code suite passed locally, but both native Windows launcher probes were explicit non-Windows skips; static workflow coverage and Linux results are not native acceptance.
+
+User explicitly authorized publishing the complete feature branch, creating a Draft PR and necessary follow-up pushes on that branch for CI corrections; no merge/release/activation/migration. Branch pushed normally and Draft PR created: https://github.com/Getty/skilletor/pull/2 (head cba4cda). Initial check read: Ubuntu Node, Perl5.40 and both SimpiCI jobs SUCCESS; macOS and native Windows still running. No native Windows success claimed yet. Main is watching this specific PR and will inspect the native launcher test evidence before closure.
+
+Native PR2 CI at cba4cda completed: Ubuntu Node PASS, Perl5.40 PASS, both SimpiCI jobs PASS; macOS1316 pass/2 fail/17 skip, Windows1068 pass/173 fail/94 skip. Both new native Windows executable probes PASSED, including isolated Unicode paths, but the full Windows suite failed, so no acceptance/closure. macOS failures are the k220 bundle equality test and CLI-environment contract. Windows includes many conformance failures plus other groups; counts are failing tests, not yet classified independent bugs. Authorized follow-up CI-correction phase started with read-only root-cause grouping, no blanket skips or expectation regeneration. Run https://github.com/Getty/skilletor/actions/runs/43798992684 ; main has saved native failure logs.
+
+Read-only triage grouped Windows173 failures into140 conformance-driver portability failures,29 CLI/move/Git-state failures with overlapping alias/CRLF causes,2 transport fixtures and2 Hermes fixtures. macOS2 failures are bundle-test fixture identity and runtime-injected env. Real runtime follow-ups are now k238 (8.3/long path identity) and k239 (CRLF managed blocks); the remaining focused harness/fixture corrections stay under k237. User-authorized CI-correction work continues in one serial file lane; no oracle regeneration or blanket Windows skips. Native API assumption will be pinned by a real Windows regression, not inferred from Linux.
+
+Scoped native-CI correction candidate prepared in17 source/test/doc files, without existing oracle/case changes. Includes shared TS/Perl conformance portability and strict known-OS env handling, same-checkout bundle equality, transport and Hermes fixture corrections, plus k238/k239 runtime fixes. Main froze a review package and started independent Sol review plus full Node/build/Perl gates. Linux native-only skips remain explicit; first native run is still red until the next authorized follow-up push/rerun.
+
+Native correction patch is independently reviewed after two scoped rounds, no open local code findings. Main is running final Node gates; full Perl50 files2703 tests PASS on byte-identical runtime. Release-manager preparing only local commit scope, not executing yet. Next authorized push will rerun PR2 CI; all three native cards remain open until their required native checks pass.
+
+Native CI portability follow-up committed as 7dda9e3 after both scoped fix rounds were approved with no open local findings. Fresh local proof: Node 1339 pass, 0 fail, 4 explicit skips; typecheck, build, check-dist and diff-check passed. Retained Perl proof on byte-identical runtime and inputs: 50 files, 2703 tests, 0 TODO. Native success is not claimed.
+
+Main verified commit7dda9e3 against all25 tested file hashes/modes plus Changes, exact26-path scope and footer; only foreign nytprof.out remains untracked. User-authorized normal follow-up push completed to the existing PR2 branch. New native CI run https://github.com/Getty/skilletor/actions/runs/43815639211 is registered and running; Perl run43815639237 also registered. Named8.3 test must PASS rather than availability-skip; no card closure yet. No merge/release/activation/migration.
+
+Second native run43815639211 at7dda9e3: macOS and Ubuntu Node PASS including check-dist; Perl5.40 and both SimpiCI jobs PASS. Windows1177pass/70fail/96skip. All3 native probes PASS (version, Unicode hook, raw8.3 identity). Remaining failure families:2 build cleanup EPERM,1 transport-derived-name fixture,66 conformance cases including residual rooted separators and executable fixture Git SHA,1 k239 hook report. Logs saved and same worker assigned bounded root-cause/fix follow-up; no oracle/hash weakening or blanket normalization. No global Windows acceptance yet.
+
+Remaining70 native failures are accounted for:63 rooted-path abstractions, case29 executable Git index/SHA, case115 prior Hermes-home fixture, case152 filesystem-dependent catalog order,2 transient cleanup failures,1 opaque transport fixture name,1 double-CRLF test fixture. Catalog runtime follow-up is k240, preserving existing UTF-8 byte order from k208 rather than introducing UTF-16 order.
+
+Second native correction candidate fully accounts for70 failures, including63 nested rooted-path abstractions, deterministic Git index executable metadata, explicit case115 prior-home input, k240 byte ordering, bounded cleanup retry, portable opaque transport fixture and idempotent CRLF setup. No oracle expectation edits. Corrected catalog candidate is under fresh independent review; main full Node/build/Perl gates running. Native proof, not Linux success, remains the closure gate.
+
+Wave2 independent review found2 conformance-runner defects before any push: explicit +x does not reset prior executable index mode on later commits with core.filemode=false; rooted raw-JSON normalization corrupts single escapes such as newline/tab. Both reproduced in disposable probes. Return for a single scoped TS/Perl runner fix with exact mode-transition and encoding regressions; no oracle/hash/byte-contract weakening. Catalog byte order and other families were reviewed positively. Pre-fix local Node1340pass/4skip and Perl51 files2704pass are not acceptance of the rejected candidate.
+
+Structural path comparison re-review APPROVED: expected-oracle provenance, separate encoding levels, exact data/format bytes, malformed-root rejection and unordered JSON multiplicity are preserved. Git mode-reset correction remains accepted. Windows verification remains supported; expectation regeneration now explicitly fails before writes on Windows and directs authors to POSIX because no oracle provenance exists in update mode. Main fresh Node1341pass/4 explicit skips and build gates PASS; latest-file full Perl still running. No commit/native acceptance yet.
+
+Second residual Windows follow-up committed as 6911d0d after scoped round-two approval with no significant local findings. Current-file gates passed: Node 1341 pass, 0 fail, 4 explicit skips; Perl 51 files and 2705 tests, 0 TODO; typecheck, build, check-dist and diff-check passed. Native success is not claimed.
+
+Main independently verified local commit6911d0d: exact12 paths (11 tested manifest+Changes), all tested hashes/modes unchanged, required footer, only foreign profiler untracked. User-authorized normal follow-up push completed. New CI run https://github.com/Getty/skilletor/actions/runs/43836868631 and Perl run43836868425 are registered for this exact head. Local latest-file proof: Node1341pass/4 explicit skips, Perl51 files2705pass/0TODOs. No native acceptance inferred; no merge/release/activation/migration.
+
+Third native matrix at6911d0d: Ubuntu/macOS PASS including check-dist; Windows1248pass/1fail/97skip. All3 native probes PASS. Sole failure: case54 hook JSON contains a rejected ref JSON-stringified inside systemMessage and then serialized again, so its project-root path has an extra escaping layer not abstracted by the helper. Rejection message remains present; no fixture/security assertion is being skipped. Targeted helper-only correction with portable nested-serializer reproduction assigned; payload/goldens/product validation must remain intact. Native check-dist still not reached because test suite failed.
+
+Nested-path review found missing closing-quote validation: current helper authorizes extra depth after an escaped opener without proving a complete pair. Return for complete intervals within one outer JSON scalar, with missing opener/closer negatives. Main Node pre-fix run finished green but does not override finding. Main deliberately stopped the obsolete Perl run before source edits; it is not counted as passing. No publication of this candidate.
+
+Paired nested-JSON conformance correction committed as 845ee04 after scoped review approval with no new breakage. Fresh current-file gates passed: Node 1341 pass, 0 fail, 4 explicit skips; Perl 51 files and 2705 tests, 0 TODO; typecheck, build, check-dist and diff-check passed. Native case 54 and Windows check-dist remain pending; native success is not claimed.
+
+Commit845ee04 verified by main: exact4 paths (3 tested runner/docs+Changes), all tested hashes/modes unchanged, footer valid, no product/fixture/golden changes. User-authorized normal follow-up push completed to PR2. New head confirmed OPEN/DRAFT. Main is waiting for exact-head pull-request CI registration and then watching its matrix; nested case54 and Windows check-dist must actually pass before closure. Current local proof remains Node1341pass/4 explicit skips and fresh Perl51 files2705pass/0TODOs. No merge/release/activation/migration.
+
+Native acceptance verified at exact head 845ee04: all six PR checks succeeded, including Ubuntu, macOS and Windows matrix run 43845708032, Perl 5.40 run 43845707978 and both SimpiCI checks. Windows job 133225221919 recorded 1249 pass, 0 fail, 97 explicit skips, 0 TODO, with check-dist up to date. Named passes include case 54, both shipped launcher probes, raw 8.3 identity, k239 CRLF and UTF-8 catalog ordering. Accepted implementation commits: cba4cda, 7dda9e3, 6911d0d and 845ee04. The 97 declared POSIX, shell, permission, mode, signal, deleted-cwd and missing-Hermes-runtime skips are not claimed as passes; native Windows Perl APIs, standalone Perl binaries and default activation remain unproven.
