@@ -5,18 +5,47 @@ use strict;
 use warnings;
 use utf8;
 
-use Cwd ();
-use Encode ();
 use Exporter qw( import );
-use Scalar::Util qw( blessed );
-use Skilletor::FSUtil qw( decode_utf8_lossy path_join );
-use Skilletor::Hooks qw( project_root_of );
-use Skilletor::JSON qw( js_ordered js_parse js_stringify js_type );
-use Skilletor::Report qw( backend_label display_safe report_json report_text status_text );
 
 our $VERSION = '0.002';
 
 our @EXPORT_OK = qw( run parse_flags unknown_option project_root_of self_command is_packed CLI_VERSION USAGE );
+
+# Every module beyond Exporter is loaded by the first call that needs it (k199): --version and
+# --help load nothing else, nor does a usage error; a hook loads its own. Each helper below
+# loads its module and hands over the call as it was.
+sub decode_utf8_lossy { require Skilletor::FSUtil; goto &Skilletor::FSUtil::decode_utf8_lossy }
+sub path_join         { require Skilletor::FSUtil; goto &Skilletor::FSUtil::path_join }
+sub project_root_of   { require Skilletor::Hooks;  goto &Skilletor::Hooks::project_root_of }
+sub js_ordered        { require Skilletor::JSON;   goto &Skilletor::JSON::js_ordered }
+sub js_parse          { require Skilletor::JSON;   goto &Skilletor::JSON::js_parse }
+sub js_stringify      { require Skilletor::JSON;   goto &Skilletor::JSON::js_stringify }
+sub js_type           { require Skilletor::JSON;   goto &Skilletor::JSON::js_type }
+sub backend_label     { require Skilletor::Report; goto &Skilletor::Report::backend_label }
+sub report_json       { require Skilletor::Report; goto &Skilletor::Report::report_json }
+sub report_text       { require Skilletor::Report; goto &Skilletor::Report::report_text }
+sub status_text       { require Skilletor::Report; goto &Skilletor::Report::status_text }
+
+# A line of printable ASCII and tabs has nothing to escape (t/68-cli.t holds display_safe to
+# that), so a usage error loads no report module either.
+sub display_safe {
+  return $_[0] if defined $_[0] && $_[0] =~ /\A[\t\x20-\x7E]*\z/;
+  require Skilletor::Report;
+  goto &Skilletor::Report::display_safe;
+}
+
+# An argument as Encode::decode reads it, Encode loaded for one that is not ASCII alone: ASCII
+# decodes to itself, a character string.
+sub _decode {
+  my ( $bytes ) = @_;
+  return undef unless defined $bytes;
+  if ( $bytes =~ /[^\x00-\x7F]/ ) {
+    require Encode;
+    return Encode::decode( 'UTF-8', $bytes );
+  }
+  utf8::upgrade( my $text = $bytes );
+  return $text;
+}
 
 # The version the CLI reports: the plugin's (package.json), which t/60-conformance.t pins.
 # Provisional until k167 decides between it and the dist's own $VERSION.
@@ -108,10 +137,15 @@ sub parse_flags {
   return \%flags;
 }
 
-# Text to a stream as UTF-8, as Node writes a string.
+# Text to a stream as UTF-8, as Node writes a string. ASCII is its own UTF-8: Encode is loaded
+# for other text only.
 sub _write {
   my ( $fh, $text ) = @_;
-  print {$fh} Encode::encode( 'UTF-8', $text );
+  if ( $text =~ /[^\x00-\x7F]/ ) {
+    require Encode;
+    $text = Encode::encode( 'UTF-8', $text );
+  }
+  print {$fh} $text;
 }
 
 # Display lines, each escaped whole (spec §8), one newline after each.
@@ -148,6 +182,7 @@ sub _engine {
   my $home = _home();
   my $project_dir = $flags->{project_dir};
   unless ( defined $project_dir ) {
+    require Cwd;
     my $cwd = Cwd::getcwd();
     die "the current directory no longer exists; pass --project-dir <dir>\n" unless defined $cwd;
     $project_dir = project_root_of( decode_utf8_lossy($cwd) );
@@ -341,7 +376,8 @@ sub _usage_error {
 # " at FILE line N." it appends.
 sub _message {
   my ( $err ) = @_;
-  return $err->message if blessed $err && $err->can('message');
+  require Scalar::Util;
+  return $err->message if Scalar::Util::blessed($err) && $err->can('message');
   my $text = "$err";
   $text =~ s/ at (?:(?! at ).)+ line \d+(?:, <[^>]*> (?:line|chunk) \d+)?\.\n\z//s;
   chomp $text;
@@ -416,11 +452,12 @@ sub _hook_output {
     self_command      => self_command(),
   );
   $ctx{harness} = $harness if defined $harness && ( $harness eq 'codex' || $harness eq 'hermes' );
+  require Skilletor::Hooks;
   return Skilletor::Hooks::run_hook( $event, $input, \%ctx );
 }
 
 sub run {
-  my ( @argv ) = map { Encode::decode( 'UTF-8', $_ ) } @_;
+  my ( @argv ) = map { _decode($_) } @_;
   # Argument hygiene (spec §7): --version only first, --help anywhere and alone.
   if ( @argv && ( $argv[0] eq '--version' || $argv[0] eq '-v' ) ) {
     _write( \*STDOUT, CLI_VERSION."\n" );
@@ -590,8 +627,9 @@ The engine runs on this machine: the home from C<$HOME>, the project from
 C<--project-dir> or the git top level of the working directory
 (L</project_root_of>), state under C<$CLAUDE_CONFIG_DIR> or F<~/.claude>, in
 F<skilletor/>, and the real host and user for templates. The engine and the
-commands are loaded only for the commands that run, so C<--help> and a usage
-error stay quick.
+commands are loaded only for the commands that run, every other module by the
+first call that needs it, so C<--version>, C<--help> and a usage error in ASCII
+load none of them and stay quick.
 
 C<hook E<lt>eventE<gt> [--harness codex|hermes]> runs a hook
 (L<Skilletor::Hooks>): the input is stdin's JSON (none on a terminal; malformed

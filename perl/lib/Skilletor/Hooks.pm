@@ -13,7 +13,6 @@ use Skilletor::FSUtil qw( decode_utf8_lossy encode_text node_fs_error path_join 
 use Skilletor::GitEnv qw( git_env );
 use Skilletor::JSON qw( js_ordered js_type );
 use Skilletor::Process qw( run_command spawn_detached );
-use Skilletor::Report qw( display_safe empty_scope_report report_hook );
 
 our $VERSION = '0.002';
 
@@ -32,7 +31,10 @@ use constant DEFAULT_INTERVAL => 600;
 use constant MOVE_DEADLINE_MS => 20_000;
 
 # State, Config and Engine are loaded by the events that use them: a prompt with nothing due
-# loads no engine.
+# loads no engine. The report module is loaded by the first answer that says something (k199).
+sub display_safe       { require Skilletor::Report; goto &Skilletor::Report::display_safe }
+sub empty_scope_report { require Skilletor::Report; goto &Skilletor::Report::empty_scope_report }
+sub report_hook        { require Skilletor::Report; goto &Skilletor::Report::report_hook }
 
 # The project of a directory, as the hooks and the CLI find it (spec §14.5): git's top level of
 # $cwd – of the repository found from $cwd, never one an exported GIT_DIR names (k91) – else $cwd

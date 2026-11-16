@@ -261,6 +261,28 @@ END
   ok( !-e "$m->{root}/git.log", 'no git run: the project was known' );
 };
 
+# The same prompt as Claude Code runs it, `skilletor hook user-prompt-submit`, pinned to the
+# modules of the dist it loads (k199): the hook, its state and config, what they stand on – no
+# report module, no engine. Every prompt pays for each one; a module that joins this list must
+# be one the fast path cannot do without.
+subtest 'the CLI prompt hook with nothing due loads the hook, state and config modules alone' => sub {
+  my $m = machine();
+  claude_marker($m);
+  user_config( $m, {} );
+  Skilletor::State->new( root => "$m->{home}/.claude/skilletor" )->mark_checked( $m->{project} );
+  my $script = <<'END';
+require Skilletor::CLI;
+my $code = Skilletor::CLI::run( 'hook', 'user-prompt-submit' );
+print "\n", $code, ' ', join( ',', sort grep { m{\ASkilletor/} } keys %INC ), "\n";
+END
+  my %env = ( %ENV, HOME => $m->{home}, CODEX_HOME => "$m->{home}/.no-codex", CLAUDE_PROJECT_DIR => $m->{project} );
+  delete $env{SKILLETOR_PROJECT_DIR};    # it would name another project, one that is due
+  my $r = run_command( cmd => [ $^X, ( map { "-I$_" } grep { !ref } @INC ), '-e', $script ], stdin => '{"session_id":"s","cwd":"x"}', env => \%env );
+  my @loaded = map { "Skilletor/$_.pm" }
+    qw( CLI Config Entry Error Error/Config Error/JSON Error/LockTimeout FSUtil GitEnv Hooks JSON JSON/OrderedHash JSString Process State );
+  is( $r->{stdout}, "\n0 ".join( ',', sort @loaded )."\n", 'nothing said, exit 0, and these modules alone' ) or diag $r->{stderr};
+};
+
 # ---- pending reports ---------------------------------------------------------------------------
 
 subtest 'a pending report is delivered once, on the next prompt' => sub {

@@ -1,6 +1,12 @@
 Revision history for Skilletor
 
 {{$NEXT}}
+  - The Perl CLI loads each module by the first call that needs it:
+    --version, --help and a usage error in ASCII load Skilletor::CLI alone
+    (180 -> 19 ms with perl -Ilib), and the prompt hook with nothing due no
+    longer loads Skilletor::Report and what it stands on. Output and exit
+    codes are unchanged. t/68-cli.t pins what the argument layer loads,
+    t/69-hooks.t the modules of the prompt hook's fast path (k199).
   - Skilletor::Frontmatter::Float and Skilletor::TOML::Float are hidden from
     the PAUSE indexer: inner value classes without a .pm of their own, no
     longer listed in META's provides (k202).

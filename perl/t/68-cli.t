@@ -136,6 +136,45 @@ END
   like( $run->( 'uninstall', 'bad', '--project-dir', "$home" ), qr{\A1 .*Skilletor/Commands\.pm}, 'uninstall: the commands loaded' );
 };
 
+# What --version, --help and a usage error cost is what they load (k199): the CLI module, the
+# pragmas and Exporter it uses, nothing else – no module of the dist, no Encode, no Moo. Asserted
+# in a fresh perl against what that perl had loaded before the CLI, so a switch of its own
+# (PERL5OPT) counts for nothing; the CLI writes to the real stdout, the last line is the count.
+subtest '--version, --help and a usage error load the CLI module alone' => sub {
+  my $home = tempdir;
+  my $script = <<'END';
+my %before = map { ( $_ => 1 ) } keys %INC;
+require Skilletor::CLI;
+my $code = Skilletor::CLI::run(@ARGV);
+print "\n", $code, ' ', join( ',', sort grep { !$before{$_} } keys %INC ), "\n";
+END
+  my $loaded = 'Exporter.pm,Skilletor/CLI.pm,constant.pm,strict.pm,utf8.pm,warnings.pm,warnings/register.pm';
+  my $run = sub {
+    my $r = run_command( cmd => [ $^X, ( map { "-I$_" } grep { !ref } @INC ), '-e', $script, '--', @_ ], env => { %ENV, HOME => "$home" } );
+    return ( $r->{stdout} =~ /([^\r\n]*)\r?\n\z/ )[0];
+  };
+  for my $argv ( ['--version'], ['-v'], [ '--version', 'sync' ], ['--help'], ['-h'], [], [ 'sync', '--help' ], [ 'hook', '-h' ] ) {
+    is( $run->(@$argv), "0 $loaded", ( "@$argv" || 'no arguments' ).': nothing loaded beyond the CLI module' );
+  }
+  for my $argv ( ['nope'], ['--nope'], [ 'sync', '--bogus' ], [ 'status', '--scope', 'nope' ], [ 'sync', '--scope' ], ['add'],
+    ['trust'], ['source'], [ 'source', 'remove' ], ['install'], [ 'uninstall', '--project' ], [ 'check', '--force' ] ) {
+    is( $run->(@$argv), "2 $loaded", "@$argv: a usage error, nothing loaded beyond the CLI module" );
+  }
+  like( $run->( Encode::encode( 'UTF-8', 'nöpe' ) ), qr{\A2 .*Encode\.pm.*Skilletor/Report\.pm}, 'a usage error naming non-ASCII: Encode and the report module' );
+};
+
+# The CLI's display_safe returns a line of printable ASCII and tabs as it is without loading
+# Skilletor::Report (k199): that holds while the report's own display_safe changes none of those
+# characters – the test of that – and every other line goes to the report's.
+subtest "display_safe: the CLI's shortcut is the report's own" => sub {
+  my $ascii = join '', "\t", map { chr } 0x20 .. 0x7E;
+  is( Skilletor::Report::display_safe($ascii), $ascii, "the report's display_safe changes no printable ASCII, no tab" );
+  for my $line ( $ascii, '', "a\nb", "a\rb", "\x7F", "\e[31mred", "\x{202E}gnp.exe", "caf\x{E9}", "\x{2028}", "x\x{FEFF}" ) {
+    is( Skilletor::CLI::display_safe($line), Skilletor::Report::display_safe($line),
+      'the same line: '.Skilletor::Report::display_safe($line) );
+  }
+};
+
 subtest "an edit's config path: the user config, the project's, no project scope" => sub {
   require Skilletor::Commands;
   require Skilletor::Engine;
