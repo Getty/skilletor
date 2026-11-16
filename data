@@ -1,0 +1,43 @@
+---
+claimed_at: 2026-11-16T10:19:04Z
+claimed_by: skilletor-sol-windows-ci
+class: standard
+completed: 2026-11-16T10:19:04Z
+created: 2026-11-16T04:12:15Z
+id: 239
+priority: high
+started: 2026-11-16T10:19:04Z
+status: done
+tags:
+- windows
+- bug
+- gitignore
+title: 'Windows: recognize CRLF managed ignore blocks without spurious writes'
+updated: 2026-11-16T10:19:04Z
+---
+
+Observed in the authorized native CI follow-up for Draft PR https://github.com/Getty/skilletor/pull/2 at cba4cda. Eleven Windows CLI/move/Git-state failures additionally report .gitignore/.worktreeinclude changes after Git checkout. High-confidence diagnosis to reproduce first: src/gitignore.ts splits on LF and compares marker lines that still carry CR, so CRLF managed blocks are not recognized correctly.
+
+Done when: a portable RED regression demonstrates the actual marker/update failure; existing CRLF blocks with unchanged entries remain unchanged (no duplicate block or perpetual layout drift); updates/removal preserve unrelated user text and follow the established newline contract; TypeScript and Perl behavior agree with focused/shared parity evidence. Do not normalize away real differences in the conformance oracle. Rebuild dist with source changes and verify native Windows Git checkout behavior. This is a necessary scoped CI-correction follow-up authorized by the user; no unrelated cleanup or activation.
+
+Worker reproduced CRLF failure portably (TS10pass/1fail; Perl15/22 assertions failed) and implemented matching TS/Perl block handling preserving unchanged bytes, outside text and newline style. Focused GREEN: TS11, Perl22 assertions and runHook regression1. Independent review/main integrated suites are running. Native Git-for-Windows checkout confirmation remains required; no closure or follow-up commit yet.
+
+Independent disposable probe found EOF removal deletes an intentional preceding blank line outside markers in both engines. Return for exact outside-byte preservation and mirrored EOF coverage for .gitignore/.worktreeinclude. If an existing test expects removal of outside whitespace, that claim conflicts with the spec and must be corrected explicitly, not silently weakened. Existing golden changes, if genuinely required by this semantic correction, need case-by-case explanation; no blanket regeneration.
+
+Fix-round1 re-review accepted EOF preservation, Windows-only state policy/Perl parity and precise native-alias availability handling. Fresh full Perl suite PASS:50 files2703 tests,0TODOs. Full Node suite now has exactly9 stale inline assertions in codex/engine/hooks/worktreeinclude tests, all expecting one outside newline to be deleted. Existing conformance golden files remain unchanged and did not fail. Per the recorded spec ruling, update each conflicting test claim after inspecting its input; no production change, trimming or blanket regeneration. Node final gate remains RED until corrected assertions pass.
+
+Both review rounds approved. EOF removal retains all outside-marker bytes, including unobservable separator ownership; mirrored EOF tests protect both consumers. Nine legacy Node expectations explicitly corrected after input inspection, with exact equality retained; no golden/oracle changes. Main verified those corrections touched only4 Node test files, leaving all21 previously tested runtime/Perl/dist files identical. Fresh Node gates pending; native Git-for-Windows proof remains required.
+
+CRLF and outside-byte managed-block fixes committed as 7dda9e3 after both scoped fix rounds were approved with no open local findings. Fresh local proof: Node 1339 pass, 0 fail, 4 explicit skips; typecheck, build, check-dist and diff-check passed. Retained Perl proof on byte-identical runtime and inputs: 50 files, 2703 tests, 0 TODO. Native success is not claimed.
+
+Main verified commit7dda9e3 against all25 tested file hashes/modes plus Changes, exact26-path scope and footer; only foreign nytprof.out remains untracked. User-authorized normal follow-up push completed to the existing PR2 branch. New native CI run https://github.com/Getty/skilletor/actions/runs/43815639211 is registered and running; Perl run43815639237 also registered. Named8.3 test must PASS rather than availability-skip; no card closure yet. No merge/release/activation/migration.
+
+Native unit/runtime probe improvements are positive, but the k239 runHook integration regression still reports managed metadata changes at7dda9e3. Reopened for exact filesystem/tracking/report cause, not an automatic expected-message adjustment. Parent Windows CI remains red; code changes beyond confirmed cause require a scoped explanation.
+
+Remaining native runHook failure was traced to test input converting existing CRLF with replaceAll LF, creating CRCRLF. Test setup now idempotently converts LF/CRLF once and asserts no double CR, while expected no-spurious-metadata message remains strict. Runtime CRLF/outside-byte implementation unchanged. Focused case PASS; independent review and fresh native rerun still required.
+
+Idempotent CRLF fixture correction committed as 6911d0d after scoped round-two approval. Current-file gates passed: Node 1341 pass, 0 fail, 4 explicit skips; Perl 51 files and 2705 tests, 0 TODO; typecheck, build, check-dist and diff-check passed. Native success is not claimed.
+
+Main independently verified local commit6911d0d: exact12 paths (11 tested manifest+Changes), all tested hashes/modes unchanged, required footer, only foreign profiler untracked. User-authorized normal follow-up push completed. New CI run https://github.com/Getty/skilletor/actions/runs/43836868631 and Perl run43836868425 are registered for this exact head. Local latest-file proof: Node1341pass/4 explicit skips, Perl51 files2705pass/0TODOs. No native acceptance inferred; no merge/release/activation/migration.
+
+Native acceptance verified at head 845ee04 in Windows job 133225221919, matrix run 43845708032. The CRLF managed-block runtime and fixture work from commits 7dda9e3 and 6911d0d passed the named k239 runHook regression. Windows job: 1249 pass, 0 fail, 97 explicit skips, 0 TODO; check-dist was up to date.
