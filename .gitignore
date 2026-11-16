@@ -17,3 +17,6 @@ evals/results/
 
 # a Hermes that loads hermes/skilletor through a symlink compiles it here
 __pycache__/
+
+# Devel::NYTProf profile output
+nytprof.out
