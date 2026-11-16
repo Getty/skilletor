@@ -1,0 +1,41 @@
+---
+class: standard
+completed: 2026-11-16T18:49:52Z
+created: 2026-11-13T23:52:37Z
+depends_on:
+- 190
+id: 203
+priority: high
+started: 2026-11-16T18:49:28Z
+status: done
+tags:
+- decision
+- binary
+- starter
+- performance
+title: 'Decision: the binary''s start cost per prompt against Node'
+updated: 2026-11-16T18:49:52Z
+---
+
+Decision for the maintainer: options and a recommendation, not decided here.
+
+The maintainer's starter order is: the binary, else download it, else Node, else Perl (k190 implements it, not wired). Measured by the dispatcher on 2026-11-14, HEAD 6302832, binary from perl/scripts/build-binary.sh (9.1 MiB, 177 modules), Debian 13 x86_64, 16 cores, a temp HOME with a detected Claude harness and nothing to sync; N=15 per cell, interleaved; load average rose 4 -> 9.5 during the run (other workers), so the minimum is the comparable figure:
+
+| ms, min / median | --version | hook session-start | hook user-prompt-submit (nothing due) |
+|---|---|---|---|
+| node dist/skilletor.js | 211 / 367 | 242 / 439 | 218 / 366 |
+| perl -Iperl/lib | 271 / 527 | 659 / 1108 | 320 / 539 |
+| binary, warm PAR cache | 715 / 1179 | 808 / 1764 | 571 / 983 |
+| binary, cold PAR cache | 1187 / 2380 | 2120 / 2900 | 1172 / 1867 |
+
+(An earlier run at load ~3 gave about half the medians: --version node 117/221, binary warm 373/650, cold 791/1271.) k188: a pp binary that does nothing costs ~250 ms warm; that floor cannot be cut inside PAR::Packer.
+
+So on a machine that has Node, binary-first costs every UserPromptSubmit and SessionStart roughly +350-550 ms (warm) over Node, and a cold cache (first start after a reboot when PAR_GLOBAL_TEMP is under tmpfs /tmp; the starter puts it beside the binary, so only after a download) about +1 s.
+
+Options:
+(a) Keep the order: one engine everywhere, the price above on every prompt. k199 (lazy loads) takes ~100 ms off.
+(b) Node first when node >= 18 and dist/ are there; the binary only where Node is missing. Fastest for those who have Node; two engines in the field (conformance holds them together).
+(c) Keep the order, and let the starter answer the prompt hook's nothing-due case itself (sh: interval since the last check, no pending report) without starting any engine. Most prompts then cost a shell start; but it duplicates a piece of the state logic in sh, which conformance would have to pin.
+Recommendation: (a) with k199 now; revisit (c) if the cost shows in practice, since (b) gives up the single engine the binary is for. Re-measure on the release binaries (and macOS/Windows) before wiring (k191).
+
+2026-11-16 18:49 Maintainer decision 2026-11-16 (via the perl-developer hub, design ~/dev/perl-developer/docs/superpowers/specs/2026-11-16-ack-paket-design.md): (a) binary first, with k199 lazy loads now.
