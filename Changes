@@ -1,6 +1,19 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - Published-layout catalog entries use platform-independent UTF-8 byte
+    ordering, matching Linux and Perl instead of native directory order or
+    JavaScript UTF-16 order (k240).
+  - Conformance verification uses expected-oracle path-token provenance and
+    encoding-aware separator matching. Raw streams and files retain byte order
+    and exact formatting; engine-result JSON arrays remain deliberately
+    unordered while preserving duplicate multiplicity. Windows verification
+    still runs; only expectation-update authoring is refused on Windows before
+    writes and points authors to POSIX (k237).
+  - Cross-platform fixtures set exact Git-index modes per commit, seed the
+    prior Hermes home explicitly, use portable decoded transport paths, retry
+    transient cleanup failures within a bound, and make CRLF conversion
+    idempotent (k237, k239).
   - On Windows, existing absolute project paths use native canonical spelling
     so 8.3 and long aliases share scope, pending-report and last-check identity;
     POSIX keys retain their stored spelling (k238).

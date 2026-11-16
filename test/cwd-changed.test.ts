@@ -136,7 +136,10 @@ test("k239: a move hook accepts unchanged CRLF managed blocks without duplicatin
     e.userCfg({ sources: { mine: { local: localSource(e) } } });
     const wt = await mainWithWorktree(e, { skills: ["foo@mine"] });
     const managed = [join(wt, ".claude", ".gitignore"), join(wt, ".worktreeinclude")];
-    for (const path of managed) writeFileSync(path, readFileSync(path, "utf8").replaceAll("\n", "\r\n"));
+    for (const path of managed) {
+      writeFileSync(path, readFileSync(path, "utf8").replace(/\r?\n/g, "\r\n"));
+      assert.doesNotMatch(readFileSync(path, "utf8"), /\r\r\n/, `${path}: exactly one CR per line ending`);
+    }
 
     const out = await runHook("cwd-changed", move(e.main, wt), e.ctx);
     assert.deepEqual(out, { systemMessage: `skilletor: 1 item(s) updated in ${wt}` });

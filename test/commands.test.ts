@@ -411,7 +411,9 @@ test("k118: add keeps transport::address verbatim as a git source and installs t
     mkdirSync(transportRoot);
     const repoUrl = gitRepo(transportRoot, "tools", ["t-one"]);
     assert.match(repoUrl, /%7E/i, "fixture proves an encoded filesystem URL");
-    const address = fileURLToPath(repoUrl);
+    const address = fileURLToPath(repoUrl).replaceAll("\\", "/");
+    assert.doesNotMatch(address, /%7E/i, "remote-helper address is a decoded filesystem path");
+    assert.match(address, /\/tools\.git$/);
     const log = join(e.tmp.dir, "helper.log");
     writeRemoteHelper(join(e.tmp.dir, "bin"), "k118", log);
     const spec = `k118::${address}`;

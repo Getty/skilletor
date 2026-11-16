@@ -21,6 +21,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildToString } from "../scripts/esbuild.config.mjs";
 import { check, resolveItems, status, sync, type EngineContext, type ResolveReport } from "../src/engine.ts";
 import { homeEnv } from "./helpers/harness.ts";
+import { makeTmpDir } from "./helpers/tmp.ts";
 
 const ROOT = fileURLToPath(new URL("../conformance/cases", import.meta.url));
 const UPDATE = process.env.SKILLETOR_CONFORMANCE_UPDATE === "1";
@@ -29,6 +30,14 @@ const VERSION = (JSON.parse(readFileSync(new URL("../package.json", import.meta.
 /** The CLI of `cli` steps as a JSON argv prefix; unset, this checkout's bundle (README: which CLI). */
 const CLI_OVERRIDE = process.env.SKILLETOR_CONFORMANCE_CLI;
 const CLI_TIMEOUT_MS = 30_000;
+function updatePlatformProblem(update: boolean, platform: NodeJS.Platform): string | undefined {
+  return update && platform === "win32"
+    ? "SKILLETOR_CONFORMANCE_UPDATE=1 is unsupported on Windows: regenerate expectations on POSIX so path provenance comes from the existing oracle"
+    : undefined;
+}
+
+const updateProblem = updatePlatformProblem(UPDATE, process.platform);
+if (updateProblem) throw new Error(updateProblem);
 if (UPDATE && CLI_OVERRIDE !== undefined) {
   throw new Error("SKILLETOR_CONFORMANCE_UPDATE=1 refuses SKILLETOR_CONFORMANCE_CLI: the expectations are the reference CLI's");
 }
@@ -153,19 +162,141 @@ function placeholders(r: Roots): [string, string][] {
 
 const jsonStringContents = (value: string) => JSON.stringify(value).slice(1, -1);
 
-function abstract(text: string, r: Roots): string {
+type EncodingContext = "decoded" | "json" | "stream";
+
+/** Whether `offset` lies inside a JSON string, without decoding or reserializing the text. */
+function inJsonString(text: string, offset: number): boolean {
+  let quoted = false;
+  let escaped = false;
+  for (let i = 0; i < offset; i++) {
+    const c = text[i]!;
+    if (escaped) escaped = false;
+    else if (c === "\\") escaped = true;
+    else if (c === '"') quoted = !quoted;
+  }
+  return quoted;
+}
+
+function replaceExactWhere(
+  text: string, needle: string, replacement: string, accept: (text: string, offset: number) => boolean,
+): string {
+  let out = "";
+  let from = 0;
+  for (;;) {
+    const at = text.indexOf(needle, from);
+    if (at === -1) return out + text.slice(from);
+    out += text.slice(from, at) + (accept(text, at) ? replacement : needle);
+    from = at + needle.length;
+  }
+}
+
+/** Replace concrete roots only; separator equivalence needs the expected oracle below. */
+function abstractRoots(text: string, r: Roots, encoding: EncodingContext): string {
   for (const [path, name] of placeholders(r)) {
-    // A path can be plain text or the contents of a JSON string, where Windows backslashes
-    // are doubled. Normalize only the separator immediately after the exact placeholder path.
     const escaped = jsonStringContents(path);
-    text = text.split(`${escaped}\\\\`).join(`${name}/`);
-    text = text.split(`${escaped}/`).join(`${name}/`);
-    text = text.split(`${path}\\`).join(`${name}/`);
-    text = text.split(`${path}/`).join(`${name}/`);
-    text = text.split(escaped).join(name);
-    text = text.split(path).join(name);
+    if (encoding === "decoded") {
+      text = text.split(path).join(name);
+    } else if (encoding === "json") {
+      text = text.split(escaped).join(name);
+    } else {
+      text = replaceExactWhere(text, escaped, name, inJsonString);
+      text = replaceExactWhere(text, path, name, (value, at) => !inJsonString(value, at));
+    }
   }
   return text;
+}
+
+const PLACEHOLDER_NAMES = ["${HOME}", "${PROJECT}", "${TMP}"] as const;
+
+function placeholderAt(text: string, offset: number): string | undefined {
+  return PLACEHOLDER_NAMES.find((name) => text.startsWith(name, offset));
+}
+
+function pathClose(text: string, offset: number): string | undefined {
+  const before = text[offset - 1];
+  if (before === '"' || before === "'" || before === "`") return before;
+  if (before === "(") return ")";
+  return undefined;
+}
+
+function endsPath(c: string, close: string | undefined): boolean {
+  if (close !== undefined && c === close) return true;
+  if ('"\'`)]},;:\r\n—'.includes(c)) return true;
+  return close === undefined && /\s/.test(c);
+}
+
+/** Exact comparison except for separators explicitly designated by `/` inside an expected
+ * placeholder-rooted path token. JSON strings require an encoded `\\`; decoded text requires `\`. */
+function oraclePathEqual(actual: string, expected: string, encoding: EncodingContext): boolean {
+  let a = 0;
+  let e = 0;
+  let inPath = false;
+  let close: string | undefined;
+  while (e < expected.length) {
+    const placeholder = placeholderAt(expected, e);
+    if (placeholder !== undefined) {
+      if (!actual.startsWith(placeholder, a)) return false;
+      a += placeholder.length;
+      e += placeholder.length;
+      inPath = expected[e] === "/";
+      close = inPath ? pathClose(expected, e - placeholder.length) : undefined;
+      continue;
+    }
+    const wanted = expected[e]!;
+    if (inPath && endsPath(wanted, close)) inPath = false;
+    if (inPath && wanted === "/") {
+      const json = encoding === "json" || (encoding === "stream" && inJsonString(expected, e));
+      if (actual[a] === "/") a++;
+      else if (json && actual.startsWith("\\\\", a)) a += 2;
+      else if (!json && actual[a] === "\\") a++;
+      else return false;
+      e++;
+      continue;
+    }
+    if (actual[a] !== wanted) return false;
+    a++;
+    e++;
+  }
+  return a === actual.length;
+}
+
+function actualTextForExpected(actual: string, expected: string, encoding: EncodingContext): string {
+  return oraclePathEqual(actual, expected, encoding) ? expected : actual;
+}
+
+function valuesEquivalent(actual: unknown, expected: unknown): boolean {
+  if (typeof actual === "string" && typeof expected === "string") {
+    return oraclePathEqual(actual, expected, "decoded");
+  }
+  if (Array.isArray(actual) && Array.isArray(expected)) {
+    if (actual.length !== expected.length) return false;
+    const matchedActual = new Array<number>(expected.length).fill(-1);
+    const assign = (actualIndex: number, seen: Set<number>): boolean => {
+      for (let expectedIndex = 0; expectedIndex < expected.length; expectedIndex++) {
+        if (seen.has(expectedIndex) || !valuesEquivalent(actual[actualIndex], expected[expectedIndex])) continue;
+        seen.add(expectedIndex);
+        if (matchedActual[expectedIndex] === -1 || assign(matchedActual[expectedIndex]!, seen)) {
+          matchedActual[expectedIndex] = actualIndex;
+          return true;
+        }
+      }
+      return false;
+    };
+    return actual.every((_, i) => assign(i, new Set()));
+  }
+  if (actual !== null && expected !== null && typeof actual === "object" && typeof expected === "object" &&
+      !Array.isArray(actual) && !Array.isArray(expected)) {
+    const a = actual as Record<string, unknown>;
+    const e = expected as Record<string, unknown>;
+    const aKeys = Object.keys(a).sort();
+    const eKeys = Object.keys(e).sort();
+    return aKeys.length === eKeys.length && aKeys.every((key, i) => key === eKeys[i] && valuesEquivalent(a[key], e[key]));
+  }
+  return Object.is(actual, expected);
+}
+
+function actualForExpected(actual: unknown, expected: unknown): unknown {
+  return valuesEquivalent(actual, expected) ? expected : actual;
 }
 
 function concrete(text: string, r: Roots): string {
@@ -179,9 +310,9 @@ function concreteJsonText(text: string, r: Roots): string {
   return text;
 }
 
-/** Output placeholders in every string of a JSON value, before it is serialized. */
+/** Replace concrete roots in every string of a structured result; comparison supplies paths. */
 function abstractDeep(v: unknown, r: Roots): unknown {
-  if (typeof v === "string") return abstract(v, r);
+  if (typeof v === "string") return abstractRoots(v, r, "decoded");
   if (Array.isArray(v)) return v.map((x) => abstractDeep(x, r));
   if (v !== null && typeof v === "object") {
     return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, abstractDeep(x, r)]));
@@ -228,6 +359,11 @@ function buildGit(caseDir: string, c: Case, r: Roots, env: NodeJS.ProcessEnv): v
       }
       for (const rel of commit.executable ?? []) chmodSync(join(repo, rel), 0o755);
       git(repo, env, "add", "-A");
+      const regular = execFileSync("git", ["-C", repo, "ls-files", "--stage", "-z"], { env, encoding: "utf8" })
+        .split("\0").filter(Boolean).filter((entry) => entry.startsWith("100"))
+        .map((entry) => entry.slice(entry.indexOf("\t") + 1));
+      if (regular.length) git(repo, env, "update-index", "--chmod=-x", "--", ...regular);
+      if (commit.executable?.length) git(repo, env, "update-index", "--chmod=+x", "--", ...commit.executable);
       git(repo, env, "commit", "-q", "--allow-empty", "-m", `conformance ${i + 1}`);
       if (commit.tag) git(repo, env, "tag", commit.tag);
       if (commit.branch) git(repo, env, "branch", commit.branch);
@@ -331,18 +467,14 @@ function runCli(prefix: string[], step: Step, r: Roots, env: Record<string, stri
   return { exit: res.status, stdout: res.stdout, stderr: res.stderr };
 }
 
-/** Output placeholders on raw bytes (README: placeholders), `${VERSION}` only where asked. */
+/** Replace exact roots on raw stream bytes; expected-aware comparison handles separators. */
 function abstractBytes(bytes: Buffer, r: Roots, version: boolean): Buffer {
   let text = bytes.toString("latin1"); // one char per byte: nothing is decoded, nothing lost
   for (const [path, name] of placeholders(r)) {
     const raw = Buffer.from(path).toString("latin1");
     const escaped = Buffer.from(jsonStringContents(path)).toString("latin1");
-    text = text.split(`${escaped}\\\\`).join(`${name}/`);
-    text = text.split(`${escaped}/`).join(`${name}/`);
-    text = text.split(`${raw}\\`).join(`${name}/`);
-    text = text.split(`${raw}/`).join(`${name}/`);
-    text = text.split(escaped).join(name);
-    text = text.split(raw).join(name);
+    text = replaceExactWhere(text, escaped, name, inJsonString);
+    text = replaceExactWhere(text, raw, name, (value, at) => !inJsonString(value, at));
   }
   if (version) text = text.split(VERSION).join("${VERSION}");
   return Buffer.from(text, "latin1");
@@ -375,15 +507,17 @@ function homeSkip(r: Roots, configDir: string | undefined): string[] {
  *  PROJECT – each without the `.git` a `gitInit` made there – and all of `${TMP}/cwd`. */
 function snapshot(r: Roots, skip: string[], gitInit: string[]): Map<string, string> {
   const out = new Map<string, string>();
+  const fileText = (root: string, rel: string) =>
+    abstractRoots(readFileSync(join(root, rel), "utf8"), r, rel.endsWith(".json") ? "json" : "decoded");
   for (const rel of walk(r.home, gitInit.includes("home") ? [...skip, ".git"] : skip)) {
-    out.set(`home/${escapeName(rel)}`, abstract(readFileSync(join(r.home, rel), "utf8"), r));
+    out.set(`home/${escapeName(rel)}`, fileText(r.home, rel));
   }
   if (r.project) {
     for (const rel of walk(r.project, gitInit.includes("project") ? [".git"] : [])) {
-      out.set(`project/${escapeName(rel)}`, abstract(readFileSync(join(r.project, rel), "utf8"), r));
+      out.set(`project/${escapeName(rel)}`, fileText(r.project, rel));
     }
   }
-  for (const rel of walk(r.cwd)) out.set(`cwd/${escapeName(rel)}`, abstract(readFileSync(join(r.cwd, rel), "utf8"), r));
+  for (const rel of walk(r.cwd)) out.set(`cwd/${escapeName(rel)}`, fileText(r.cwd, rel));
   return out;
 }
 
@@ -471,14 +605,19 @@ async function runCase(name: string, t: TestContext): Promise<void> {
           assert.deepEqual(canonical({ exit: got.exit }), canonical(want), `${name}: step ${step.id}: the exit code; stderr: ${stderr}`);
           for (const [stream, bytes] of [["stdout", stdout], ["stderr", stderr]] as const) {
             const wantBytes = readStream(`${base}.${stream}`);
-            assert.equal(bytes.toString("utf8"), wantBytes.toString("utf8"), `${name}: step ${step.id}: ${stream}`);
-            assert.ok(bytes.equals(wantBytes), `${name}: step ${step.id}: ${stream}, byte for byte`);
+            const actualText = actualTextForExpected(bytes.toString("latin1"), wantBytes.toString("latin1"), "stream");
+            const comparable = Buffer.from(actualText, "latin1");
+            assert.equal(comparable.toString("utf8"), wantBytes.toString("utf8"), `${name}: step ${step.id}: ${stream}`);
+            assert.ok(comparable.equals(wantBytes), `${name}: step ${step.id}: ${stream}, byte for byte`);
           }
         }
       } else {
         const actual = canonical(abstractDeep(await runStep(step, ctx), r));
         if (UPDATE) writeJson(file, actual);
-        else assert.deepEqual(actual, canonical(JSON.parse(readFileSync(file, "utf8"))), `${name}: step ${step.id}`);
+        else {
+          const expected = canonical(JSON.parse(readFileSync(file, "utf8")));
+          assert.deepEqual(actualForExpected(actual, expected), expected, `${name}: step ${step.id}`);
+        }
       }
       if (!step.tree) continue;
       const treeDir = join(caseDir, "expected", step.id);
@@ -497,7 +636,12 @@ async function runCase(name: string, t: TestContext): Promise<void> {
       }
       const want = new Map(walk(treeDir).map((rel) => [rel, readFileSync(join(treeDir, rel), "utf8")]));
       assert.deepEqual([...have.keys()].sort(), [...want.keys()].sort(), `${name}: step ${step.id}: the files in the tree`);
-      for (const [rel, text] of want) assert.equal(have.get(rel), text, `${name}: step ${step.id}: ${rel}`);
+      for (const [rel, text] of want) {
+        const actual = have.get(rel);
+        assert.equal(typeof actual, "string", `${name}: step ${step.id}: ${rel}`);
+        const encoding: EncodingContext = rel.endsWith(".json") ? "json" : "decoded";
+        assert.equal(actualTextForExpected(actual!, text, encoding), text, `${name}: step ${step.id}: ${rel}`);
+      }
       const wantExecs = existsSync(execFile) ? JSON.parse(readFileSync(execFile, "utf8")) : [];
       if (process.platform === "win32" && wantExecs.length > 0) {
         await t.test(`${name}: ${step.id}: executable bits`, {
@@ -524,7 +668,7 @@ for (const name of cases) {
   test(`conformance: ${name}`, (t) => runCase(name, t));
 }
 
-test("conformance: Windows-shaped placeholders escape only paths and preserve unrelated backslashes", () => {
+test("conformance: expected oracles distinguish native paths from literal escapes", () => {
   const r: Roots = {
     tmp: "C:\\Temp\\fixture",
     home: "C:\\Temp\\fixture\\home",
@@ -536,17 +680,103 @@ test("conformance: Windows-shaped placeholders escape only paths and preserve un
     path: `${r.home}/child`,
     literal: "keep\\literal",
   });
-  assert.deepEqual(abstractDeep({ path: `${r.home}\\child`, literal: "keep\\literal" }, r), {
-    path: "${HOME}/child",
+
+  const structured = abstractDeep({
+    path: `${r.home}\\child\\deep`,
+    nativeComponents: `${r.home}\\next\\tab\\u1234`,
+    escaped: `${r.home}\\dev\\t\\u001b[31m`,
     literal: "keep\\literal",
-  });
+  }, r);
+  const structuredExpected = {
+    path: "${HOME}/child/deep",
+    nativeComponents: "${HOME}/next/tab/u1234",
+    escaped: "${HOME}/dev/t\\u001b[31m",
+    literal: "keep\\literal",
+  };
+  assert.deepEqual(actualForExpected(structured, structuredExpected), structuredExpected);
+
   const stream = abstractBytes(Buffer.from(JSON.stringify({
-    path: `${r.project}\\child`, literal: "keep\\literal",
-  })), r, false);
-  assert.deepEqual(JSON.parse(stream.toString("utf8")), {
-    path: "${PROJECT}/child",
-    literal: "keep\\literal",
-  });
+    path: `${r.project}\\child\\deep`, literal: "keep\\literal",
+  })), r, false).toString("latin1");
+  const streamExpected = JSON.stringify({ path: "${PROJECT}/child/deep", literal: "keep\\literal" });
+  assert.equal(actualTextForExpected(stream, streamExpected, "stream"), streamExpected);
+
+  const rawJson = '{"message":"${HOME}/child\\nnext","tab":"${HOME}/child\\tnext","unicode":"${HOME}/child\\u1234",' +
+    '"path":"${HOME}\\\\nested\\\\u-part","literal":"keep\\\\literal"}';
+  const normalizedJson = '{"message":"${HOME}/child\\nnext","tab":"${HOME}/child\\tnext","unicode":"${HOME}/child\\u1234",' +
+    '"path":"${HOME}/nested/u-part","literal":"keep\\\\literal"}';
+  assert.equal(actualTextForExpected(abstractRoots(rawJson, r, "json"), normalizedJson, "json"), normalizedJson);
+  assert.equal(actualTextForExpected(abstractBytes(Buffer.from(rawJson), r, false).toString("latin1"), normalizedJson, "stream"), normalizedJson);
+  const malformedRoot = `{"path":"${r.home}\\child"}`;
+  assert.equal(abstractRoots(malformedRoot, r, "json"), malformedRoot,
+    "raw JSON root substitution does not repair unescaped Windows bytes");
+
+  // The same ambiguous bytes are data or a path only because the expected oracle says which.
+  assert.equal(oraclePathEqual("${HOME}/child\\next", "${HOME}/child\\next", "decoded"), true);
+  assert.equal(oraclePathEqual("${HOME}/child\\next", "${HOME}/child/next", "decoded"), true);
+  assert.equal(oraclePathEqual('"${HOME}/child\\next"', '"${HOME}/child/next"', "json"), false,
+    "a single raw-JSON escape is never a separator");
+  assert.equal(oraclePathEqual('"${HOME}/child\\\\next"', '"${HOME}/child/next"', "json"), true);
+  assert.equal(oraclePathEqual('"${HOME}/dir with space\\\\file"', '"${HOME}/dir with space/file"', "json"), true);
+
+  for (const [label, actual, expected, encoding] of [
+    ["changed non-separator", "${HOME}\\child\\wrong", "${HOME}/child/right", "decoded"],
+    ["extra escape", '"${HOME}\\\\child\\\\\\next"', '"${HOME}/child/next"', "json"],
+    ["missing escape", '"${HOME}\\\\childnext"', '"${HOME}/child/next"', "json"],
+    ["formatting", '{ "path":"${HOME}\\\\child"}', '{"path":"${HOME}/child"}', "stream"],
+    ["unrelated after path", "${HOME}\\child; data \\value", "${HOME}/child; data /value", "decoded"],
+  ] as const) {
+    assert.equal(oraclePathEqual(actual, expected, encoding), false, label);
+  }
+
+  const duplicates = [{ path: "${HOME}\\a" }, { path: "${HOME}\\a" }];
+  assert.equal(valuesEquivalent(duplicates, [{ path: "${HOME}/a" }, { path: "${HOME}/a" }]), true);
+  assert.equal(valuesEquivalent(duplicates, [{ path: "${HOME}/a" }]), false, "missing duplicate fails");
+  assert.equal(valuesEquivalent([{ path: "${HOME}\\b" }, { path: "${HOME}\\a" }],
+    [{ path: "${HOME}/a" }, { path: "${HOME}/b" }]), true, "array order remains insignificant");
+
+  assert.match(updatePlatformProblem(true, "win32") ?? "", /regenerate expectations on POSIX/);
+  assert.equal(updatePlatformProblem(true, "linux"), undefined);
+});
+
+test("conformance: git fixture executable mode is declared independently for every commit", () => {
+  const tmp = makeTmpDir("skilletor-conformance-mode-");
+  try {
+    const caseDir = join(tmp.dir, "case");
+    for (const tree of ["one", "two"]) {
+      const dir = join(caseDir, tree);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "run.sh"), "#!/bin/sh\nexit 0\n");
+    }
+    const fixture: Case = {
+      description: "",
+      git: { shared: { url: "https://conformance.invalid/shared.git", commits: [
+        { tree: "one", executable: ["run.sh"] }, { tree: "two" },
+      ] } },
+      steps: [],
+    };
+    const histories: string[][] = [];
+    for (const name of ["a", "b"]) {
+      const root = join(tmp.dir, `run-${name}`);
+      mkdirSync(root);
+      const roots: Roots = { tmp: root, home: join(root, "home"), cwd: join(root, "cwd") };
+      buildGit(caseDir, fixture, roots, {
+        ...process.env, ...COMMIT_ENV,
+        GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.filemode", GIT_CONFIG_VALUE_0: "false",
+        GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: join(root, "global.gitconfig"),
+      });
+      const repo = join(root, "git", "shared");
+      const commits = execFileSync("git", ["-C", repo, "rev-list", "--reverse", "HEAD"], { encoding: "utf8" }).trim().split("\n");
+      const modes = commits.map((commit) => execFileSync("git", ["-C", repo, "ls-tree", commit, "--", "run.sh"], { encoding: "utf8" }).slice(0, 6));
+      assert.deepEqual(modes, ["100755", "100644"]);
+      const trees = commits.map((commit) => execFileSync("git", ["-C", repo, "show", "-s", "--format=%T", commit], { encoding: "utf8" }).trim());
+      assert.notEqual(trees[0], trees[1], "mode-only change has a different exact Git tree");
+      histories.push(commits);
+    }
+    assert.deepEqual(histories[0], histories[1], "fixed metadata produces exact commit identities");
+  } finally {
+    tmp.cleanup();
+  }
 });
 
 // The harness itself (README: cli), on a stand-in CLI that reports what it got. Asserts: the

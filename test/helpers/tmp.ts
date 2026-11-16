@@ -20,7 +20,9 @@ export function makeTmpDir(prefix = "skilletor-test-"): TmpDir {
   return {
     dir,
     cleanup() {
-      rmSync(dir, { recursive: true, force: true });
+      // A completed Windows child can release its executable/package handles just after wait.
+      // Retry only Node's documented transient recursive-removal errors; a persistent error still throws.
+      rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
     },
   };
 }

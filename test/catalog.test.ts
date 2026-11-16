@@ -42,6 +42,25 @@ test("scans all three types with names and descriptions", () => {
   }
 });
 
+test("published-layout items use platform-independent UTF-8 byte ordering", () => {
+  const tmp = makeTmpDir();
+  try {
+    // Names are otherwise unrestricted path entries. U+E000 and U+10000 deliberately order
+    // oppositely as UTF-8 bytes and JavaScript UTF-16 code units.
+    const names = ["bar", "𐀀", "Foo", "-dash", "", "Baz", "_under"];
+    for (const name of names) {
+      const dir = join(tmp.dir, "skills", name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "SKILL.md"), `---\ndescription: ${name}\n---\n`);
+    }
+    const expected = ["-dash", "Baz", "Foo", "_under", "bar", "", "𐀀"];
+    assert.notDeepEqual([...names].sort(), expected, "UTF-16 order is a distinct contract");
+    assert.deepEqual(scan(tmp.dir).items.map((item) => item.name), expected);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
 test("a skill item includes its companion files", () => {
   const src = makeSource();
   try {

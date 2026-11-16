@@ -10,7 +10,7 @@ use warnings;
 use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/lib";
-use SkilletorTest qw( git_ok );
+use SkilletorTest qw( git_ok git_out );
 use SkilletorTest::ParityCLI ();
 
 use Cwd ();
@@ -150,19 +150,144 @@ sub _json_string_contents {
   return substr( js_stringify($value), 1, -1 );
 }
 
-sub abstract {
-  my ( $text, $r ) = @_;
+sub _in_json_string {
+  my ( $text, $offset ) = @_;
+  my ( $quoted, $escaped ) = ( 0, 0 );
+  for my $i ( 0 .. $offset - 1 ) {
+    my $c = substr( $text, $i, 1 );
+    if    ($escaped)     { $escaped = 0 }
+    elsif ( $c eq '\\' ) { $escaped = 1 }
+    elsif ( $c eq '"' )  { $quoted = !$quoted }
+  }
+  return $quoted;
+}
+
+sub _replace_exact_where {
+  my ( $text, $needle, $replacement, $accept ) = @_;
+  my ( $out, $from ) = ( '', 0 );
+  while (1) {
+    my $at = index( $text, $needle, $from );
+    return $out.substr( $text, $from ) if $at == -1;
+    $out .= substr( $text, $from, $at - $from ).( $accept->( $text, $at ) ? $replacement : $needle );
+    $from = $at + length($needle);
+  }
+}
+
+sub abstract_roots {
+  my ( $text, $r, $encoding ) = @_;
   for my $pair ( placeholders($r) ) {
     my ( $path, $name ) = @$pair;
     my $escaped = _json_string_contents($path);
-    my @forms = (
-      [ $escaped.'\\\\', "$name/" ], [ $escaped.'/', "$name/" ],
-      [ $path.'\\', "$name/" ],       [ $path.'/', "$name/" ],
-      [ $escaped, $name ],              [ $path, $name ],
-    );
-    $text =~ s/\Q$_->[0]\E/$_->[1]/g for @forms;
+    if ( $encoding eq 'decoded' ) {
+      $text =~ s/\Q$path\E/$name/g;
+    }
+    elsif ( $encoding eq 'json' ) {
+      $text =~ s/\Q$escaped\E/$name/g;
+    }
+    else {
+      $text = _replace_exact_where( $text, $escaped, $name, \&_in_json_string );
+      $text = _replace_exact_where( $text, $path, $name, sub { !_in_json_string( $_[0], $_[1] ) } );
+    }
   }
   return $text;
+}
+
+my @PLACEHOLDER_NAMES = ( '${HOME}', '${PROJECT}', '${TMP}' );
+
+sub _placeholder_at {
+  my ( $text, $offset ) = @_;
+  for my $name (@PLACEHOLDER_NAMES) { return $name if substr( $text, $offset, length($name) ) eq $name }
+  return undef;
+}
+
+sub _path_close {
+  my ( $text, $offset ) = @_;
+  my $before = $offset > 0 ? substr( $text, $offset - 1, 1 ) : '';
+  return $before if $before eq '"' || $before eq q{'} || $before eq '`';
+  return ')' if $before eq '(';
+  return undef;
+}
+
+sub _ends_path {
+  my ( $c, $close ) = @_;
+  return 1 if defined $close && $c eq $close;
+  return 1 if $c =~ /["'`)\]},;:\r\n\x{2014}]/;
+  return !defined($close) && $c =~ /\s/ ? 1 : 0;
+}
+
+sub oracle_path_equal {
+  my ( $actual, $expected, $encoding ) = @_;
+  my ( $a, $e, $in_path, $close ) = ( 0, 0, 0, undef );
+  while ( $e < length $expected ) {
+    my $placeholder = _placeholder_at( $expected, $e );
+    if ( defined $placeholder ) {
+      return 0 unless substr( $actual, $a, length($placeholder) ) eq $placeholder;
+      $a += length($placeholder);
+      $e += length($placeholder);
+      $in_path = substr( $expected, $e, 1 ) eq '/' ? 1 : 0;
+      $close = $in_path ? _path_close( $expected, $e - length($placeholder) ) : undef;
+      next;
+    }
+    my $wanted = substr( $expected, $e, 1 );
+    $in_path = 0 if $in_path && _ends_path( $wanted, $close );
+    if ( $in_path && $wanted eq '/' ) {
+      my $json = $encoding eq 'json' || ( $encoding eq 'stream' && _in_json_string( $expected, $e ) );
+      if ( substr( $actual, $a, 1 ) eq '/' ) { $a++ }
+      elsif ( $json && substr( $actual, $a, 2 ) eq '\\\\' ) { $a += 2 }
+      elsif ( !$json && substr( $actual, $a, 1 ) eq '\\' ) { $a++ }
+      else { return 0 }
+      $e++;
+      next;
+    }
+    return 0 if substr( $actual, $a, 1 ) ne $wanted;
+    $a++;
+    $e++;
+  }
+  return $a == length($actual) ? 1 : 0;
+}
+
+sub actual_text_for_expected {
+  my ( $actual, $expected, $encoding ) = @_;
+  return oracle_path_equal( $actual, $expected, $encoding ) ? $expected : $actual;
+}
+
+sub _assign_array_item {
+  my ( $actual, $expected, $actual_index, $matched, $seen ) = @_;
+  for my $expected_index ( 0 .. $#$expected ) {
+    next if $seen->{$expected_index} || !values_equivalent( $actual->[$actual_index], $expected->[$expected_index] );
+    $seen->{$expected_index} = 1;
+    if ( !exists $matched->{$expected_index}
+      || _assign_array_item( $actual, $expected, $matched->{$expected_index}, $matched, $seen ) ) {
+      $matched->{$expected_index} = $actual_index;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+sub values_equivalent {
+  my ( $actual, $expected ) = @_;
+  my ( $a_type, $e_type ) = ( js_type($actual), js_type($expected) );
+  return oracle_path_equal( $actual, $expected, 'decoded' ) if $a_type eq 'string' && $e_type eq 'string';
+  if ( $a_type eq 'array' && $e_type eq 'array' ) {
+    return 0 unless @$actual == @$expected;
+    my %matched;
+    for my $i ( 0 .. $#$actual ) { return 0 unless _assign_array_item( $actual, $expected, $i, \%matched, {} ) }
+    return 1;
+  }
+  if ( $a_type eq 'object' && $e_type eq 'object' ) {
+    my @a = js_sort_keys( keys %$actual );
+    my @e = js_sort_keys( keys %$expected );
+    return 0 unless @a == @e;
+    for my $i ( 0 .. $#a ) { return 0 if $a[$i] ne $e[$i] || !values_equivalent( $actual->{$a[$i]}, $expected->{$e[$i]} ) }
+    return 1;
+  }
+  return js_stringify($actual) eq js_stringify($expected) ? 1 : 0;
+}
+
+sub actual_for_expected {
+  my ( $actual, $expected ) = @_;
+  return values_equivalent( $actual, $expected ) ? $expected : $actual;
 }
 
 sub concrete {
@@ -184,7 +309,7 @@ sub concrete_json_text {
 sub abstract_deep {
   my ( $v, $r ) = @_;
   my $type = js_type($v);
-  return abstract( $v, $r ) if $type eq 'string';
+  return abstract_roots( $v, $r, 'decoded' ) if $type eq 'string';
   return [ map { abstract_deep( $_, $r ) } @$v ] if $type eq 'array';
   return js_ordered( map { ( $_ => abstract_deep( $v->{$_}, $r ) ) } keys %$v ) if $type eq 'object';
   return $v;
@@ -245,6 +370,10 @@ sub build_git {
       copy_tree( "$case_dir/$commit->{tree}", "$repo" );
       chmod 0755, "$repo/$_" for @{ $commit->{executable} // [] };
       git_ok( "$repo", 'add', '-A' );
+      my $staged = git_ok( "$repo", 'ls-files', '--stage', '-z' );
+      my @regular = map { s/[^\t]*\t//r } grep { /\A100/ } split /\0/, $staged;
+      git_ok( "$repo", 'update-index', '--chmod=-x', '--', @regular ) if @regular;
+      git_ok( "$repo", 'update-index', '--chmod=+x', '--', @{ $commit->{executable} } ) if @{ $commit->{executable} // [] };
       git_ok( "$repo", 'commit', '-q', '--allow-empty', '-m', "conformance $i" );
       git_ok( "$repo", 'tag', $commit->{tag} )       if defined $commit->{tag};
       git_ok( "$repo", 'branch', $commit->{branch} ) if defined $commit->{branch};
@@ -315,19 +444,15 @@ sub run_cli {
   return { exit => $res->{code}, stdout => $res->{stdout}, stderr => $res->{stderr} };
 }
 
-# Output placeholders on raw bytes (README: placeholders), ${VERSION} only where asked.
+# Replace exact roots on raw stream bytes; expected-aware comparison handles separators.
 sub abstract_bytes {
   my ( $bytes, $r, $version ) = @_;
   for my $pair ( placeholders($r) ) {
     my ( $path, $name ) = @$pair;
     my $raw     = encode_text($path);
     my $escaped = encode_text( _json_string_contents($path) );
-    my @forms = (
-      [ $escaped.'\\\\', "$name/" ], [ $escaped.'/', "$name/" ],
-      [ $raw.'\\', "$name/" ],         [ $raw.'/', "$name/" ],
-      [ $escaped, $name ],                [ $raw, $name ],
-    );
-    $bytes =~ s/\Q$_->[0]\E/$_->[1]/g for @forms;
+    $bytes = _replace_exact_where( $bytes, $escaped, $name, \&_in_json_string );
+    $bytes = _replace_exact_where( $bytes, $raw, $name, sub { !_in_json_string( $_[0], $_[1] ) } );
   }
   $bytes =~ s/\Q$VERSION\E/\${VERSION}/g if $version;
   return $bytes;
@@ -350,11 +475,15 @@ sub snapshot {
   my ( $r, $skip, $git_init ) = @_;
   my %init = map { ( $_ => 1 ) } @$git_init;
   my %out;
-  $out{ "home/".escape_name($_) } = abstract( read_text("$r->{home}/$_"), $r ) for walk( $r->{home}, [ @$skip, $init{home} ? '.git' : () ] );
+  my $file_text = sub {
+    my ( $root, $rel ) = @_;
+    return abstract_roots( read_text("$root/$rel"), $r, $rel =~ /\.json\z/ ? 'json' : 'decoded' );
+  };
+  $out{ "home/".escape_name($_) } = $file_text->( $r->{home}, $_ ) for walk( $r->{home}, [ @$skip, $init{home} ? '.git' : () ] );
   if ( $r->{project} ) {
-    $out{ "project/".escape_name($_) } = abstract( read_text("$r->{project}/$_"), $r ) for walk( $r->{project}, [ $init{project} ? '.git' : () ] );
+    $out{ "project/".escape_name($_) } = $file_text->( $r->{project}, $_ ) for walk( $r->{project}, [ $init{project} ? '.git' : () ] );
   }
-  $out{ "cwd/".escape_name($_) } = abstract( read_text("$r->{cwd}/$_"), $r ) for walk( $r->{cwd} );
+  $out{ "cwd/".escape_name($_) } = $file_text->( $r->{cwd}, $_ ) for walk( $r->{cwd} );
   return \%out;
 }
 
@@ -432,7 +561,9 @@ sub run_case {
       is( js_stringify( canonical( { exit => $got->{exit} } ), 2 ), js_stringify( canonical($want), 2 ), "step $id: the exit code" )
         or diag( "stderr: $got->{stderr}" );
       for my $stream (qw( stdout stderr )) {
-        is( abstract_bytes( $got->{$stream}, $r, $step->{version} ), read_stream("$expected.$stream"), "step $id: $stream" );
+        my $actual = abstract_bytes( $got->{$stream}, $r, $step->{version} );
+        my $want_stream = read_stream("$expected.$stream");
+        is( actual_text_for_expected( $actual, $want_stream, 'stream' ), $want_stream, "step $id: $stream" );
       }
     }
     else {
@@ -445,13 +576,16 @@ sub run_case {
         :                            die "unknown op $step->{op}";
       my $actual = canonical( abstract_deep( $result, $r ) );
       my $want   = canonical( js_parse( read_text("$expected.json") ) );
-      is( js_stringify( $actual, 2 ), js_stringify( $want, 2 ), "step $id" );
+      is( js_stringify( actual_for_expected( $actual, $want ), 2 ), js_stringify( $want, 2 ), "step $id" );
     }
     next unless $step->{tree};
     my $have  = snapshot( $r, home_skip( $r, $config_dir ), $git_init );
     my %want  = map { ( $_ => read_text("$expected/$_") ) } walk($expected);
     is_deeply( [ sort keys %$have ], [ sort keys %want ], "step $id: the files in the tree" );
-    is( $have->{$_}, $want{$_}, "step $id: $_" ) for sort keys %want;
+    for my $rel ( sort keys %want ) {
+      my $encoding = $rel =~ /\.json\z/ ? 'json' : 'decoded';
+      is( actual_text_for_expected( $have->{$rel}, $want{$rel}, $encoding ), $want{$rel}, "step $id: $rel" );
+    }
     my @execs = grep {
       my ( $where, $rel ) = unescape_name($_) =~ m{\A(home|project|cwd)/(.*)\z}s;
       ( ( stat( $r->{$where}.'/'.$rel ) )[2] // 0 ) & 0100;
@@ -471,7 +605,7 @@ for my $name (@cases) {
   subtest "conformance: $name" => sub { run_case($name) };
 }
 
-subtest 'Windows-shaped placeholders escape only paths and preserve unrelated backslashes' => sub {
+subtest 'expected oracles distinguish native paths from literal escapes' => sub {
   my $r = {
     tmp => 'C:\\Temp\\fixture', home => 'C:\\Temp\\fixture\\home',
     project => 'C:\\Temp\\fixture\\project', cwd => 'C:\\Temp\\fixture\\cwd',
@@ -479,13 +613,86 @@ subtest 'Windows-shaped placeholders escape only paths and preserve unrelated ba
   my $input = '{"path":"${HOME}/child","literal":"keep\\\\literal"}';
   is_deeply( js_parse( concrete_json_text( $input, $r ) ),
     { path => "$r->{home}/child", literal => 'keep\\literal' }, 'JSON input' );
-  is_deeply( abstract_deep( { path => "$r->{home}\\child", literal => 'keep\\literal' }, $r ),
-    { path => '${HOME}/child', literal => 'keep\\literal' }, 'structured output' );
+
+  my $structured = abstract_deep( {
+    path => "$r->{home}\\child\\deep", nativeComponents => "$r->{home}\\next\\tab\\u1234",
+    escaped => "$r->{home}\\dev\\t\\u001b[31m", literal => 'keep\\literal',
+  }, $r );
+  my $structured_expected = {
+    path => '${HOME}/child/deep', nativeComponents => '${HOME}/next/tab/u1234',
+    escaped => '${HOME}/dev/t\\u001b[31m', literal => 'keep\\literal',
+  };
+  is_deeply( actual_for_expected( $structured, $structured_expected ), $structured_expected, 'structured output' );
+
   my $stream = abstract_bytes( encode_text( js_stringify( {
-    path => "$r->{project}\\child", literal => 'keep\\literal',
+    path => "$r->{project}\\child\\deep", literal => 'keep\\literal',
   } ) ), $r, 0 );
-  is_deeply( js_parse( Encode::decode( 'UTF-8', $stream ) ),
-    { path => '${PROJECT}/child', literal => 'keep\\literal' }, 'stream output' );
+  my $stream_expected = encode_text( js_stringify( { path => '${PROJECT}/child/deep', literal => 'keep\\literal' } ) );
+  is( actual_text_for_expected( $stream, $stream_expected, 'stream' ), $stream_expected, 'stream output' );
+
+  my $raw_json = '{"message":"${HOME}/child\\nnext","tab":"${HOME}/child\\tnext","unicode":"${HOME}/child\\u1234",'
+    .'"path":"${HOME}\\\\nested\\\\u-part","literal":"keep\\\\literal"}';
+  my $normalized_json = '{"message":"${HOME}/child\\nnext","tab":"${HOME}/child\\tnext","unicode":"${HOME}/child\\u1234",'
+    .'"path":"${HOME}/nested/u-part","literal":"keep\\\\literal"}';
+  is( actual_text_for_expected( abstract_roots( $raw_json, $r, 'json' ), $normalized_json, 'json' ), $normalized_json,
+    'raw JSON file escapes and formatting stay exact' );
+  is( actual_text_for_expected( abstract_bytes( $raw_json, $r, 0 ), $normalized_json, 'stream' ), $normalized_json,
+    'raw JSON stream escapes and formatting stay exact' );
+  my $malformed_root = '{"path":"'.$r->{home}.'\\child"}';
+  is( abstract_roots( $malformed_root, $r, 'json' ), $malformed_root,
+    'raw JSON root substitution does not repair unescaped Windows bytes' );
+
+  ok( oracle_path_equal( '${HOME}/child\\next', '${HOME}/child\\next', 'decoded' ), 'ambiguous display data stays literal' );
+  ok( oracle_path_equal( '${HOME}/child\\next', '${HOME}/child/next', 'decoded' ), 'oracle-designated decoded path separator' );
+  ok( !oracle_path_equal( '"${HOME}/child\\next"', '"${HOME}/child/next"', 'json' ), 'single raw-JSON escape is no separator' );
+  ok( oracle_path_equal( '"${HOME}/child\\\\next"', '"${HOME}/child/next"', 'json' ), 'encoded raw-JSON separator' );
+  ok( oracle_path_equal( '"${HOME}/dir with space\\\\file"', '"${HOME}/dir with space/file"', 'json' ), 'spaces inside a delimited path' );
+
+  my @negative = (
+    [ 'changed non-separator', '${HOME}\\child\\wrong', '${HOME}/child/right', 'decoded' ],
+    [ 'extra escape', '"${HOME}\\\\child\\\\\\next"', '"${HOME}/child/next"', 'json' ],
+    [ 'missing escape', '"${HOME}\\\\childnext"', '"${HOME}/child/next"', 'json' ],
+    [ 'formatting', '{ "path":"${HOME}\\\\child"}', '{"path":"${HOME}/child"}', 'stream' ],
+    [ 'unrelated after path', '${HOME}\\child; data \\value', '${HOME}/child; data /value', 'decoded' ],
+  );
+  ok( !oracle_path_equal( @$_[ 1 .. 3 ] ), $_->[0] ) for @negative;
+
+  my $duplicates = [ { path => '${HOME}\\a' }, { path => '${HOME}\\a' } ];
+  ok( values_equivalent( $duplicates, [ { path => '${HOME}/a' }, { path => '${HOME}/a' } ] ), 'duplicates match' );
+  ok( !values_equivalent( $duplicates, [ { path => '${HOME}/a' } ] ), 'missing duplicate fails' );
+  ok( values_equivalent( [ { path => '${HOME}\\b' }, { path => '${HOME}\\a' } ],
+    [ { path => '${HOME}/a' }, { path => '${HOME}/b' } ] ), 'array order remains insignificant' );
+};
+
+subtest 'git fixture executable mode is declared independently for every commit' => sub {
+  my $tmp = tempdir;
+  my $case_dir = $tmp->child('case');
+  for my $tree (qw( one two )) {
+    my $dir = $case_dir->child($tree);
+    $dir->mkpath;
+    $dir->child('run.sh')->spew_raw("#!/bin/sh\nexit 0\n");
+  }
+  my $fixture = { git => { shared => {
+    url => 'https://conformance.invalid/shared.git',
+    commits => [ { tree => 'one', executable => ['run.sh'] }, { tree => 'two' } ],
+  } } };
+  my @histories;
+  for my $name (qw( a b )) {
+    my $root = $tmp->child("run-$name");
+    $root->mkpath;
+    my $r = { tmp => "$root", home => "$root/home", cwd => "$root/cwd" };
+    local @ENV{qw( GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_CONFIG_NOSYSTEM GIT_CONFIG_GLOBAL )} =
+      ( '1', 'core.filemode', 'false', '1', "$root/global.gitconfig" );
+    build_git( "$case_dir", $fixture, $r );
+    my $repo = "$root/git/shared";
+    my @commits = split /\n/, git_out( $repo, 'rev-list', '--reverse', 'HEAD' );
+    my @modes = map { substr( git_out( $repo, 'ls-tree', $_, '--', 'run.sh' ), 0, 6 ) } @commits;
+    is_deeply( \@modes, [qw( 100755 100644 )], "$name: executable then regular" );
+    my @trees = map { git_out( $repo, 'show', '-s', '--format=%T', $_ ) } @commits;
+    isnt( $trees[0], $trees[1], "$name: mode-only change has a different exact Git tree" );
+    push @histories, \@commits;
+  }
+  is_deeply( $histories[0], $histories[1], 'fixed metadata produces exact commit identities' );
 };
 
 # The harness itself (README: cli), on a stand-in CLI that reports what it got. Asserts: the

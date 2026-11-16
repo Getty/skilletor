@@ -177,6 +177,8 @@ git init -q -b main                     # once
 #   bytes, each file new with the default mode, not the mode the checkout gave it –
 #   then chmod 0755 each path the commit lists in "executable" (relative to the tree)
 git add -A
+git update-index --chmod=-x -- <every current regular file>  # reset the prior commit's index modes
+git update-index --chmod=+x -- <executable paths>              # when the list is nonempty
 git commit -q --allow-empty -m "conformance <i>"
 git tag <tag>                           # when the commit has "tag" (lightweight)
 git branch <branch>                     # when the commit has "branch"
@@ -216,12 +218,14 @@ any case.
   its path (configs naming a local path, a plugin state's `installPath`; inside a JSON file the
   inserted path is JSON-escaped), and so has every string of a `cli` step's `argv`, `cwd`, `env`
   and `stdin`, and of the case's `env`. Source trees and git trees are copied byte for byte.
-- **Outputs:** before comparing, every occurrence of a temp path in the step's JSON (in
-  every string), in a `cli` step's stdout and stderr and in every compared file is replaced
-  by its placeholder – plain and JSON-escaped path spellings both count. Only a path separator
-  immediately after that exact path is normalized to `/`; unrelated backslashes stay bytes.
-  Replacement runs first `${HOME}`, then `${PROJECT}`, then `${TMP}`, so the longer,
-  nested paths win.
+- **Outputs:** before comparing, every exact temp root in the step's JSON strings, a CLI
+  stream or a compared file is replaced by its placeholder; plain and JSON-escaped root
+  spellings remain distinct. The existing expected oracle then supplies path provenance: only
+  a `/` inside its explicitly delimited placeholder-rooted path token may match a native
+  separator. Decoded strings use one backslash; raw JSON string bytes require two. Single JSON
+  escapes (`\\n`, `\\t`, `\\uNNNN`), formatting, ordering and all unrelated bytes remain exact;
+  no stream or file is parsed and reserialized. Replacement runs first `${HOME}`, then
+  `${PROJECT}`, then `${TMP}`, so the longer, nested paths win.
 - **`${VERSION}`** stands for the version in `package.json`, and only in the stdout and
   stderr of a `cli` step with `"version": true`: there every occurrence of it is replaced,
   after the paths. Anywhere else a version-shaped string stays as it is.
@@ -440,7 +444,9 @@ key with `null`. Order that does matter lives in files and is compared there, by
 
 ## Regenerating and adding cases
 
-The TS engine is the reference, so its runner rewrites every expectation:
+The TS engine is the reference, so its runner rewrites every expectation on POSIX (Windows
+verification runs normally, but Windows update mode is refused because no existing oracle is
+there to distinguish native separators from literal escape data):
 
 ```bash
 SKILLETOR_CONFORMANCE_UPDATE=1 node --test --import ./test/setup.ts test/conformance.test.ts
@@ -449,8 +455,9 @@ SKILLETOR_CONFORMANCE_UPDATE=1 node --test --import ./test/setup.ts test/conform
 It writes `expected/<id>.json` and, for tree steps, replaces `expected/<id>/` and writes
 `expected/<id>.executables.json` (or removes it when no file carries the bit); for `cli` steps
 it writes `expected/<id>.stdout` and `.stderr`, removing the one a stream left empty. It
-refuses to run while `SKILLETOR_CONFORMANCE_CLI` is set: the expectations are the reference
-CLI's, the bundle of this checkout. Review the diff
+refuses to run while `SKILLETOR_CONFORMANCE_CLI` is set, and refuses update mode on Windows
+with instructions to regenerate on POSIX: the expectations are the reference CLI's, the bundle
+of this checkout, with portable path spelling. Review the diff
 against the spec before keeping it: an expectation that mirrors whatever the code does
 proves nothing. A new case is a directory with `case.json`, its inputs and – after a
 reviewed regeneration – its `expected/`. Keep it small: one behaviour, the fewest items that

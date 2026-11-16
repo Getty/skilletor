@@ -8519,6 +8519,7 @@ var TYPE_DIRS = [
   { dir: "agents", type: "agent" },
   { dir: "rules", type: "rule" }
 ];
+var utf8ByteOrder = (a, b) => Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 function noSymlink(path) {
   const st = lstatSync6(path);
   if (st.isSymbolicLink()) {
@@ -8616,7 +8617,7 @@ function scan(dir, paths) {
     if (!existsSync7(typeDir)) continue;
     noSymlink(typeDir);
     const found = [];
-    for (const entry of readdirSync4(typeDir)) {
+    for (const entry of readdirSync4(typeDir).sort(utf8ByteOrder)) {
       const p = join9(typeDir, entry);
       const st = noSymlink(p);
       if (type === "skill") {

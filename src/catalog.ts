@@ -93,6 +93,9 @@ const TYPE_DIRS: { dir: string; type: ItemType }[] = [
   { dir: "rules", type: "rule" },
 ];
 
+/** Published layout enumeration follows libuv/Linux strcmp order: UTF-8 bytes (k208). */
+const utf8ByteOrder = (a: string, b: string) => Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+
 /** Throw if `path` is a symlink; return its lstat otherwise. */
 function noSymlink(path: string) {
   const st = lstatSync(path);
@@ -227,7 +230,7 @@ export function scan(dir: string, paths?: string[]): Catalog {
     noSymlink(typeDir);
 
     const found: CatalogItem[] = []; // a skill per directory, an agent or rule per file
-    for (const entry of readdirSync(typeDir)) {
+    for (const entry of readdirSync(typeDir).sort(utf8ByteOrder)) {
       const p = join(typeDir, entry);
       const st = noSymlink(p);
 
