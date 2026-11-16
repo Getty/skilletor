@@ -12,7 +12,7 @@ jobs:
       matrix:
         # Node 24: the test runner executes .ts directly via native type-stripping.
         # The shipped bundle still targets Node 18 (esbuild target=node18).
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6

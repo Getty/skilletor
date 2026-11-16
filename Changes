@@ -1,6 +1,10 @@
 Revision history for skilletor
 
 {{$NEXT}}
+  - The ordinary CI matrix now includes a Windows Node 24 leg with typecheck,
+    tests and dist verification. Native-only launcher probes cover version and
+    hook startup from isolated paths containing spaces and non-ASCII
+    characters (k237).
   - An included template's syntax error is now a synchronous item warning
     rather than a delayed crash; unaffected items still install (k160).
   - Skill install paths no longer consult the process cwd. Commands that need
