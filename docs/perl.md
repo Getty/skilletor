@@ -1,4 +1,4 @@
-# The Perl port (`perl/`, dist `Skilletor`)
+# The Perl port (dist `Skilletor`, at the repository root)
 
 Decision record for karr #143 (2026-10-19, Getty: "own Perl dist in the skilletor repo,
 same flow as TS, shared conformance fixtures against divergence").
@@ -60,7 +60,7 @@ plain file trees, with the format given in `conformance/README.md`. Each case ha
 config, source trees (git sources are built as real repos and reached offline through
 `insteadOf`), steps (`resolve`, `sync`, `check`, `status`, and `cli`, which runs a whole
 command line) and the expected results. `test/conformance.test.ts` and
-`perl/t/60-conformance.t` both run every case and compare the outputs as canonical data,
+`t/60-conformance.t` both run every case and compare the outputs as canonical data,
 and the installed files byte for byte; a `cli` step's exit code, stdout and stderr are
 compared as bytes. Each runner takes the CLI to run from `SKILLETOR_CONFORMANCE_CLI` (a
 JSON argv prefix), so either runner can hold the other implementation's CLI to the same
@@ -71,7 +71,7 @@ expects a different outcome in Perl only where it says so explicitly under
 The expectations are generated from TS (`SKILLETOR_CONFORMANCE_UPDATE=1 npm test`) and
 then hand-reviewed against the design spec, because an expectation that only mirrors the
 code proves nothing. Beside the cases, the Perl suite replays recorded TS outputs
-("oracles", made by `perl/maint/*.mjs`) and runs parity tests (`t/5x-parity*.t`) that
+("oracles", made by `maint/*.mjs`) and runs parity tests (`t/5x-parity*.t`) that
 drive both engines live against the same remotes and cache.
 
 ## The raider API
@@ -128,7 +128,7 @@ fail a case that holds an unescaped name.
 
 ## Proof of shared state
 
-`perl/t/52-parity-sync.t` syncs one machine from the same starting state with TS and with
+`t/52-parity-sync.t` syncs one machine from the same starting state with TS and with
 Perl, and requires the following to come out byte-identical:
 
 - the reports and the installed trees;
@@ -137,7 +137,7 @@ Perl, and requires the following to come out byte-identical:
 
 It also requires each engine's `check` to accept the other engine's sync.
 
-`perl/t/54-parity-cli.t` does the same for the two command lines (`node dist/skilletor.js`
+`t/54-parity-cli.t` does the same for the two command lines (`node dist/skilletor.js`
 and `bin/skilletor`): it restores one saved machine before each CLI runs, so both run in the
 same paths, and compares exit codes, both streams and every file under the temp dir as raw
 bytes – the lock, `render-inputs.json`, `sources-read.json`, `unreached.json`, trust and the
@@ -160,24 +160,26 @@ other's `sync` and SessionStart wait or time out. It skips without node or the b
   hook follows a move (k184); under `--harness hermes` SessionStart ends with the line saying
   how to opt in while `hermes` is no target, and the prompt hook follows a move, naming
   `hermes skills trust` once a skill Hermes loads landed (k185).
-  The Perl CLI (`bin/skilletor`) runs `sync`, `check`, `status` (k173), `trust`, `source list`,
+  The Perl CLI (`script/skilletor`) runs `sync`, `check`, `status` (k173), `trust`, `source list`,
   `source remove` (k175), `add` with the probe of a generic host (k176: `git ls-remote`, then a
   HEAD on the tarball through HTTP::Tiny in the process, so a packed binary needs neither Node
   nor Perl for it), `available` (k177), `install` (k178), `uninstall` (k179), and the hooks.
   Shared cases 130–139 and 200–205 cover the two config-edit commands against both CLIs.
-  The default plugin launchers still use Node: packed-binary platform verification,
-  performance checks and activation remain gated under k166/k191.
+  The plugin's hooks run `bin/skilletor-start` (k191): a pinned, cached release binary,
+  else Node, else this port from `lib/`. No release pins binaries yet; they come from the
+  house route (`.github/workflows/binaries.yml`, dzil-binary, k242), and the port moved
+  from `perl/` to the repository root with it (2026-11-16).
 - Windows is untested. The process layer has a Windows path (k186: `run_command` through
   temp files on a no-wait spawn, `spawn_detached` through Win32::Process, the sync lock
   refreshed by its holder instead of a forked child), exercised on Linux through an injected
   seam; nothing has run on real Windows yet. Known open points: k207 (a dead lock owner),
   k209 (non-ASCII paths), k210 (the Windows binary's modules and smoke).
 - There are no conformance cases for a `url` fetch (it needs TLS), for symlink
-  conflicts, or for partial syncs. `perl/t/62-engine.t` covers partial syncs.
+  conflicts, or for partial syncs. `t/62-engine.t` covers partial syncs.
 
 Known divergences are kept on karr #143. The TS oddities the port found (duplicate trust
 requests, a `\U` escape above U+10FFFF aborting a source scan, a lost `description` with CRLF
 or a BOM, an inherited object key such as `constructor` accepted as an install key or a forge,
 a non-string install entry crashing `removeInstallEntries`) were fixed in the reference
-(k144) and are pinned by cases 13 to 16 and the oracles in `perl/t/data/`; the port mirrors
+(k144) and are pinned by cases 13 to 16 and the oracles in `t/data/`; the port mirrors
 none of them any more.

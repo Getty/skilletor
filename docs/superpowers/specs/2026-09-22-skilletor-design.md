@@ -1350,7 +1350,8 @@ resolve – not the directory of each command it runs.
 
 ```
 .claude-plugin/plugin.json      hooks/hooks.json
-bin/skilletor                   # shim → node dist/skilletor.js, checks Node ≥ 18 with a clear message; follows its own symlinks
+bin/skilletor                   # sh shim → bin/skilletor-start; follows its own symlinks; its .exe twin (winlaunch) on Windows
+bin/skilletor-start             # starter: pinned cached release binary, else node dist/skilletor.js, else Perl (k191)
 install.sh                      # setup from a plain shell: plugin + a stable `skilletor` on PATH (k141)
 dist/skilletor.js               # esbuild bundle incl. Nunjucks, committed
 skills/skilletor/SKILL.md
@@ -1372,12 +1373,16 @@ src/lock.ts  src/state.ts       # lock; trust, last-check, pending-report, mutex
 src/hooks.ts  src/report.ts  src/fsutil.ts  src/gitenv.ts
 hermes/skilletor/               # native Hermes Agent plugin: plugin.yaml, __init__.py (§16.4)
 test/
+dist.ini  cpanfile  lib/  script/skilletor  t/   # the Perl port, CPAN dist Skilletor (docs/perl.md)
+.github/workflows/binaries.yml  # its standalone binaries, house route dzil-binary.yml (k242)
 ```
 
 Boundaries: `sources/*` knows nothing about templating, `render` nothing about the
 target filesystem, `apply` nothing about sources. TypeScript, the only runtime
-dependency is Nunjucks (bundled); user requirements: `node ≥ 18`, `git`. Its own repo
-`Getty/skilletor`, an entry in `Getty/marketplace`; develop locally with
+dependency is Nunjucks (bundled); user requirements: `git` and one engine, `node ≥ 18`, Perl
+≥ 5.40 with `cpanfile`'s modules, or the pinned release binary. Its own repo
+`Getty/skilletor`, an entry in `Getty/marketplace`, and the CPAN dist `Skilletor` from the
+same root (version 0.00N ≡ plugin 0.N.0, tag the bare dist version); develop locally with
 `claude --plugin-dir .`.
 
 **From a plain shell** (`install.sh`, POSIX sh, k141): outside a Claude Code session the
@@ -1398,20 +1403,31 @@ github:Getty/skilletor` is not a supported path: npm 11 (seen with 11.17) links 
 package's temporary clone instead of copying it unless `--install-links` is given.
 
 **Prepared no-Node path** (k230): without `node`, the installer neither invokes `claude` nor
-parses its plugin metadata. It uses a CLI-only checkout, runs `bin/skilletor-start --version`
-as a preflight, and links that starter only on success. Updating an installer-managed
+parses its plugin metadata. It uses a CLI-only checkout, runs `bin/skilletor-start --help`
+as a preflight (a command that provisions; `--version` never does), and links that starter only on success. Updating an installer-managed
 checkout uses a separate candidate; failed provisioning leaves the prior command, checkout
 and local files intact. Earlier checkouts are retained. A binary must match checksums pinned
 in that checkout; without an available verified binary or usable source-Perl fallback the
 preflight fails safely. No Python, jq or system Perl is required for the binary route itself.
 
-The prepared starter (k231) rechecks a cached binary's hash. Only explicit CLI commands and
-SessionStart may provision; other hooks do not download. Failed SessionStart provisioning
-backs off for 900 seconds per version/platform, with explicit CLI retry allowed immediately.
-Malformed retry timestamps do not break the hook's exit-0 contract. Binary startup requires
-`sha256sum` or `shasum`, provisioning also `curl` or `wget`. These are tested local paths,
-not default runtime activation: plugin hook/launcher wiring and platform-binary verification
-remain gated by k191, including Windows and the startup-cost checks.
+The starter (k190, wired in k191) is what every hook, npm, the Hermes adapter in a checkout
+and `install.sh` run, through `bin/skilletor`. It takes the first of: the release binary
+for this platform named in `bin/skilletor-binaries.sha256` (the release's `SHA256SUMS`,
+committed as is), cached under `<claudeConfigDir>/skilletor/bin/<version>/` and rechecked
+against its pinned hash on every start; `node ≥ 18` with `dist/skilletor.js`; Perl ≥ 5.40
+with `lib/`, once `cpanfile`'s modules load; else one line, which a hook prints as its
+warning with exit 0. Without the pinned file nothing is downloaded. The binary comes from
+`releases/download/<version>/skilletor-<version>-<platform>` (bare tags). An explicit CLI
+command provisions in the foreground. A SessionStart hook starts the provision detached
+(`setsid`, else Perl's `setsid()`, else a plain background start) and never waits for it:
+the session runs Node or Perl, the next one the binary. Other hooks never download, and
+neither do `--version`/`-v`, which print the answering engine's own version (binary and
+Perl the dist's, Node `package.json`'s). Failed SessionStart provisioning backs off for
+900 seconds per version/platform, with explicit CLI retry allowed immediately. Malformed
+retry timestamps do not break the hook's exit-0 contract. Binary startup requires
+`sha256sum` or `shasum`, provisioning also `curl` or `wget`. Windows stays on Node through
+`bin/skilletor.exe` (k169). No release pins binaries yet: the release sequence is
+`docs/release.md`.
 
 ## 11. Tests
 

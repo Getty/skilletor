@@ -45,13 +45,13 @@ clones this repository into `~/.local/share/skilletor` (`$XDG_DATA_HOME/skilleto
 the clone's `bin/skilletor` there instead. Run it again to update either one.
 
 **Without Node:** the installer leaves Claude Code's plugin state untouched and uses a
-CLI-only checkout. It first runs `bin/skilletor-start --version`, then installs a link to
-that starter only if the check succeeds. A downloaded binary must match a checksum pinned
-in the checkout. Updates are checked in a separate candidate checkout; a failed download or
-preflight leaves the existing command and its checkout working. Previous checkouts are kept.
-This path is prepared for the Perl-binary rollout, not a claim that platform binaries are
-already available: without a pinned usable binary or a working source-Perl fallback,
-installation fails safely. The default plugin hooks have not switched away from Node.
+CLI-only checkout. It first runs `bin/skilletor-start --help`, which fetches the pinned
+release binary if there is one, then installs a link to that starter only if the check
+succeeds. A downloaded binary must match a checksum pinned in the checkout. Updates are
+checked in a separate candidate checkout; a failed download or preflight leaves the existing
+command and its checkout working. Previous checkouts are kept. No release pins binaries yet
+(see [Which engine runs](#which-engine-runs)), so today this path needs Perl ≥ 5.40 with the
+Perl port's dependencies; without one, installation fails safely.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh -s -- --no-plugin --bin-dir ~/bin
@@ -868,7 +868,7 @@ is on disk at once but listed by Codex only from the next session.
   can still be available there; use that CLI when present, including a verified no-Node
   starter installation. Otherwise the bundled skill locates the current plugin's launcher
   by absolute path: `$CODEX_HOME/plugins/cache/<marketplace>/skilletor/<version>/bin/skilletor`
-  (the default plugin launcher still needs Node). In your own shell,
+  (it runs whichever engine is there, [Which engine runs](#which-engine-runs)). In your own shell,
   [`install.sh`](#from-the-command-line) puts a `skilletor` on `PATH`;
   or put that file or a clone of this repository there yourself, by a symlink
   (`ln -s ~/src/skilletor/bin/skilletor ~/.local/bin/skilletor`) or an alias
@@ -968,7 +968,8 @@ and enables it (without `--enable` it asks, or — not on a terminal — leaves 
 catalog entry, so Hermes says "custom (unreviewed) source"; its install-time scan passes it.
 
 **The plugin needs the CLI**, which it does not bring: `$SKILLETOR_BIN`, else `skilletor`
-on `PATH`; without one it does nothing. The default plugin launcher still needs Node.js ≥ 18.
+on `PATH`; without one it does nothing. A checkout's `bin/skilletor` runs whichever engine is
+there ([Which engine runs](#which-engine-runs)).
 [`install.sh`](#from-the-command-line) can place a checkout launcher, a preflighted starter,
 or the Node-backed plugin command in `~/.local/bin`. Hermes reads `$HERMES_HOME/.env` into
 its environment, so name the CLI there once:
@@ -1112,14 +1113,15 @@ sync lock`; run it again.
 
 ## Perl port
 
-`perl/` holds `Skilletor`, a Perl distribution of skilletor for Perl programs that
-must resolve skills, agents and rules the way skilletor does, without Node.
-[langertha-raider](https://github.com/Getty/langertha-raider) uses it to load a
-skill or agent straight from its source. It reads the same config files, fetches
-into the same cache (`~/.claude/skilletor/cache`, so one fetch serves both), takes the
-same sync lock and keeps the same trust records. It syncs, checks and reports status
-for Claude Code, Codex and Hermes Agent, with the same target layouts and lock format
-(Hermes receives skills only).
+The repository root is also `Skilletor`, a Perl distribution of skilletor (CPAN), for Perl
+programs that must resolve skills, agents and rules the way skilletor does, without Node:
+`lib/`, `script/skilletor`, `t/`, `cpanfile` and `dist.ini`. The root `bin/` is the plugin's
+starter and not part of it. [langertha-raider](https://github.com/Getty/langertha-raider) uses
+it to load a skill or agent straight from its source. It reads the same config files, fetches
+into the same cache (`~/.claude/skilletor/cache`, so one fetch serves both), takes the same
+sync lock and keeps the same trust records. It syncs, checks and reports status for Claude
+Code, Codex and Hermes Agent, with the same target layouts and lock format (Hermes receives
+skills only).
 
 ```perl
 use Skilletor;
@@ -1130,25 +1132,47 @@ my $file = $sk->resolve_skill('perl-moo');   # path into the local source or the
 The TypeScript version stays the reference. `conformance/` holds shared cases:
 configs and source trees, plus the expected resolution and, for sync cases, the
 files, lock, check and status they should produce. Both
-`test/conformance.test.ts` and `perl/t/60-conformance.t` run them, and
+`test/conformance.test.ts` and `t/60-conformance.t` run them, and
 `SKILLETOR_CONFORMANCE_UPDATE=1 npm test` regenerates them from TypeScript.
 
 Sync renders `.njk` templates through `Text::Nunjucks`. The source-file lookup helpers
 (`resolve_skill` and its siblings) still refuse templated items rather than serving
 unrendered templates. Running the port from source requires Perl ≥ 5.40 and the dependencies
-in `perl/cpanfile`; its CLI is `perl/bin/skilletor`.
+in `cpanfile`; its CLI is `script/skilletor`. The dist's version is the plugin's in CPAN
+spelling: 0.008 is 0.8.0. See `perldoc Skilletor` for the API and
+[`docs/perl.md`](docs/perl.md) for the design decisions.
 
-The plugin launchers still use Node. The standalone Perl-binary starter is being prepared;
-platform verification and default-runtime activation remain pending. See
-[`perl/README.md`](perl/README.md) for the API and [`docs/perl.md`](docs/perl.md) for the
-design decisions.
+### Which engine runs
+
+`bin/skilletor` (what every plugin hook, the Hermes adapter in a checkout, npm and
+`install.sh`'s link run) hands over to `bin/skilletor-start`, which takes the first of:
+
+1. the release binary for this platform pinned in `bin/skilletor-binaries.sha256` (the
+   release's `SHA256SUMS`), cached under `<claudeConfigDir>/skilletor/bin/<version>/` and
+   checked against its pinned checksum on every start;
+2. Node.js ≥ 18 with `dist/skilletor.js`;
+3. Perl ≥ 5.40 with `lib/` and `script/skilletor`, once the modules in `cpanfile` load;
+4. else one line saying why: a hook prints it as its warning and exits 0, it never blocks.
+
+Only two things fetch the binary (`curl` or `wget`, checked with `sha256sum` or `shasum`): a
+CLI command, in the foreground, and a SessionStart hook, in the background. The session that
+starts it keeps running Node or Perl, the next one runs the binary. Other hooks never fetch.
+`--version` and `-v` never fetch either; they print the version of the engine that answers:
+`0.008` from the binary and Perl, `0.8.0` from Node. A failed SessionStart fetch is retried
+after 15 minutes.
+
+Without the pinned file the starter downloads nothing. No release has pinned one yet. The
+first release with binaries (linux-x86_64, linux-arm64, macos-arm64, windows-x86_64, from the
+`binaries` workflow) will, as [docs/release.md](docs/release.md) describes; until then a plugin
+install runs Node, else Perl. Windows runs Node through `bin/skilletor.exe` either way.
 
 ## Requirements
 
-- The current default plugin launcher needs Node.js ≥ 18 and `git`; its only bundled runtime
-  dependency is Nunjucks. The [Perl port](#perl-port) and prepared
-  [no-Node installer path](#from-the-command-line) have separate runtime requirements.
-- Windows: the same, without Git Bash. Claude Code starts the hooks through
+- `git`, and one engine ([Which engine runs](#which-engine-runs)): Node.js ≥ 18, whose only
+  bundled runtime dependency is Nunjucks; or Perl ≥ 5.40 with the dependencies in
+  `cpanfile`; or, once a release pins it, the release binary for the platform, fetched with
+  `curl` or `wget` and checked with `sha256sum` or `shasum`.
+- Windows: Node.js ≥ 18 and `git`, without Git Bash. Claude Code starts the hooks through
   `bin/skilletor.exe`, a small launcher next to the sh script that runs the bundle with
   the first `node.exe` on `PATH` (without one it exits silently). It is also the
   `skilletor` command in PowerShell and cmd once `bin/` is on `PATH`. Sources are checked
@@ -1157,4 +1181,5 @@ design decisions.
 
 ## License
 
-MIT.
+Artistic License 2.0 from 0.008 (plugin 0.8.0) on; the plugin releases up to 0.7.0 were MIT,
+the Perl dist's 0.001 on CPAN Perl 5. See [LICENSE](LICENSE).

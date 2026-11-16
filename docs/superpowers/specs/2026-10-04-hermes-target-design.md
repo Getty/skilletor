@@ -239,7 +239,7 @@ or a confirmation on a terminal. Also dropped: the CLI of an installed Claude Co
 hermes`, one per scope) and fetching a release at run time (network on a session start, code
 the install scan never saw). A clone and `SKILLETOR_BIN=<clone>/bin/skilletor` in
 `$HERMES_HOME/.env` is the documented way; `skilletor` on `PATH` works too, a symlink to
-`<clone>/bin/skilletor` included (the launcher follows its own symlinks to `dist/`).
+`<clone>/bin/skilletor` included (the launcher follows its own symlinks into the checkout).
 
 **Install by hand.** Symlink (or copy) `hermes/skilletor` to
 `$HERMES_HOME/plugins/skilletor` and add `skilletor` to `plugins.enabled` in
