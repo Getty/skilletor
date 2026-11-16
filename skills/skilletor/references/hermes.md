@@ -13,10 +13,8 @@ Hermes is never machine-detected; all three steps are needed:
    `hermes plugins update skilletor`, apart from the CLI and the Claude Code or Codex plugin
    (`hermes plugins check-updates` cannot tell whether this install is behind).
 3. The CLI, which the plugin does not bring — `SKILLETOR_BIN=<clone>/bin/skilletor` in
-   `$HERMES_HOME/.env`, else `skilletor` on `PATH`. A separately verified installer CLI can
-   provide the latter without changing plugin state; the Node launcher is a fallback, not a
-   required no-Node path. Production binaries and non-Node hook activation are not ready.
-   Without a CLI the plugin does nothing.
+   `$HERMES_HOME/.env`, else `skilletor` on `PATH` (`install.sh` puts one there). Without a
+   CLI the plugin does nothing.
 
 Check: `hermes skilletor status` (any CLI command after `hermes skilletor`) runs the CLI
 with that Hermes' home as `HERMES_HOME`.

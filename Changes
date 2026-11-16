@@ -1,6 +1,9 @@
 Revision history for skilletor and Skilletor, its Perl distribution
 
 {{$NEXT}}
+  - Bundled skill: "Running the CLI" and the Hermes reference give the
+    starter's engine order (pinned release binary, Node.js >= 18, Perl >= 5.40)
+    instead of calling the launcher Node-based (k191).
   - The Perl distribution Skilletor moves from perl/ to the repository root
     and is released with dzil; its version 0.008 is the plugin's 0.8.0, which
     the Perl CLI now reports. Standalone binaries for linux-x86_64,

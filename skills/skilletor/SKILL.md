@@ -9,12 +9,14 @@ description: "skilletor CLI — installs and updates skills, agents and rules fr
 
 - **Claude Code:** the plugin's `bin/` is on the Bash tool's `PATH`; a separately installed CLI also works.
 - **Codex:** the plugin adds no `PATH` entry. A separately installed `skilletor` on `PATH`
-  works; otherwise use its Node-based fallback, `<plugin root>/bin/skilletor`, two directories
+  works; otherwise use its launcher, `<plugin root>/bin/skilletor`, two directories
   above this SKILL.md (`…/skilletor/<version>/skills/skilletor/SKILL.md` → `…/skilletor/<version>/bin/skilletor`).
   Take `<version>` from that listed path, never from memory. Codex runs skilletor's hooks only
   once trusted in `/hooks` (again after an update changes them); until then `sync` by hand.
-- **No Node:** `install.sh` can install a separately verified `skilletor` on `PATH` without changing
-  plugin state. Production binaries and non-Node hook activation are not ready; the plugin's Node `bin/` is a fallback, not an enforced no-Node path.
+- **Engine:** `bin/skilletor` runs the first of a binary pinned in `bin/skilletor-binaries.sha256`
+  (fetched only if that file exists), Node.js ≥ 18, Perl ≥ 5.40 with the modules in the plugin's
+  `cpanfile`; on Windows, Node only. None: a hook warns once and exits 0, a command exits 1 —
+  install Node.js ≥ 18, or Perl ≥ 5.40 and those modules.
 - **Hermes Agent:** `hermes skilletor <command>` runs the CLI the plugin uses; setup: [references/hermes.md](references/hermes.md).
 
 ## Do not hand-edit a managed file — change it in the source
