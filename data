@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-11-16T02:06:54Z
+claimed_by: skilletor-sol-prototype
+class: standard
+completed: 2026-11-16T02:06:54Z
+created: 2026-11-13T21:54:37Z
+id: 194
+priority: low
+started: 2026-11-16T00:12:31Z
+status: done
+tags:
+- ts
+- bug
+- frontmatter
+title: 'TS: prototype keys slip through frontmatter, convert and hook state'
+updated: 2026-11-16T02:06:54Z
+---
+
+Found on k180 and k183 (2026-11-13), from reading the code and probing with node; same family as k144.
+- frontmatter.ts: a __proto__ key is never stored as a plain key. codex: {__proto__: x} disappears, and a top-level __proto__: mapping lends its keys to the whole frontmatter (its description: becomes the agent's description). Perl keeps it as a plain key.
+- convert.ts: `key in top` treats a codex table named constructor/toString/valueOf/hasOwnProperty/... as a collision and drops it; the Perl port copies this with a fixed %INHERITED list (Convert.pm) for byte identity.
+- state.ts: putSessionCwd/putPendingReport with the key __proto__ change the parsed object's prototype, so that entry is never written; takePendingReport uses `in`, which finds inherited keys such as constructor. Session ids are UUIDs and keys absolute paths, so unreachable in practice.
+Done: TS uses own-key checks (Object.hasOwn / null-prototype objects) with tests; the Perl port then drops %INHERITED and follows; oracles regenerated (perl/maint/oracle-convert.mjs).
+
+Independent Sol task review: spec compliant, quality approved, no blocking findings. Main independently reran50 Node tests and17 Perl top-level tests across2 files: all PASS,0 skips/0 TODOs; diff-check clean. Ordinary object prototypes preserved while reserved names become own enumerable data. Converter oracle and actual cross-language state sequence reviewed; no case243/schema change needed for these directly tested boundaries. Final combined typecheck/build/dist/full suites and commit pending.
+
+Committed as d392166 after implementation review and final corrected-code approval. Gates passed: Node 1332 pass, 0 fail, 3 explicit skips; Perl 49 files and 2699 tests, 0 TODO; typecheck, build, check-dist and diff-check passed.
