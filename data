@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-11-18T03:58:47Z
+id: 244
+priority: medium
+status: backlog
+tags:
+- codex
+- hooks
+- bug
+title: 'Codex hooks: quote ${CLAUDE_PLUGIN_ROOT} in the hook commands'
+updated: 2026-11-18T03:58:47Z
+---
+
+hooks/codex-hooks.json runs `${CLAUDE_PLUGIN_ROOT}/bin/skilletor hook session-start --harness codex` (and user-prompt-submit) as one shell string with the variable unquoted. A plugin root with a space in its path splits into two words and the hook fails. It predates k191 (found 2026-11-16 during the ACK package work, k242). Claude Code's hooks/hooks.json is not affected the same way only if its command is not word-split; check it too.
+
+Do: quote the path ("${CLAUDE_PLUGIN_ROOT}/bin/skilletor"), after checking how Codex substitutes the placeholder (textually before the shell, or as an env var for the shell) so the quoting survives either way; add a test that a plugin root with a space runs the hook.
