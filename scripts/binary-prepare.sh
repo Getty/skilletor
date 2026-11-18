@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # What the skilletor binary needs before the dist's dependencies are installed: TLS for an
-# https url source, and Text::Nunjucks. binary_prepare of the [@Author::GETTY] bundle
-# (dist.ini): its dzil-binary workflow runs it from the dist root once per platform, after the
-# packing perl and before `cpanm --installdeps .` -- a Net::SSLeay that cpanm builds first links
-# the host's libssl instead -- with the deps local lib active and the cache dir it keeps per
-# platform (keyed by this file's checksum) as PREFIX.
+# https url source. binary_prepare of the [@Author::GETTY] bundle (dist.ini): its dzil-binary
+# workflow runs it from the dist root once per platform, after the packing perl and before
+# `cpanm --installdeps .` -- a Net::SSLeay that cpanm builds first links the host's libssl
+# instead -- with the deps local lib active and the cache dir it keeps per platform (keyed by
+# this file's checksum) as PREFIX. That `cpanm --installdeps .` takes every other dependency,
+# Text::Nunjucks among them, from CPAN (cpanfile).
 #   scripts/binary-prepare.sh PREFIX
-# Needs git and, on Linux and macOS, curl, a C compiler and make.
-# Exit 0 when the perl on PATH has TLS as the binary needs it and Text::Nunjucks, non-zero
-# otherwise.
+# Needs, on Linux and macOS, curl, a C compiler and make.
+# Exit 0 when the perl on PATH has TLS as the binary needs it, non-zero otherwise.
 #
 # TLS, Linux and macOS: OpenSSL as static libraries in PREFIX (bin/openssl, lib/libssl.a,
 # lib/libcrypto.a, include/), reused when PREFIX already holds this version, and Net::SSLeay
@@ -35,12 +35,6 @@ set -euo pipefail
 OPENSSL_VERSION=3.5.9
 OPENSSL_SHA256=603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
 OPENSSL_URL="https://github.com/openssl/openssl/releases/download/openssl-$OPENSSL_VERSION/openssl-$OPENSSL_VERSION.tar.gz"
-
-# TEMP (k243): Text::Nunjucks is not on CPAN yet, so the probe installs it from this commit of
-# its public repository. Remove the pin once Text::Nunjucks 0.001 is on CPAN; the release build
-# must install it from CPAN (cpanfile), as every other dependency.
-TEXT_NUNJUCKS_REPO=https://github.com/Getty/p5-text-nunjucks
-TEXT_NUNJUCKS_REF=1a9a608ad90270a7ae0d15a92466fc186fda00fd
 
 PREFIX=${1:?usage: binary-prepare.sh PREFIX}
 mkdir -p "$PREFIX"; PREFIX=$(cd "$PREFIX" && pwd)
@@ -106,22 +100,3 @@ else
 fi
 perl -MIO::Socket::SSL=2.009 -MMozilla::CA -e 'print "IO::Socket::SSL $IO::Socket::SSL::VERSION, Mozilla::CA $Mozilla::CA::VERSION\n"'
 echo "TLS for the binary: $tls"
-
-# Text::Nunjucks at the pinned commit (TEMP, k243): a git checkout of the commit itself, whose id
-# vouches for every byte, installed with a Makefile.PL of its own (the repository is a Dist::Zilla
-# one and has none) into the local lib, its dependencies from CPAN first.
-tn=$work/p5-text-nunjucks
-git init -q "$tn"
-git -C "$tn" fetch -q --depth 1 "$TEXT_NUNJUCKS_REPO" "$TEXT_NUNJUCKS_REF"
-git -C "$tn" -c advice.detachedHead=false checkout -q FETCH_HEAD
-[ "$(git -C "$tn" rev-parse HEAD)" = "$TEXT_NUNJUCKS_REF" ] \
-  || { echo "ERROR: $TEXT_NUNJUCKS_REPO fetched $(git -C "$tn" rev-parse HEAD), want $TEXT_NUNJUCKS_REF" >&2; exit 1; }
-cat >"$tn/Makefile.PL" <<'EOF'
-use ExtUtils::MakeMaker;
-WriteMakefile( NAME => 'Text::Nunjucks', VERSION_FROM => 'lib/Text/Nunjucks.pm', MIN_PERL_VERSION => '5.040' );
-EOF
-tn_perl=$tn    # the checkout as perl takes it: Strawberry's, C:/... on Windows
-if [ -n "$windows" ]; then tn_perl=$(cygpath -m "$tn"); fi
-perl -S cpanm --notest --installdeps "$tn_perl"
-perl -S cpanm --notest "$tn_perl"
-perl -MText::Nunjucks -e 'print "Text::Nunjucks $Text::Nunjucks::VERSION from $INC{q{Text/Nunjucks.pm}}\n"'

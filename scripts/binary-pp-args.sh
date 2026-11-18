@@ -16,7 +16,7 @@ set -euo pipefail
 
 # Every module needed at run time must be installed, or the loaded set below is short.
 perl -Ilib -MSkilletor -MText::Nunjucks -e1 \
-  || { echo "ERROR: runtime dependencies missing (cpanm --installdeps .; Text::Nunjucks: scripts/binary-prepare.sh)" >&2; exit 1; }
+  || { echo "ERROR: runtime dependencies missing (cpanm --installdeps .)" >&2; exit 1; }
 # TLS: IO::Socket::SSL on Net::SSLeay, and Mozilla::CA as the trust store of last resort.
 # Net::SSLeay carries whatever OpenSSL it was built against into the binary: a portable build
 # links OpenSSL statically (scripts/binary-prepare.sh, binary_prepare), a dev-box build links the

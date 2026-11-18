@@ -1,6 +1,6 @@
-// The Perl CI cannot obtain Text::Nunjucks from CPAN yet. Keep its minimum Perl
-// declaration and its checked-out dependency contract aligned with the binary build
-// (scripts/binary-prepare.sh, the bundle's binary_prepare; TEMP until k243).
+// Perl CI and the binary build take Text::Nunjucks from CPAN through the cpanfile, like every
+// other dependency: no checkout of its own, no PERL5LIB injection, no install in
+// scripts/binary-prepare.sh (the bundle's binary_prepare, which prepares TLS only).
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -13,26 +13,22 @@ const cpanfile = readRepoFile("cpanfile");
 const perlWorkflow = readRepoFile(".github/workflows/perl.yml");
 const binaryPrepare = readRepoFile("scripts/binary-prepare.sh");
 
-function envValue(workflow: string, name: string): string | undefined {
-  return new RegExp(`^\\s+${name}: (.+)$`, "m").exec(workflow)?.[1];
-}
-
-function shellValue(script: string, name: string): string | undefined {
-  return new RegExp(`^${name}=(.+)$`, "m").exec(script)?.[1];
-}
-
-test("Perl distribution declares Text::Nunjucks' Perl 5.40 minimum", () => {
+test("cpanfile requires Text::Nunjucks 0.001 and its Perl 5.40 minimum", () => {
   assert.match(cpanfile, /^requires 'perl', '5\.040';$/m);
+  assert.match(cpanfile, /^requires 'Text::Nunjucks', '0\.001';$/m);
 });
 
-test("Perl CI checks out and provisions the pinned Text::Nunjucks dependency", () => {
+test("Perl CI installs Text::Nunjucks from CPAN through the cpanfile", () => {
   assert.match(perlWorkflow, /^        perl-version: \["5\.40"\]$/m);
-  assert.equal(`https://github.com/${envValue(perlWorkflow, "TEXT_NUNJUCKS_REPO")}`, shellValue(binaryPrepare, "TEXT_NUNJUCKS_REPO"));
-  assert.match(envValue(perlWorkflow, "TEXT_NUNJUCKS_REF") ?? "", /^[0-9a-f]{40}$/);
-  assert.equal(envValue(perlWorkflow, "TEXT_NUNJUCKS_REF"), shellValue(binaryPrepare, "TEXT_NUNJUCKS_REF"));
-  assert.match(perlWorkflow, /- name: Check out Text::Nunjucks \(not on CPAN\) at the pinned commit\n        uses: actions\/checkout@v6\n        with:\n          repository: \$\{\{ env\.TEXT_NUNJUCKS_REPO \}\}\n          ref: \$\{\{ env\.TEXT_NUNJUCKS_REF \}\}\n          path: _deps\/p5-text-nunjucks/m);
-  assert.match(perlWorkflow, /echo "PERL5LIB=\$GITHUB_WORKSPACE\/_deps\/p5-text-nunjucks\/lib" >> "\$GITHUB_ENV"/);
-  assert.match(perlWorkflow, /cpanm -nq --installdeps \.\/_deps\/p5-text-nunjucks\n          cpanm -nq --installdeps \.\n/);
+  assert.match(perlWorkflow, /^        run: cpanm -nq --installdeps \.$/m);
+  assert.equal(perlWorkflow.match(/--installdeps/g)?.length, 1, "one installdeps, the dist's");
+  assert.equal(perlWorkflow.match(/uses: actions\/checkout@/g)?.length, 1, "one checkout, the dist's");
+  assert.doesNotMatch(perlWorkflow, /PERL5LIB/);
   assert.match(perlWorkflow, /^        run: prove -lr -j4 t$/m);
   assert.doesNotMatch(perlWorkflow, /working-directory:/);
+});
+
+test("the binary prepare installs no Text::Nunjucks of its own", () => {
+  const code = binaryPrepare.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+  assert.doesNotMatch(code, /nunjucks/i);
 });

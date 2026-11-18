@@ -38,7 +38,7 @@ drift away from what the TypeScript engine does.
   `t/53-parity-render.t` renders the same templates with both engines. Render context is
   constructed only when an item actually renders a `.njk` file, companions included, and
   reused within that build; plain copies do not require an OS passwd entry (k161).
-  Text::Nunjucks needs Perl 5.40 and is not on CPAN yet.
+  Text::Nunjucks (on CPAN since 0.001) needs Perl 5.40.
 - **Claude Code, Codex and Hermes targets** for sync/check/status (Codex since k184, Hermes
   since k185).
 - **Project-local target defaults** (k229) match the reference: user `targets` sets the

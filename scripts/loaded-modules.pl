@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # Print the modules the skilletor CLI loads, one per line (Foo::Bar), by running the real
 # commands. Run it as `perl -Ilib scripts/loaded-modules.pl` from the dist root, with
-# Text::Nunjucks installed or on PERL5LIB (a checkout's lib/ until it is on CPAN, k243).
+# Text::Nunjucks installed or on PERL5LIB.
 # binary-pp-args.sh turns the list into pp -M options; binary-verify.sh requires every entry
 # inside the packed archive. One source, so build and verify cannot drift.
 # Problems go to STDERR; the list goes to STDOUT.
@@ -39,10 +39,10 @@ sub pm_under {
 -f 'lib/Skilletor.pm' or die "loaded-modules: run from the dist root\n";
 $mods{ s{/}{::}gr } = 1 for pm_under( 'lib', 'Skilletor' );
 
-# Text::Nunjucks, every module of its checkout: the template engine builds its node classes and
-# compiled templates by eval and loads its loaders on some paths only.
+# Text::Nunjucks, every module of the copy on @INC: the template engine builds its node classes
+# and compiled templates by eval and loads its loaders on some paths only.
 my ($tn_dir) = grep { -f "$_/Text/Nunjucks.pm" } grep { !ref } @INC;
-defined $tn_dir or die "loaded-modules: Text::Nunjucks is not on \@INC (PERL5LIB=<checkout>/lib)\n";
+defined $tn_dir or die "loaded-modules: Text::Nunjucks is not on \@INC (cpanm --installdeps .)\n";
 $mods{ s{/}{::}gr } = 1 for pm_under( $tn_dir, 'Text/Nunjucks' );
 
 # Loaded by name at run time, which pp's scanner cannot see:

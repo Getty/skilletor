@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prove a packed binary where neither perl nor node exists: the shared conformance cases'
 # `cli` steps run it inside a container, through t/60-conformance.t's SKILLETOR_CONFORMANCE_CLI.
-#   maint/container-proof.sh <binary>   from the repository root, Text::Nunjucks on PERL5LIB
+#   maint/container-proof.sh <binary>   from the repository root, Text::Nunjucks installed
 # The runner, its non-cli steps and the git fixtures run here; maint/container-exec.pl carries
 # each `cli` step into the container with its environment, working directory and stdin. The
 # cases' temp dirs and the binary live under one proof dir, bind-mounted at the same path.
@@ -22,7 +22,7 @@ command -v docker >/dev/null 2>&1 || { echo "ERROR: docker is not installed" >&2
 BIN=$(perl -MCwd=abs_path -e 'print abs_path(shift) // ""' "${1:?usage: container-proof.sh <binary>}")
 [ -f "$BIN" ] && [ -x "$BIN" ] || { echo "ERROR: no executable binary: $1" >&2; exit 1; }
 perl -Ilib -MText::Nunjucks::Environment -e1 2>/dev/null \
-  || { echo "ERROR: Text::Nunjucks is not on @INC (PERL5LIB=<p5-text-nunjucks checkout>/lib)" >&2; exit 1; }
+  || { echo "ERROR: Text::Nunjucks is not on @INC (cpanm --installdeps .)" >&2; exit 1; }
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "Making $IMAGE from $BASE"
