@@ -1,0 +1,89 @@
+---
+claimed_at: 2026-11-16T18:55:38Z
+claimed_by: skilletor-worker-k191
+class: standard
+created: 2026-11-13T20:44:23Z
+depends_on:
+- 189
+- 190
+- 185
+- 186
+- 167
+- 168
+- 169
+- 250
+id: 191
+priority: medium
+started: 2026-11-16T18:49:34Z
+status: in-progress
+tags:
+- binary
+- starter
+- gate
+title: Activate the Perl binary for plugin users (maintainer gate)
+updated: 2026-11-18T16:47:07Z
+---
+
+Part of the Perl CLI strand (see the strand card). Gate: the maintainer only. Do not start without the maintainer's explicit go-ahead.
+
+Switch plugin users to the starter:
+- hooks.json, codex-hooks.json;
+- bin/skilletor, or the starter replaces it;
+- the `# winlaunch:` line and bin/skilletor.exe, per the Windows decision;
+- the Hermes adapter's find_cli, which today requires dist/skilletor.js beside bin/skilletor;
+- README, skills/skilletor, the spec, release notes.
+
+The release flow per the decisions: tag, binaries and checksums, then the checksums pinned in the plugin if chosen, then the marketplace. This falls under the publish gate.
+
+Depends on every card of the strand and every decision.
+
+Before wiring: decision k203 (the binary's start cost per prompt against Node; measured numbers there) next to k167/k168/k169; the starter test asserts that nothing wired names skilletor-start - flip it here (k190 note f).
+
+From k189, before the first tag run: (1) its README gate fails until README.md names libcrypt, libssl, libcrypto, libz and libzstd in backticks (docs, write it when the binaries become user-facing); (2) release-binaries.yml checks out Getty/p5-text-nunjucks at a pinned commit and assumes the repo is public - if not, the step needs a token secret; (3) switch-on: add 'release: types: [published]' beside workflow_dispatch (header comment), after one green probe and one tag dispatch onto an existing release.
+
+2026-11-15 maintainer explicitly requested safe Perl-primary migration, including systems without JavaScript. Treat as direction to prepare a safe local activation design, not as a waiver of k167/k168/k169/k203 or parity gates and not as permission to publish. Read-only audit of current wiring and remaining blockers in progress.
+
+2026-11-16 18:49 Maintainer decision 2026-11-16 (via the perl-developer hub, design ~/dev/perl-developer/docs/superpowers/specs/2026-11-16-ack-paket-design.md): prepare activation locally now (hooks.json, codex-hooks.json, bin/skilletor to the starter, Hermes adapter, README, skill). Without the pinned checksum file the starter downloads nothing and falls back to Node/Perl, so activation is safe before binaries exist. Push to main, tags, releases and the checksum commit remain the maintainer's go.
+
+Local wiring, pass 1 (skilletor-worker, reviewed by main, 2026-11-16):
+- bin/skilletor is a thin POSIX shim that follows its symlinks and execs bin/skilletor-start. hooks.json, codex-hooks.json, package.json and Hermes keep naming bin/skilletor, because on Windows Claude Code and PowerShell start its .exe twin and the `# winlaunch:` line lives there; the starter has no .exe twin. Starter missing or not executable: a hook prints one systemMessage line and exits 0, the CLI prints to stderr and exits 1.
+- Without bin/skilletor-binaries.sha256 nothing is downloaded: Node, else Perl. Windows stays on Node via bin/skilletor.exe (k169 c).
+- Hermes find_cli: POSIX takes an executable bin/skilletor without dist/; Windows takes bin/skilletor.exe only beside dist/skilletor.js.
+- Tests: 6 wired-entry tests (8 entry points each: four hooks.json hooks, two Codex hooks, the CLI, a symlink on PATH): no pin -> Node and no curl/wget call; pinned but not cached -> non-start hooks fetch nothing; Perl without Node; cached verified binary without Node and Perl; nothing to run -> every hook exits 0 with one line; starter missing. The k190 note-f assertion is flipped (entry points name bin/skilletor, which runs the starter); winlaunch-line test kept. Pin present vs absent in a temp tree copy gives identical verdicts on all 1354 tests and no fetch.
+- Overhead of the extra sh step: about 3.5 ms per hook (shell side min 7.9 -> 11.6 ms; real-node runs 218.8/260.0 old vs 212.3/283.7 new ms min/median, within noise).
+- Verified by main: npm run typecheck && npm test && npm run build && npm run check-dist: 1354 tests, 1350 pass, 0 fail, 4 skipped (Hermes real install without SKILLETOR_HERMES_INSTALL=1; two native-Windows launcher tests; the 8.3/long-path test).
+
+Decisions:
+- Developer override (a checkout with the pin file runs the release binary, not the working tree): not added now. Recommendation: SKILLETOR_ENGINE=node|perl to skip the binary steps, for developers, CI testing the checkout and users who prefer k203 (b). Workaround today: node dist/skilletor.js or the Perl script directly.
+
+Open, for pass 2 (house route, k242): release URL releases/download/<VERSION>/ (tag_format %v), assets skilletor-<VERSION>-<PLATFORM>, pin = the release's SHA256SUMS; `skilletor --version` never downloads and names the runtime that answers (hub, from ACK c14); Perl fallback paths lib/, script/skilletor, cpanfile after the root move; SessionStart time limits (Hermes 20 s, Claude 30 s) are shorter than the 60 s download bound plus warm-up.
+
+Commit: e78e974 on ack-paket.
+
+Pass 2, done on ack-paket 2026-11-16 (skilletor-worker, reviewed by main):
+
+What changed:
+- The starter reads the house route. URL: …/releases/download/<version>/skilletor-<version>-<platform>[.exe], with bare tags (tag_format %v). The pin is the release's SHA256SUMS committed as is. The parser skips other binaries, malformed versions and the .exe line on POSIX. The cache is keyed by version.
+- `--version` and `-v` never provision. They answer from the engine that runs (cached binary, else Node, else Perl) with its own output: binary and Perl print 0.008, Node prints 0.8.0. The starter adds nothing (ACK c14, hub).
+- Perl runs from lib/, script/skilletor and cpanfile at the root.
+- SessionStart provisions detached (setsid, else perl setsid(), else a plain background start with HUP ignored) and never waits. The session runs Node or Perl; the next one runs the binary. The hook takes 33-40 ms median instead of 6 s with a slow server. The provision survives a SIGKILL of the hook's process group. A CLI command still provisions in the foreground.
+- install.sh's no-Node preflight runs --help (which provisions) instead of --version. In a sandbox the install tests go 16/16 with the change and 12/16 without it.
+
+Decisions:
+- Detached provisioning instead of a time bound. Reason: a bound can't guarantee the hook never overruns its budget. SessionStart shares 30 s (Hermes 20 s) with the sync, and the binary's first-run unpack alone takes 10+ s.
+- Not added: a stale-.tmp sweep (SIGTERM cleans up, tested) and an in-flight guard (a double download is harmless; the rename is atomic).
+- Developer override: still deferred.
+
+Limits:
+- perl setsid() is untested on real macOS (bash --posix stood in).
+- In a 35-185 ms window after start, a group kill can still catch the provision; the next SessionStart retries. Hermes doesn't kill the group after a normal exit (code read). Claude Code and Codex: not checked.
+
+Verified by main (together with k242): npm 1356 tests, 1352 pass, 0 fail, 4 skipped; prove 2710 PASS. The worker ran 7 deliberate mutations; each turned a test red.
+
+Docs: README "Which engine runs", spec §10, the bundled skill's engine order. No release pins binaries yet, so users run Node, else Perl, until docs/release.md's pin step.
+
+Commits: 1cff03e (starter), 6f1463d (docs), 60aa062 (bundled skill) on ack-paket.
+
+Committed e78e974, 1cff03e (+ docs 6f1463d, skill 60aa062). Stays open for the maintainer gate: the pin bin/skilletor-binaries.sha256 after the first release with binaries (docs/release.md).
+
+2026-11-18 16:47 2026-11-18: depends on k250 (binary session-start past the 30 s hook limit on a real state, found in the agent-construction-kit binary test on reuben).
