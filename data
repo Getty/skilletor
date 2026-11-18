@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-11-18T03:59:26Z
+id: 247
+priority: low
+status: backlog
+tags:
+- starter
+- binary
+- dx
+title: 'Starter: SKILLETOR_ENGINE=node|perl skips the release binary'
+updated: 2026-11-18T03:59:26Z
+---
+
+bin/skilletor-start always prefers the pinned release binary once bin/skilletor-binaries.sha256 exists (k191). There is no switch to run Node or Perl instead -- for a developer checkout that has the pin, for CI that must test a given engine, and for users who want k203 (b) (Node first). Today only `node dist/skilletor.js` or `perl -Ilib script/skilletor` directly does that, which the hooks never call.
+
+Recommendation (from k191, deferred 2026-11-16): SKILLETOR_ENGINE=node or perl makes the starter skip the binary and run that engine (failing loudly when it is missing, except for `hook` calls, which fail open as today); unset or `auto` keeps the current order. Document it in the README's "Which engine runs" and the bundled skill; test it in test/starter.test.ts.
