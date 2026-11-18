@@ -2605,7 +2605,7 @@ var require_runtime = __commonJS({
         }
         return p && p.lookup(name);
       };
-      _proto.resolve = function resolve2(name, forWrite) {
+      _proto.resolve = function resolve3(name, forWrite) {
         var p = forWrite && this.isolateWrites ? void 0 : this.parent;
         var val = this.variables[name];
         if (val !== void 0) {
@@ -4335,7 +4335,7 @@ var require_loader = __commonJS({
         return _EmitterObj.apply(this, arguments) || this;
       }
       var _proto = Loader.prototype;
-      _proto.resolve = function resolve2(from, to) {
+      _proto.resolve = function resolve3(from, to) {
         return path.resolve(path.dirname(from), to);
       };
       _proto.isRelative = function isRelative(filename) {
@@ -5741,7 +5741,7 @@ import { realpathSync as realpathSync3 } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { join as join18 } from "node:path";
+import { isAbsolute as isAbsolute4, join as join18, resolve as resolve2 } from "node:path";
 
 // src/fsutil.ts
 import { createHash } from "node:crypto";
@@ -5818,7 +5818,7 @@ function sameFile(a, b) {
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { hostname as hostname2, platform, userInfo } from "node:os";
 import { existsSync as existsSync11, readFileSync as readFileSync13, realpathSync as realpathSync2, rmSync as rmSync8, statSync as statSync5 } from "node:fs";
-import { basename as basename4, dirname as dirname4, isAbsolute as isAbsolute3, join as join15, relative as relative4, resolve as resolvePath5, sep as sep5 } from "node:path";
+import { basename as basename4, dirname as dirname5, isAbsolute as isAbsolute3, join as join15, relative as relative4, resolve as resolvePath5, sep as sep5 } from "node:path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "node:fs";
@@ -9292,7 +9292,7 @@ import {
   writeFileSync as writeFileSync3
 } from "node:fs";
 import { hostname } from "node:os";
-import { isAbsolute as isAbsolute2, join as join12 } from "node:path";
+import { dirname as dirname4, isAbsolute as isAbsolute2, join as join12 } from "node:path";
 var SyncLockTimeoutError = class extends Error {
   name = "SyncLockTimeoutError";
 };
@@ -9306,6 +9306,15 @@ function setOwn3(record, key, value2) {
 }
 function projectStateKey(key) {
   return process.platform === "win32" && isAbsolute2(key) ? realOrResolved(key) : key;
+}
+function dropGoneScopes(all, keep) {
+  let dropped = false;
+  for (const key of Object.keys(all)) {
+    if (key === keep || isAbsolute2(key) && existsSync9(dirname4(key))) continue;
+    delete all[key];
+    dropped = true;
+  }
+  return dropped;
 }
 var State = class {
   root;
@@ -9398,7 +9407,8 @@ var State = class {
     }
     return out;
   }
-  /** Replace a scope's record of sources read; the file is written only when it changes. */
+  /** Replace a scope's record of sources read, dropping the records of scopes that are gone
+   *  (k254); the file is written only when it changes. */
   putSourcesRead(scopeKey, record) {
     const all = this.readJson("sources-read.json");
     const next = {};
@@ -9408,7 +9418,8 @@ var State = class {
       if (r.ref !== void 0) next[name].ref = r.ref;
       if (r.path !== void 0) next[name].path = r.path;
     }
-    if (JSON.stringify(all[scopeKey] ?? {}) === JSON.stringify(next)) return;
+    const dropped = dropGoneScopes(all, scopeKey);
+    if (!dropped && JSON.stringify(all[scopeKey] ?? {}) === JSON.stringify(next)) return;
     if (Object.keys(next).length > 0) all[scopeKey] = next;
     else delete all[scopeKey];
     this.writeJson("sources-read.json", all);
@@ -10912,7 +10923,7 @@ function syncCodexRules(a) {
     else atomicWrite(agentsFile, agentsNext);
   }
   if (want) {
-    const override = join15(dirname4(agentsFile), "AGENTS.override.md");
+    const override = join15(dirname5(agentsFile), "AGENTS.override.md");
     if (existsSync11(override)) {
       warnings.push(`${labelOf(override)} exists; Codex reads it instead of AGENTS.md, so the pointer to the skilletor rules is not seen`);
     }
@@ -11217,7 +11228,7 @@ function status(given, opts = {}) {
 }
 
 // src/commands.ts
-import { dirname as dirname5, join as join16 } from "node:path";
+import { dirname as dirname6, join as join16 } from "node:path";
 
 // src/probe.ts
 import { execFileSync as execFileSync3 } from "node:child_process";
@@ -11609,7 +11620,7 @@ async function cmdUninstall(ctx, args) {
   const project = Boolean(args.project);
   const path = configPath(ctx, project);
   const scopeName = project ? "project" : "user";
-  const lock = readLock(join16(dirname5(path), "skilletor.lock.json"));
+  const lock = readLock(join16(dirname6(path), "skilletor.lock.json"));
   const parsed = args.items.map((spec) => ({ spec, ...parseItemSpec(spec) }));
   const errors = [];
   const hints = [];
@@ -12165,15 +12176,14 @@ function parseFlags(args) {
 function makeContext2(flags) {
   const home = homedir();
   let projectDir = flags.projectDir;
-  if (projectDir === void 0) {
-    try {
-      projectDir = projectRootOf(process.cwd());
-    } catch (err) {
-      if (err.code === "ENOENT") {
-        throw new Error("the current directory no longer exists; pass --project-dir <dir>");
-      }
-      throw err;
+  try {
+    if (projectDir === void 0) projectDir = projectRootOf(process.cwd());
+    else if (projectDir !== "" && !isAbsolute4(projectDir)) projectDir = resolve2(projectDir);
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      throw new Error("the current directory no longer exists; pass --project-dir <dir>");
     }
+    throw err;
   }
   return {
     home,
@@ -12381,16 +12391,16 @@ async function run(argv) {
   }
 }
 function readStdin() {
-  return new Promise((resolve2) => {
+  return new Promise((resolve3) => {
     let data = "";
     if (process.stdin.isTTY) {
-      resolve2("");
+      resolve3("");
       return;
     }
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (chunk) => data += chunk);
-    process.stdin.on("end", () => resolve2(data));
-    process.stdin.on("error", () => resolve2(data));
+    process.stdin.on("end", () => resolve3(data));
+    process.stdin.on("error", () => resolve3(data));
   });
 }
 async function runHookCommand(args) {

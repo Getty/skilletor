@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { claudeConfigDirOf } from "./fsutil.ts";
 import { sync, check, status, type EngineContext } from "./engine.ts";
 import { backendLabel, displaySafe, reportJson, reportText, type SyncReport } from "./report.ts";
@@ -111,16 +111,16 @@ function parseFlags(args: string[]): Flags {
 function makeContext(flags: Flags): EngineContext {
   const home = homedir();
   let projectDir = flags.projectDir;
-  if (projectDir === undefined) {
-    try {
-      // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd.
-      projectDir = projectRootOf(process.cwd());
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error("the current directory no longer exists; pass --project-dir <dir>");
-      }
-      throw err;
+  try {
+    // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd. A relative
+    // --project-dir is taken from cwd: the scope's state is keyed by its absolute lock path (k254).
+    if (projectDir === undefined) projectDir = projectRootOf(process.cwd());
+    else if (projectDir !== "" && !isAbsolute(projectDir)) projectDir = resolve(projectDir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error("the current directory no longer exists; pass --project-dir <dir>");
     }
+    throw err;
   }
   return {
     home,

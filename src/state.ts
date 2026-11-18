@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import type { Stats } from "node:fs";
 import { hostname } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { atomicWrite, realOrResolved } from "./fsutil.ts";
 
 /** What trust is stored for (spec §4.3): the backend in use – its kind and its effective
@@ -74,6 +74,20 @@ function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
  * Canonicalize absolute Windows keys so 8.3 aliases agree; POSIX keeps persisted raw spellings. */
 function projectStateKey(key: string): string {
   return process.platform === "win32" && isAbsolute(key) ? realOrResolved(key) : key;
+}
+
+/** Drop the keys of scopes that are gone (k254) from a file keyed by lock path, but `keep`'s:
+ *  a key that is no absolute path – it names a checkout only from a cwd long changed – or whose
+ *  lock's directory, the scope's `.claude`, no longer exists. The directory, not the lock: a sync
+ *  that installed nothing leaves no lock, and its record still holds. True when one was dropped. */
+function dropGoneScopes(all: Record<string, unknown>, keep: string): boolean {
+  let dropped = false;
+  for (const key of Object.keys(all)) {
+    if (key === keep || (isAbsolute(key) && existsSync(dirname(key)))) continue;
+    delete all[key];
+    dropped = true;
+  }
+  return dropped;
 }
 
 /** What a waiter saw of a lock it judged stale: the stat of its owner record, or of the dir
@@ -194,7 +208,8 @@ export class State {
     return out;
   }
 
-  /** Replace a scope's record of sources read; the file is written only when it changes. */
+  /** Replace a scope's record of sources read, dropping the records of scopes that are gone
+   *  (k254); the file is written only when it changes. */
   putSourcesRead(scopeKey: string, record: Record<string, SourceRead>): void {
     const all = this.readJson("sources-read.json");
     const next: Record<string, SourceRead> = {};
@@ -204,7 +219,8 @@ export class State {
       if (r.ref !== undefined) next[name].ref = r.ref;
       if (r.path !== undefined) next[name].path = r.path;
     }
-    if (JSON.stringify(all[scopeKey] ?? {}) === JSON.stringify(next)) return;
+    const dropped = dropGoneScopes(all, scopeKey);
+    if (!dropped && JSON.stringify(all[scopeKey] ?? {}) === JSON.stringify(next)) return;
     if (Object.keys(next).length > 0) all[scopeKey] = next;
     else delete all[scopeKey];
     this.writeJson("sources-read.json", all);

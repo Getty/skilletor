@@ -235,6 +235,44 @@ subtest 'removed cwd: an explicit project syncs a skill; otherwise the error is 
     [ 1, '', "skilletor: the current directory no longer exists; pass --project-dir <dir>\n" ],
     'without a project dir: exit 1, one actionable CLI error, no stack'
   );
+
+  my $relative = $run_removed->( 'gone-relative', 'status', '--project-dir', 'project' );
+  is_deeply(
+    [ $relative->{code}, decode_utf8_lossy( $relative->{stdout} ), decode_utf8_lossy( $relative->{stderr} ) ],
+    [ 1, '', "skilletor: the current directory no longer exists; pass --project-dir <dir>\n" ],
+    'a relative project dir needs the cwd: the same error'
+  );
+};
+
+# k254: a relative --project-dir names the project from the cwd. The sync keeps the scope's records
+# under its absolute lock path, as every other run does – a relative key named no checkout once the
+# cwd changed, and no later run could tell whether it was gone. As the reference's cli.test.ts.
+subtest 'a relative --project-dir is the project at that path from the cwd, recorded absolute' => sub {
+  my $base = tempdir->realpath;
+  my ( $home, $src, $proj ) = map { path( $base, $_ ) } qw( home src proj );
+  path( $home, '.claude' )->mkpath;
+  path( $src, 'skills', 'foo' )->mkpath;
+  path( $proj, '.claude' )->mkpath;
+  path( $home, '.claude.json' )->spew_raw("{}\n");
+  path( $src, 'skills', 'foo', 'SKILL.md' )->spew_raw("---\ndescription: foo\n---\nFOO\n");
+  path( $home, '.claude', 'skilletor.json' )->spew_raw( js_stringify( js_ordered( sources => js_ordered( s => js_ordered( local => "$src" ) ) ) ) );
+  path( $proj, '.claude', 'skilletor.json' )->spew_raw( js_stringify( js_ordered( install => js_ordered( skills => ['foo@s'] ) ) ) );
+
+  my $bin = path( $FindBin::Bin, '..', 'script', 'skilletor' )->realpath;
+  my $lib = path( $FindBin::Bin, '..', 'lib' )->realpath;
+  my %env = %ENV;
+  delete @env{qw( CLAUDE_CONFIG_DIR CLAUDE_PROJECT_DIR SKILLETOR_PROJECT_DIR HERMES_HOME )};
+  @env{qw( HOME CODEX_HOME )} = ( "$home", path( $home, '.no-codex' )->stringify );
+  my $r = run_command(
+    cmd => [ 'sh', '-c', 'cd "$1" && shift && exec "$@"', 'sh', "$base", $^X, "-I$lib", "$bin", 'sync', '--project-dir', 'proj' ],
+    env => \%env,
+  );
+  is_deeply( [ $r->{code}, decode_utf8_lossy( $r->{stderr} ) ], [ 0, '' ], 'synced' );
+  ok( -e path( $proj, '.claude', 'skills', 'foo', 'SKILL.md' ), 'the skill installed in the project' );
+  my $recorded = sub { [ keys %{ js_parse( path( $home, '.claude', 'skilletor', $_[0] )->slurp_raw ) } ] };
+  my $lock_path = "$base/proj/.claude/skilletor.lock.json";
+  is_deeply( [ $recorded->('sources-read.json'), $recorded->('render-inputs.json') ], [ [$lock_path], [$lock_path] ],
+    'its records are keyed by the absolute lock path' );
 };
 
 done_testing;

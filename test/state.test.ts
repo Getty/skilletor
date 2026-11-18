@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { NO_SYMLINKS } from "./helpers/symlink.ts";
 import { State } from "../src/state.ts";
@@ -178,6 +178,65 @@ test("session cwd round-trips prototype-named keys from an empty store", () => {
         { own: true, cwd: "/cwd/toString" },
       ],
     );
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// ---- sources read -----------------------------------------------------------
+// k254: the record is keyed by lock path, and every scope a sync ever saw left its key – gone
+// worktrees, fixtures under /tmp, the relative keys a relative --project-dir made. A put drops
+// the keys of scopes that are gone: a key that is no absolute path, or whose lock's directory
+// (the scope's `.claude`) no longer exists. The scope written stays, even before its lock does;
+// a scope whose `.claude` exists keeps its record without a lock (a sync that installed nothing
+// leaves none, and that record is what `check` compares its sources with, k80).
+
+const readOf = (version: string) => ({ s: { kind: "git" as const, address: "https://example.invalid/s.git", version } });
+
+test("k254: putSourcesRead drops gone scopes and relative keys, keeps the live ones byte for byte", () => {
+  const tmp = makeTmpDir();
+  try {
+    const root = join(tmp.dir, "state");
+    const live = join(tmp.dir, "live", ".claude", "skilletor.lock.json");
+    const bare = join(tmp.dir, "bare", ".claude", "skilletor.lock.json"); // its .claude, no lock
+    const gone = join(tmp.dir, "gone", ".claude", "skilletor.lock.json");
+    const written = join(tmp.dir, "new", ".claude", "skilletor.lock.json"); // nothing on disk yet
+    mkdirSync(dirname(live), { recursive: true });
+    writeFileSync(live, "{}\n");
+    mkdirSync(dirname(bare), { recursive: true });
+    mkdirSync(root);
+    // A live record as another writer left it: fields in another order, one no version knows.
+    const liveRecord = { s: { version: "git:1", address: "https://example.invalid/s.git", kind: "git", extra: [1] } };
+    writeFileSync(join(root, "sources-read.json"), JSON.stringify({
+      [gone]: readOf("git:0"), ".claude/skilletor.lock.json": readOf("git:0"), [live]: liveRecord, [bare]: readOf("git:2"),
+    }, null, 2) + "\n");
+
+    new State(root).putSourcesRead(written, readOf("git:3"));
+    assert.equal(readFileSync(join(root, "sources-read.json"), "utf8"),
+      JSON.stringify({ [live]: liveRecord, [bare]: readOf("git:2"), [written]: readOf("git:3") }, null, 2) + "\n");
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("k254: a put that changes no record still drops gone scopes; with none to drop it writes nothing", () => {
+  const tmp = makeTmpDir();
+  try {
+    const root = join(tmp.dir, "state");
+    const live = join(tmp.dir, "live", ".claude", "skilletor.lock.json");
+    const gone = join(tmp.dir, "gone", ".claude", "skilletor.lock.json");
+    mkdirSync(dirname(live), { recursive: true });
+    writeFileSync(live, "{}\n");
+    mkdirSync(root);
+    const file = join(root, "sources-read.json");
+    // Compact, as no put writes it: a rewrite would show.
+    writeFileSync(file, JSON.stringify({ [gone]: readOf("git:0"), [live]: readOf("git:1") }));
+    const state = new State(root);
+    state.putSourcesRead(live, readOf("git:1"));
+    assert.equal(readFileSync(file, "utf8"), JSON.stringify({ [live]: readOf("git:1") }, null, 2) + "\n", "the gone scope dropped");
+    writeFileSync(file, JSON.stringify({ [live]: readOf("git:1") }));
+    state.putSourcesRead(live, readOf("git:1"));
+    assert.equal(readFileSync(file, "utf8"), JSON.stringify({ [live]: readOf("git:1") }), "nothing to drop, nothing changed: not written");
   } finally {
     tmp.cleanup();
   }

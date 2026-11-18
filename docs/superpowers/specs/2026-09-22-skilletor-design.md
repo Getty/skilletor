@@ -1122,13 +1122,14 @@ refuses is never kept, so that `add` fails before any trust or sync (exit 1, §4
 Exit 1 stays a command error before the edit (nothing changed); exit 2 a usage error or a
 config error.
 
-The project root is `--project-dir`, else the git top level of the current directory, else
-the current directory – the resolution the hooks use without `CLAUDE_PROJECT_DIR` (§14.5),
-so the CLI run from a subdirectory sees the same project as the session. A root that is
-`~` itself has no project scope (§3). Without an explicit project path, a current directory
-that no longer exists is a command error (exit 1): `skilletor: the current directory no
-longer exists; pass --project-dir <dir>`, never a stack trace. A valid explicit
-`--project-dir` is sufficient and must not read the removed current directory.
+The project root is `--project-dir` (a relative one taken from the current directory), else
+the git top level of the current directory, else the current directory – the resolution the
+hooks use without `CLAUDE_PROJECT_DIR` (§14.5), so the CLI run from a subdirectory sees the
+same project as the session. A root that is `~` itself has no project scope (§3). Without an
+absolute project path, a current directory that no longer exists is a command error (exit
+1): `skilletor: the current directory no longer exists; pass --project-dir <dir>`, never a
+stack trace. A valid absolute `--project-dir` is sufficient and must not read the removed
+current directory.
 
 `uninstall` removes explicit entries from that one config only: `type:name@source` from
 that type's list, `name@source` from every list. The name matches ignoring case (k136: one
@@ -1624,9 +1625,13 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
   another `path`: the same tree offered other items, so a changed `path` – compared as a list,
   `"skills"` being `["skills"]` – is one sync too, though the source did not move. A source a sync tried
   but could not resolve or scan keeps what an earlier sync read of it; a source no sync
-  needs any more leaves the record with the next sync. With no record – before the first
-  sync, or after one that stopped with an error, which clears it with `unreached.json` –
-  `check` compares with the lock's version as before; a malformed record counts as none.
+  needs any more leaves the record with the next sync. Each write also drops the record of
+  every other lock whose key is no absolute path or whose directory, the scope's `.claude`, no
+  longer exists – a removed worktree, a relative `--project-dir` of a release before k254 – the
+  directory and not the lock, which a sync that installed nothing does not leave. With no
+  record – before the first sync, or after one that stopped with an error, which clears it
+  with `unreached.json`, or once a write dropped it – `check` compares with the lock's
+  version as before; a malformed record counts as none.
 - **Vars changed** (k76) means: since the last sync rendered with them. Each sync records per
   lock in `render-inputs.json` (§6.5) one hash of what every item of the scope rendered with
   apart from its source and its lock key – the config's merged `vars` (user < project <

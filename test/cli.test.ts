@@ -491,6 +491,29 @@ test("default project dir: git top level of cwd; a subdir of a git ~ has no proj
   assert.match(hs.stdout, /^project scope: none/m);
 });
 
+// k254: a relative --project-dir names the project from the cwd. The sync keeps the scope's
+// records under its absolute lock path, as every other run does – a relative key named no
+// checkout once the cwd changed, and no later run could tell whether it was gone.
+test("k254: a relative --project-dir is the project at that path from the cwd, recorded absolute", () => {
+  const base = join(tmp.dir, "relative");
+  const home = join(base, "home");
+  const src = join(base, "src");
+  const proj = join(base, "proj");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  mkdirSync(join(src, "skills", "foo"), { recursive: true });
+  mkdirSync(join(proj, ".claude"), { recursive: true });
+  writeFileSync(join(src, "skills", "foo", "SKILL.md"), "---\ndescription: foo\n---\nFOO\n");
+  writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } } }));
+  writeFileSync(join(proj, ".claude", "skilletor.json"), JSON.stringify({ install: { skills: ["foo@s"] } }));
+
+  const r = runCli(["sync", "--project-dir", "proj"], claudeOnlyEnv(home), undefined, base);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(existsSync(join(proj, ".claude", "skills", "foo", "SKILL.md")), true);
+  const recorded = (name: string) => Object.keys(JSON.parse(readFileSync(join(home, ".claude", "skilletor", name), "utf8")));
+  const lockPath = join(realpathSync(base), "proj", ".claude", "skilletor.lock.json");
+  assert.deepEqual([recorded("sources-read.json"), recorded("render-inputs.json")], [[lockPath], [lockPath]]);
+});
+
 // k65 (spec §6.4): every sync runs the project scope of the directory it starts in; where
 // skilletor is not used it writes nothing and asks for no commit.
 test("sync in a git repo or a plain dir that never used skilletor: nothing written there, no commit hint", () => {
@@ -871,6 +894,11 @@ test("removed cwd: explicit --project-dir syncs a skill; otherwise the CLI gives
   assert.deepEqual([missing.status, missing.stdout], [1, ""]);
   assert.equal(missing.stderr, "skilletor: the current directory no longer exists; pass --project-dir <dir>\n");
   assert.doesNotMatch(missing.stderr, /\n\s+at\s|node:internal|uv_cwd/);
+
+  // k254: a relative project dir needs the cwd it is relative to.
+  const relative = runCliFromRemovedCwd(join(tmp.dir, "removed-relative"), ["status", "--project-dir", "proj"], env, "");
+  assert.deepEqual([relative.status, relative.stdout, relative.stderr],
+    [1, "", "skilletor: the current directory no longer exists; pass --project-dir <dir>\n"]);
 });
 
 // Asserts: through the built bundle, run from a cwd that no longer exists (a session whose

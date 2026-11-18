@@ -172,19 +172,22 @@ sub _home {
 }
 
 # The engine a command runs on, as the reference's makeContext builds it: the home, the project
-# from --project-dir or the git top level of cwd. The rest is the engine's own default, read from
-# this machine: the state root <CLAUDE_CONFIG_DIR or ~/.claude>/skilletor, host and user, the
-# harness markers, git's answers.
+# from --project-dir (a relative one taken from cwd: the scope's state is keyed by its absolute lock
+# path, k254) or the git top level of cwd. The rest is the engine's own default, read from this
+# machine: the state root <CLAUDE_CONFIG_DIR or ~/.claude>/skilletor, host and user, the harness
+# markers, git's answers.
 sub _engine {
   my ( $flags ) = @_;
   require Skilletor::Engine;    # loaded for the commands that run it: --help and usage errors stay fast
+  require Skilletor::FSUtil;
   my $home = _home();
   my $project_dir = $flags->{project_dir};
-  unless ( defined $project_dir ) {
+  unless ( defined $project_dir && ( $project_dir eq '' || Skilletor::FSUtil::is_absolute($project_dir) ) ) {
     require Cwd;
     my $cwd = Cwd::getcwd();
     die "the current directory no longer exists; pass --project-dir <dir>\n" unless defined $cwd;
-    $project_dir = project_root_of( decode_utf8_lossy($cwd) );
+    $cwd = decode_utf8_lossy($cwd);
+    $project_dir = defined $project_dir ? Skilletor::FSUtil::path_resolve( $cwd, $project_dir ) : project_root_of($cwd);
   }
   return Skilletor::Engine->new( home => $home, project_dir => $project_dir );
 }

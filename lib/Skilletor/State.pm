@@ -4,13 +4,14 @@ package Skilletor::State;
 use Moo;
 use Errno ();
 use Fcntl ();
+use File::Basename ();
 use POSIX ();
 use Path::Tiny qw( path );
 use Sys::Hostname ();
 use Time::HiRes ();
 use Skilletor::Error::LockTimeout;
 use Skilletor::Process ();
-use Skilletor::FSUtil qw( is_absolute path_join read_text real_or_resolved write_text );
+use Skilletor::FSUtil qw( encode_text is_absolute path_join read_text real_or_resolved write_text );
 use Skilletor::JSON qw( js_parse js_stringify js_ordered js_sort_keys js_type );
 use namespace::clean;
 
@@ -172,12 +173,29 @@ sub sources_read {
   return $out;
 }
 
+# Drop the keys of scopes that are gone (k254) from a state file keyed by lock path, but $keep's: a
+# key that is no absolute path – it names a checkout only from a cwd long changed – or whose lock's
+# directory, the scope's .claude, no longer exists. The directory, not the lock: a sync that
+# installed nothing leaves no lock, and its record still holds. True when one was dropped.
+# File::Basename's dirname, as Node's, takes either separator on Windows; a key with a NUL exists
+# nowhere, silently, as for existsSync.
+sub _drop_gone_scopes {
+  my ( $all, $keep ) = @_;
+  no warnings 'syscalls';
+  my @gone = grep { $_ ne $keep && !( is_absolute($_) && -e encode_text( File::Basename::dirname($_) ) ) } keys %$all;
+  delete $all->{$_} for @gone;
+  return @gone ? 1 : 0;
+}
+
+# Replace a scope's record of sources read, dropping the records of scopes that are gone (k254);
+# written only when the file changes.
 sub put_sources_read {
   my ( $self, $scope_key, $record ) = @_;
   my $all  = $self->_read_json('sources-read.json');
   my $next = js_ordered();
   $next->{$_} = _source_read( $record->{$_} ) for js_sort_keys( keys %$record );
-  return if js_stringify( $all->{$scope_key} // {} ) eq js_stringify($next);
+  my $dropped = _drop_gone_scopes( $all, $scope_key );
+  return if !$dropped && js_stringify( $all->{$scope_key} // {} ) eq js_stringify($next);
   if   (%$next) { $all->{$scope_key} = $next }
   else          { delete $all->{$scope_key} }
   $self->_write_json( 'sources-read.json', $all );
@@ -559,6 +577,10 @@ Replaces an earlier entry of the name.
 =method put_sources_read
 
   $state->put_sources_read( $lock_path, \%read );   # names sorted; none drops the key
+
+It drops the records of scopes that are gone, too: a key that is no absolute
+path, or whose lock's directory no longer exists (k254). The scope written
+stays, and so does one whose directory holds no lock.
 
 =method render_inputs
 

@@ -113,6 +113,12 @@ Revision history for skilletor and Skilletor, its Perl distribution
     quarter second instead of 10 s and more, so `check` and the SessionStart
     hook no longer stall on it: its JSON parser no longer copies the text for
     every string and number (k196).
+  - A sync drops from sources-read.json the records of scopes that are gone: a
+    removed worktree or temp checkout, or a key a relative --project-dir left
+    (k254). A scope stays while its .claude directory exists, with or without
+    a lock. On a machine with many removed worktrees this cut the file from
+    300 KB to 55 KB. A relative --project-dir is now taken from the current
+    directory, so the scope is recorded under its absolute path.
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's
