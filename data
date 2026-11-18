@@ -1,0 +1,18 @@
+---
+class: standard
+created: 2026-11-14T02:08:49Z
+id: 216
+priority: low
+status: backlog
+tags:
+- perl
+- binary
+- windows
+title: 'verify-binary.sh: the output comparison is POSIX-only, Windows checks the
+  archive alone'
+updated: 2026-11-18T06:59:54Z
+---
+
+From k210. On the Windows leg of .github/workflows/release-binaries.yml verify-binary.sh runs its archive checks only; its comparison of the packed binary against perl -Ilib (stdout, stderr, exit codes, files) needs a POSIX shell environment it does not get there, so on Windows only smoke-binary.sh checks what the binary prints. Decide: port the comparison to Git Bash (as smoke-binary.sh now runs there) or accept the smoke as the Windows check and say so in the workflow comment (it does today). Also from k210, untested until a real Windows run: the hooks may print checkout paths with backslashes (JSON-escaped), while smoke-binary.sh rewrites only the cygpath -m form (forward slashes) to <work>, so the Windows transcript may differ from the Linux one there.
+
+2026-11-18 (k242): the open question at the end is settled by the first real Windows run: the windows-2022 smoke of probe https://github.com/Getty/skilletor/actions/runs/44253898506 matched the Linux transcript byte for byte, hooks included, so no backslash form leaked into it. The output comparison in binary-verify.sh is still POSIX-only; the decision above stands.
