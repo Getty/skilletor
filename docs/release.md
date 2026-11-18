@@ -43,12 +43,17 @@ older tags are `v0.1.0` to `v0.7.0`.
    `gh workflow run binaries.yml` with an empty `tag` (artifacts only, no release touched).
 3. **Audit** — run the `skilletor-release-manager` agent: versions, dist, CLI reference in
    README and the bundled skill, marketplace entries, release notes.
-4. **`dzil release`** (Getty) — on a clean `main`. It runs the dist's tests and uploads
-   `Skilletor-0.008.tar.gz` to CPAN. It stamps `Changes`, commits, and tags `0.008`. It bumps
-   `lib/` to `0.009` in a commit of its own, pushes `main` and the tag, and publishes the GitHub
-   release with that version's `Changes` entries as its notes. From here `t/02-version.t`
-   accepts `lib/` one step ahead of `package.json`. Nothing in it writes the root `bin/`, so
-   the starter and its pin are untouched.
+4. **`dzil release`** (Getty) — on a clean `main` (the bundle refuses another branch). It
+   builds the tarball and, as every `dzil build`, packs, verifies and smokes the binary for
+   this machine; then `maint/version-tie.pl` checks `package.json`, the dist's tests run with
+   `RELEASE_TESTING`, the tarball is test-installed into a scratch dir, and it asks before
+   uploading `Skilletor-0.008.tar.gz` to CPAN. It stamps `Changes`, commits, and tags `0.008`.
+   It bumps `lib/` to `0.009` in a commit of its own and pushes `main` and the tag. Then it
+   creates the GitHub release as a draft, attaches the CPAN tarball and publishes it with that
+   version's `Changes` entries as its notes, not marked latest (the binaries workflow does
+   that). Last it installs the release locally. From here `t/02-version.t` accepts `lib/` one
+   step ahead of `package.json`. Nothing in it writes the root `bin/`, so the starter and its
+   pin are untouched; the binary packed locally is not uploaded.
 5. **Binaries and pin** — the sequence below.
 6. **Marketplace** — only when the descriptions below changed or a harness listing is new:
    edit `Getty/marketplace`, then `python3 scripts/check-manifests.py`. Entries carry no
@@ -78,9 +83,11 @@ Every step here is outward-facing and needs Getty's go-ahead.
 
 1. **The workflow** — the published release starts `.github/workflows/binaries.yml`
    (`release: types: [published]`; the release plugin publishes it with Getty's own token, so
-   the event fires). It calls the bundle's `dzil-binary.yml`, pinned to the commit the tag
-   `binary-v1` named on 2026-11-18 (`ace48ca`; move the pin by hand), which builds from the
-   release's CPAN tarball on linux-x86_64, linux-arm64, macos-arm64 and windows-x86_64. Each
+   the event fires). It calls the bundle's `dzil-binary.yml` pinned to a full commit
+   (`c339eef`, bundle `main` on 2026-11-18), and passes the same commit as `bundle_ref`, the ref
+   its scripts are checked out from; `test/` keeps the two equal, so move both by hand together.
+   The workflow builds from the release's CPAN tarball on linux-x86_64, linux-arm64,
+   macos-arm64 and windows-x86_64. Each
    binary is smoked on clean machines (AlmaLinux 8 and 9, Debian bookworm slim, the macOS and
    Windows runners) with `scripts/binary-smoke.sh`, the https url source included. The
    workflow attaches `skilletor-0.008-<platform>` (`.exe` on Windows), `SHA256SUMS`,
