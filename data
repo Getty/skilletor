@@ -1,0 +1,50 @@
+---
+class: standard
+completed: 2026-11-14T02:32:40Z
+created: 2026-11-14T00:43:10Z
+depends_on:
+- 186
+id: 210
+priority: medium
+started: 2026-11-14T00:52:03Z
+status: done
+tags:
+- ci
+- windows
+- binary
+title: 'Windows leg: pack Win32::Process, compute the module list on Windows, full
+  smoke'
+updated: 2026-11-18T06:59:50Z
+---
+
+From k186 for the release-binaries workflow (k189, 79e08d3):
+- Win32::Process must be packed: perl/scripts/loaded-modules.pl only reaches it when a due hook user-prompt-submit starts the background sync, so add it to the by-name list on MSWin32 (or have verify-binary.sh require it there).
+- The Windows leg must compute the module list on Windows (File::Spec::Win32 and friends), never reuse the Linux list.
+- perl/scripts/smoke-binary.sh (lines ~18-19, 95-97) skips sync, check and status on Windows citing k186; enable them now that the process layer has a Windows path.
+Untested until the leg runs on GitHub.
+
+2026-11-14 02:01 Done (worker), commit-ready, not committed. Commit after k205.
+FILES: .github/workflows/release-binaries.yml, perl/scripts/loaded-modules.pl, perl/scripts/smoke-binary.sh (k210 hunks only; patch on top of k205: /tmp/k210-only.patch).
+CHANGES:
+- loaded-modules.pl: Win32::Process by name on MSWin32 (only a due prompt reaches it). The script had to work on Windows before it could compute the list there: TMPDIR's backslashes become slashes on MSWin32 (the fixture's JSON and gitconfig take the path as it is: 'D:\a' is no valid JSON), spew keeps a drive prefix (it built '/D:\a/...'), the insteadOf URL is file:///D:/... there. Without them the k204 guard would stop the Windows build: the git source would not resolve.
+- release-binaries.yml, Windows leg: the build step now requires File::Spec::Win32 (proof the list is this machine's) and Win32::Process in the list; the verify step requires Win32::Process's DLL in the archive (find *.dll under lib/auto/Win32/Process); the smoke step name drops '--version, --help, error path'; the header and the verify comment no longer cite k186. Triggers unchanged: workflow_dispatch only.
+- smoke-binary.sh, k210's own hunks: the header's Windows paragraph; native() (cygpath -m on Windows, identity elsewhere) and nwork; the Windows SKIPPED block removed (sync, check, status and the hooks run there); capture_hook's CLAUDE_PROJECT_DIR and the five hook inputs use $nwork; the final rewrite maps both $nwork and $work to <work>. Everything else in that file is k205's.
+CHECKS: actionlint 1.7.12 (rhysd/actionlint:latest, -no-color) rc 0; its shellcheck is live (a copy with an unquoted $m reports SC2086, rc 1). shellcheck smoke-binary.sh verify-binary.sh build-binary.sh check-binary-libs.sh container-proof.sh rc 0. perl -c loaded-modules.pl OK. Module list unchanged: host 177 (diff empty), bullseye 171 (diff empty). The new spew, URL and slash logic run on Linux against a relative 'D:' dir: D:/a/_temp/... is created, file:///D:/a/_temp/x/git/remote, D:\a\_temp -> D:/a/_temp. Windows branch simulated on Linux (fake uname MINGW64, fake cygpath -m through a symlink alias of /tmp): smoke OK with the PAR binary; the same run without the $nwork rewrite FAILs with the alias paths in the diff. On a snapshot of HEAD 79264fb + k205 + k210: prove -lr -j4 t Files=37 Tests=2349 PASS; SKILLETOR_BIN_OUT=/tmp/k210-host/skilletor build 9.1M/177; verify-binary.sh 'verify: OK'; smoke-binary.sh 'smoke: OK'; node dist/skilletor.js stand-in smoke OK; t/70-smoke-binary.t PASS; bullseye binary smoke OK in ubuntu:22.04 and debian:bullseye-slim.
+UNTESTED ON WINDOWS (nothing ran there):
+- loaded-modules.pl under Strawberry 5.40: the drive-letter and slash handling, the fixture's git init/commit and the file:///D:/ insteadOf with Git for Windows, the git source resolving (else the guard stops the build), the /dev/null redirects, END's rm -rf through Git's usr/bin, Win32::Process and File::Spec::Win32 landing in the list.
+- pp packing Win32::Process's DLL, and the find '*.dll' check (Strawberry's .xs.dll naming is assumed to match the glob).
+- smoke-binary.sh under Git Bash:
+  - sync/check/status give the Linux transcript byte for byte (e.g. the url error text 'fetch failed' for a refused connect);
+  - the hooks with cygpath -m paths in CLAUDE_PROJECT_DIR and on stdin, the binary printing that form back in 'in <dir>';
+  - the background sync: PAR_PROGNAME through Win32::Process::Create, its pending report within SKILLETOR_SMOKE_WAIT (60 s), State's lock refresh;
+  - env -i's PATH conversion for a native exe, whether the binary finds git under PATH=/usr/bin:/bin (by Hooks.pm either way the not-a-repo cwd is used as given).
+- every other leg on GitHub.
+ALSO FOUND (for the dispatcher, not done):
+- verify-binary.sh's byte comparison with perl -Ilib (git and https backends included) is POSIX-only, so on Windows only the smoke covers output. Candidate ticket, skilletor board.
+- perl/lib/Skilletor/CLI.pm _home takes HOME before anything else on every OS. The reference's os.homedir() takes USERPROFILE on Windows and ignores HOME, so the two CLIs pick different homes where those differ. The smoke sets both to one value, so it cannot show this. perl/lib is not my lane; candidate ticket, skilletor board.
+
+2026-11-14 02:06 Re-checked at HEAD 441d8d3 (k175 landed, my lane untouched by it): git archive HEAD + git apply /tmp/k205-only.patch + /tmp/k210-only.patch reproduces the tree's files in my lane byte for byte; prove -lr -j4 t there: Files=37, Tests=2375, PASS.
+
+Committed as 00e8f61
+
+2026-11-18: the items listed above as untested on Windows ran on the house route (k242). Probe https://github.com/Getty/skilletor/actions/runs/44253898506 (6718922): the windows-x86_64 leg computed the module list on Strawberry 5.40.4 (265 -M, Win32::Process included), packed Strawberry's OpenSSL DLLs, lib-gate and verify OK; the smoke on windows-2022 passed every ported command and hook, the background sync included, byte-identical to t/data/smoke/expected.txt, and the https url source.
