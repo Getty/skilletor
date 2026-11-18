@@ -1,0 +1,19 @@
+---
+class: standard
+created: 2026-11-18T05:21:19Z
+id: 248
+priority: low
+status: backlog
+tags:
+- perl
+- windows
+- binary
+title: loaded-modules.pl on Windows writes into the real Hermes home
+updated: 2026-11-18T05:21:19Z
+---
+
+Found while fixing the Windows pack leg (k242, commit 5ad3774).
+
+scripts/loaded-modules.pl runs every command on a fixture with its own HOME and CODEX_HOME and removes HERMES_HOME, but sets no LOCALAPPDATA. On MSWin32, default_hermes_home (lib/Skilletor/Targets.pm) takes %LOCALAPPDATA%\hermes, so the fixture run with hermes as a target resolves to the real Hermes home of whoever packs. On the CI runner that is harmless (Pack and Verify write into a throwaway home); a local `dzil build` on Windows would write into the developer's own Hermes home.
+
+Not observed failing; the module list should not change. Fix: set LOCALAPPDATA (or HERMES_HOME) to a fixture dir in the script's env block, next to HOME/CODEX_HOME. Check binary-smoke.sh and binary-verify.sh for the same gap.
