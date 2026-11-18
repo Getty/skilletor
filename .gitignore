@@ -24,6 +24,7 @@ nytprof.out
 # The Perl dist Skilletor (dist.ini): dzil build, its local binary check, make
 /.build/
 /Skilletor-*
+/binary-pp-args.txt
 _build/
 blib/
 /Build
