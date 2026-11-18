@@ -64,9 +64,12 @@ HTTP::Tiny->can_ssl if HTTP::Tiny->can('can_ssl');
 # The fixture: a home with Claude Code's marker and a user config over three backends (a local
 # tree with a template, a git repository reached through insteadOf, an https url nobody serves),
 # a project declaring an untrusted source of its own, and an empty cwd.
-my $base = ( defined $ENV{TMPDIR} && -d $ENV{TMPDIR} ) ? $ENV{TMPDIR} : '/tmp';
-# Windows (TMPDIR D:\a\_temp): forward slashes, since the fixture's JSON and gitconfig take the
-# path as it is.
+# Its base: the first of TMPDIR, TEMP and TMP that is a directory, else /tmp. On Windows a caller
+# may set no TMPDIR (the bundle's build leg does not) and native perl cannot see Git Bash's /tmp,
+# but TEMP and TMP are always set (C:\Users\...\Temp). Forward slashes there, since the fixture's
+# JSON and gitconfig take the path as it is.
+my ($base) = grep { defined $_ && -d $_ } @ENV{qw( TMPDIR TEMP TMP )};
+$base //= '/tmp';
 $base =~ tr{\\}{/} if $^O eq 'MSWin32';
 my $tmp;
 for my $n ( 0 .. 99 ) {

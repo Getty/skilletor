@@ -53,7 +53,7 @@ bin() { env -i "${envs[@]}" PAR_GLOBAL_TEMP="$cache" "${TMO[@]}" "$BIN" "$@" </d
 # The reference: the same CLI from the dist, its modules from the dependencies' PERL5LIB.
 ref() { env -i "${envs[@]}" PERL5LIB="$deps" "${TMO[@]}" "$PERL" -I"$root/lib" "$root/script/skilletor" "$@" </dev/null; }
 
-with_deps perl -I"$root/lib" -MSkilletor -MText::Nunjucks -e1 2>"$work/deps.err" \
+with_deps perl -I"$(native "$root/lib")" -MSkilletor -MText::Nunjucks -e1 2>"$work/deps.err" \
   || fail "the reference perl ($PERL) cannot load Skilletor and its dependencies" \
        "(DZIL_BINARY_PERL5LIB=${DZIL_BINARY_PERL5LIB:-<unset>}, PERL5LIB=${PERL5LIB:-<unset>}): $(head -n 1 "$work/deps.err")"
 want_version=$(sed -n "s/^our \$VERSION = '\(.*\)';\$/\1/p" "$root/lib/Skilletor.pm")
