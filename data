@@ -1,0 +1,84 @@
+---
+block_reason: binary probe stops in the bundle workflow's plan step (mkdir src collides
+  with the root src/; bundle finding, at the hub); k243 done
+blocked: true
+claimed_at: 2026-11-18T07:19:27Z
+claimed_by: skilletor-release-manager
+class: standard
+completed: 2026-11-18T07:19:27Z
+created: 2026-11-16T20:19:38Z
+id: 242
+priority: high
+started: 2026-11-16T20:20:06Z
+status: done
+tags:
+- perl
+- binary
+- release
+- layout
+title: Move the Perl dist to the repo root; binaries through the house route
+updated: 2026-11-18T07:19:27Z
+---
+
+Maintainer decision 2026-11-16 (via the perl-developer hub, brief ~/dev/perl-developer/docs/ack-paket/brief-skilletor.md, amendment): Skilletor is released to CPAN by the maintainer with `dzil release`; the binaries come from the house route ([@Author::GETTY] binary keys + [@Author::GETTY::Binary / skilletor], .github/workflows/binaries.yml on dzil-binary.yml@binary-v1, as in ~/dev/p5-mcp-hub).
+
+- The dist moves from perl/ to the root as in briefing: dist.ini, cpanfile, lib/, t/, script/skilletor. Root bin/ stays the plugin starter and is excluded from the tarball together with the TS/Node parts. One Changes in CPAN format.
+- One version line: dist 0.008 (= v0.8.0), package.json 0.8.0; the Perl CLI reports the dist version.
+- Platforms linux-x86_64 linux-arm64 macos-arm64 windows-x86_64; binary_smoke proves https.
+- This repo's release-binaries.yml and its own TLS fix go (the k167 work is kept as a patch in the job dir).
+- License: the dist is provisionally MIT (the repo LICENSE and the plugin manifests are MIT; Skilletor 0.001 on CPAN is Perl_5) until the maintainer decides.
+- Text::Nunjucks comes from a pinned commit in binary-prepare.sh for the probe only (follow-up card).
+
+Done on ack-paket 2026-11-16 (skilletor-worker, reviewed by main):
+- Move: the Perl dist Skilletor went from perl/ to the root (lib, t, script/skilletor, cpanfile, dist.ini, maint; binary scripts in scripts/).
+- Binaries: [@Author::GETTY] binary keys plus [@Author::GETTY::Binary / skilletor] (script = script/skilletor, ExecDir dir = script), and .github/workflows/binaries.yml on dzil-binary.yml@binary-v1 as in the mcp-hub template.
+- scripts/binary-prepare.sh: static OpenSSL 3.5.9 in Net::SSLeay (OPENSSLDIR /etc/ssl, Mozilla::CA fallback); Text::Nunjucks from commit 1a9a608 (TEMP, k243).
+- scripts/binary-smoke.sh: the full ported-command transcript plus a real https url source (GitHub archive of a fixed commit), checked byte for byte against t/data/smoke/https/SKILL.md.
+- Removed: release-binaries.yml and its contract test.
+- Version: dist 0.008 = plugin 0.8.0; the Perl CLI prints $VERSION. t/02-version.t accepts package.json == normal($VERSION) or normal($VERSION - 0.001), so the post-release bump commit stays green; maint/version-tie.pl is run_before_release and gates the exact match.
+- License: Artistic 2.0 (maintainer, via the hub) in LICENSE + NOTICE, dist.ini, package.json, .claude-plugin, .codex-plugin and the Hermes plugin.yaml; test/license.test.ts.
+- Tarball: gathers lib, t, script, scripts, the dotfiles (.claude/, .github/, CLAUDE.md, plugin manifests, as the house rule wants), misc/agent-context; not bin/, src/, test/, dist/, node, conformance/, maint/, .claude/worktrees.
+- TEMP (k242): push trigger for ack-paket in binaries.yml, ci.yml, perl.yml, with its marker in test/windows-ci-contract.test.ts. Drop before merging.
+
+Decisions:
+- conformance/ is not shipped (3319 files); parity and conformance tests skip without it.
+- Changes is one CPAN-format file, with both histories' pending entries under {{$NEXT}}.
+- The dist README is generated; the root README.md stays the plugin's.
+- The version tie accepts two states (above). Main's reason: the bundle's post-release bump puts lib one ahead of package.json, and no bundle option keeps $VERSION in source without that bump.
+
+Verified by main:
+- prove -lr -j4 t at the root: 52 files, 2710 tests, PASS.
+- npm run typecheck && npm test && npm run build && npm run check-dist: 1356 tests, 1352 pass, 0 fail, 4 skipped (Hermes real install; three native-Windows tests); dist up to date.
+- DZIL_BINARY_SKIP=1 dzil build: OK, tarball contents as above.
+- fleet-housecheck: 0 errors.
+
+Verified by the worker:
+- dzil build with the local pack: 181 modules; verify and smoke OK, https url source included.
+- A one-shot perl:5.40-bookworm leg: prepare, installdeps and the https smoke all pass.
+
+Open:
+- The GitHub probe stops at the plan job's `dzil listdeps --author --missing | cpanm` until Text::Nunjucks is on CPAN (k243). The hub restarts the probe after that.
+- Windows TLS (Strawberry DLLs via win-dlls.pl plus Mozilla::CA) is unproven until the probe.
+- Release needs bundle 0.328 locally (CPAN has 0.327).
+
+Commit: 70f7d5c on ack-paket.
+
+Correction (main, 2026-11-16), from the worker's follow-up. My earlier note overstated the https proof. No static-OpenSSL pp binary has done https anywhere yet.
+- The one-shot docker leg (perl:5.40-bookworm, Debian 12) ran binary-prepare.sh and installdeps, then binary-smoke.sh against a stand-in that runs the Perl CLI from source. What it proved:
+  - OpenSSL 3.5.9 is built static and Net::SSLeay links it statically (OPENSSLDIR /etc/ssl), and a rerun reuses it;
+  - Text::Nunjucks installs from the pin;
+  - the Perl CLI on that Net::SSLeay syncs the GitHub https url source byte-identically.
+  - No pp pack, lib-gate or require-gate ran.
+- The local `dzil build` with pack ran on the host only (Debian 13, glibc 2.41). That binary carries the host's dynamically linked Net::SSLeay (system OpenSSL 3.5.7) and misses the 2.28 floor. Its verify (TLS to 127.0.0.1) and smoke (public https) passed with /usr/bin/perl present, so it proves neither the shipped linkage nor "no system Perl".
+- Unproven until the GitHub probe (after k243):
+  - a static-OpenSSL packed binary with prepare, deps, pack, lib-gate and require-gate together;
+  - the glibc 2.28 floor (almalinux:8 build);
+  - smoke on almalinux:8/9 and bookworm-slim;
+  - linux-arm64, macos-arm64 and windows-x86_64 (Strawberry DLLs via win-dlls.pl, Mozilla::CA);
+  - binary-pp-args.sh as read by the workflow's pp-args.pl.
+
+2026-11-18 probe after k243 (ack-paket ec27f40, dzil-binary pinned to ace48ca = binary-v1): run 44233321926 failure in plan. dzil build (probe) is green now (Text::Nunjucks from CPAN, Skilletor-0.008.tar.gz written); the next step 'Plan' fails with `mkdir: cannot create directory 'src': File exists` -- in probe mode the bundle workflow checks the dist out at the workspace root and unpacks the tarball into src/, which collides with skilletor's TypeScript src/. Same line on bundle main; tag mode (no checkout) is not affected. Bundle finding, reported to the hub with two options (bundle fix + new pin; or a throwaway src-less probe branch, identical tarball). build/smoke/publish skipped; nothing about the binaries proven yet. CI/Perl/SimpiCI on ec27f40 green (Perl installed Text-Nunjucks-0.001 from CPAN, 52 files/2709 tests PASS).
+
+Probe green on 6718922: https://github.com/Getty/skilletor/actions/runs/44253898506 — four builds (linux-x86_64/arm64: OpenSSL 3.5.9 static, glibc floor 2.28, lib-gate ok, verify OK; macos-arm64: 3.5.9 static, lib-gate ok, verify OK; windows-x86_64: Strawberry OpenSSL 3.6.1 DLLs packed, lib-gate ok, verify OK), require-gate passed, every smoke OK incl. the https url source (almalinux:8, almalinux:9, bookworm-slim, arm64 almalinux:9, macos-26, windows-2022). Fixes on the way: 09843e4 (keep Strawberry's IO::Socket::SSL), 5ad3774 (loaded-modules temp base TMPDIR/TEMP/TMP), da33bed (pp option file past Windows' 32767-char command line), f29be52 (smoke chmod only without the mode: /bins mounted read-only). Next: TEMP trigger removal.
+
+Done 2026-11-18: probe green on 6718922 (https://github.com/Getty/skilletor/actions/runs/44253898506: four builds, lib-gate, require-gate, verify, every smoke incl. https url); TEMP probe triggers removed in c9ece93; local checks green on that tree (prove 54 files/2731 tests, npm test 1355 pass/0 fail/4 skipped, check-dist up to date, DZIL_BINARY_SKIP=1 dzil build, DZIL_BINARY_SKIP=1 dzil test --release 56 files/2416 tests); release text audited (no blockers). Commits on ack-paket: 08c37c7, ec27f40, 40a9769, 27c21be, 09843e4, 5ad3774, da33bed, f29be52, 6718922, c9ece93, 8c45688 and the Changes commit 4fc74ad. Merge and release are the maintainer's (k241).
