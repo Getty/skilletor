@@ -1,0 +1,18 @@
+---
+class: standard
+created: 2026-11-18T07:20:15Z
+id: 249
+priority: low
+status: backlog
+tags:
+- perl
+- ci
+title: Perl CI skips t/82-binary-pp-args.t (no Getopt::ArgvFile) and counts one test
+  fewer than a local run
+updated: 2026-11-18T07:20:15Z
+---
+
+Seen 2026-11-18 on ack-paket 6718922 (Perl workflow run 44253898061, perl:5.40-bookworm): Files=54, Tests=2721, PASS; the same tree locally (Debian 13, perl 5.40.1, PAR::Packer installed): Files=54, Tests=2731.
+
+- t/82-binary-pp-args.t skips on CI: "needs Getopt::ArgvFile, which pp reads its option files with (PAR::Packer)". That is 9 tests; the option-file path of scripts/binary-pp-args.sh (the fix for the Windows command-line cap) is then proven only by the binaries workflow and local runs. Fix: install Getopt::ArgvFile in perl.yml (it is small; PAR::Packer itself is not needed for the test), or decide the skip is fine.
+- One more test differs (2721 + 9 = 2730, not 2731), as on 2026-11-16 (CI 2709 vs local 2710). Find the file whose count depends on the environment (prove -v, or per-file counts) and say whether it is a skip that should be visible.
