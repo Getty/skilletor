@@ -1,0 +1,39 @@
+---
+claimed_at: 2026-11-18T17:55:52Z
+claimed_by: ack-paket
+class: standard
+completed: 2026-11-18T17:55:52Z
+created: 2026-11-13T21:54:48Z
+id: 196
+priority: high
+started: 2026-11-18T17:15:23Z
+status: done
+tags:
+- perl
+- json
+- perf
+title: 'Perl: js_parse copies the whole text per string and number'
+updated: 2026-11-18T17:55:57Z
+---
+
+Found on k183 (2026-11-13). Skilletor::JSON::js_parse slows down sharply on big input: each _string/_number call copies the whole text (my $s = $p->{s}). A 221 KB file takes about 22 s, an 89 KB one 2.5 s. Configs and locks are small, but a large lock or state file would stall a hook. Done: parse in place (pos()/\G on the one string, or a reference), same results and error messages (t/10-json.t oracle green), a timing guard in a test.
+
+2026-11-18 16:46 Raised to high on 2026-11-18: likely cause of the binary's 14.2 s check and 41 s session-start on a real state with a 307 KB sources-read.json (see the new session-start timing card); that blocks k191.
+
+(k250)
+
+2026-11-18 16:53 Confirmed and measured on reuben (perl 5.40.1, Perl source from ack-paket 4fc74ad, sandbox copy of the user's real state with the 307 KB sources-read.json):
+- NYTProf of `check --scope user`: 11.0 s of 13.2 s in CORE:match inside _string (16659 calls); `my $s = $p->{s}` in _string and _number gives each call its own copy of the whole text.
+- Scratch patch: drop those two copies and match on $p->{s} in place (pos($p->{s}), $p->{s} =~ /\G.../gc, substr($p->{s}, ...)). `check --scope user`: 13.4 s -> 0.72 s, output identical (cmp). `hook session-start`: 39.1 s ("its sources took too long") -> 2.45 s, sync applied.
+- js_parse on the same file read by a plain slurp + utf8::decode takes 0.26 s even unpatched, so the copy only bites on the CLI's read path (no copy-on-write there); a regression test should go through that path.
+Patch not applied to the repo: the skilletor team owns it.
+
+Correction to the last note: 'no copy-on-write there' is a guess for why the plain-slurp run is fast, not checked.
+
+Taken up on the maintainer's word (2026-11-18, via the agent-construction-kit session): fix on branch ack-paket, skilletor-worker implements with a regression test through the CLI read path.
+
+Fixed on ack-paket (uncommitted, tree commit-ready): lib/Skilletor/JSON.pm _string and _number match on $p->{s} in place (pos($p->{s}), $p->{s} =~ /\G.../gc, substr($p->{s}, ...)); no other parser path copies the text per token (_units/_fail_at copy a prefix on the error path only). Cause checked, not guessed: the per-call copy IS copy-on-write (Devel::Peek: IsCOW, COW_REFCNT 2) on both read paths. What differs is the UTF-8 flag: read_text (Encode::decode) always flags the text, utf8::decode leaves an ASCII file unflagged. A fresh copy carries no UTF-8 offset cache, so every pos() on a flagged copy converts char<->byte offsets by scanning from the start: quadratic. Same 300 KB file: unflagged 0.24 s, utf8::upgrade'd 10.74 s, read_text 10.76 s (unpatched); patched all three 0.22-0.25 s; patched with ${^UTF8CACHE}=0 a 100 KB file takes 8.9 s. Regression test t/27-state-read-large.t reads a synthetic 300778-byte sources-read.json through Skilletor::State->sources_read (bound 3 s): red unpatched 10.96 s, green patched 0.239 s. t/10-json.t green; patched js_stringify(js_parse) of the fixture is byte-identical to Node's JSON.stringify(JSON.parse). Full suite: Files=55 Tests=2736 PASS (t/65-report-json.t skips 102 conformance cases by design: no sync, check or status step to compare). k250 numbers in the handoff report to the main agent.
+
+Ready for review: lib/Skilletor/JSON.pm (in-place matching) + t/27-state-read-large.t (red 10.96 s unpatched, green 0.239 s). Full Perl suite PASS. No src/, dist/ or Changes change; no conformance case affected (parse results unchanged).
+
+Committed as 796f651
