@@ -9,17 +9,14 @@ The version is one line in two spellings: the dist's `$VERSION` in `lib/` (`0.00
 plugin's `0.8.0` (`package.json`). The tag is the bare dist version (`0.008`); the plugin's
 older tags are `v0.1.0` to `v0.7.0`.
 
-## Before the first dist release
+## On the release machine
 
-- **Text::Nunjucks on CPAN** (k243): Skilletor needs it, and a CPAN install fails without it.
-  The house workflow's build also installs the dist's dependencies from CPAN. Then remove the
-  pinned checkout from `scripts/binary-prepare.sh` and `.github/workflows/perl.yml` (both
-  marked `TEMP (k243)`).
-- **The bundle with binary support** on the release machine: `Dist::Zilla::PluginBundle::Author::GETTY`
-  0.328 or later (0.327 on CPAN has none), and `PAR::Packer` (`pp`): `dzil build` packs,
+- **The bundle with binary support**: `Dist::Zilla::PluginBundle::Author::GETTY` 0.328 or
+  later (earlier versions have no binary keys), and `PAR::Packer` (`pp`): `dzil build` packs,
   verifies and smokes the binary locally (`DZIL_BINARY_SKIP=1` skips that).
-- **No temporary probe triggers**: `.github/workflows/binaries.yml`, `ci.yml`, `perl.yml` and
-  `test/windows-ci-contract.test.ts` carry no `TEMP (k242)` lines.
+- **The dist's dependencies from CPAN**, Text::Nunjucks 0.001 among them:
+  `cpanm --installdeps .` and `dzil authordeps --missing | cpanm`. Every dependency comes
+  from CPAN, in CI and in the binary build alike.
 
 ## Per release
 
@@ -81,7 +78,8 @@ Every step here is outward-facing and needs Getty's go-ahead.
 
 1. **The workflow** — the published release starts `.github/workflows/binaries.yml`
    (`release: types: [published]`; the release plugin publishes it with Getty's own token, so
-   the event fires). It calls the bundle's `dzil-binary.yml@binary-v1`, which builds from the
+   the event fires). It calls the bundle's `dzil-binary.yml`, pinned to the commit the tag
+   `binary-v1` named on 2026-11-18 (`ace48ca`; move the pin by hand), which builds from the
    release's CPAN tarball on linux-x86_64, linux-arm64, macos-arm64 and windows-x86_64. Each
    binary is smoked on clean machines (AlmaLinux 8 and 9, Debian bookworm slim, the macOS and
    Windows runners) with `scripts/binary-smoke.sh`, the https url source included. The
