@@ -1,0 +1,52 @@
+---
+claimed_at: 2026-11-16T18:55:27Z
+claimed_by: skilletor-worker-k199
+class: standard
+completed: 2026-11-16T22:35:14Z
+created: 2026-11-13T23:31:55Z
+id: 199
+priority: medium
+started: 2026-11-16T18:49:57Z
+status: done
+tags:
+- perl
+- cli
+- performance
+title: 'Perl CLI start time: lazy loads for --version, --help and the hook fast path'
+updated: 2026-11-18T06:58:49Z
+---
+
+Every SessionStart and UserPromptSubmit runs the CLI, so its load time is paid per session and per prompt.
+
+Measured:
+- k188 (throwaway CLI.pm copy): loading past --version/--help lazily cuts warm --version of the packed binary by 100-120 ms (to 266-301 ms), cold by 70-100 ms; status/check unchanged. Deferring Encode as well adds only 15-25 ms.
+- k181: `hook user-prompt-submit` with nothing due costs about what `require Skilletor::CLI` costs (~240 ms of ~240 ms; perl -e 1 is 9 ms). Most of it is Moo and namespace::clean pulled in through Skilletor::Error::JSON, plus Path::Tiny, Encode and JSON::MaybeXS. The hook itself adds State and Config (~45 ms) and never the engine.
+
+Do: load in Skilletor::CLI only what --version, --help, a usage error and the hook fast path need; keep t/69 fast-path test (no engine) and add one for the modules a --version run loads. Measure before/after for perl -Ilib and the packed binary (perl/scripts/build-binary.sh) and put the numbers on the card.
+
+2026-11-16 18:49 Part of the ACK package work 2026-11-16 (k203 decided: binary first plus these lazy loads).
+
+Done 2026-11-16 (skilletor-worker, reviewed by main): Skilletor::CLI loads every module by the first call that needs it; --version, --help and a usage error in ASCII load the CLI module alone (7 files vs 93: Exporter, constant, strict, utf8, warnings, warnings::register). Encode is loaded only for non-ASCII text, and display_safe returns printable ASCII as is, so usage errors skip Report and Moo. Skilletor::Hooks loads Skilletor::Report only for an answer that says something; the nothing-due prompt drops 6 dist modules (102 -> 96 files). Pins: t/68-cli.t (exact set for --version/--help/12 usage errors; display_safe shortcut == Report's), t/69-hooks.t (exact dist modules of `skilletor hook user-prompt-submit`, nothing due). Both fail on HEAD's CLI.pm/Hooks.pm.
+
+Measured A/B in one interleaved pass, N=15 per cell, Debian 13 x86_64, 16 cores, perl 5.40.1, load 2.9-3.0, temp HOME with Claude detected and nothing to sync. ms min/median:
+- --version: perl -Iperl/lib 180/201 -> 19/40; node 119/136.
+- hook user-prompt-submit (nothing due): perl 212/238 -> 205/223; node 125/142.
+- hook session-start: unchanged within noise (perl 376/425 vs 395/436); it loads the engine by design.
+- Provisional binary cells (perl/scripts/build-binary.sh, 9.1 MiB, 181 modules, before the route change to dzil-binary): --version warm 388/695 -> 269/307, cold 822/1077 -> 715/804; prompt warm 410/483 -> 408/440, cold 848/912 -> 823/902. Binary numbers from the house build are left for later.
+
+The prompt hook's remaining ~205 ms (perl) is Moo + namespace::clean (Error, State, Config), Path::Tiny, Encode, JSON::MaybeXS: Hooks+State+Config load in 202 ms min, 175 without Report. Cutting further is a design change (Moo-free state/config on the prompt path, or k203 (c)).
+
+Verified by main: prove -lr -j4 t in perl/ with node_modules present: 51 files, 2708 tests, PASS (parity t/50-54 included). Worker: 47-case byte comparison of stdout/stderr/exit, HEAD vs new: identical.
+
+Commit: 37244c4 on ack-paket.
+
+Committed 37244c4 (ack-paket). Binary cells from the house build are left for when the probe builds (k243).
+
+2026-11-18 binary cells with the house binary (skilletor-worker, main recorded): linux-x86_64 artifact of the green probe https://github.com/Getty/skilletor/actions/runs/44253898506 (6718922; dzil-binary on almalinux:8, perl 5.40.5 non-threaded, static OpenSSL 3.5.9; 11.3 MiB, 277 .pm), against the provisional binary of 2026-11-16 (build-binary.sh, Debian threaded perl 5.40.1, 9.0 MiB, 223 .pm). Same method: one interleaved pass, warm-up first, N=15 per cell, temp HOME with Claude detected and nothing to sync. Load 0.45-1.78 (lower than last time's 2.9-3.0, so absolute numbers sit a little below the earlier table). ms min/median:
+- node: --version 118/128, session-start 132/140, prompt 132/141
+- perl -Ilib: 19/20, 379/402, 211/227
+- warm provisional: 270/288, 570/618, 398/434
+- warm house: 265/285, 539/581, 380/396
+- cold provisional: 695/747, 1009/1081, 829/869
+- cold house: 777/803, 1089/1119, 884/938
+All 288 runs exit 0; house output equals perl in every cell (hooks silent, --version 0.008). Reading: warm, the house binary is equal or faster (medians -3/-37/-38 ms; likely the non-threaded perl, not isolated). Cold, it is 38-69 ms slower in median: each fresh cache unpacks 22.3 MB vs 15.9 MB, nearly all of the difference the static SSLeay.so (8.8 MB vs 2.3 MB).
