@@ -40,6 +40,22 @@ local $ENV{SKILLETOR_SMOKE_PATH} = "$runtime_path";
 local $ENV{TMPDIR} = "$smoke_tmp";    # the smoke shell's own mktemp; the runtime gets its child
 local $ENV{SKILLETOR_SMOKE_OFFLINE} = 1;    # no network here: the workflow's smoke proves https
 
+# The bundle's Linux smoke mounts the binary read-only, made executable on the host: a chmod of it
+# fails there. A non-root test cannot make that mount, so a chmod first on the smoke shell's PATH
+# refuses the stand-in the same way and hands every other file to the real one.
+my ($real_chmod) = grep { -x } map { "$_/chmod" } split /:/, $ENV{PATH} // '';
+my $ro_bin = $tmp->child('ro-bin');
+$ro_bin->mkpath;
+$ro_bin->child('chmod')->spew_raw( <<"SH" );
+#!/bin/sh
+for a in "\$@"; do
+  case \$a in */$base) echo "chmod: changing permissions of '\$a': Read-only file system" >&2; exit 1 ;; esac
+done
+exec @{[ sq( $real_chmod // 'false' ) ]} "\$@"
+SH
+$ro_bin->child('chmod')->chmod(0755);
+local $ENV{PATH} = "$ro_bin:$ENV{PATH}";
+
 # Poison every ambient root the CLI could otherwise consult. binary-smoke.sh's env -i must replace
 # HOME, harness homes, git and temporary paths, and drop config/project/plugin roots and PERL5LIB.
 my $ambient = $tmp->child('ambient');

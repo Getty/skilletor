@@ -44,7 +44,9 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 fixture=$(pwd)/t/data/smoke
 [ -f "$1" ] || fail "no such binary: $1"
 BIN=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
-chmod +x "$BIN"    # an Actions artifact or an HTTP download carries no mode
+# An Actions artifact or an HTTP download carries no mode. The bundle's Linux smoke mounts the
+# binary read-only, made executable on the host, where a chmod fails: only one that lacks it.
+[ -x "$BIN" ] || chmod +x "$BIN"
 windows=
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) windows=1 ;; esac
 
