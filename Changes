@@ -1,359 +1,110 @@
 Revision history for skilletor and Skilletor, its Perl distribution
 
 {{$NEXT}}
-  - Bundled skill: "Running the CLI" and the Hermes reference give the
-    starter's engine order (pinned release binary, Node.js >= 18, Perl >= 5.40)
-    instead of calling the launcher Node-based (k191).
-  - The Perl distribution Skilletor moves from perl/ to the repository root
-    and is released with dzil; its version 0.008 is the plugin's 0.8.0, which
-    the Perl CLI now reports. Standalone binaries for linux-x86_64,
-    linux-arm64, macos-arm64 and windows-x86_64 come from the house
-    dzil-binary workflow, with OpenSSL linked statically; the smoke proves an
-    https url source. skilletor is licensed under the Artistic License 2.0
-    from this release (k242).
-  - The plugin's hooks and bin/skilletor run bin/skilletor-start: a cached
-    release binary verified against the release's SHA256SUMS pinned in the
-    plugin, else Node.js >= 18, else Perl >= 5.40 from source. Without pinned
-    checksums nothing is downloaded. A SessionStart hook fetches the binary in
-    the background and never waits for it; --version and -v never fetch and
-    answer from the engine that runs. Windows stays on Node through
-    bin/skilletor.exe. The Hermes adapter takes a checkout's bin/skilletor
-    without dist/ on POSIX, and install.sh's no-Node preflight runs --help
-    (k191).
-  - Conformance path comparison permits exactly one additional JSON-
-    stringification layer only within complete paired escaped-quote intervals
-    in one complete outer scalar. Wrong depths, unbalanced quotes, payload or
-    formatting changes and unrelated bytes still fail (k237).
-  - Published-layout catalog entries use platform-independent UTF-8 byte
-    ordering, matching Linux and Perl instead of native directory order or
-    JavaScript UTF-16 order (k240).
-  - Conformance verification uses expected-oracle path-token provenance and
-    encoding-aware separator matching. Raw streams and files retain byte order
-    and exact formatting; engine-result JSON arrays remain deliberately
-    unordered while preserving duplicate multiplicity. Windows verification
-    still runs; only expectation-update authoring is refused on Windows before
-    writes and points authors to POSIX (k237).
-  - Cross-platform fixtures set exact Git-index modes per commit, seed the
-    prior Hermes home explicitly, use portable decoded transport paths, retry
-    transient cleanup failures within a bound, and make CRLF conversion
-    idempotent (k237, k239).
-  - On Windows, existing absolute project paths use native canonical spelling
-    so 8.3 and long aliases share scope, pending-report and last-check identity;
-    POSIX keys retain their stored spelling (k238).
-  - Managed `.gitignore` and `.worktreeinclude` edits recognize CRLF, leave
-    unchanged blocks byte-identical, and preserve every byte outside their
-    markers, including EOF separators, during update or removal (k239).
-  - Conformance and platform fixtures isolate Windows home and temporary roots,
-    compare escaped platform paths, form Git file URLs portably, constrain
-    runtime-added environment values, and remove checkout-spelling assumptions
-    from build, Git and Hermes tests (k237).
-  - The ordinary CI matrix now includes a Windows Node 24 leg with typecheck,
-    tests and dist verification. Native-only launcher probes cover version and
-    hook startup from isolated paths containing spaces and non-ASCII
-    characters (k237).
-  - An included template's syntax error is now a synchronous item warning
-    rather than a delayed crash; unaffected items still install (k160).
-  - Skill install paths no longer consult the process cwd. Commands that need
-    a project context can run from a removed cwd when given `--project-dir`;
-    without one they exit 1 with an actionable diagnostic instead of a stack
-    trace (k192, k193).
-  - SessionStart now gives source checking, lock waiting and source resolution
-    a 20-second pre-apply budget. The per-scope guard names the late scope
-    without implying that earlier scope writes were rolled back (k151).
-  - Frontmatter parsing, Codex agent conversion and hook state preserve
-    prototype-named keys as own data without inherited collisions or prototype
-    mutation (k194).
-  - `install.sh` has a fail-safe CLI-only path for machines without Node. It
-    preflights a candidate checkout's verified binary or source-Perl starter,
-    leaves Claude plugin metadata untouched, and preserves the working command
-    and checkout on failure (k230).
-  - The prepared starter keeps per-prompt hooks offline, backs off failed
-    session-start provisioning for 15 minutes, and rechecks cached binaries
-    before execution. It remains unwired from the default plugin hooks (k231).
-  - The source Perl port now requires Perl 5.40. Perl CI tests that version and
-    reproducibly provisions its pinned Text::Nunjucks dependency (k159).
-  - The prepared binary workflow resolves its template dependency repository
-    and revision from the selected skilletor source revision. Its isolated
-    smoke covers every ported command without widening platform or activation
-    claims (k219, k232).
-  - Project scopes now select explicit project targets or genuine harness
-    evidence in that project instead of every machine target. Skilletor-owned
-    artifacts do not count as evidence; an ambiguous multi-harness project is
-    preserved and warned, and a sole machine target remains the bootstrap
-    fallback. TypeScript and Perl share cases 141-149 (k229).
-  - Automatic Claude plugin requirements are skipped, without check drift,
-    when their virtual settings would change inferred project targets. Items
-    still sync, and explicit project targets permit the settings update
-    (k234).
-  - The Perl CLI implements install and uninstall: wildcards, bundles,
-    prompts, missing-source and refusal diagnostics, and scope-aware removal.
-    Shared cases 130-139 and 200-205 hold both CLIs to the same behavior
-    (k178, k179).
-  - Both engines reject lock entries that are not objects and invalid
-    string-valued ownership maps before writing. `available` compares item
-    names without case while preserving source-alias case; cases 151-153 pin
-    the behavior (k222, k236).
-  - Plain items no longer ask the operating system for a template user. Both
-    engines create render context lazily, once, only when a `.njk` file needs
-    it (k161).
-  - Hook JSON that is null or another non-object, or has a non-string `cwd`,
-    fails open without an internal TypeError. The Perl conformance transport
-    preserves explicit JSON null; case 140 pins both CLIs (k200, k228).
-  - The Perl port decodes non-ASCII harness paths from the environment, emits
-    its ambiguous-source en dash as Unicode, and joins frontmatter UTF-16
-    surrogate pairs like the reference. Cases 126-127 pin the paths (k163,
-    k195, k198).
-  - Real Hermes child tests exclude inherited credentials, and Perl report
-    conformance follows intervening CLI steps before comparing later engine
-    results (k154, k197).
-  - Documentation reflects manifest version ownership, conditional Claude
-    settings updates, and the Perl port's current Claude, Codex and Hermes,
-    template and CLI support without claiming binary activation (k157, k226,
-    k227, k233).
-  - Builds support explicitly linked local dependencies in worktrees, while
-    refusing tools or bundled inputs resolved from another checkout (k148,
-    k220).
-  - Conformance cases 93-97: the CLI's available – listing and installed marks, items that cannot be built, bundles, escaping, refusals (k177).
-  - Conformance cases 110-125: the Hermes target in sync, check and status, its home move and upgrade, and the Hermes hooks (k185).
-  - Conformance cases 83-92: the CLI's add, its refusals and the probe of a generic host (k176).
-  - Conformance cases 100-108: the Codex target in sync, check and status, and the Codex hooks (k184).
-  - Conformance cases 72-82: the CLI's trust, source list and source remove (k175).
-  - A release-binaries workflow, prepared and not active (workflow_dispatch
-    only): it packs the Perl port with PAR::Packer for linux-x86_64,
-    linux-arm64, macos-arm64 and windows-x86_64, smokes each binary on clean
-    machines without Perl, and on a tag run attaches the binaries, tarballs and
-    one checksums file to the GitHub release vX.Y.Z, with the checksums for
-    bin/skilletor-binaries.sha256 as an artifact. A run without a tag is a
-    probe that touches no release. Its Windows leg packs Win32::Process and
-    runs the full smoke, the hooks included (k210).
-  - bin/skilletor-start, a plugin starter prepared for the Perl binaries and
-    not wired yet (hooks and the Hermes adapter still run bin/skilletor): it
-    runs the release binary cached under <claudeConfigDir>/skilletor/bin/,
-    else downloads it once and runs it only if its checksum matches the one
-    pinned in the plugin, else Node >= 18, else Perl >= 5.40; a `hook` call
-    exits 0 on every path. Without pinned checksums it downloads nothing.
-  - A conformance step `cli` runs the CLI itself (`skilletor sync|check|status`
-    with its arguments, exit code and stdout/stderr compared), and the case
-    knob `gitInit` (`["project"]`, `["home"]`) makes those directories git
-    checkouts; the Perl port's CLI is held to the reference this way. Cases 41
-    to 45 cover the project root, an unused and a dropped project, the status
-    target naming and `--force`.
-  - Conformance cases 65 to 71 hold both CLIs to the same bytes on the context paths: no agent harness detected (new case knob `"claude": false`, no Claude Code marker written), the project dir being the home, a lock entry an interrupted sync left partial, a rule that renders empty, an agent's missing briefing skills, and a source's name or address with control and bidi characters escaped on every stream (k87).
-  - A sync resolves its sources in parallel, but now reports what became of
-    each - a failure, a fall back to the cache, a trust request - in the order
-    the sources are declared, the order the Perl port's sequential resolve
-    gives. Two such sources no longer swap places in the report text and
-    --json from run to run.
-  - The Claude Code plugin takes its version from the commit, so every push to
-    main reaches marketplace users with auto-update.
-  - `CLAUDE_CONFIG_DIR` is Claude Code's config dir and now the user scope's
-    `.claude` everywhere: the user config, the lock, the installed items, the
-    state dir, the briefing lookup, the plugin state read for the project's
-    `.claude/settings.json` requirement and the Claude detection markers
-    (`<dir>/.claude.json`, `settings.json`, `projects`). Default
-    `<home>/.claude`; an empty value counts as unset. The Perl port does the
-    same; conformance cases 31 and 32 pin it for both engines.
-  - Three inputs are refused instead of read loosely. A source's
-    `skilletor.json` with a `vars` that is no object (an array was spread by
-    index) fails the source's scan. A hand-edited lock whose `via` is no array
-    of strings (a string matched bundle labels by substring) is an invalid
-    lock. A url tarball cut short, inside an entry or without its
-    end-of-archive block, is a corrupt archive (the cache stays) instead of a
-    smaller one. The Perl port does the same; conformance case 33 pins the
-    vars.
-  - Five oddities the Perl port found are fixed. A source serving two foreign
-    entries of one bundle asks for trust once, not twice. A `\U` escape above
-    U+10FFFF in a bundle file is that bundle's warning instead of an error
-    that aborted the whole source scan. A `SKILL.md`, agent or rule with CRLF
-    line ends or a BOM keeps its description in the catalog. An install key
-    only `Object.prototype` knows (`constructor`, `__proto__`) is an unknown
-    type, and a spec such as `constructor/foo` is no forge link.
-    `uninstall` no longer throws on a non-string entry in an install list.
-    Conformance cases 13 to 16 pin them for both engines.
-  - A `url` source serving a tarball with a corrupt header size no longer
-    hangs a sync: the update fails as a corrupt archive and keeps the last
-    good cache, with a warning.
-  - `conformance/` holds cases (config, source trees, the expected
-    resolution, and for sync cases the files, lock, check and status) that
-    the TypeScript engine and the Perl port both run;
-    `SKILLETOR_CONFORMANCE_UPDATE=1` regenerates them from the TypeScript
-    reference. Cases cover removal, conflicts and `--force`, check drift,
-    `"gitignore": false`, briefing, settings.json and executable bits;
-    fixture names starting with `.git` are stored as `dot.git...` so a
-    checkout holds every fixture.
+  - One version line in two spellings: the CPAN dist Skilletor 0.008 is the
+    plugin's 0.8.0 (package.json, the Codex and Hermes manifests). The Perl
+    CLI reports it. The Claude Code manifest carries no version any more, so
+    every commit on main reaches marketplace users with auto-update.
+  - The Perl distribution Skilletor lives at the root of the repository and is
+    released with dzil; its tag is the bare version. It is now the whole tool,
+    not a library: a `skilletor` command (script/skilletor) that behaves like
+    the TypeScript CLI; shared conformance cases hold both to the same output.
+    Requires Perl 5.40, Text::Nunjucks 0.001 and, on Windows, Win32::Process.
+  - Standalone binaries (no Perl, no Node) for linux-x86_64, linux-arm64,
+    macos-arm64 and windows-x86_64 are built by the house dzil-binary workflow
+    and attached to the GitHub release, with OpenSSL linked statically so
+    https url sources work in them.
+  - The plugin's hooks and bin/skilletor start through bin/skilletor-start,
+    which runs, first match wins: the release binary of the plugin's version,
+    cached under <claudeConfigDir>/skilletor/bin/ and checked against the
+    SHA256SUMS pinned in bin/skilletor-binaries.sha256; else Node.js >= 18;
+    else Perl >= 5.40 from source. Without that pin file nothing is
+    downloaded. It does not exist in this release: the maintainer commits it
+    once the binaries are built, until then the plugin runs Node (or Perl) as
+    before. A SessionStart hook fetches the binary in the background and never
+    waits for it; a failed fetch backs off for 15 minutes. --version and -v
+    never fetch. Windows stays on Node through bin/skilletor.exe. The bundled
+    skill and the Hermes reference describe this order.
+  - skilletor is licensed under the Artistic License 2.0 from this release,
+    the dist (Perl 5 terms in 0.001) and the plugin (MIT up to 0.7.0) alike.
   - `install.sh` sets skilletor up from a plain shell (GitHub issue #1):
     `curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh`
     installs the plugin when `claude` is on `PATH` (or updates it) and writes
     a `~/.local/bin/skilletor` that survives plugin updates; without Claude
     Code, or with `--no-plugin`, it clones the repository and links
-    `bin/skilletor`. `--bin-dir` picks the directory. The README has it under
-    "From the command line"; the Hermes docs name the command `SKILLETOR_BIN`.
+    `bin/skilletor`. Without Node.js it leaves the plugin metadata alone and
+    links the starter after checking that it runs. `--bin-dir` picks the
+    directory. The README has it under "From the command line".
   - A session that moves into another checkout of a skilletor project (a
     plain `git worktree add`, say) gets that checkout's project scope synced,
     so the worktree completes itself: one line names the directory, and the
     model is told what landed. In Claude Code a Bash `cd` is awaited (a
     `PostToolUse` hook), so the next tool call finds the items; other moves
     are seen by `CwdChanged`, which is not awaited. A Codex or Hermes session
-    moves only between turns, and the next prompt waits for the sync; the
-    Codex `UserPromptSubmit` timeout is 30 s, the Hermes plugin's per-turn
-    limit 25 s. Under Hermes, when skills landed, the line names
-    `hermes skills trust <dir>`; skilletor never reads or writes Hermes trust.
-    After updating, trust the changed hooks again in Codex `/hooks` and run
-    `hermes plugins update skilletor` for the Hermes plugin. The Perl port has
-    no hooks.
-  - A hook run from a working directory that no longer exists, or whose own
-    setup failed, exited 1 with a stack trace; it now exits 0 with at most one
-    warning line, and no longer runs `git rev-parse` on the process cwd when
-    its project is known. `hook ... --scope bogus` exits 0 too: the hook is
-    dispatched before the option checks.
-  - The Perl CLI loads each module by the first call that needs it:
-    --version, --help and a usage error in ASCII load Skilletor::CLI alone
-    (180 -> 19 ms with perl -Ilib), and the prompt hook with nothing due no
-    longer loads Skilletor::Report and what it stands on. Output and exit
-    codes are unchanged. t/68-cli.t pins what the argument layer loads,
-    t/69-hooks.t the modules of the prompt hook's fast path (k199).
-  - Skilletor::Frontmatter::Float and Skilletor::TOML::Float are hidden from
-    the PAUSE indexer: inner value classes without a .pm of their own, no
-    longer listed in META's provides (k202).
-  - `skilletor available [source] [--json]` in the Perl CLI
-    (Skilletor::Commands::available, after cmdAvailable): every trusted
-    source - or the one named - resolved and scanned under the sync lock, the
-    caches swept first; an item marked installed when either scope declares it
-    or either lock holds it for that source (any target, not a skipped entry),
-    a bundle when either config declares it; an item's error, a bundle's
-    sorted members, `(no items)` or its expansion error on a second line;
-    --json the list; an untrusted source skipped. A lock entry that is no
-    object marks nothing installed, where the reference throws a TypeError
-    (k222). Skilletor::Error::Command's POD names add's and available's
-    refusals. Conformance cases 93 to 97, t/76-commands-available.t (k177).
-  - The Perl engine now syncs, checks and reports the Hermes target as the
-    reference does (spec section 16): skills only, in the Hermes home's
-    skills ($HERMES_HOME, else the recorded home, else ~/.hermes) and
-    <project>/.hermes/skills, with no managed .gitignore block. It is never
-    detected, a target only through the user config's "targets"; in a project
-    with Codex active, the Codex copy serves Hermes. One home per user-scope
-    lock, recorded in hermes-home.json: a sync under another home removes the
-    old home's items with a warning and installs anew, and check counts it as
-    targetsChanged. Once hermes is no target, a sync removes its entries from
-    the recorded home and drops the record. Skilletor::Engine has a new
-    hermes_home attribute and a hermes_opt_in_hint method. Under --harness
-    hermes, SessionStart ends with the opt-in line while hermes is no target,
-    and the prompt hook follows a move, naming `hermes skills trust <dir>`
-    once a skill Hermes loads landed (k152). Tested in t/74-engine-hermes.t
-    and t/75-hooks-hermes.t (k185).
-  - A Skilletor::Error stringifies to its message, as its documentation says:
-    an error no one catches prints the message, not
-    Skilletor::Error::Config=HASH(0x...). namespace::clean removed the subs
-    that hold Error.pm's overload table; the overload is now declared after
-    it. The CLI and the hooks print what they did before - they ask an error
-    for its message (k213).
-  - `skilletor add [name] <spec> [--project]` in the Perl CLI
-    (Skilletor::Commands::add, after cmdAdd): the same checks in the same
-    order - the k95 name, no project scope, the spec, the k110 definition, the
-    k101 taken name, the k119 ref, the k126 path, the k116 kept entry. It then
-    trusts the source and syncs, prints the added or kept line, and prints the
-    k103 saved lines when the sync fails (k176).
-  - New Skilletor::Probe: `git ls-remote -- url` (5 s), then an in-process
-    HEAD on url.tar.gz through HTTP::Tiny with fetch's headers, so a packed
-    binary needs neither Node nor Perl for it. Tested in t/31-probe.t (k176).
-  - The Codex target in the Perl engine: sync, check and status install
-    skills in .agents/skills, agents as TOML and rules as sections of one
-    skilletor-rules.md with the pointer block in the Codex AGENTS.md - its
-    warnings (malformed markers, a link, a directory or Claude Code's
-    CLAUDE.md in its place, AGENTS.override.md, project_doc_max_bytes) and the
-    migration of a first-design rules block as the reference has them - and
-    warn while Codex has not trusted skilletor's SessionStart hook
-    (Skilletor::AgentsMD, after agentsmd.ts; Skilletor::Error::Block).
-    Hermes followed in k185. The hooks under --harness codex: a new
-    session's context starts with the rules files, and the prompt hook syncs
-    the checkout a session moved into, its answer joined with a pending
-    report (k184).
-  - `skilletor trust`, `skilletor source list [--json]` and `skilletor source
-    remove <name> [--project] [--force]` in the Perl CLI (Skilletor::Commands,
-    after the reference's commands.ts): the same checks in the same order (an
-    undeclared name and where else it is declared, an entry other files'
-    overrides still need, the one entry config load refuses removed, installed
-    items without --force), the same messages and exit codes, the config
-    rewritten as two-space JSON in its key order. Skilletor::Config gains
-    has_source_entry (an entry written as null is declared). New conformance
-    cases 72 to 82 hold both CLIs to the same bytes.
-  - t/54-parity-cli.t runs the reference CLI (node dist/skilletor.js) and
-    bin/skilletor on one machine, in the same paths, and holds the port to the
-    same bytes: exit codes, both streams, installed trees, the lock and the
-    state files (render-inputs, sources-read, unreached, the hooks' marks and
-    records), over five conformance cases, git's failure wording, the real
-    host and user in templates, and one sync lock that either CLI holds while
-    the other's sync and SessionStart wait or time out. It skips without node
-    or the bundle.
-  - Skilletor::Process runs programs on Windows: stdin, stdout and stderr as
-    temp files on the standard handles of a P_NOWAIT spawn, the program found
-    on PATH as Node finds it (never in the cwd first, never a .bat or .cmd),
-    its arguments quoted for the C runtime, a timeout terminating it
-    (reported as signal 15, as Node does there); spawn_detached starts the
-    hooks' background through Win32::Process (new Windows-only dependency)
-    with no inherited handle and a console without a window.
-    Skilletor::State refreshes the sync lock on Windows while it waits on a
-    program, and stamps times with the core utime there (Time::HiRes has
-    none). Untested on real Windows (exercised on Linux through an injected
-    seam).
-  - `skilletor hook cwd-changed|post-tool-use` for Claude Code: a session
-    that moves into another checkout gets that checkout's project scope
-    synced – its git top level, never CLAUDE_PROJECT_DIR – when its lock no
-    longer matches its config (a local check, no source asked), with a 20 s
-    deadline past which nothing is written and a wait on the sync lock up to
-    it; one line names the checkout and what to run there, PostToolUse adds
-    a context for the model. New conformance cases 60 to 64 hold both CLIs
-    to the same bytes.
-  - `skilletor hook session-start|user-prompt-submit` for Claude Code: the
-    SessionStart check and sync, the prompt's interval check with a detached
-    background sync (a packed binary re-runs itself via PAR_PROGNAME), and
-    pending reports. Every failure is one warning line with exit 0, and a
-    prompt with nothing due never loads the engine. New conformance cases 50
-    to 59 hold both CLIs to the same hook output.
-  - Renders Nunjucks templates as the reference does, through Text::Nunjucks
-    (a Perl port of Nunjucks 3.2.4, not on CPAN yet; new dependency, Perl
-    5.40): a sync installs .njk items rendered with the reference's context,
-    skips an item whose main template renders empty and words template errors
-    the same. resolve_skill and its siblings still refuse a templated item.
-  - The sync, check and status reports keep the reference's key order, and
-    Skilletor::Report's new report_json writes them byte for byte as
-    skilletor sync|check|status --json prints them.
-  - A command line, bin/skilletor over Skilletor::CLI: the reference's usage
-    text, version (the plugin's, provisional), option checks, usage errors and
-    exit codes, byte for byte; a command not ported yet says so and exits 1.
-    Skilletor::Process::run_command feeds stdin through a
-    pipe when given one.
-  - The engine options the hooks set, as the reference has them: check's local
-    (no source asked), the sync's if_changed (a local check under the sync
-    lock), deadline and a per-call lock_timeout_ms. Skilletor::State keeps
-    pending-report.json and session-cwd.json (the 256 sessions recorded last)
-    byte for byte as the reference does, and gains due_again;
-    Skilletor::Report's new report_hook words a sync report as the hooks do.
-    report_text gives an item with an unknown harness prefix its type's
-    activation hint.
-  - Skilletor::Convert and Skilletor::TOML port the reference's Codex
-    conversion: an agent as a Codex agent-role TOML file (the codex:
-    passthrough, its warnings, the # briefing: skills line), a rule as its
-    section of the Codex rules file, and the per-target mapping of an item's
-    output, byte for byte; not yet used by a sync.
-  - The CLI runs sync, check and status as the reference does: the report
-    text and --json, check's exit 0, 1 or 2, status with the target naming,
-    --scope, --force and --project-dir; the project root is the git top level
-    of the working directory (2 s, else the directory itself). The
-    conformance runner's cli steps hold it to the reference's bytes.
-  - scripts/ builds bin/skilletor into one standalone executable with
-    PAR::Packer (build-binary.sh), proves it byte for byte against perl -Ilib
-    (verify-binary.sh), checks its shared libraries and glibc floor
-    (check-binary-libs.sh), and runs the shared conformance cases' cli steps
-    against it in a container with neither perl nor node (container-proof.sh);
-    scripts/ stays out of the CPAN tarball.
-  - scripts/smoke-binary.sh runs a packed binary through a sync, check and
-    status of the t/data/smoke fixture on a clean machine without Perl
-    (t/70-smoke-binary.t), and the Claude Code hooks, the detached
-    background sync included (k205); verify-binary.sh now also works with
-    git before 2.32. scripts/loaded-modules.pl packs Win32::Process on
-    MSWin32 and runs on Windows, and the release-binaries Windows leg runs the
-    full smoke (k210).
+    moves only between turns, and the next prompt waits for the sync. Under
+    Hermes, when skills landed, the line names `hermes skills trust <dir>`;
+    skilletor never reads or writes Hermes trust. After updating, trust the
+    changed hooks again in Codex `/hooks` and run `hermes plugins update
+    skilletor` for the Hermes plugin.
+  - The Perl CLI has every command of the TypeScript one: sync, check and
+    status (--scope, --force, --project-dir, --json), add, install, uninstall
+    (wildcards, bundles, prompts, scope-aware removal), source list and
+    remove, available, trust, and the Claude Code, Codex and Hermes hooks.
+    The engine renders .njk items through Text::Nunjucks and syncs the Codex
+    and Hermes targets as the reference does; Skilletor::Engine gains a
+    hermes_home attribute and a hermes_opt_in_hint method. Under Windows its
+    programs run through Skilletor::Process, the hooks' background sync
+    through Win32::Process. A Skilletor::Error stringifies to its message,
+    as documented, and the CLI starts faster (--version and --help load one
+    module).
+  - A project scope now installs into explicit project targets, or the
+    harnesses that have evidence in that project (their own files, not
+    skilletor's), instead of every machine target. A project with several
+    such harnesses and no explicit targets is left as it is and warned about;
+    a sole machine target stays the fallback. Claude plugin requirements in
+    `.claude/settings.json` are skipped, without check drift, when adding
+    them would change which targets a project infers; items still sync, and
+    explicit project targets allow the update.
+  - SessionStart gives source checking, lock waiting and source resolution a
+    20-second budget before anything is applied; a scope that runs out of it
+    is named, and earlier scopes are not rolled back.
+  - `CLAUDE_CONFIG_DIR` is Claude Code's config dir and now the user scope's
+    `.claude` everywhere: the user config, the lock, the installed items, the
+    state dir, the briefing lookup, the plugin state read for the project's
+    `.claude/settings.json` requirement and the Claude detection markers.
+    Default `<home>/.claude`; an empty value counts as unset.
+  - A sync resolves its sources in parallel but reports what became of each
+    (a failure, a fall back to the cache, a trust request) in the order the
+    sources are declared, so the report and --json no longer vary from run
+    to run.
+  - Malformed input is refused instead of read loosely. A source's
+    `skilletor.json` whose `vars` is not an object fails that source's scan;
+    a lock entry that is not an object, whose `via` is not an array of
+    strings or whose `files` is not a map of strings makes the lock invalid;
+    a url tarball cut short is a corrupt archive (the cache stays), as is one
+    with a corrupt header size, which used to hang a sync.
+  - Hooks fail open more thoroughly: from a working directory that no longer
+    exists, with null or non-object JSON, or a non-string `cwd`, a hook
+    exits 0 with at most one warning line instead of a stack trace. Other
+    commands from a removed directory exit 1 with a message that points to
+    --project-dir.
+  - An included template's syntax error is a warning on that item at once
+    rather than a delayed crash; unaffected items still install. Plain items
+    no longer look up the operating system's user, only a `.njk` file does.
+  - Fixes from the Perl port's comparison: a source serving two foreign
+    entries of one bundle asks for trust once; a `\U` escape above U+10FFFF in
+    a bundle file is that bundle's warning, not an error that aborts the
+    source scan; a SKILL.md, agent or rule with CRLF line ends or a BOM keeps
+    its description in the catalog; frontmatter, Codex agent conversion and
+    hook state keep keys named like Object.prototype members (`__proto__`,
+    `constructor`) as data; `uninstall` no longer throws on a non-string
+    entry in an install list; `available` matches item names without regard
+    to case.
+  - On Windows, an existing project path is spelled canonically, so its 8.3
+    and long names share one scope, pending report and last check. Managed
+    `.gitignore` and `.worktreeinclude` blocks recognize CRLF files and leave
+    every byte outside the markers unchanged. Items of a published layout are
+    listed in UTF-8 byte order on every platform.
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's
