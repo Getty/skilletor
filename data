@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-11-18T03:51:16Z
+claimed_by: skilletor-worker-k243
+class: standard
+completed: 2026-11-18T03:51:16Z
+created: 2026-11-16T20:19:56Z
+id: 243
+priority: high
+started: 2026-11-18T03:25:24Z
+status: done
+tags:
+- perl
+- binary
+- release
+- deps
+title: Remove the Text::Nunjucks pin once 0.001 is on CPAN
+updated: 2026-11-18T03:51:16Z
+---
+
+Until Text::Nunjucks is on CPAN, scripts/binary-prepare.sh installs it from the pinned commit of Getty/p5-text-nunjucks (as perl.yml does), so a probe run of binaries.yml can go green (k242). The release build must install it from CPAN: once Text::Nunjucks 0.001 is on CPAN, drop the pin from binary-prepare.sh (and from perl.yml), require it in cpanfile at that version, and run one probe. Blocks the first tag of Skilletor 0.008. Hub decision 2026-11-16.
+
+Pin dropped: scripts/binary-prepare.sh prepares TLS only (TEMP block, git checkout, Makefile.PL, cpanm of commit 1a9a608 and the final print removed; header and 'Needs' line updated); perl.yml has one checkout, no TEXT_NUNJUCKS_* env, no PERL5LIB step, and installs with 'cpanm -nq --installdeps .' only. test/perl-ci-contract.test.ts rewritten to the CPAN claim (tests 2 and 3 fail on HEAD). Stale pin wording fixed in scripts/loaded-modules.pl, scripts/binary-pp-args.sh, maint/container-proof.sh. Hub decision: binaries.yml uses dzil-binary.yml@ace48caaecb567990b0e333e4a30737d3e5de3df (binary-v1, checked with git ls-remote). Verified: typecheck + npm test 1357 tests, 1353 pass, 0 fail, 4 skip (Hermes install opt-in, 3 native Windows); check-dist up to date; prove -lr -j4 t PASS (52 files, 2710 tests) with the checkout (0.002) and with installed 0.001 from ~/perl5; loaded-modules.pl with installed copy: 87 Text::Nunjucks entries, exit 0. Not run: binary-prepare.sh (CI probe proves it), shellcheck (not installed).
+
+ready for review
+
+Committed as 08c37c7: Text::Nunjucks from CPAN, temp pin removed, contract test pins it.
