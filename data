@@ -1,0 +1,33 @@
+---
+claimed_at: 2026-11-18T18:48:35Z
+claimed_by: ack-paket
+class: standard
+completed: 2026-11-18T18:48:40Z
+created: 2026-11-18T17:07:51Z
+id: 254
+priority: medium
+started: 2026-11-18T18:48:40Z
+status: done
+tags:
+- state
+- perf
+title: 'State: sources-read.json keeps an entry for every lock path ever synced, gone
+  worktrees too'
+updated: 2026-11-18T18:48:40Z
+---
+
+Found on reuben, 2026-11-18, while tracing k196/k250. ~/.claude/skilletor/sources-read.json is the real state file, 307558 bytes. It is keyed by the lock path of every scope a sync ever recorded (src/state.ts putSourcesRead, spec §14.3, k80), and nothing removes an entry when its checkout goes away.
+Count on reuben: 762 keys, 579 of them for lock paths that no longer exist, mostly agent worktrees (<repo>/.claude/worktrees/<name>/.claude/skilletor.lock.json: rules-kuerzen 68, core-skill-laenge 24, ...); also 21 relative keys such as '.claude/skilletor.lock.json' and 14 under /tmp.
+Every check and sync reads and rewrites the whole file, Node and Perl alike; with k196 it was the 13-39 s in the binary. Done when entries for vanished lock paths (and relative keys, if they are a bug) are dropped on write or by a sweep, with a test; the ~180 live entries stay.
+
+Taken up on the maintainer's word (2026-11-18): fix on branch ack-paket for both engines (src/state.ts and lib/Skilletor/State.pm), parity tests, rebuilt dist.
+
+2026-11-18 18:03 Findings (read-only so far): check never writes sources-read.json (engine.ts check() calls only sourcesRead/unreached/renderInputs; Perl check likewise) – only sync's putSourcesRead does, so the prune goes there, no new write on the read path. Sync order: apply writes the lock (apply.ts:303), then finalLock is read, then putSourcesRead (engine.ts ~1163). A live scope CAN be without its lock file: writeLock removes the file for an empty lock (lock.ts:102), and putSourcesRead still records the sources it read – that is exactly the k80 case (a source with nothing in the lock). So 'exists' = the lock's directory (the scope's .claude dir), not the lock file. On this host both rules drop the same 579 absolute keys (0 keys have a live .claude dir but no lock). Relative keys: current code still makes them – --project-dir <relative> is passed through unresolved by both CLIs (cli.ts makeContext, CLI.pm _engine); the 21 keys are 'dbio-*/.claude/…' and '.claude/…' (--project-dir . from ~/dev and from a repo). Fix: resolve --project-dir against cwd in both CLIs.
+
+2026-11-18 18:10 Implemented (uncommitted): State.putSourcesRead / put_sources_read drop every key but the written scope's that is no absolute path or whose dirname (the scope's .claude) no longer exists; a put that drops one writes even when its own record is unchanged, a put with nothing to drop and nothing changed still writes nothing. Both CLIs resolve a relative --project-dir against cwd (absolute ones untouched, '' untouched); a relative one from a removed cwd is now the same 'current directory no longer exists' error in both (Node printed a raw uv_cwd ENOENT, Perl exited 0). Red before/green after: test/state.test.ts k254 x2, t/28-state-prune.t x2, test/cli.test.ts k254 + removed-cwd, t/68-cli.t x2, t/52-parity-sync.t (seeded gone/relative/live keys; red with either engine's prune reverted). Real-copy dry run (temp root, real file untouched, sha unchanged): 762 -> 162 keys, 307558 -> 54851 bytes, Node and Perl byte-identical, all 162 kept entries identical and in order; a second put writes nothing. Spec §14.3 + project-root paragraph updated.
+
+2026-11-18 18:40 Also found (for the main agent, no card created – my lane does not create cards): (1) render-inputs.json grows the same way on this host: 762 keys, 579 with the lock dir gone, 21 relative, 126 KB; unreached.json 2 keys, both gone. Both are keyed by lock path and written in the same sync step as sources-read.json; state.ts dropGoneScopes / State.pm _drop_gone_scopes cover them unchanged – ask: fold into k254, or a separate state,perf card? (2) last-check.json is keyed by project dir, written on the hook path (markChecked): 237 keys, 94 whose project dir is gone, 16 KB – needs its own rule (the project dir itself), separate card. (3) Windows, pre-existing: the Perl port spells lock-path keys with '/' (path_join/path_resolve are POSIX-only) where Node spells '\', so on Windows the two engines keep separate records of one scope; the prune decides the same for either spelling (File::Basename::dirname and win32 dirname take both separators). Maybe under k209/k143. (4) The card body says every check rewrites the file: check only reads sources-read.json; only sync writes it.
+
+2026-11-18 18:40 Done, uncommitted, tree commit-ready on ack-paket. src/state.ts + lib/Skilletor/State.pm: putSourcesRead/put_sources_read drop every other key that is no absolute path or whose dirname (the scope's .claude) no longer exists; a drop counts as a change, nothing to drop + unchanged record still writes nothing. src/cli.ts + lib/Skilletor/CLI.pm: relative --project-dir resolved against cwd (absolute and '' untouched); from a removed cwd it is the 'current directory no longer exists' error in both. Tests red before / green after: test/state.test.ts (2 k254 tests), t/28-state-prune.t (new, 2 subtests), test/cli.test.ts (k254 relative --project-dir; removed-cwd test extended), t/68-cli.t (same two), t/52-parity-sync.t (seeded gone/relative/live keys; red with either engine's prune reverted). Conformance cases unchanged (they compare no state files, none uses a relative --project-dir). Spec §14.3 and the project-root paragraph updated. Checks: typecheck passed; npm test 1358 pass / 0 fail / 4 skipped (Hermes live install env-gated, 3 native-Windows); build + check-dist up to date; prove -lr -j4 t: 56 files, 2741 tests, PASS, only skip t/65's 102 data-driven subtests. Real-copy dry run in a temp root: 762 -> 162 keys, 307558 -> 54851 bytes, Node and Perl byte-identical, kept entries identical and in order; real file untouched.
+
+Committed as 98fade6. Follow-ups: k255 (render-inputs/unreached/last-check grow the same way), k256 (Windows key spelling Perl vs Node).
