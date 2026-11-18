@@ -169,11 +169,15 @@ other's `sync` and SessionStart wait or time out. It skips without node or the b
   else Node, else this port from `lib/`. No release pins binaries yet; they come from the
   house route (`.github/workflows/binaries.yml`, dzil-binary, k242), and the port moved
   from `perl/` to the repository root with it (2026-11-16).
-- Windows is untested. The process layer has a Windows path (k186: `run_command` through
-  temp files on a no-wait spawn, `spawn_detached` through Win32::Process, the sync lock
-  refreshed by its holder instead of a forked child), exercised on Linux through an injected
-  seam; nothing has run on real Windows yet. Known open points: k207 (a dead lock owner),
-  k209 (non-ASCII paths), k210 (the Windows binary's modules and smoke).
+- Windows is covered by the binary only. The process layer has a Windows path (k186:
+  `run_command` through temp files on a no-wait spawn, `spawn_detached` through
+  Win32::Process, the sync lock refreshed by its holder instead of a forked child),
+  exercised on Linux through an injected seam. The windows-x86_64 binary, packed with
+  Strawberry Perl, passes `scripts/binary-smoke.sh` on GitHub's windows-2022 runner: every
+  ported command and hook, the background sync included, byte for byte the Linux transcript,
+  and the https url source (first green on 2026-11-18, k242). The test suite under `t/` does
+  not run on Windows (`perl.yml` is Linux only). Known open points: k207 (a dead lock owner),
+  k209 (non-ASCII paths), k216 (verify compares output on POSIX only).
 - There are no conformance cases for a `url` fetch (it needs TLS), for symlink
   conflicts, or for partial syncs. `t/62-engine.t` covers partial syncs.
 

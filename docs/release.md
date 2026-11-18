@@ -40,7 +40,8 @@ older tags are `v0.1.0` to `v0.7.0`.
    `SKILLETOR_HERMES_INSTALL=1 node --test --import ./test/setup.ts test/hermes-real.test.ts`
    (network; Hermes downloads its plugin runtime, about 100 s).
    A probe of the binaries on all four platforms before the release:
-   `gh workflow run binaries.yml` with an empty `tag` (artifacts only, no release touched).
+   `gh workflow run binaries.yml --ref main` with an empty `tag` (artifacts only, no release
+   touched); it builds from a tarball of that ref and runs every smoke.
 3. **Audit** — run the `skilletor-release-manager` agent: versions, dist, CLI reference in
    README and the bundled skill, marketplace entries, release notes.
 4. **`dzil release`** (Getty) — on a clean `main` (the bundle refuses another branch). It
@@ -87,9 +88,9 @@ Every step here is outward-facing and needs Getty's go-ahead.
    (`c339eef`, bundle `main` on 2026-11-18), and passes the same commit as `bundle_ref`, the ref
    its scripts are checked out from; `test/` keeps the two equal, so move both by hand together.
    The workflow builds from the release's CPAN tarball on linux-x86_64, linux-arm64,
-   macos-arm64 and windows-x86_64. Each
-   binary is smoked on clean machines (AlmaLinux 8 and 9, Debian bookworm slim, the macOS and
-   Windows runners) with `scripts/binary-smoke.sh`, the https url source included. The
+   macos-arm64 and windows-x86_64. Each binary is smoked on clean machines (AlmaLinux 8 and
+   9, Debian bookworm slim, the macOS and Windows runners) with `scripts/binary-smoke.sh`,
+   the https url source included. The
    workflow attaches `skilletor-0.008-<platform>` (`.exe` on Windows), `SHA256SUMS`,
    `install.sh` and `install.ps1` to the release, then marks it latest when it is newer than
    the current latest release (the release plugin leaves that to the workflow). A transient failure:
