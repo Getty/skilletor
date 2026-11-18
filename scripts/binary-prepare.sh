@@ -26,8 +26,10 @@
 #
 # TLS, Windows: Strawberry Perl's own Net::SSLeay on its OpenSSL DLLs (c\bin), which the bundle's
 # pack step links into the binary (win-dlls.pl); its OPENSSLDIR is no directory of a user's
-# machine, so the binary trusts the packed Mozilla bundle. Nothing is built here; IO::Socket::SSL
-# and Mozilla::CA are brought up to date.
+# machine, so the binary trusts the packed Mozilla bundle. Nothing is built here. Strawberry's
+# IO::Socket::SSL ships tested with those DLLs and is kept when it is 2.009 or later; only a
+# missing or older one comes from CPAN, whose latest need not pass its tests there (2.099's failed
+# on Strawberry 5.40.4). Mozilla::CA is brought up to date: its bundle is the binary's trust store.
 set -euo pipefail
 
 # OpenSSL 3.5 is the LTS line, supported until 2030-04-08. Bump the patch release with each
@@ -43,6 +45,17 @@ perl -S cpanm --version >/dev/null 2>&1 || { echo "ERROR: cpanm is not installed
 windows=
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) windows=1 ;; esac
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
+
+# After a failed cpanm: the tail of its build log on stderr, which otherwise stays on the machine
+# it ran on, and exit 1. The newest work/*/build.log, because ~/.cpanm/build.log is a symlink to
+# it that Windows creates only with the privilege for symlinks.
+cpanm_failed() {
+  local log
+  log=$(ls -t "${PERL_CPANM_HOME:-$HOME/.cpanm}"/work/*/build.log 2>/dev/null | head -n 1) || true
+  [ -z "$log" ] || { echo "--- the last 80 lines of $log" >&2; tail -n 80 "$log" >&2 || true; }
+  echo "ERROR: cpanm failed" >&2
+  exit 1
+}
 
 if [ -z "$windows" ]; then
   want="OpenSSL $OPENSSL_VERSION "
@@ -78,8 +91,10 @@ if [ -z "$windows" ]; then
   # prompt for network tests (no).
   OPENSSL_PREFIX="$PREFIX" PERL_MM_USE_DEFAULT=1 \
     PERL_MM_OPT="${PERL_MM_OPT:+$PERL_MM_OPT }LIBS='-L$PREFIX/lib -lssl -lcrypto'" \
-    perl -S cpanm --reinstall Net::SSLeay
-  perl -S cpanm IO::Socket::SSL Mozilla::CA
+    perl -S cpanm --reinstall Net::SSLeay || cpanm_failed
+  # One distribution per call, so the build log's tail is the failing one's.
+  perl -S cpanm IO::Socket::SSL || cpanm_failed
+  perl -S cpanm Mozilla::CA || cpanm_failed
 
   # The result must say so: this OpenSSL, OPENSSLDIR /etc/ssl, and no libssl/libcrypto needed
   # from the system by Net::SSLeay's shared object.
@@ -95,7 +110,9 @@ if [ -z "$windows" ]; then
   tls="$(head -n 1 "$PREFIX/.check"), static in $so"
 else
   perl -MNet::SSLeay -e1 || { echo "ERROR: this Strawberry Perl has no Net::SSLeay" >&2; exit 1; }
-  perl -S cpanm IO::Socket::SSL Mozilla::CA
+  perl -MIO::Socket::SSL=2.009 -e 'print "IO::Socket::SSL $IO::Socket::SSL::VERSION is 2.009 or later: kept\n"' \
+    || perl -S cpanm IO::Socket::SSL || cpanm_failed
+  perl -S cpanm Mozilla::CA || cpanm_failed
   tls="$(perl -MNet::SSLeay -e 'print Net::SSLeay::SSLeay_version(0)'), Strawberry Perl's DLLs"
 fi
 perl -MIO::Socket::SSL=2.009 -MMozilla::CA -e 'print "IO::Socket::SSL $IO::Socket::SSL::VERSION, Mozilla::CA $Mozilla::CA::VERSION\n"'
