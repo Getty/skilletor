@@ -12,8 +12,9 @@ Revision history for skilletor and Skilletor, its Perl distribution
     Requires Perl 5.40, Text::Nunjucks 0.001 and, on Windows, Win32::Process.
   - Standalone binaries (no Perl, no Node) for linux-x86_64, linux-arm64,
     macos-arm64 and windows-x86_64 are built by the house dzil-binary workflow
-    and attached to the GitHub release, with OpenSSL linked statically so
-    https url sources work in them.
+    and attached to the GitHub release. Each carries its own OpenSSL, linked
+    statically on Linux and macOS, Strawberry Perl's OpenSSL DLLs packed in on
+    Windows, so https url sources need no system OpenSSL.
   - The plugin's hooks and bin/skilletor start through bin/skilletor-start,
     which runs, first match wins: the release binary of the plugin's version,
     cached under <claudeConfigDir>/skilletor/bin/ and checked against the
