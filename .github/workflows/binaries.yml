@@ -7,9 +7,6 @@ on:
       tag:
         description: Release tag to build and attach; empty = probe run
         required: false
-  # TEMP (k242): probe runs from ack-paket; drop before merging
-  push:
-    branches: [ack-paket]
 jobs:
   binaries:
     permissions:

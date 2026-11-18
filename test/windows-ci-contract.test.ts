@@ -30,9 +30,7 @@ function yamlBlock(text: string, name: string, indentation: number): string {
 test("ordinary push and pull-request CI requires Linux, macOS, and native Windows gates", () => {
   const triggers = yamlBlock(workflow, "on", 0);
   assert.match(triggers, /^  push:$/m);
-  // TEMP (k242): also accepts the probe's extra ack-paket push branch, only under its TEMP marker;
-  // drop before merging, together with the trigger, back to /^    branches: \[main\]$/m alone.
-  assert.match(triggers, /^(?:    # TEMP \(k242\): probe runs from ack-paket; drop before merging\n    branches: \[main, ack-paket\]|    branches: \[main\])$/m); // TEMP (k242)
+  assert.match(triggers, /^    branches: \[main\]$/m);
   assert.match(triggers, /^  pull_request:$/m);
 
   const job = yamlBlock(workflow, "test", 2);
