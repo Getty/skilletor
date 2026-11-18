@@ -109,6 +109,10 @@ Revision history for skilletor and Skilletor, its Perl distribution
     `.gitignore` and `.worktreeinclude` blocks recognize CRLF files and leave
     every byte outside the markers unchanged. Items of a published layout are
     listed in UTF-8 byte order on every platform.
+  - The Perl port reads a large state file (a 300 KB sources-read.json) in a
+    quarter second instead of 10 s and more, so `check` and the SessionStart
+    hook no longer stall on it: its JSON parser no longer copies the text for
+    every string and number (k196).
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's
