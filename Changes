@@ -24,8 +24,11 @@ Revision history for skilletor and Skilletor, its Perl distribution
     once the binaries are built, until then the plugin runs Node (or Perl) as
     before. A SessionStart hook fetches the binary in the background and never
     waits for it; a failed fetch backs off for 15 minutes. --version and -v
-    never fetch. Windows stays on Node through bin/skilletor.exe. The bundled
-    skill and the Hermes reference describe this order.
+    never fetch. For now the plugin on Windows keeps starting Node through
+    bin/skilletor.exe; the windows-x86_64 binary is there to run skilletor
+    directly, installed from the release (install.ps1, which the release
+    carries, does it). The bundled skill and the Hermes reference describe
+    this order.
   - skilletor is licensed under the Artistic License 2.0 from this release,
     the dist (Perl 5 terms in 0.001) and the plugin (MIT up to 0.7.0) alike.
   - `install.sh` sets skilletor up from a plain shell (GitHub issue #1):
