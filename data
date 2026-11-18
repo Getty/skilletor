@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-18T03:58:57Z
+id: 245
+priority: low
+status: backlog
+tags:
+- skill
+- docs
+title: 'Bundled skilletor skill: SKILL.md is over its length budget (155 lines)'
+updated: 2026-11-18T03:58:57Z
+---
+
+skills/skilletor/SKILL.md has 155 lines after the starter's engine order went in (60aa062, k191); the budget check warned. Route: skilletor-skill-auditor scores it (is every section earning its tokens, does the description still trigger), then skilletor-skill-author shrinks it, moving reference material to references/ where the skill already points. Found during the ACK package work 2026-11-16.
