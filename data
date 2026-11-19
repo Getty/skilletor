@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-11-19T07:34:58Z
+claimed_by: ack-paket
+class: standard
+completed: 2026-11-19T07:34:58Z
+created: 2026-11-18T16:46:32Z
+id: 253
+priority: low
+started: 2026-11-19T07:34:58Z
+status: done
+tags:
+- starter
+- binary
+title: 'Starter: SKILLETOR_BINARY_BASE_URL takes http:// without a test gate'
+updated: 2026-11-19T07:34:58Z
+---
+
+Found on reuben, 2026-11-18, ack-paket 4fc74ad: bin/skilletor-start downloads from ${SKILLETOR_BINARY_BASE_URL:-<release prefix>}/<asset> (:337) and takes any scheme, http:// included, with no gate. briefing's starter accepts http only with BRIEFING_STARTER_TESTING=1. The pinned checksum still guards the bytes, so this is a plaintext fetch and a difference between the two starters, not a hole. Done when skilletor decides the rule (match briefing or name why not), with a test.
+
+2026-11-19 03:12 Maintainer decision 2026-11-19 (via the agent-construction-kit session): fix before the 0.008 release; the release follows a dogfood run on reuben with new probe binaries and the Windows test (windows-developer k22).
+
+Note from k252 (ack-paket, not worked here): k252 adds a starter test ('a refused cache is named in the line on every path...') whose last part serves the binary over http://127.0.0.1 through serve(), like the other serve() cases in test/starter.test.ts; an http gate has to let it through the same way. k252 does not touch line :337 (the download URL).
+
+2026-11-19 Handed to skilletor-worker on ack-paket (after k252 4176599).
+
+2026-11-19 07:02 Read briefing's rule (bin/briefing download(), tests/test_starter.py): without BRIEFING_STARTER_TESTING=1 any URL that is not https:// is refused inside download() (file:// too); the fetch fails as any failed download does (why_binary 'the download of <asset> failed', backoff recorded, falls through to the fallback engines). With the gate any scheme curl/wget take. Production curl also runs --proto =https --proto-redir =https and wget's Location chain is checked for https. Plan for skilletor: same rule with SKILLETOR_STARTER_TESTING=1, checked in fetch_binary before anything is created, but with its own why_binary (the brief asks the line to say why; briefing's is generic). Only test/starter.test.ts and test/install.test.ts use SKILLETOR_BINARY_BASE_URL with http/file URLs; no doc, script, CI workflow or Perl file names it.
+
+2026-11-19 07:24 Done, tree commit-ready (not committed). Rule now as briefing's: SKILLETOR_BINARY_BASE_URL (and the default prefix) must start with https://; any other scheme (http://, file://, ...) only with SKILLETOR_STARTER_TESTING=1, exactly 1. Checked in fetch_binary after the tool lookups, before the cache dir is made: nothing fetches, why_binary says 'SKILLETOR_BINARY_BASE_URL is not an https:// URL, so <asset> was not downloaded (another scheme is for tests, with SKILLETOR_STARTER_TESTING=1)' (fixed text, the URL is never in the line), a SessionStart provision backs off as after a failed download, Node/Perl run next. Deviation from briefing: briefing refuses inside download() with the generic 'the download of <asset> failed'; skilletor names the reason, as the brief asks. Files: bin/skilletor-start; test/starter.test.ts (new k253 case; helper testRelease() sets the gate at all 28 existing http/file sites, k252's included); test/install.test.ts (4 serveBinary sites set the gate). No doc, script, CI workflow, dist.ini or Perl file names SKILLETOR_BINARY_BASE_URL, so nothing else changed; dist/ unchanged (no src/ change). Red before: the new case on the old starter got 'the download of <asset> failed' (curl started on http://). Without the gate 17 starter cases and 4 install cases go red; with it all green. Checks: typecheck ok; npm test 1380 tests, 1366 pass, 0 fail, 14 skipped (11 Hermes real-agent: no Hermes Agent; 3 native Windows); build ok; check-dist up to date; prove 57 files, 2762 tests PASS (t/65-report-json.t skips 102 subtests: no sync/check/status step to compare). shellcheck not installed, so the parse test ran sh -n and dash -n only. Also found, not changed: (1) an https base URL that redirects to http:// is still followed - curl -L and wget keep their default redirect protocols; briefing pins curl to --proto =https --proto-redir =https and checks wget's Location chain. (2) On the hook path the refusal reaches no line: SessionStart says 'it is being fetched in the background', the next one the backoff line; only a CLI command shows the reason - as for any failed fetch. (3) A dogfood run that serves probe binaries to the starter over http:// or file:// now needs SKILLETOR_STARTER_TESTING=1.
+
+Committed as a4cbd48. A probe served to the starter over http:// or file:// (e.g. the dogfood run) now needs SKILLETOR_STARTER_TESTING=1.
