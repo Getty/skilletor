@@ -1,0 +1,37 @@
+---
+claimed_at: 2026-11-19T04:04:23Z
+claimed_by: ack-paket
+class: standard
+completed: 2026-11-19T04:04:23Z
+created: 2026-11-18T18:42:19Z
+id: 255
+priority: medium
+started: 2026-11-19T03:06:27Z
+status: done
+tags:
+- state
+- perf
+title: 'State: render-inputs.json, unreached.json and last-check.json keep entries
+  of gone scopes'
+updated: 2026-11-19T04:04:23Z
+---
+
+Found on k254 (2026-11-18, reuben, key counts read-only, real files untouched). k254 prunes only sources-read.json. The other state files keyed per scope grow the same way:
+- render-inputs.json (keyed by lock path, written in the same sync step): 762 keys, 579 whose lock directory is gone, 21 relative, 126 KB.
+- unreached.json (keyed by lock path): 2 keys, both gone.
+- last-check.json (keyed by project dir, written on the hook path by markChecked): 237 keys, 94 whose project dir is gone, 16 KB.
+The k254 helper (src/state.ts dropGoneScopes, lib/Skilletor/State.pm _drop_gone_scopes: drop keys that are no absolute path or whose lock's directory is gone, keep the scope written) covers render-inputs.json and unreached.json unchanged; last-check.json needs its own rule (the project dir itself). Done: same prune in Node and Perl for these files, tests red before/green after, parity bytes equal.
+
+Taken up on the maintainer's word (2026-11-19, via the ACK session): fix on branch ack-paket for both engines, modelled on k254 (98fade6): prune render-inputs.json, unreached.json and last-check.json of gone scopes, parity tests, rebuilt dist.
+
+2026-11-19 03:12 Findings (read-only so far). render-inputs.json and unreached.json: every key is the lock path join(targetDir, 'skilletor.lock.json') – engine.ts syncScopeRun ~1152/1170/1172 and the error path ~649-651; Engine.pm _sync_scope_run ~696/707/710 and _sync_scope ~444-446 via _lock_path – the same key and the same sync step as sources-read.json, nothing else writes either file; check/status only read them. So dropGoneScopes/_drop_gone_scopes apply unchanged (dirname = the scope's .claude). putRenderInputs is not called when a trusted source was unreachable – no write, no prune there; the next sync prunes. last-check.json: keys are projectKeyOf = ctx.projectDir ?? input.cwd ?? '' (Hooks.pm _project_key alike); runHook always sets projectDir (projectRootOf(input.cwd ?? process.cwd()), so '' never reaches markChecked; markChecked(answered) in sessionMove is projectRootOf(cwd). Keys are project dirs, not lock paths: the k254 dirname rule would test the project's parent. On this host (read-only count): 237 keys, 0 relative, 94 whose dir is gone, 13 whose parent is gone, 10 live dirs without .claude (sessions in projects without skilletor) – so the rule is 'no absolute path, or the key dir itself is gone', and not '.claude'. Pruned in markChecked only (it always writes); isDue untouched; clearChecked not: it only follows a markChecked of the same flow (checkAndSync, the prompt that spawned the background sync) that just pruned. Existing tests whose claim needs a nonexistent key to keep its mark (t/26-state-hooks.t '/p','/q') get real dirs.
+
+2026-11-19 03:25 Resumed after the killed worker. Reviewed the inherited diff (src/state.ts, lib/Skilletor/State.pm, 6 tests): logic sound and the same in both engines – dropGoneScopes/_drop_gone_scopes gain an optional dir-of (default dirname); putUnreached/putRenderInputs prune as putSourcesRead; markChecked prunes with the key itself as the dir. Node state+hooks tests and t/26, t/28, t/52 green on it. t/54 red: dist/skilletor.js was never rebuilt, so the reference CLI did not prune last-check.json. Next: build, spec section 14.3/6.5, red-before runs, full checks, dry run on a copy.
+
+2026-11-19 03:28 Red before, green after (each engine's k255 prune reverted alone, k254's putSourcesRead prune kept, restored from a backup, checksums verified). Node reverted: test/state.test.ts 3 k255 tests red, test/hooks.test.ts the k255 hook test red (74 tests, 4 fail); t/26 reference 'check marks of gone projects' red (answers and bytes), t/52 red on render-inputs.json and unreached.json (reference asserts + state bytes). Perl reverted: t/28 subtests 3,4,5 red, t/26 reference sequence red, t/52 state bytes red (render-inputs.json, unreached.json), t/54 SessionStart step bytes red. The old dist (not rebuilt) already made t/54 red on the reference's last-check.json. Rebuilt dist; spec 6.5 (last-check.json rule) and 14.3 (unreached/render-inputs prune, render-inputs no-record list) updated.
+
+2026-11-19 03:54 Dry run on a copy of the maintainer's state (temp root, temp HOME and CODEX_HOME, sha256 of the four originals equal before and after): one put with a keep key that adds nothing (putRenderInputs undef, putUnreached [], putSourcesRead {}, markChecked of a temp dir, clock fixed). render-inputs.json 762 keys/126292 B -> 162/23463 (21 relative, 579 gone dropped); unreached.json 2/1034 B -> 0/3 B; last-check.json 237/16453 B -> 144/8228 (94 gone dropped, +1 keep key); sources-read.json (k254, comparison) 762/307558 B -> 162/54851. Node and Perl outputs byte-identical for all four; kept keys keep their values and order. A second put writes nothing (same inode and mtime) for the three lock-keyed files; markChecked rewrites by design, same bytes. Also found (not in this change): pending-report.json is keyed by project dir too and never pruned – a gone project's report stays until a prompt there takes it (here 1 key, gone, 3 KB).
+
+2026-11-19 03:54 Done, uncommitted on ack-paket. Kept the inherited code and tests after review (logic the same in both engines); added: dist/skilletor.js rebuilt (the inherited diff never built it, so t/54 was red on the reference's last-check.json), spec 6.5 (last-check.json rule) and 14.3 (unreached.json/render-inputs.json prune; 'once a write dropped it' in the render-inputs no-record list). Checks: typecheck clean; npm test 1366 tests, 1362 pass, 0 fail, 4 skipped (Hermes install needs SKILLETOR_HERMES_INSTALL=1; 3 native-Windows tests); build + check-dist clean; prove -lr -j4 t: 56 files, 2749 tests, PASS, 102 skipped subtests all in t/65-report-json.t (conformance cases with no sync/check/status step). Red-before evidence and dry-run numbers in the notes above. Changes entry left to the release manager.
+
+Committed as ead04cf on ack-paket.
