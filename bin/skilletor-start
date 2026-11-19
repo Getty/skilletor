@@ -264,27 +264,34 @@ find_binary() {
   bin_file=$cache_dir/$asset-$sum
   par_dir=$bin_file.par
   retry_file=$cache_dir/.$asset.failed-at
-  if [ -f "$bin_file" ] && [ -x "$bin_file" ] && verify_cached_binary; then
-    clear_failed_session_start
-    return 0
+  # A cached binary that fails its check is refused, as if it were not there - and why leads
+  # whatever is said next, so a damaged or tampered cache never reads as "not cached" (k252).
+  refused=
+  if [ -f "$bin_file" ] && [ -x "$bin_file" ]; then
+    if verify_cached_binary; then
+      clear_failed_session_start
+      return 0
+    fi
+    refused="$why_binary; "
   fi
   if [ -z "$provision" ]; then
-    why_binary="the pinned binary is not cached; a SessionStart hook or a CLI command other than --version fetches it"
+    why_binary="${refused:-the pinned binary is not cached; }a SessionStart hook or a CLI command other than --version fetches it"
     return 1
   fi
   if retry_backoff_active; then
-    why_binary="the last SessionStart binary provision failed; retrying after $retry_backoff_seconds seconds"
+    why_binary="${refused}the last SessionStart binary provision failed; retrying after $retry_backoff_seconds seconds"
     return 1
   fi
   if [ "$provision" = background ]; then
     provision_in_background
-    why_binary="the pinned binary is not cached; it is being fetched in the background"
+    why_binary="${refused:-the pinned binary is not cached; }it is being fetched in the background"
     return 1
   fi
   if fetch_binary; then
     clear_failed_session_start
     return 0
   fi
+  why_binary=$refused$why_binary
   record_failed_session_start
   return 1
 }

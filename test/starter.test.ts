@@ -722,6 +722,63 @@ test("a mismatch with neither Node nor Perl: the line names the refusal", { skip
   assert.ok(!existsSync(versionDir(m)));
 });
 
+// k252: a cached binary of other bytes is refused and never run, and every start that falls
+// through to the line says so – first, before what happens next – where it said "not cached" or
+// gave only its own reason. A cache that is not there still says "not cached".
+test("a refused cache is named in the line on every path, an absent one says 'not cached'", { skip: noBinary }, async () => {
+  const sum = sha256(BINARY);
+  const TAMPERED = BINARY.replace("warm", "evil");
+  const refused = `the cached ${ASSET} does not match its pinned checksum and was refused`;
+  const line = (why: string) =>
+    "skilletor: Node.js is required but was not found on PATH (need >= 18); " +
+    `perl was not found on PATH (need >= 5.40); ${why}.`;
+  /** A hook: the line as its systemMessage, exit 0. The CLI: the line on stderr, exit 1. */
+  const answer = (args: string[], why: string): Run =>
+    args[0] === "hook"
+      ? { status: 0, stdout: JSON.stringify({ systemMessage: line(why) }) + "\n", stderr: "" }
+      : { status: 1, stdout: "", stderr: line(why) + "\n" };
+  const tamper = (m: Machine) => {
+    mkdirSync(versionDir(m), { recursive: true });
+    writeFileSync(join(versionDir(m), cachedName(sum)), TAMPERED);
+    chmodSync(join(versionDir(m), cachedName(sum)), 0o755);
+  };
+  const toFetch = "a SessionStart hook or a CLI command other than --version fetches it";
+  const backoff = "the last SessionStart binary provision failed; retrying after 900 seconds";
+  // [args, the reason with no cache, the reason with a refused one], in this order: the CLI's
+  // failed download records no backoff, the first SessionStart's does.
+  const paths: [string[], string, string][] = [
+    [["--version"], `the pinned binary is not cached; ${toFetch}`, `${refused}; ${toFetch}`],
+    [["-v"], `the pinned binary is not cached; ${toFetch}`, `${refused}; ${toFetch}`],
+    [HOOK_ARGS, `the pinned binary is not cached; ${toFetch}`, `${refused}; ${toFetch}`],
+    [CLI_ARGS, `the download of ${ASSET} failed`, `${refused}; the download of ${ASSET} failed`],
+    [SESSION_START_ARGS, "the pinned binary is not cached; it is being fetched in the background",
+      `${refused}; it is being fetched in the background`],
+    [SESSION_START_ARGS, backoff, `${refused}; ${backoff}`],
+  ];
+  for (const tampered of [false, true]) {
+    const root = makePlugin({ pinned: pinned(sum), perl: false });
+    // Neither Node nor Perl, and every download fails: what the binary step says reaches the line.
+    const recorder = fetchRecorder([SUM]);
+    const m = machine(recorder.tools, { SKILLETOR_STARTER_NOW: "1000" });
+    if (tampered) tamper(m);
+    for (const [i, [args, absent, refusal]] of paths.entries()) {
+      const label = `${tampered ? "refused" : "absent"} cache, start ${i + 1}: ${args.join(" ")}`;
+      assert.deepEqual(await start(starter(root), args, m.env, HOOK_INPUT), answer(args, tampered ? refusal : absent), label);
+      if (args === SESSION_START_ARGS) await until(() => existsSync(retryFile(m)), `${label}: the background provision ends`);
+    }
+    assert.equal(recorder.fetched().length, 2, "the CLI command and the first SessionStart tried the release");
+    if (tampered) assert.equal(readFileSync(join(versionDir(m), cachedName(sum)), "utf8"), TAMPERED, "nothing replaced it");
+  }
+
+  // What the lines promise: a CLI command fetches the pinned bytes over the refused ones.
+  const s = serve(BINARY);
+  const m = machine(makeTools(["curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  tamper(m);
+  assertEngine(await start(starter(makePlugin({ pinned: pinned(sum), perl: false })), CLI_ARGS, m.env), "binary", CLI_ARGS, "");
+  assert.equal(s.hits(), 1);
+  assertCached(m, sum, BINARY);
+});
+
 test("a binary that does not run here is not cached, and Node runs", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sha256(BROKEN_BINARY)) });
   const s = serve(BROKEN_BINARY);

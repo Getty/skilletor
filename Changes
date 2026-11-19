@@ -138,6 +138,10 @@ Revision history for skilletor and Skilletor, its Perl distribution
     SIGKILLed holder's lock is broken by the next run once its record missed
     two refreshes, and the Perl heartbeat no longer refreshes a dead
     holder's record (k251).
+  - A cached binary that fails its pinned checksum is still refused, and the
+    starter's line now says so on every path that falls through to it
+    (--version, -v, any hook, a failed fetch, the SessionStart backoff)
+    instead of "the pinned binary is not cached" (k252).
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's
