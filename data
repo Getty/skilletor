@@ -1,0 +1,13 @@
+---
+class: standard
+created: 2026-11-19T09:16:34Z
+id: 265
+priority: low
+status: backlog
+tags:
+- docs
+title: docs/branding.md and docs/release.md follow the k258 README
+updated: 2026-11-19T09:16:34Z
+---
+
+Found during k258. docs/branding.md (README outline, around line 39) still describes the old README: the '30-second start' section and its commands, which k258 replaced by Install / First steps / Everyday use / Status / Develop. docs/release.md has no step to update the README's Status bullet 'Released' (newest release, what CPAN carries) at a release; add one next to the binary pin step. Prose docs only.
