@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T09:16:44Z
+id: 267
+priority: low
+status: backlog
+tags:
+- skills
+- docs
+title: 'skilletor-core skill: Windows is in CI'
+updated: 2026-11-19T09:16:44Z
+---
+
+Found during k258. .claude/skills/skilletor-core/SKILL.md (around line 145) says 'Windows is not in CI', but .github/workflows/ci.yml runs the TypeScript tests on windows-latest (with ubuntu-latest and macos-latest), and simpici.yml checks the committed winlaunch .exe. Correct the sentence (what still does not run on Windows: the sh-script tests skip themselves, the Perl suite runs on Linux only). Skill text: skilletor-skill-author lane.
