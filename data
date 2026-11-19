@@ -1,0 +1,15 @@
+---
+class: standard
+created: 2026-11-19T08:33:57Z
+id: 263
+priority: low
+status: backlog
+tags:
+- ci
+- perl
+- windows
+title: 'CI: run the full Perl suite (prove -lr t) on Windows'
+updated: 2026-11-19T08:33:57Z
+---
+
+Split from k262. k262 adds a Windows leg to perl.yml (load-windows) that only installs the deps on Strawberry Perl 5.40 and runs the load tests (t/00-load.t, t/03-load-win32-signals.t). The full suite has never run on native Windows Perl, so its result is unknown; until it does, the Perl port on Windows is checked only by those load tests and the binaries probe (build and smoke). Done when perl.yml runs prove -lr t on windows-latest green, or the tests that cannot pass there skip with a named reason (see k207, k215, k256 for known Windows divergences).
