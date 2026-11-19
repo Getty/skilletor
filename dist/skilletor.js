@@ -9307,10 +9307,10 @@ function setOwn3(record, key, value2) {
 function projectStateKey(key) {
   return process.platform === "win32" && isAbsolute2(key) ? realOrResolved(key) : key;
 }
-function dropGoneScopes(all, keep) {
+function dropGoneScopes(all, keep, dirOf = dirname4) {
   let dropped = false;
   for (const key of Object.keys(all)) {
-    if (key === keep || isAbsolute2(key) && existsSync9(dirname4(key))) continue;
+    if (key === keep || isAbsolute2(key) && existsSync9(dirOf(key))) continue;
     delete all[key];
     dropped = true;
   }
@@ -9360,9 +9360,13 @@ var State = class {
     if (typeof last !== "number") return true;
     return Date.now() - last >= intervalSeconds * 1e3;
   }
+  /** Mark a check now, dropping the marks of projects that are gone (k255): a key that is no
+   *  absolute path, or whose directory – the project dir itself, `.claude` or not – no longer
+   *  exists. The file is written anyway; `isDue` only reads it, and `clearChecked` follows a mark. */
   markChecked(scopeKey) {
     scopeKey = projectStateKey(scopeKey);
     const checks = this.readJson("last-check.json");
+    dropGoneScopes(checks, scopeKey, (dir) => dir);
     checks[scopeKey] = Date.now();
     this.writeJson("last-check.json", checks);
   }
@@ -9381,11 +9385,13 @@ var State = class {
     const ids = this.readJson("unreached.json")[scopeKey];
     return Array.isArray(ids) ? ids.filter((id) => typeof id === "string") : [];
   }
-  /** Replace a scope's unreached drift; the file is written only when it changes. */
+  /** Replace a scope's unreached drift, dropping the records of scopes that are gone (k255, as
+   *  `putSourcesRead`); the file is written only when it changes. */
   putUnreached(scopeKey, ids) {
     const all = this.readJson("unreached.json");
     const next = [...new Set(ids)].sort();
-    if (JSON.stringify(all[scopeKey] ?? []) === JSON.stringify(next)) return;
+    const dropped = dropGoneScopes(all, scopeKey);
+    if (!dropped && JSON.stringify(all[scopeKey] ?? []) === JSON.stringify(next)) return;
     if (next.length > 0) all[scopeKey] = next;
     else delete all[scopeKey];
     this.writeJson("unreached.json", all);
@@ -9432,11 +9438,12 @@ var State = class {
     const hash = this.readJson("render-inputs.json")[scopeKey];
     return typeof hash === "string" ? hash : void 0;
   }
-  /** Replace a scope's render-inputs hash, or drop it (undefined); the file is written only
-   *  when it changes. */
+  /** Replace a scope's render-inputs hash, or drop it (undefined), dropping the records of
+   *  scopes that are gone (k255, as `putSourcesRead`); the file is written only when it changes. */
   putRenderInputs(scopeKey, hash) {
     const all = this.readJson("render-inputs.json");
-    if (all[scopeKey] === hash) return;
+    const dropped = dropGoneScopes(all, scopeKey);
+    if (!dropped && all[scopeKey] === hash) return;
     if (hash === void 0) delete all[scopeKey];
     else all[scopeKey] = hash;
     this.writeJson("render-inputs.json", all);

@@ -920,9 +920,11 @@ the block is deleted. Content outside the block is never touched.
 
 ### 6.5 State
 
-`~/.claude/skilletor/`: `cache/` (deletable), `trust.json`, `last-check.json`,
-`pending-report.json`, `unreached.json` (per lock, the drift the last sync could not reach,
-§14.3), `sources-read.json` (per lock, the version of each source the last sync read, the
+`~/.claude/skilletor/`: `cache/` (deletable), `trust.json`, `last-check.json` (per project
+dir, when the in-session check last ran, §8; each mark drops the mark of every other key that
+is no absolute path or whose directory – the project dir itself, `.claude` or not – no longer
+exists, k255), `pending-report.json`, `unreached.json` (per lock, the drift the last sync
+could not reach, §14.3), `sources-read.json` (per lock, the version of each source the last sync read, the
 backend it read it through and the `path` it scanned it with, §14.3), `render-inputs.json` (per lock, a hash of the vars and
 project the last sync rendered the scope's items with, §14.3), `hermes-home.json` (the
 Hermes home the user scope's `hermes:` entries live under, when not `~/.hermes`, §16.2),
@@ -1628,7 +1630,10 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
   needs any more leaves the record with the next sync. Each write also drops the record of
   every other lock whose key is no absolute path or whose directory, the scope's `.claude`, no
   longer exists – a removed worktree, a relative `--project-dir` of a release before k254 – the
-  directory and not the lock, which a sync that installed nothing does not leave. With no
+  directory and not the lock, which a sync that installed nothing does not leave.
+  `unreached.json` and `render-inputs.json`, keyed by lock path and written in the same step,
+  drop the same records with each of their writes (k255); `last-check.json` drops the marks
+  of gone projects by its own rule (§6.5). With no
   record – before the first sync, or after one that stopped with an error, which clears it
   with `unreached.json`, or once a write dropped it – `check` compares with the lock's
   version as before; a malformed record counts as none.
@@ -1649,9 +1654,10 @@ Every item type has a Codex form, so there is no "not installed for Codex" note 
   whichever harness started the session), `host.*` and `user.*` (the machine – a home shared
   by several hosts would sync at every switch); after such a change `skilletor sync`
   re-renders. With no record – the first session after an upgrade from a version without
-  it, after a sync that stopped with an error (which clears it with `unreached.json`), or a
-  malformed one – a scope counts as changed and one sync records it: counted as unchanged,
-  a var changed before the upgrade or around a failed sync would stay unrendered. A scope that declares
+  it, after a sync that stopped with an error (which clears it with `unreached.json`), a
+  malformed one, or once a write dropped it – a scope counts as changed and one sync
+  records it: counted as unchanged, a var changed before the upgrade or around a failed
+  sync would stay unrendered. A scope that declares
   nothing and holds no lock entries records nothing and never counts, so a directory
   without skilletor config costs no sync; nor does a scope whose every source is untrusted –
   the trust request stands for it. A sync that could not resolve or scan a trusted source

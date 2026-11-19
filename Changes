@@ -119,6 +119,13 @@ Revision history for skilletor and Skilletor, its Perl distribution
     a lock. On a machine with many removed worktrees this cut the file from
     300 KB to 55 KB. A relative --project-dir is now taken from the current
     directory, so the scope is recorded under its absolute path.
+  - A sync also drops from render-inputs.json and unreached.json the records
+    of scopes that are gone, as from sources-read.json (k255). Marking the
+    in-session check drops from last-check.json the marks of project
+    directories that no longer exist, and of keys that are no absolute path;
+    a project without .claude keeps its mark. On a machine with many removed
+    worktrees this cut render-inputs.json from 126 KB to 23 KB and
+    last-check.json from 16 KB to 8 KB.
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's

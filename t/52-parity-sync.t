@@ -162,13 +162,19 @@ write_json( "$proj/.claude/skilletor.json", {
 write_json( "$proj/.claude/skilletor.local.json", { vars => { who => 'me' } } );
 
 # What earlier syncs recorded of scopes that are gone – a removed checkout, a key a relative
-# --project-dir made – beside a live scope's (k254): both engines drop the same, the live one stays.
+# --project-dir made – beside a live scope's (k254; unreached.json and render-inputs.json, k255):
+# both engines drop the same, the live one stays.
 my $other = "$root/other/.claude/skilletor.lock.json";
 path($other)->parent->mkpath;
 path($other)->spew_raw("{}\n");
-my $earlier = js_ordered( s => js_ordered( version => 'git:1', kind => 'git', address => 'https://example.invalid/s.git' ) );
-write_json( "$home/.claude/skilletor/sources-read.json",
-  js_ordered( "$root/gone/.claude/skilletor.lock.json" => $earlier, '.claude/skilletor.lock.json' => $earlier, $other => $earlier ) );
+my %earlier = (
+  'sources-read.json'  => js_ordered( s => js_ordered( version => 'git:1', kind => 'git', address => 'https://example.invalid/s.git' ) ),
+  'unreached.json'     => ['missing:skills/x@s'],
+  'render-inputs.json' => 'sha256:1',
+);
+write_json( "$home/.claude/skilletor/$_",
+  js_ordered( "$root/gone/.claude/skilletor.lock.json" => $earlier{$_}, '.claude/skilletor.lock.json' => $earlier{$_}, $other => $earlier{$_} ) )
+  for sort keys %earlier;
 
 # The pristine machine, to start each engine's sync from; the project's .git stays as it is.
 my %pristine = ( home => tree($home), project => tree( $proj, '.git' ) );
@@ -203,10 +209,12 @@ my %after_ts = (
 );
 ok( scalar( keys %{ $after_ts{state} } ) >= 3, 'the reference recorded its state' )
   or diag join ', ', sort keys %{ $after_ts{state} };
-my $read_ts = js_parse( decode_utf8_lossy( $after_ts{state}{'sources-read.json'} ) );
-is_deeply( [ keys %$read_ts ], [ $other, "$home/.claude/skilletor.lock.json", "$proj/.claude/skilletor.lock.json" ],
-  'the reference dropped the records of scopes that are gone, kept the live one' );
-is( js_stringify( $read_ts->{$other} ), js_stringify($earlier), 'the live one as it was' );
+for my $file ( sort keys %earlier ) {
+  my $recorded = js_parse( decode_utf8_lossy( $after_ts{state}{$file} ) );
+  is_deeply( [ keys %$recorded ], [ $other, "$home/.claude/skilletor.lock.json", "$proj/.claude/skilletor.lock.json" ],
+    "$file: the reference dropped the records of scopes that are gone, kept the live one" );
+  is( js_stringify( $recorded->{$other} ), js_stringify( $earlier{$file} ), "$file: the live one as it was" );
+}
 # The templates did render there, so the same bytes here are the same rendering.
 like( decode_utf8_lossy( $after_ts{project}{'.claude/skills/hello/SKILL.md'} // '' ),
   qr/^skill hello from crew, project\/claude into \Q$proj\E\/\.claude\n.*^\x{2013} source, n=11$/ms, 'the reference rendered the templates' );

@@ -257,6 +257,41 @@ test("user-prompt-submit spawns a background sync only when due", async () => {
   }
 });
 
+// k255: the marks of project dirs that are gone leave last-check.json with the next mark –
+// SessionStart's, a due prompt's – and the hook answers as before; a live project keeps its mark,
+// and a prompt that is not due writes nothing.
+test("k255: session-start and a due prompt drop the check marks of gone project dirs, keep the live ones", async () => {
+  const e = env();
+  try {
+    e.writeUserCfg({});
+    const other = join(e.tmp.dir, "other"); // another session's live project
+    const gone = join(e.tmp.dir, "gone", "proj");
+    mkdirSync(other);
+    mkdirSync(e.ctx.stateRoot);
+    const file = join(e.ctx.stateRoot, "last-check.json");
+    const seed = () => writeFileSync(file, JSON.stringify({ [gone]: 1, [other]: 2, "relative/proj": 3 }));
+    const marks = () => JSON.parse(readFileSync(file, "utf8")) as Record<string, number>;
+
+    seed();
+    assert.deepEqual(await runHook("session-start", { source: "startup" }, e.ctx), {});
+    assert.deepEqual(Object.keys(marks()), [other, e.projectDir]);
+    assert.equal(marks()[other], 2);
+
+    seed();
+    assert.deepEqual(await runHook("user-prompt-submit", {}, e.ctx), {});
+    assert.equal(e.backgroundCalls.length, 1, "due: the background sync starts");
+    assert.deepEqual(Object.keys(marks()), [other, e.projectDir]);
+
+    writeFileSync(file, JSON.stringify({ [gone]: 1, [e.projectDir]: Date.now() }));
+    const before = readFileSync(file, "utf8");
+    assert.deepEqual(await runHook("user-prompt-submit", {}, e.ctx), {});
+    assert.equal(e.backgroundCalls.length, 1, "not due: none");
+    assert.equal(readFileSync(file, "utf8"), before, "not due: nothing written, nothing dropped");
+  } finally {
+    e.cleanup();
+  }
+});
+
 // Asserts (k133): the default background trigger starts `<bin> hook __sync-background` with the
 // running node, detached and unreferenced, with no stdio, the project in SKILLETOR_PROJECT_DIR –
 // and windowsHide, so a background sync on Windows opens no console window. Without a binPath

@@ -97,10 +97,14 @@ sub is_due {
   return _now_ms_number() - $last >= $interval_seconds * 1000 ? 1 : 0;
 }
 
+# Mark a check now, dropping the marks of projects that are gone (k255): a key that is no absolute
+# path, or whose directory – the project dir itself, .claude or not – no longer exists. The file is
+# written anyway; is_due only reads it, and clear_checked follows a mark.
 sub mark_checked {
   my ( $self, $scope_key ) = @_;
   $scope_key = _project_state_key($scope_key);
   my $checks = $self->_read_json('last-check.json');
+  _drop_gone_scopes( $checks, $scope_key, sub { $_[0] } );
   $checks->{$scope_key} = _now_ms_number();
   $self->_write_json( 'last-check.json', $checks );
 }
@@ -133,12 +137,15 @@ sub unreached {
   return [ grep { js_type($_) eq 'string' } @$ids ];
 }
 
+# Replace a scope's unreached drift, dropping the records of scopes that are gone (k255, as
+# put_sources_read); written only when the file changes.
 sub put_unreached {
   my ( $self, $scope_key, $ids ) = @_;
   my $all = $self->_read_json('unreached.json');
   my %seen;
   my $next = [ js_sort_keys( grep { !$seen{$_}++ } @$ids ) ];
-  return if js_stringify( $all->{$scope_key} // [] ) eq js_stringify($next);
+  my $dropped = _drop_gone_scopes( $all, $scope_key );
+  return if !$dropped && js_stringify( $all->{$scope_key} // [] ) eq js_stringify($next);
   if   (@$next) { $all->{$scope_key} = $next }
   else          { delete $all->{$scope_key} }
   $self->_write_json( 'unreached.json', $all );
@@ -176,13 +183,15 @@ sub sources_read {
 # Drop the keys of scopes that are gone (k254) from a state file keyed by lock path, but $keep's: a
 # key that is no absolute path – it names a checkout only from a cwd long changed – or whose lock's
 # directory, the scope's .claude, no longer exists. The directory, not the lock: a sync that
-# installed nothing leaves no lock, and its record still holds. True when one was dropped.
-# File::Basename's dirname, as Node's, takes either separator on Windows; a key with a NUL exists
-# nowhere, silently, as for existsSync.
+# installed nothing leaves no lock, and its record still holds. A file keyed by another path names
+# its directory with $dir_of (last-check.json: the project dir itself, k255). True when one was
+# dropped. File::Basename's dirname, as Node's, takes either separator on Windows; a key with a NUL
+# exists nowhere, silently, as for existsSync.
 sub _drop_gone_scopes {
-  my ( $all, $keep ) = @_;
+  my ( $all, $keep, $dir_of ) = @_;
+  $dir_of //= \&File::Basename::dirname;
   no warnings 'syscalls';
-  my @gone = grep { $_ ne $keep && !( is_absolute($_) && -e encode_text( File::Basename::dirname($_) ) ) } keys %$all;
+  my @gone = grep { $_ ne $keep && !( is_absolute($_) && -e encode_text( $dir_of->($_) ) ) } keys %$all;
   delete $all->{$_} for @gone;
   return @gone ? 1 : 0;
 }
@@ -209,16 +218,18 @@ sub render_inputs {
   return js_type($hash) eq 'string' ? $hash : undef;
 }
 
-# Replace a scope's render-inputs hash, or drop it (undef); written only when it changes.
+# Replace a scope's render-inputs hash, or drop it (undef), dropping the records of scopes that are
+# gone (k255, as put_sources_read); written only when the file changes.
 sub put_render_inputs {
   my ( $self, $scope_key, $hash ) = @_;
   my $all = $self->_read_json('render-inputs.json');
+  my $dropped = _drop_gone_scopes( $all, $scope_key );
   if ( defined $hash ) {
-    return if exists $all->{$scope_key} && js_type( $all->{$scope_key} ) eq 'string' && $all->{$scope_key} eq $hash;
+    return if !$dropped && exists $all->{$scope_key} && js_type( $all->{$scope_key} ) eq 'string' && $all->{$scope_key} eq $hash;
     $all->{$scope_key} = $hash;
   }
   else {
-    return unless exists $all->{$scope_key};
+    return if !$dropped && !exists $all->{$scope_key};
     delete $all->{$scope_key};
   }
   $self->_write_json( 'render-inputs.json', $all );
@@ -569,6 +580,9 @@ Replaces an earlier entry of the name.
 
   $state->put_unreached( $lock_path, \@ids );   # sorted, deduplicated; none drops the key
 
+It drops the records of scopes that are gone, as L</put_sources_read> does
+(k255).
+
 =method sources_read
 
   my $read = $state->sources_read($lock_path);
@@ -590,6 +604,9 @@ stays, and so does one whose directory holds no lock.
 
   $state->put_render_inputs( $lock_path, $hash );   # undef drops it
 
+It drops the records of scopes that are gone, as L</put_sources_read> does
+(k255).
+
 =method is_due
 
   $state->is_due( $key, $interval_seconds );
@@ -597,6 +614,13 @@ stays, and so does one whose directory holds no lock.
 True when no check was marked for the key, or the interval has passed.
 
 =method mark_checked
+
+  $state->mark_checked($key);   # the project dir; is_due is false for the interval
+
+It drops the marks of projects that are gone, too: a key that is no absolute
+path, or whose directory itself no longer exists (k255) – a project without
+F<.claude> keeps its mark. The key marked stays. L</is_due> and
+L</clear_checked> drop nothing.
 
 =method clear_checked
 

@@ -242,6 +242,113 @@ test("k254: a put that changes no record still drops gone scopes; with none to d
   }
 });
 
+// k255: unreached.json and render-inputs.json are keyed by lock path too and written in the same
+// sync step; their puts drop the same keys as putSourcesRead's.
+
+test("k255: putUnreached and putRenderInputs drop gone scopes and relative keys, keep the live ones byte for byte", () => {
+  const tmp = makeTmpDir();
+  try {
+    const root = join(tmp.dir, "state");
+    const live = join(tmp.dir, "live", ".claude", "skilletor.lock.json");
+    const bare = join(tmp.dir, "bare", ".claude", "skilletor.lock.json"); // its .claude, no lock
+    const gone = join(tmp.dir, "gone", ".claude", "skilletor.lock.json");
+    const written = join(tmp.dir, "new", ".claude", "skilletor.lock.json"); // nothing on disk yet
+    mkdirSync(dirname(live), { recursive: true });
+    writeFileSync(live, "{}\n");
+    mkdirSync(dirname(bare), { recursive: true });
+    mkdirSync(root);
+    const rel = ".claude/skilletor.lock.json";
+    // Live records as another writer left them: an id list unsorted, a value no version writes.
+    writeFileSync(join(root, "unreached.json"), JSON.stringify({
+      [gone]: ["missing:skills/a@s"], [rel]: ["missing:skills/b@s"], [live]: ["z", "a"], [bare]: { odd: 1 },
+    }, null, 2) + "\n");
+    writeFileSync(join(root, "render-inputs.json"), JSON.stringify({
+      [gone]: "sha256:0", [rel]: "sha256:0", [live]: "sha256:1", [bare]: 7,
+    }, null, 2) + "\n");
+
+    const state = new State(root);
+    state.putUnreached(written, ["missing:skills/c@s"]);
+    state.putRenderInputs(written, "sha256:3");
+    assert.equal(readFileSync(join(root, "unreached.json"), "utf8"),
+      JSON.stringify({ [live]: ["z", "a"], [bare]: { odd: 1 }, [written]: ["missing:skills/c@s"] }, null, 2) + "\n");
+    assert.equal(readFileSync(join(root, "render-inputs.json"), "utf8"),
+      JSON.stringify({ [live]: "sha256:1", [bare]: 7, [written]: "sha256:3" }, null, 2) + "\n");
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("k255: an unreached or render-inputs put that changes no record still drops gone scopes; with none to drop it writes nothing", () => {
+  const tmp = makeTmpDir();
+  try {
+    const root = join(tmp.dir, "state");
+    const live = join(tmp.dir, "live", ".claude", "skilletor.lock.json");
+    const gone = join(tmp.dir, "gone", ".claude", "skilletor.lock.json");
+    const empty = join(tmp.dir, "empty", ".claude", "skilletor.lock.json"); // records nothing
+    mkdirSync(dirname(live), { recursive: true });
+    mkdirSync(dirname(empty), { recursive: true });
+    mkdirSync(root);
+    const unreached = join(root, "unreached.json");
+    const inputs = join(root, "render-inputs.json");
+    // Compact, as no put writes it: a rewrite would show.
+    writeFileSync(unreached, JSON.stringify({ [gone]: ["x"], [live]: ["y"] }));
+    writeFileSync(inputs, JSON.stringify({ [gone]: "sha256:0", [live]: "sha256:1" }));
+    const state = new State(root);
+    state.putUnreached(empty, []); // drops a record it does not have
+    state.putRenderInputs(empty, undefined);
+    assert.equal(readFileSync(unreached, "utf8"), JSON.stringify({ [live]: ["y"] }, null, 2) + "\n", "the gone scope dropped");
+    assert.equal(readFileSync(inputs, "utf8"), JSON.stringify({ [live]: "sha256:1" }, null, 2) + "\n", "the gone scope dropped");
+    writeFileSync(unreached, JSON.stringify({ [live]: ["y"] }));
+    writeFileSync(inputs, JSON.stringify({ [live]: "sha256:1" }));
+    state.putUnreached(live, ["y"]);
+    state.putRenderInputs(live, "sha256:1");
+    state.putUnreached(empty, []);
+    state.putRenderInputs(empty, undefined);
+    assert.deepEqual([readFileSync(unreached, "utf8"), readFileSync(inputs, "utf8")],
+      [JSON.stringify({ [live]: ["y"] }), JSON.stringify({ [live]: "sha256:1" })], "nothing to drop, nothing changed: not written");
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// k255: last-check.json is keyed by project dir – the session's project, the checkout a move
+// answered for – not by lock path. A mark drops the marks of every other key that is no absolute
+// path or whose directory itself no longer exists; a project without `.claude` (a session where
+// skilletor is not used) is live and keeps its mark. The key marked stays, gone or not. Only a
+// mark prunes: it writes the file anyway; `isDue` reads, and `clearChecked` follows a mark.
+
+test("k255: markChecked drops the marks of gone project dirs and relative keys, keeps the live ones in order", () => {
+  const tmp = makeTmpDir();
+  try {
+    const root = join(tmp.dir, "state");
+    const live = join(tmp.dir, "live");
+    const plain = join(tmp.dir, "plain"); // a project dir without .claude
+    const gone = join(tmp.dir, "gone");
+    const goneParent = join(tmp.dir, "gone-too", "proj");
+    const marked = join(tmp.dir, "removed"); // marked though gone: a session in a removed dir
+    mkdirSync(join(live, ".claude"), { recursive: true });
+    mkdirSync(plain);
+    mkdirSync(root);
+    const file = join(root, "last-check.json");
+    writeFileSync(file, JSON.stringify({ [gone]: 1, [live]: 2, proj: 3, "": 4, [plain]: 5, [goneParent]: 6 }, null, 2) + "\n");
+
+    const state = new State(root);
+    assert.equal(state.isDue(gone, 600), true);
+    assert.equal(readFileSync(file, "utf8"), JSON.stringify({ [gone]: 1, [live]: 2, proj: 3, "": 4, [plain]: 5, [goneParent]: 6 }, null, 2) + "\n",
+      "isDue writes nothing");
+    state.clearChecked(marked);
+    assert.equal(readFileSync(file, "utf8"), JSON.stringify({ [gone]: 1, [live]: 2, proj: 3, "": 4, [plain]: 5, [goneParent]: 6 }, null, 2) + "\n",
+      "clearChecked of a key not marked writes nothing");
+    state.markChecked(marked);
+    const after = JSON.parse(readFileSync(file, "utf8")) as Record<string, number>;
+    assert.deepEqual(Object.keys(after), [live, plain, marked]);
+    assert.deepEqual([after[live], after[plain]], [2, 5], "the live marks as they were");
+    assert.equal(state.isDue(marked, 600), false);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
 // ---- mutex ------------------------------------------------------------------
 // `sync.lock/` (spec §6.5, k81): a lock counts as stale once its owner record has not been
 // refreshed for the stale age – a holder refreshes it while it runs – or once its owner died

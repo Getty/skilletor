@@ -186,35 +186,44 @@ subtest 'at most 256 sessions: the ones recorded last' => sub {
 
 # ---- dueAgain, clearChecked ------------------------------------------------------------------
 
+# The keys are project dirs that exist: a mark drops the marks of the ones that are gone (k255).
 subtest 'a check mark dropped: the next check is due at once' => sub {
   my $root = tempdir;
+  my $dirs = tempdir;
+  my ( $p, $q ) = map { path( $dirs, $_ )->mkpath; "$dirs/$_" } qw( p q );
   my $s = Skilletor::State->new( root => "$root" );
-  $s->mark_checked('/p');
-  $s->mark_checked('/q');
-  ok( !$s->is_due( '/p', 600 ), 'marked: not due' );
-  $s->due_again('/p');
-  ok( $s->is_due( '/p', 600 ), 'due again' );
-  ok( !$s->is_due( '/q', 600 ), 'the other key keeps its mark' );
-  $root->child('last-check.json')->spew_raw('{"/q":1}');
-  $s->clear_checked('/p');
-  is( $root->child('last-check.json')->slurp_raw, '{"/q":1}', 'a key not marked: nothing written' );
+  $s->mark_checked($p);
+  $s->mark_checked($q);
+  ok( !$s->is_due( $p, 600 ), 'marked: not due' );
+  $s->due_again($p);
+  ok( $s->is_due( $p, 600 ), 'due again' );
+  ok( !$s->is_due( $q, 600 ), 'the other key keeps its mark' );
+  my $one = js_stringify( js_ordered( $q => 1 ) );
+  $root->child('last-check.json')->spew_raw($one);
+  $s->clear_checked($p);
+  is( $root->child('last-check.json')->slurp_raw, $one, 'a key not marked: nothing written' );
   SKIP: {
     skip 'root ignores the mode', 2 if $> == 0;
     skip 'no mode bits on Windows', 2 if $^O eq 'MSWin32';
-    $s->mark_checked('/p');
+    $s->mark_checked($p);
     chmod 0500, "$root";
-    my $ok = eval { $s->due_again('/p'); 1 };
+    my $ok = eval { $s->due_again($p); 1 };
     my $err = $@;
     chmod 0700, "$root";
     ok( $ok, 'a state dir that cannot be written: due_again does not throw' ) or diag $err;
     chmod 0500, "$root";
-    $ok = eval { $s->clear_checked('/p'); 1 };
+    $ok = eval { $s->clear_checked($p); 1 };
     chmod 0700, "$root";
     ok( !$ok, 'where clear_checked does' );
   }
 };
 
 # ---- the reference, byte for byte ------------------------------------------------------------
+
+# Project dirs that exist, for the check marks: a mark drops the marks of gone ones (k255).
+my $dirs = tempdir;
+my ( $P, $Q, $LIVE ) = map { path( $dirs, $_ )->mkpath; "$dirs/$_" } qw( p q live );
+my $GONE = "$dirs/gone";
 
 my @sequences = (
   [ 'prototype-named keys from empty stores' => {}, [
@@ -281,15 +290,24 @@ my @sequences = (
       [ sessionCwd    => ['s1'] ],
       [ sessionCwd    => ['late3'] ],
     ] ],
-  [ 'check marks: mark, clear, clear again, due' => { 'last-check.json' => '{"/q":1}' }, [
-      [ markChecked  => ['/p'], 10_000 ],
-      [ isDue        => [ '/p', 600 ], 600_000 ],
-      [ isDue        => [ '/p', 600 ], 610_000 ],
-      [ clearChecked => ['/p'] ],
-      [ clearChecked => ['/p'] ],
-      [ isDue        => [ '/p', 600 ], 10_001 ],
-      [ isDue        => [ '/q', 1 ], 1_000 ],
-      [ isDue        => [ '/q', 1 ], 1_001 ],
+  [ 'check marks: mark, clear, clear again, due' => { 'last-check.json' => js_stringify( js_ordered( $Q => 1 ) ) }, [
+      [ markChecked  => [$P], 10_000 ],
+      [ isDue        => [ $P, 600 ], 600_000 ],
+      [ isDue        => [ $P, 600 ], 610_000 ],
+      [ clearChecked => [$P] ],
+      [ clearChecked => [$P] ],
+      [ isDue        => [ $P, 600 ], 10_001 ],
+      [ isDue        => [ $Q, 1 ], 1_000 ],
+      [ isDue        => [ $Q, 1 ], 1_001 ],
+    ] ],
+  [ 'check marks of gone projects: a due test and a clear keep them, a mark drops them (k255)' => {
+      'last-check.json' => js_stringify( js_ordered( $GONE => 1, $LIVE => 2, 'rel/proj' => 3, '' => 4, "$GONE/sub" => 5 ), 2 )."\n" }, [
+      [ isDue        => [ $GONE, 600 ], 10_000 ],
+      [ clearChecked => [$P] ],
+      [ markChecked  => ["$dirs/removed"], 20_000 ],
+      [ isDue        => [ $LIVE, 600 ], 30_000 ],
+      [ isDue        => [ $GONE, 600 ], 30_000 ],
+      [ markChecked  => [$P], 40_000 ],
     ] ],
 );
 

@@ -230,6 +230,9 @@ subtest 'git failures, real host and user, the state files' => sub {
   git_ok( $m->{project}, 'remote', 'add', 'origin', 'https://example.invalid/team/app.git' );    # a render input
   write_json( "$m->{project}/.claude/skilletor.json", { install => { skills => [ 'whoami@good', 'lint@good' ] }, vars => { team => 'core' } } );
   path( $m->{project}, '.claude', 'skills', 'lint', 'SKILL.md' )->touchpath->spew_raw("mine\n");    # a lasting conflict: unreached
+  # Check marks earlier sessions left (k255): a project dir that is gone, a relative key, a live
+  # one; SessionStart's mark drops the first two in both CLIs.
+  write_json( "$m->{home}/.claude/skilletor/last-check.json", { "$tmp/gone/proj" => 1, 'rel/proj' => 2, "$tmp/cwd" => 3 } );
 
   my $moved = { GIT_CONFIG_GLOBAL => '${TMP}/gitconfig-moved' };
   my $runs = both( $m, [
@@ -267,6 +270,9 @@ subtest 'git failures, real host and user, the state files' => sub {
     for qw( render-inputs.json sources-read.json unreached.json );
   ok( exists $ts{'session-start, moved'}{snap}{files}{"home/.claude/skilletor/$_"}, "its SessionStart wrote $_" )
     for qw( last-check.json session-cwd.json );
+  is( $ts{'session-start, moved'}{snap}{files}{'home/.claude/skilletor/last-check.json'},
+    qq({\n  "$tmp/cwd": 3,\n  "$m->{project}": "<step session-start, moved>"\n}\n),
+    'its SessionStart dropped the marks of the gone project and the relative key, kept the live one' );
 
   same_runs($runs);
 };
