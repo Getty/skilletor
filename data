@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T07:35:27Z
+id: 260
+priority: low
+status: backlog
+tags:
+- starter
+- binary
+title: 'Starter: an https base URL that redirects to http:// is still followed'
+updated: 2026-11-19T07:35:27Z
+---
+
+Found on k253 (2026-11-19, ack-paket, a4cbd48). k253 makes bin/skilletor-start take SKILLETOR_BINARY_BASE_URL only as https:// outside SKILLETOR_STARTER_TESTING=1, but download() runs curl -L / wget with their default redirect protocols, so an https URL that redirects to http:// is fetched in plaintext. briefing's starter pins both outside testing: curl --proto '=https' --proto-redir '=https', and a check of wget's redirect chain (its test test_wget_rejects_https_to_http_redirect). The pinned checksum still guards the bytes. Done when skilletor pins redirects to https outside the test gate as briefing does (or says why not), with a test for curl and wget.
