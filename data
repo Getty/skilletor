@@ -1,0 +1,68 @@
+---
+claimed_at: 2026-11-19T04:58:43Z
+claimed_by: ack-paket
+class: standard
+completed: 2026-11-19T04:58:00Z
+created: 2026-11-18T16:46:16Z
+depends_on:
+- 196
+id: 250
+priority: high
+started: 2026-11-19T04:58:00Z
+status: done
+tags:
+- perl
+- binary
+- perf
+title: 'Perl binary: session-start on a real user state runs past Claude''s 30 s hook
+  limit'
+updated: 2026-11-19T04:58:43Z
+---
+
+Found by the agent-construction-kit session on reuben (Linux x86_64), 2026-11-18, testing the binary path before k191.
+Setup: plugin tree from ack-paket 4fc74ad with a pin for a local build skilletor-0.008-linux-x86_64 (probe 6718922), served through SKILLETOR_BINARY_BASE_URL; the user's real ~/.claude state; Node 0.7 as the comparison.
+
+- `hook session-start`, binary: 41.5 s and 41.3 s, output {"systemMessage":"skilletor: sync stopped before applying the user scope: its sources took too long"}. Node 0.7 on the same state: 0.39 s, silent.
+- In a real Claude session (claude -p --plugin-dir) Claude cancelled the hook at its 30 s limit, so the sync never applied (and see the sync.lock card).
+- `check --scope user`: binary 14.2 s, Node 0.18 s. The driver is ~/.claude/skilletor/sources-read.json (307558 bytes): with it moved away the binary takes 1.2 s. Suspect k196 (js_parse copies the whole text per string and number).
+
+Blocks k191: with this state the binary cannot replace Node for this user. Done when a session start on a state of this size (a test fixture with a ~300 KB sources-read.json) stays well inside the hook limit, measured against Node. The user's own state file stays on reuben; ask the maintainer if a copy is needed.
+
+Lock left by the cancel: k251.
+
+2026-11-18 16:53 k196 confirmed as the cause; a scratch fix brings session-start from 39.1 s to 2.45 s on the same state (numbers on k196).
+
+What the k196 fix (796f651 on ack-paket, not pushed) measures. Setup: this host, perl 5.40.1 from source (perl -Ilib script/skilletor, not the packed binary), Node v24.19.0 with dist/skilletor.js; temp HOME/CODEX_HOME/cwd under env -i; synthetic ~300 KB sources-read.json; user config with one local source, no network. 'synced' = after one sync, 'fresh' = nothing installed.
+- check --scope user, synced: Perl unpatched 11.2 s, patched 0.65 s, Node 0.15 s. Fresh: 11.5 / 0.63 / 0.14 s.
+- hook session-start, synced: unpatched 33 s ('sync stopped ... its sources took too long'), patched 1.9 s silent, Node 0.21 s. Fresh: 33-34 s / 2.0 s ('1 item(s) updated') / 0.22 s.
+- Patched Perl stdout byte-identical to Node in every case. Tiny sources-read.json baseline: Perl 0.40 s check, 0.46 s session-start; Node 0.15 / 0.20 s.
+- Left for this card: session-start parses sources-read.json 6 times per run (0.23-0.25 s each, 1.44 s of 1.92 s); reading it once per run is the next lever. The packed binary is not measured yet. k254 (prune vanished lock paths) shrinks the real file further. Bench scripts: /tmp/k196/bench (run.sh, run-instr.sh) on reuben.
+
+2026-11-19 03:11 Maintainer decision 2026-11-19 (via the agent-construction-kit session): fix before the 0.008 release; the release follows a dogfood run on reuben with new probe binaries and the Windows test (windows-developer k22).
+
+2026-11-19 Handed to skilletor-worker on ack-paket (after k255 ead04cf): read the state once per session-start run, measure before/after against Node.
+
+2026-11-19 04:15 Before (HEAD ead04cf, this host, perl 5.40.1, Node v24.19.0, median of 7, env -i with temp HOME/CODEX_HOME/cwd, user config with one local source, no network). Fixture: synthetic sources-read.json of 301 KB, 180 scopes x 6 records, every key a live scope (its .claude dir exists outside the run dir, so the k254/k255 prunes keep all of them; size checked after every run). 'synced' = after one sync, 'fresh' = nothing installed. A local source always reports a change, so session-start always syncs, and a cwd gives a project scope even with no project config: check reads per scope, sync reads per scope twice (sources_read + put_sources_read).
+- hook session-start: Perl synced 1.95 s / fresh 2.09 s; Node 0.21 / 0.24 s.
+- check --scope user: Perl 0.69 / 0.68 s; Node 0.16 / 0.15 s.
+- Small-file baseline (3.5 KB): Perl session-start 0.47 / 0.49 s, check 0.45 / 0.42 s; Node 0.20 / 0.20, 0.15 / 0.15 s.
+- Reads per session-start run, identical in Perl and Node: sources-read.json 6, unreached.json 4, render-inputs.json 3, hermes-home.json 10 (absent file), last-check.json 1, session-cwd.json 1. check --scope user: 1 each. Perl spends 1.34 s of 1.95 s parsing sources-read.json (0.22-0.25 s each); Node 14 ms for all six.
+- Perl and Node leave byte-identical state, lock and installed tree in every case (fingerprint of all files but last-check.json's clock values).
+Plan: an opt-in read-once view in State (each file parsed once per object, a write drops the file from the view, with_lock empties it when it takes and gives up the lock), used by check and by the sync lock holder. The check (outside the lock) and the sync (under it) keep one read each: another session's background sync may write between them. Expected 6 -> 2 reads per session-start.
+
+2026-11-19 04:32 Implemented (uncommitted, ack-paket): State gets an opt-in read-once view, in both engines - State.pm read_once / state.ts { readOnce: true }. A read-once state parses each file once and hands out that object; a write (and the removal of hermes-home.json) drops the file from the view, so the next read parses what was written; with_lock/withLock empties the view when it takes the lock and when it gives it up. Used by check (it only reads) and by every sync-lock holder: TS withSyncLock (sync, resolveItems, available, install's planning), Perl Engine::sync, Resolver::resolve, Commands::_with_sync_lock. Hooks' own states (last-check, pending-report, session-cwd are written outside the lock) stay plain. Kept on purpose: the check runs outside the lock and the sync re-reads under it, since another session's background sync may write in between. Reads per synced session-start now 2 / 2 / 2 (sources-read / unreached / render-inputs), was 6 / 4 / 3; fresh 3 / 2 / 3 (the user scope's write makes the project scope parse again). Same counts in Perl and Node. Regression tests red before (6 vs 2): t/29-state-read-once.t, test/state.test.ts + test/hooks.test.ts (k250 tests). Full runs pending.
+
+2026-11-19 04:45 Done, uncommitted on ack-paket (no commit, no Changes edit). An opt-in read-once view in State, both engines (State.pm read_once, state.ts { readOnce: true }): each file is parsed once per object; a write, or removing hermes-home.json, drops the file from the view, so the next read parses what was written; with_lock/withLock empties the view when it takes the lock and when it gives it up. check uses it (read-only) and so does every sync-lock holder: TS withSyncLock, Perl Engine::sync, Resolver::resolve, Commands::_with_sync_lock. The hooks' own states stay plain, because last-check, pending-report and session-cwd are written outside the lock. Kept on purpose: the check (outside the lock) and the sync (under it) read once each, since another session's sync may write in between. Node changed too, to keep the engines parallel: its read counts were the same as Perl's and still are; its timings did not change.
+Reads per session-start (sources-read / unreached / render-inputs): before 6/4/3; after synced 2/2/2, fresh 3/2/3 (the user scope's write makes the project scope parse again). check --scope user is 1/1/1 before and after. Perl and Node count the same.
+Timings, median of 7, 301 KB live-key fixture, env -i with temp HOME/CODEX_HOME/cwd, one local source, no network, before -> after:
+- Perl from source, hook session-start: synced 1.95 -> 0.98 s, fresh 2.0 -> 1.29 s (interleaved re-run). check --scope user: 0.69 -> 0.67 s and 0.68 -> 0.65 s (one scope, so no change expected).
+- Packed binary (pp 1.064, local pack of each tree, both pass scripts/binary-verify.sh), session-start: synced 2.28 -> 1.24 s, fresh 2.39 -> 1.87 s; check 0.91 -> 0.91 s.
+- Node, session-start: 0.21 / 0.24 -> 0.23 / 0.23 s; check 0.16 / 0.15 -> 0.15 / 0.16 s (noise).
+- An interleaved N=9 run on a busier host shows the same ratios (Perl synced 2.21 -> 1.04 s, fresh 2.54 -> 1.59 s).
+State, lock and installed tree are byte-identical before vs after and Perl vs Node in every case; stdout is identical too.
+Tests: t/29-state-read-once.t, plus k250 tests in test/state.test.ts and test/hooks.test.ts (helper test/helpers/reads.ts, an fs.readFileSync spy, no production seam). Against HEAD they are red (hook test: 6 vs 2, both engines) and green after. Checks: typecheck ok; npm test 1371 tests, 1367 pass, 0 fail, 4 skipped (Hermes install without SKILLETOR_HERMES_INSTALL=1, three native-Windows tests); build + check-dist ok; prove 57 files, 2754 tests, all pass, 102 skipped subtests, all in t/65-report-json.t (conformance cases with no sync/check/status step); parity t/50-54 and conformance pass in both suites.
+Left: the remaining Perl cost is the two necessary parses of the file (about 0.23 s each, js_parse at about 1.3 MB/s). A faster parser would be the next lever, and that is a separate card if wanted. hermes-home.json is still opened 10 times per run; it is a tiny or missing file, and a cross-object view would need the sync's write to reach it.
+
+Committed 8d194aa on ack-paket
+
+Commit message amended for accuracy; the k250 commit is now 50af895 (was 8d194aa).
