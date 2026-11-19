@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-11-19T06:58:42Z
+claimed_by: ack-paket
+class: standard
+completed: 2026-11-19T06:58:42Z
+created: 2026-11-18T16:46:26Z
+id: 252
+priority: low
+started: 2026-11-19T06:58:42Z
+status: done
+tags:
+- starter
+- binary
+title: 'Starter: a tampered cache warns ''not cached'' instead of the checksum mismatch'
+updated: 2026-11-19T06:58:42Z
+---
+
+Found on reuben, 2026-11-18, ack-paket 4fc74ad: with the cached binary's bytes changed, `skilletor --version` says "the pinned binary is not cached; a SessionStart hook or a CLI command other than --version fetches it". bin/skilletor-start: verify_cached_binary sets why_binary to "the cached $asset does not match its pinned checksum and was refused" (:194), then the branch without provision overwrites it with "not cached" (:272). The refusal itself is right; only the message hides the cause. Same as briefing k13. Done when the mismatch text reaches the user, with a test.
+
+2026-11-19 03:12 Maintainer decision 2026-11-19 (via the agent-construction-kit session): fix before the 0.008 release; the release follows a dogfood run on reuben with new probe binaries and the Windows test (windows-developer k22).
+
+2026-11-19 Handed to skilletor-worker on ack-paket (after k251 46604fe).
+
+Started. Read bin/skilletor-start: a refused cache (checksum mismatch, or no tool to verify it) loses its reason on every fall-through path - no provision (--version/-v, non-start hooks) and SessionStart background say 'not cached', the SessionStart backoff and a failed CLI download replace it with their own reason. Plan: keep the refusal reason as a prefix on all four, unchanged text for an absent cache; refusal and refetch unchanged. briefing k13 is still in its backlog (no fix to copy). winlaunch/bin/skilletor.exe have no cache logic (Node only); no README/skill/docs quote the message. Test first in test/starter.test.ts.
+
+Done, uncommitted on ack-paket (bin/skilletor-start, test/starter.test.ts; no src/ change, dist/ untouched). find_binary keeps why a cached binary was refused (refused="$why_binary; ") and puts it first on all four fall-through paths: no provision (--version, -v, non-start hooks), SessionStart background, SessionStart backoff, failed CLI/provisioner fetch. An absent cache says what it said before. The refusal and the refetch over it are unchanged. Test 'a refused cache is named in the line on every path, an absent one says not cached': six starts each with an absent and a tampered cache, plus a CLI fetch that replaces the tampered bytes. It is red on the old starter at start 1 (--version says 'not cached'). Reverting any one of the four changed lines turns it red at its own path (1, 4, 5, 6). Checks: typecheck ok; npm test 1379 tests, 1375 pass, 0 fail, 4 skip (SKILLETOR_HERMES_INSTALL unset; 3 need native Windows); build ok; check-dist up to date; prove 57 files, 2762 tests, PASS, 0 skips. shellcheck is not installed on this host, so the parse test ran sh -n and dash -n only. briefing k13 is still in its backlog, so there was no fix there to match. winlaunch/bin/skilletor.exe run Node only, with no cache logic, so they need no change. No README/skill/docs quote the message. Drift, not fixed: with neither sha256sum nor shasum, the tails 'a SessionStart hook or a CLI command other than --version fetches it' / 'it is being fetched in the background' promise a fetch that fetch_binary refuses at once. That is old behavior for an absent cache too. With a cached binary the line now starts with 'neither sha256sum nor shasum is there to verify the cached <asset>'; a failed CLI fetch then repeats the no-tool reason. Not pinned by a test.
+
+Committed on ack-paket as 4176599.
