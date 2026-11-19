@@ -1,0 +1,36 @@
+---
+claimed_at: 2026-11-19T06:20:18Z
+claimed_by: ack-paket
+class: standard
+completed: 2026-11-19T06:20:18Z
+created: 2026-11-18T16:46:21Z
+id: 251
+priority: medium
+started: 2026-11-19T06:20:18Z
+status: done
+tags:
+- perl
+- binary
+- lock
+title: 'Perl binary: a session-start cancelled at the hook limit leaves sync.lock
+  behind'
+updated: 2026-11-19T06:20:18Z
+---
+
+Found on reuben, 2026-11-18 (same setup as the session-start timing card): after Claude cancelled the binary's SessionStart hook at its 30 s limit, ~/.claude/skilletor/sync.lock stayed behind with owner.json {"pid":1166993,"host":"reuben","token":"90c553d79447d310","at":1795018499311,"refreshMs":10000}; pid 1166993 was dead. Node 0.7 broke it on its next run (sync.lock.broken-11623320-1795018499311). Runs that ended on their own (41 s, "its sources took too long") left no lock, so only the cancellation leaves it. Which signal Claude sends was not checked.
+
+Related: k207 (Windows: a dead owner is broken only after the stale age), k223 (one sync-lock helper). Done when a binary stopped by Claude's cancel releases the lock, or the stale-break is named as the contract and tested for this case.
+
+Timing card: k250.
+
+2026-11-19 03:11 Maintainer decision 2026-11-19 (via the agent-construction-kit session): fix before the 0.008 release; the release follows a dogfood run on reuben with new probe binaries and the Windows test (windows-developer k22).
+
+2026-11-19 Handed to skilletor-worker on ack-paket (after k250 50af895).
+
+2026-11-19 05:13 Findings before any change (scratch machine, temp HOME, slow git source via ext::): (1) Claude Code 2.1.328, read from its local bundle, not a session: a command hook is spawned detached (own process group); on cancel it sends SIGTERM to the group and to every descendant, then SIGKILL to the group 1.5 s later if anything lives. That fits the reuben record: owner.json mtime == at, so the Perl heartbeat child died with the holder. (2) Today a SIGTERM to the group leaves sync.lock in BOTH engines (Node dist, Perl lib, the packed binary from the k250 bench): killed by signal 15, owner.json left with the dead pid. Neither has a handler; Node skips finally on a default signal death. (3) The chain bin/skilletor -> skilletor-start -> exec node / exec env BINARY keeps one pid; the PAR binary on Linux execs, so the owner pid is the spawned pid (its second process is the heartbeat fork). (4) SIGKILL, every holder/next pair (node/perl x node/perl): the next sync within two refreshes of the last one (20 s at the default 10 s) times out after 5 s; with the record aged 21 s it breaks the lock at once and syncs. Same in both engines. (5) Perl only: after a SIGKILL of the holder alone, its heartbeat child refreshes the record once more (seen 0.2 s after the kill at refresh 300 ms), so a dead Perl holder looks up to one refresh younger than Node's. Plan: a stop handler (TERM/INT/HUP, POSIX only, installed only where the signal would end the process) that releases the locks this pid holds by token and re-raises the signal, in both engines; the heartbeat checks its parent after the sleep, before the touch; spec 6.5 names the contract.
+
+2026-11-19 05:33 Progress: stop handler in both engines (state.ts releaseOnStop/stopped, State.pm %held/_stopped): SIGTERM/SIGINT/SIGHUP, POSIX only, installed as withLock starts and only where the signal would end the process; on a stop it releases every lock this pid holds (token check), then re-raises the signal with its default action back (Perl: unblocks it inside the handler), exit 128+n only as a guard. First placement (handlers after acquire) failed once in a full npm test run: the record is on disk before the handler, a stop in between gets the default death; moved before the acquire loop, the token check keeps a waiter's release a no-op. Perl heartbeat now checks its parent after the sleep, before the touch. Tests: test/sync-lock-stop.test.ts (7), t/25-sync-lock.t (+7 subtests), t/54-parity-cli.t (+1, both CLIs, SIGKILL then the other CLI breaks it). Red before on both engines; SIGKILL/next-run parts green before (contract). Hand test: packed binary from the new lib releases on TERM/INT/HUP to its group and dies of the signal. Spec 6.5 paragraph added. Full checks next.
+
+Ready for review (worktree ack-paket, uncommitted). Before: Node, Perl and the packed binary all died of SIGTERM to the hook's process group and left sync.lock/owner.json behind. bin/skilletor-start and the PAR binary keep one pid. After a SIGKILL, a run within 20 s waited 5 s and failed, and a record aged past 2 missed refreshes broke at once in both engines. Perl only: the heartbeat child refreshed the record once more after its holder was SIGKILLed. Change: src/state.ts and lib/Skilletor/State.pm release every held lock on SIGTERM/SIGINT/SIGHUP and then end by that signal. The handler is installed before the acquire loop, so a stop finds no record without it, and the token check makes a waiter's release a no-op. It only applies where the signal would end the process, only in the process that took the lock, and not on Windows. The Perl heartbeat checks the parent after its sleep and before the touch. Spec 6.5 names the contract, with SIGKILL relying on the dead-owner break. Tests: new test/sync-lock-stop.test.ts (7), t/25-sync-lock.t (+5 subtests), t/54-parity-cli.t (k251 subtest, both CLIs in both roles). They were red on HEAD except the SIGKILL break, which is the contract test and was green before. Checks: typecheck ok; npm test 1378 tests, 1374 pass, 0 fail, 4 skips (hermes live install, 3 native-Windows); prove 57 files 2762 tests PASS; build and check-dist ok. Conformance cases unchanged, because sync behaviour is unchanged. Open: a SIGTERM to the engine pid alone (not Claude's way) frees the lock while a git child runs on orphaned. A death between creating and writing owner.json leaves an empty record that breaks only after 5 min (pre-existing). Windows is unchanged (k207). The Claude signal sequence was read from the 2.1.328 bundle, not observed in a live session.
+
+Committed as 46604fe on ack-paket.
