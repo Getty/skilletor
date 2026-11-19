@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T09:16:49Z
+id: 268
+priority: medium
+status: backlog
+tags:
+- release
+- marketplace
+title: Marketplace entries list skilletor as MIT; 0.8.0 is Artistic-2.0
+updated: 2026-11-19T09:16:49Z
+---
+
+Found during k258. Getty/marketplace lists skilletor with license MIT (.claude-plugin/marketplace.json entry, and the README table). From 0.8.0 on skilletor is Artistic-2.0 (LICENSE, package.json, both plugin manifests). The marketplace entries name no version (Claude: git url without ref, Codex: ref main), so once ack-paket is in main the marketplace serves Artistic-2.0 code under an MIT label. The marketplace repo has no karr board, hence this card here. Any edit to Getty/marketplace is under the publish gate: needs the maintainer's go-ahead; release-manager's pre-release audit covers the marketplace entry.
