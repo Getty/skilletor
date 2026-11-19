@@ -1,0 +1,26 @@
+---
+class: standard
+created: 2026-11-19T07:46:39Z
+id: 262
+priority: medium
+started: 2026-11-19T07:46:49Z
+status: review
+tags:
+- ci
+- perl
+- windows
+title: 'CI: no job compiles or tests the Perl dist on Windows'
+updated: 2026-11-19T08:37:48Z
+---
+
+Gap behind k261: ci.yml runs the Node build on Windows, perl.yml runs prove on Linux only (perl:5.40-bookworm container). The only Windows Perl run is the binaries probe (dzil-binary.yml, workflow_dispatch), so the k251 SIGHUP load failure reached ack-paket unseen.
+
+Plan (main agent's call, 2026-11-19): a cheap Windows leg in perl.yml that installs the deps with the same setup the binaries workflow uses (shogo82148/actions-setup-perl, Strawberry) and loads every module (t/00-load.t plus the k261 regression test), with workflow_dispatch so it can be probed on a branch before main. The full prove on Windows has never run and is not claimed here: it goes to a backlog card.
+
+2026-11-19 08:21 Added a load-windows job to .github/workflows/perl.yml and workflow_dispatch to its triggers; the Linux job is unchanged. Setup taken verbatim from the pinned dzil-binary.yml (c339eef) Windows leg: runs-on windows-latest, shogo82148/actions-setup-perl@v1 with perl-version 5.40 and distribution strawberry, PERL_CPANM_OPT as the Linux job. Steps run in the default shell pwsh, where setup-perl's perl comes first (the reusable workflow reads it there with Get-Command perl.exe; Git Bash would put its own perl ahead): perl -S cpanm -nq --installdeps . and perl -S prove -l t/00-load.t t/03-load-win32-signals.t (perl -S as build-leg.sh runs cpanm). Cheap and safe as far as visible: 00-load.t only use_ok's modules, all of which loaded on Windows in binaries run 44253898506; the deps are the same set the binaries' deps step installs on the same Strawberry (no TLS build needed: Strawberry's Net::SSLeay and IO::Socket::SSL satisfy the cpanfile, binary-prepare only matters for the packed binary); .gitattributes keeps LF. test/perl-ci-contract.test.ts pinned one installdeps and one checkout in perl.yml: now one per job, each the dist's, and no checkout of another repository. Validated: actionlint 1.7.12 (docker) clean, YAML parses. Not verifiable here: the job itself on a Windows runner (cpanm's install time, prove there).
+
+2026-11-19 08:21 Done: .github/workflows/perl.yml gains workflow_dispatch and a load-windows job (windows-latest, shogo82148/actions-setup-perl@v1 perl-version 5.40 distribution strawberry as in the pinned dzil-binary.yml; perl -S cpanm -nq --installdeps .; perl -S prove -l t/00-load.t t/03-load-win32-signals.t). Linux job unchanged. test/perl-ci-contract.test.ts now expects one installdeps and one checkout per job, each the dist's, no checkout of another repository (green; red on the old perl.yml). Verified locally: actionlint 1.7.12 clean, YAML parses, npm test green. Not verified: the job on a Windows runner; the ACK session can probe it on a branch with workflow_dispatch before main. The full prove -lr t on Windows is not part of this change (backlog). Not committed: proposed subject 'Load every Perl module on Windows in CI (k262)', no Changes entry (CI only).
+
+2026-11-19 08:34 Review (main agent): load-windows job matches the pinned dzil-binary.yml Windows setup (shogo82148/actions-setup-perl@v1, perl 5.40, strawberry, pwsh); Linux job unchanged; contract test updated and green. Not verified: the job on a real runner; workflow_dispatch lets the ACK session probe it on ack-paket before main. Full prove on Windows split to k263. Approved for commit.
+
+2026-11-19 08:37 Committed as c983c2c on ack-paket-win-fix; stays in review until the new load-windows job runs green on a real windows-latest runner (workflow_dispatch on ack-paket, or the first main push).
