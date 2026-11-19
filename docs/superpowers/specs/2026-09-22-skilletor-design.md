@@ -957,6 +957,23 @@ removes `sync.lock.*` leftovers older than 5 minutes. Limits: a holder stalled f
 5 minutes (a suspended laptop) counts as dead; skilletor ≤ 0.3.0 still judges a lock by the
 record's acquisition time `at` and breaks a dir without a record at once (k81).
 
+A holder that is stopped (k251): a stop the process can catch – `SIGTERM`, `SIGINT`, `SIGHUP` –
+releases every lock it holds (token check, as above), then ends the process by that very
+signal, so whoever stopped it sees nothing different but the lock gone. Claude Code cancels a
+hook at its time limit that way: `SIGTERM` to the hook's process group, `SIGKILL` 1.5 s later
+(read from Claude Code 2.1.328); Ctrl+C sends `SIGINT`, a closed terminal `SIGHUP`. A process
+handles a stop only while it takes or holds a lock – from before its owner record is written,
+so no stop finds the record without the handler – only where the signal would end it – no
+handler of the program's own, not ignored – and only in the process that took the lock, not a
+child forked under it; a run still waiting gives nothing up (the token check). Not on Windows,
+where a process is ended without a signal it can catch. A stop no process can catch –
+`SIGKILL`, a crash, a power loss – leaves the lock, and the rule above is the contract: the next
+run breaks it as soon as its record names this host and a pid that is gone and missed two
+refreshes (20 s after the holder's last refresh; the Perl port's heartbeat child never
+refreshes after its holder died), else once it is 5 minutes old. A run that comes earlier
+waits its 5 s and fails as against a live holder, and a `SessionStart` that did leaves the
+project due (§8).
+
 A run that takes the lock first sweeps what a run that failed or died left of a `url` update
 (§4.4) in `cache/`: a `<hash>.stage-*` tree goes; a `<hash>.backup-*` goes too, unless its
 cache dir `<hash>` is missing – then the backup holds the last good cache and is moved back

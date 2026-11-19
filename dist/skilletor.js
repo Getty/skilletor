@@ -8147,8 +8147,8 @@ var GitSource = class {
       const head = (await this.run(dir, ["rev-parse", "--verify", "HEAD^{commit}"])).trim();
       const pin = await this.run(dir, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).then((out) => out.trim(), () => "");
       const byName = ref.length < 40 && (pin === "" || pin === head);
-      const held2 = head.startsWith(ref.toLowerCase()) ? pin === head : byName;
-      if (!held2) throw new CacheRejected(`cached commit ${head} does not match requested pin ${ref}`);
+      const held3 = head.startsWith(ref.toLowerCase()) ? pin === head : byName;
+      if (!held3) throw new CacheRejected(`cached commit ${head} does not match requested pin ${ref}`);
     }
     const sha = (await this.run(dir, ["rev-parse", "--short", "HEAD"])).trim();
     return `git:${sha}`;
@@ -9291,7 +9291,7 @@ import {
   utimesSync,
   writeFileSync as writeFileSync3
 } from "node:fs";
-import { hostname } from "node:os";
+import { constants, hostname } from "node:os";
 import { dirname as dirname4, isAbsolute as isAbsolute2, join as join12 } from "node:path";
 var SyncLockTimeoutError = class extends Error {
   name = "SyncLockTimeoutError";
@@ -9301,6 +9301,9 @@ var errCode = (err) => err.code;
 var SESSION_CWDS = 256;
 var LOCK = "sync.lock";
 var LEFTOVER2 = `${LOCK}.`;
+var STOPS = ["SIGTERM", "SIGINT", "SIGHUP"];
+var held2 = /* @__PURE__ */ new Set();
+var listening = /* @__PURE__ */ new Map();
 function setOwn3(record, key, value2) {
   Object.defineProperty(record, key, { value: value2, writable: true, enumerable: true, configurable: true });
 }
@@ -9527,7 +9530,8 @@ var State = class {
    * refreshed for `staleMs` – or for two of its refreshes when its pid on this host is gone –
    * marks a lock a dead run left; an owner-less dir older than `graceMs`, one that died before
    * writing its record. A stale lock is renamed to a tombstone named after what the waiter saw,
-   * so of two waiters that judged it stale only one moves it.
+   * so of two waiters that judged it stale only one moves it. A stop the process can catch –
+   * SIGTERM, SIGINT, SIGHUP – releases the lock before it ends the process (k251).
    */
   async withLock(fn, opts = {}) {
     const timeoutMs = opts.timeoutMs ?? 5e3;
@@ -9539,28 +9543,33 @@ var State = class {
     const ownerFile = join12(lockDir, "owner.json");
     const token = randomBytes(8).toString("hex");
     const deadline = Date.now() + timeoutMs;
-    for (; ; ) {
-      if (acquire(lockDir, ownerFile, token, refreshMs, opts.afterMkdir)) break;
-      const stale = judge(lockDir, ownerFile, staleMs, graceMs);
-      if (stale) {
-        if (opts.beforeBreak) await opts.beforeBreak();
-        if (this.breakLock(lockDir, ownerFile, stale)) continue;
-      }
-      if (Date.now() >= deadline) {
-        throw new SyncLockTimeoutError(`timed out acquiring sync lock at ${lockDir}`);
-      }
-      await delay(pollMs);
-    }
-    this.view.clear();
-    const heartbeat = setInterval(() => touch(ownerFile), refreshMs);
-    heartbeat.unref();
+    const unhold = releaseOnStop(() => this.release(lockDir, ownerFile, token));
     try {
-      this.sweepLeftovers(staleMs);
-      return await fn();
-    } finally {
-      clearInterval(heartbeat);
-      this.release(lockDir, ownerFile, token);
+      for (; ; ) {
+        if (acquire(lockDir, ownerFile, token, refreshMs, opts.afterMkdir)) break;
+        const stale = judge(lockDir, ownerFile, staleMs, graceMs);
+        if (stale) {
+          if (opts.beforeBreak) await opts.beforeBreak();
+          if (this.breakLock(lockDir, ownerFile, stale)) continue;
+        }
+        if (Date.now() >= deadline) {
+          throw new SyncLockTimeoutError(`timed out acquiring sync lock at ${lockDir}`);
+        }
+        await delay(pollMs);
+      }
       this.view.clear();
+      const heartbeat = setInterval(() => touch(ownerFile), refreshMs);
+      heartbeat.unref();
+      try {
+        this.sweepLeftovers(staleMs);
+        return await fn();
+      } finally {
+        clearInterval(heartbeat);
+        this.release(lockDir, ownerFile, token);
+        this.view.clear();
+      }
+    } finally {
+      unhold();
     }
   }
   /** Break a lock judged stale; true when it is gone, so taking it is worth a try at once. */
@@ -9648,6 +9657,32 @@ function acquire(lockDir, ownerFile, token, refreshMs, afterMkdir) {
   }
   touch(ownerFile);
   return true;
+}
+function releaseOnStop(release) {
+  held2.add(release);
+  if (held2.size === 1 && process.platform !== "win32") {
+    for (const signal of STOPS) {
+      if (process.listenerCount(signal) > 0) continue;
+      const listener = () => stopped(signal);
+      listening.set(signal, listener);
+      process.on(signal, listener);
+    }
+  }
+  return () => {
+    held2.delete(release);
+    if (held2.size === 0) unlisten();
+  };
+}
+function unlisten() {
+  for (const [signal, listener] of listening) process.removeListener(signal, listener);
+  listening.clear();
+}
+function stopped(signal) {
+  for (const release of held2) release();
+  held2.clear();
+  unlisten();
+  process.kill(process.pid, signal);
+  process.exit(128 + constants.signals[signal]);
 }
 function judge(lockDir, ownerFile, staleMs, graceMs) {
   let owner;

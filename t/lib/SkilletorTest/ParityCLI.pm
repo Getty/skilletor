@@ -99,7 +99,8 @@ sub cli_env {
 
 # Start a step's CLI: argv after the prefix, cwd (default the project, else ${TMP}/cwd), env,
 # stdin through a pipe (a string as its UTF-8 bytes, any other value as compact JSON), then end
-# of file. Its own fork and exec, not Skilletor::Process: the port's process layer is under test.
+# of file; with group, in a process group of its own, as Claude Code starts a hook (k251). Its own
+# fork and exec, not Skilletor::Process: the port's process layer is under test.
 sub start_cli {
   my ( $prefix, $m, $step ) = @_;
   my @cmd = ( @$prefix, map { encode_text( concrete( $_, $m ) ) } @{ $step->{argv} } );
@@ -115,6 +116,7 @@ sub start_cli {
   my $pid = fork // die "fork: $!";
   if ( !$pid ) {
     close $writer;
+    setpgrp( 0, 0 ) if $step->{group};
     open STDIN,  '<&', $reader       or POSIX::_exit(126);
     open STDOUT, '>',  "$dir/stdout" or POSIX::_exit(126);
     open STDERR, '>',  "$dir/stderr" or POSIX::_exit(126);

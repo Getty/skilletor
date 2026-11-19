@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import type { Stats } from "node:fs";
-import { hostname } from "node:os";
+import { constants, hostname } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { atomicWrite, realOrResolved } from "./fsutil.ts";
 
@@ -64,6 +64,15 @@ const SESSION_CWDS = 256;
 const LOCK = "sync.lock";
 /** What a lock leaves beside it: a broken lock's tombstone, a released lock on its way out. */
 const LEFTOVER = `${LOCK}.`;
+
+/** The stops a process can catch (spec §6.5, k251): a harness cancelling a hook – Claude Code
+ *  sends SIGTERM to the hook's process group, SIGKILL 1.5 s later – Ctrl+C, a closed terminal. */
+const STOPS = ["SIGTERM", "SIGINT", "SIGHUP"] as const;
+type Stop = (typeof STOPS)[number];
+/** The release of each sync lock this process takes or holds. */
+const held = new Set<() => void>();
+/** The listener added per stop signal while this process takes or holds a lock. */
+const listening = new Map<Stop, () => void>();
 
 /** Assign a state key as data, including Object.prototype's setter name `__proto__`. */
 function setOwn<T>(record: Record<string, T>, key: string, value: T): void {
@@ -345,7 +354,8 @@ export class State {
    * refreshed for `staleMs` – or for two of its refreshes when its pid on this host is gone –
    * marks a lock a dead run left; an owner-less dir older than `graceMs`, one that died before
    * writing its record. A stale lock is renamed to a tombstone named after what the waiter saw,
-   * so of two waiters that judged it stale only one moves it.
+   * so of two waiters that judged it stale only one moves it. A stop the process can catch –
+   * SIGTERM, SIGINT, SIGHUP – releases the lock before it ends the process (k251).
    */
   async withLock<T>(fn: () => Promise<T> | T, opts: WithLockOptions = {}): Promise<T> {
     const timeoutMs = opts.timeoutMs ?? 5_000;
@@ -358,29 +368,36 @@ export class State {
     const token = randomBytes(8).toString("hex");
     const deadline = Date.now() + timeoutMs;
 
-    for (;;) {
-      if (acquire(lockDir, ownerFile, token, refreshMs, opts.afterMkdir)) break;
-      const stale = judge(lockDir, ownerFile, staleMs, graceMs);
-      if (stale) {
-        if (opts.beforeBreak) await opts.beforeBreak();
-        if (this.breakLock(lockDir, ownerFile, stale)) continue;
-      }
-      if (Date.now() >= deadline) {
-        throw new SyncLockTimeoutError(`timed out acquiring sync lock at ${lockDir}`);
-      }
-      await delay(pollMs);
-    }
-
-    this.view.clear(); // what was read before the lock is not what holds under it
-    const heartbeat = setInterval(() => touch(ownerFile), refreshMs);
-    heartbeat.unref(); // never what keeps the process alive
+    // Listening from before the owner record is written, so a stop that comes once it is finds
+    // the listener (k251); until then, the release gives nothing up – the token check.
+    const unhold = releaseOnStop(() => this.release(lockDir, ownerFile, token));
     try {
-      this.sweepLeftovers(staleMs);
-      return await fn();
+      for (;;) {
+        if (acquire(lockDir, ownerFile, token, refreshMs, opts.afterMkdir)) break;
+        const stale = judge(lockDir, ownerFile, staleMs, graceMs);
+        if (stale) {
+          if (opts.beforeBreak) await opts.beforeBreak();
+          if (this.breakLock(lockDir, ownerFile, stale)) continue;
+        }
+        if (Date.now() >= deadline) {
+          throw new SyncLockTimeoutError(`timed out acquiring sync lock at ${lockDir}`);
+        }
+        await delay(pollMs);
+      }
+
+      this.view.clear(); // what was read before the lock is not what holds under it
+      const heartbeat = setInterval(() => touch(ownerFile), refreshMs);
+      heartbeat.unref(); // never what keeps the process alive
+      try {
+        this.sweepLeftovers(staleMs);
+        return await fn();
+      } finally {
+        clearInterval(heartbeat);
+        this.release(lockDir, ownerFile, token);
+        this.view.clear(); // nor what was read under it once another run may write
+      }
     } finally {
-      clearInterval(heartbeat);
-      this.release(lockDir, ownerFile, token);
-      this.view.clear(); // nor what was read under it once another run may write
+      unhold();
     }
   }
 
@@ -486,6 +503,44 @@ function acquire(lockDir: string, ownerFile: string, token: string, refreshMs: n
   }
   touch(ownerFile);
   return true;
+}
+
+/** Hold `release` until the function returned is called (k251). While this process takes or
+ *  holds a lock, a stop that would end it – one no listener of its own handles; not on Windows,
+ *  where a process is ended without a signal it can catch – gives every lock it holds up first.
+ *  A stop can never release a lock it was only waiting for (each release checks its token), nor
+ *  a SIGKILL any: the next run breaks a lock a dead owner left (`deadOwner`). */
+function releaseOnStop(release: () => void): () => void {
+  held.add(release);
+  if (held.size === 1 && process.platform !== "win32") {
+    for (const signal of STOPS) {
+      if (process.listenerCount(signal) > 0) continue; // the program's own stop, not ours to end
+      const listener = () => stopped(signal);
+      listening.set(signal, listener);
+      process.on(signal, listener);
+    }
+  }
+  return () => {
+    held.delete(release);
+    if (held.size === 0) unlisten();
+  };
+}
+
+function unlisten(): void {
+  for (const [signal, listener] of listening) process.removeListener(signal, listener);
+  listening.clear();
+}
+
+/** A stop while this process takes or holds a lock: every lock it holds given up, then the end
+ *  the signal would have brought – by the signal itself, its default action back; by its
+ *  conventional status should a listener added since keep the process alive, which must not run
+ *  on without its lock. */
+function stopped(signal: Stop): void {
+  for (const release of held) release();
+  held.clear();
+  unlisten();
+  process.kill(process.pid, signal);
+  process.exit(128 + constants.signals[signal]);
 }
 
 /** Is the lock stale? What the waiter saw of it when it is, else undefined. */

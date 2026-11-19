@@ -132,6 +132,12 @@ Revision history for skilletor and Skilletor, its Perl distribution
     a 300 KB sources-read.json, so its SessionStart on such a file takes
     1.0 s instead of 2.0 s (the binary 1.2 s instead of 2.3 s). The files
     written stay byte for byte the same.
+  - A run stopped while it holds the sync lock (Claude Code cancelling a hook
+    at its time limit with SIGTERM, Ctrl+C, a closed terminal) now releases
+    the lock and still ends by that signal, in Node, Perl and the binary. A
+    SIGKILLed holder's lock is broken by the next run once its record missed
+    two refreshes, and the Perl heartbeat no longer refreshes a dead
+    holder's record (k251).
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's

@@ -339,11 +339,20 @@ use constant LEFTOVER => LOCK_NAME.'.';
 
 sub _now_ms { int( Time::HiRes::time() * 1000 ) }
 
+# The stops a process can catch (k251): a harness cancelling a hook – Claude Code sends SIGTERM to
+# the hook's process group, SIGKILL 1.5 s later –, Ctrl+C, a closed terminal; with their numbers.
+my %STOP = ( TERM => POSIX::SIGTERM(), INT => POSIX::SIGINT(), HUP => POSIX::SIGHUP() );
+
+# The release of each sync lock this process takes or holds, by token, with the pid that took it: a
+# child forked under the lock – the heartbeat, a spawn before its exec – holds none.
+my %held;
+
 # Run $code holding `sync.lock/`, the one mutex over the locks, the target dirs and the source
 # cache – shared with the reference, which takes the same directory the same way: mkdir, then
 # `owner.json` created exclusively; a holder refreshes the record's mtime; a record not
 # refreshed for the stale age – or for two refreshes when its pid on this host is gone – is a
-# dead run's, an owner-less dir older than the grace time one that died before writing it.
+# dead run's, an owner-less dir older than the grace time one that died before writing it. A stop
+# the process can catch releases the lock before it ends the process (k251).
 sub with_lock {
   my ( $self, $code, %opts ) = @_;
   my $timeout_ms = $opts{timeout_ms} // 5_000;
@@ -357,6 +366,17 @@ sub with_lock {
   my $owner    = path_join( $lock_dir, 'owner.json' );
   my $token    = join '', map { sprintf '%02x', int rand 256 } 1 .. 8;
   my $deadline = _now_ms() + $timeout_ms;
+
+  # While this process takes or holds the lock, a stop that would end it – no handler of the
+  # program's own, not ignored; not on Windows, where a process is ended without a signal it can
+  # catch – gives every lock it holds up first (the reference's releaseOnStop). In place before
+  # the owner record is written, so a stop that comes once it is finds the handler; until then,
+  # the release gives nothing up – the token check. A lock taken inside another finds the outer
+  # one's handlers and adds none. A stop can never release a lock it was only waiting for, nor a
+  # SIGKILL any: the next run breaks a lock a dead owner left (_dead_owner).
+  local $held{$token} = [ $$, sub { $self->_release( $lock_dir, $owner, $token ) } ];
+  my @stops = $^O eq 'MSWin32' ? () : grep { ( $SIG{$_} // '' ) =~ /\A(?:DEFAULT)?\z/ } qw( TERM INT HUP );
+  local @SIG{@stops} = map { my $name = $_; sub { _stopped($name) } } @stops;
 
   for ( ;; ) {
     last if $self->_acquire( $lock_dir, $owner, $token, $refresh_ms );
@@ -385,6 +405,20 @@ sub with_lock {
   %{ $self->_view } = ();    # nor what was read under it once another run may write
   die $err unless $ok;
   return $want ? @result : $result[0];
+}
+
+# A stop while this process takes or holds a lock: every lock it holds given up, then the end the
+# signal would have brought – by the signal itself, its default action back and Perl's block of it
+# while its handler runs lifted; by its conventional status should that not end the process, which
+# must not run on without its lock.
+sub _stopped {
+  my ($name) = @_;
+  $_->[0] == $$ and $_->[1]->() for values %held;
+  %held = ();
+  $SIG{$name} = 'DEFAULT';
+  kill $name, $$;
+  POSIX::sigprocmask( POSIX::SIG_UNBLOCK(), POSIX::SigSet->new( $STOP{$name} ) );
+  POSIX::_exit( 128 + $STOP{$name} );
 }
 
 sub _acquire {
@@ -502,8 +536,9 @@ sub _heartbeat {
   return undef unless defined $pid;
   return $pid if $pid;
   local $SIG{TERM} = sub { POSIX::_exit(0) };
-  while ( getppid() == $parent && -e $owner ) {
+  for ( ;; ) {
     Time::HiRes::sleep( $refresh_ms / 1000 );
+    last unless getppid() == $parent && -e $owner;    # no refresh once the holder is gone (k251)
     _touch($owner);
   }
   POSIX::_exit(0);
@@ -719,5 +754,12 @@ runs, not an HTTP download; C<< win32 => 1 >> takes this way on any system,
 for a test. The lock is released however the code ends; its result (in the
 caller's context) is returned and its exception rethrown. A L</read_once>
 object reads every file afresh under the lock, and once more after it.
+
+A stop the process can catch while it takes or holds the lock – C<SIGTERM>,
+C<SIGINT>, C<SIGHUP>, each where it would end the process: no handler of the
+program's own, not ignored – releases every lock the process holds, then ends
+it by that signal (k251). Not on Windows, where a process is ended without a
+signal it can catch. A C<SIGKILL> leaves the lock: the next run breaks it once
+its record, of this host and a pid that is gone, missed two refreshes.
 
 =cut

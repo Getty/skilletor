@@ -18,7 +18,7 @@ use warnings;
 use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/lib";
-use SkilletorTest::ParityCLI qw( skip_reason clis start_cli finish_cli save_machine restore_machine snapshot drive wait_for );
+use SkilletorTest::ParityCLI qw( skip_reason clis start_cli finish_cli run_cli save_machine restore_machine snapshot drive wait_for );
 
 BEGIN {
   my $why = skip_reason();
@@ -368,6 +368,65 @@ subtest 'one sync lock: a CLI holds it, the other waits or times out' => sub {
           is( $run->{hook}{result}{exit}, 0, "$name: and exits 0" );
         }
       }
+    };
+  }
+};
+
+#### A stopped holder (k251) ############################################
+
+subtest 'k251: a CLI stopped while it holds the lock: SIGTERM releases it, after a SIGKILL the other CLI breaks it' => sub {
+  my $m = machine();
+  my $tmp = $m->{tmp};
+  BAIL_OUT("a temp path ext:: cannot carry: $tmp") if $tmp =~ /[\s%;"\\]/;
+  make_repo( "$tmp/git/slow", 'skills/lint/SKILL.md' => skill('lint') );
+  my $url = 'https://parity.invalid/slow.git';
+  gitconfig( $m, 'gitconfig', { $url => "file://$tmp/git/slow" } );
+  gitconfig( $m, 'gitconfig-slow', { $url => "ext::sh -c sleep% 60;exec% git-upload-pack% $tmp/git/slow" },
+    qq([protocol "ext"]\n\tallow = always\n) );
+  write_json( "$m->{home}/.claude/skilletor.json", { sources => { slow => { git => $url } }, install => { skills => ['lint@slow'] } } );
+  my $saved = save_machine($m);
+  my $state = "$m->{home}/.claude/skilletor";
+  my $owner = "$state/sync.lock/owner.json";
+  my $leftovers = sub { [ grep { /\Async\.lock\./ } map { $_->basename } path($state)->children ] };
+
+  # A CLI in a process group of its own, its fetch asleep: once it holds the lock, $signal goes to
+  # the group, as Claude Code cancels a hook. Its result and the pid it held the lock with.
+  my $stop = sub {
+    my ( $cli, $step, $signal ) = @_;
+    restore_machine( $m, $saved );
+    my $run = start_cli( $CLI{$cli}, $m, { %$step, group => 1, env => { GIT_CONFIG_GLOBAL => '${TMP}/gitconfig-slow' } } );
+    my $held = wait_for( sub { -s $owner && ( eval { js_parse( path($owner)->slurp_utf8 )->{pid} } // 0 ) == $run->{pid} }, 15_000 );
+    kill $signal, -$run->{pid};
+    return ( finish_cli( $run, 10_000 ), $held, $run->{pid} );
+  };
+
+  for my $cli (qw( ts perl )) {
+    my $other = $cli eq 'ts' ? 'perl' : 'ts';
+    subtest "the $cli CLI holds it" => sub {
+      # The reported case: a SessionStart cancelled while its sync holds the lock.
+      my $input = { session_id => 'k251', cwd => '${TMP}/cwd', source => 'startup' };
+      my ( $r, $held ) = $stop->( $cli, { argv => [ 'hook', 'session-start' ], stdin => $input }, 'TERM' );
+      ok( $held, 'its SessionStart took the lock' );
+      like( $r->{failed} // '', qr/ was killed by signal 15\z/, 'it ended by SIGTERM, as without the lock' );
+      is( $r->{stdout}, '', 'and said nothing' );
+      ok( !-e "$state/sync.lock", 'the lock released' );
+      is_deeply( $leftovers->(), [], 'nothing left beside it' );
+
+      # The contract for a stop no process can catch: the lock left, of this host and a pid that is
+      # gone; once its record missed two refreshes (20 s at the default 10 s, here aged so), the
+      # other CLI's sync breaks it at once and syncs.
+      ( $r, $held, my $pid ) = $stop->( $cli, { argv => ['sync'] }, 'KILL' );
+      ok( $held, 'its sync took the lock' );
+      like( $r->{failed} // '', qr/ was killed by signal 9\z/, 'killed' );
+      my $record = eval { js_parse( path($owner)->slurp_utf8 ) } // {};
+      is_deeply( [ @{$record}{qw( pid host )} ], [ $pid, $HOST ], 'the lock left, a dead owner of this host' );
+      my $then = time - 21;
+      utime $then, $then, $owner;
+      my $next = run_cli( $CLI{$other}, $m, { argv => ['sync'] } );
+      is( $next->{exit}, 0, "the $other CLI synced" ) or diag $next->{failed} // $next->{stderr};
+      like( $next->{stdout} // '', qr{skills/lint}, 'the skill installed' );
+      ok( !-e "$state/sync.lock", 'no lock left' );
+      is( scalar( grep { /\Async\.lock\.broken-/ } @{ $leftovers->() } ), 1, 'the dead one broken, one tombstone' );
     };
   }
 };
