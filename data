@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T09:16:39Z
+id: 266
+priority: low
+status: backlog
+tags:
+- docs
+- perl
+title: POD samples and a Targets.pm comment after k258
+updated: 2026-11-19T09:16:39Z
+---
+
+Found during k258 review. (1) The sample output in lib/Skilletor.pm (DESCRIPTION, 'Getting started') and in script/skilletor (DESCRIPTION) is the output of a machine with Claude Code alone and does not say so; with Codex detected the report adds '+ codex:skills/getty-perl-moo (active from the next Codex session)' and the Codex trust warning. The README now labels the same sample; the POD should too (one sentence each, ASCII-only in script/skilletor). (2) The comment above the layout table in lib/Skilletor/Targets.pm (around line 279) still says the Perl port writes for Claude Code and Codex; it writes for Hermes too, and the .gitignore blocks skip Hermes roots (the POD was fixed in k258, the comment was left). skilletor-worker lane; no behaviour change.
