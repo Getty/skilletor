@@ -340,8 +340,10 @@ use constant LEFTOVER => LOCK_NAME.'.';
 sub _now_ms { int( Time::HiRes::time() * 1000 ) }
 
 # The stops a process can catch (k251): a harness cancelling a hook – Claude Code sends SIGTERM to
-# the hook's process group, SIGKILL 1.5 s later –, Ctrl+C, a closed terminal; with their numbers.
-my %STOP = ( TERM => POSIX::SIGTERM(), INT => POSIX::SIGINT(), HUP => POSIX::SIGHUP() );
+# the hook's process group, SIGKILL 1.5 s later –, Ctrl+C, a closed terminal. By name: _stopped
+# looks a number up only when one comes, since a POSIX macro the platform lacks dies wherever it
+# is evaluated – Windows' POSIX has no SIGHUP, and loading this module there must not die (k261).
+use constant STOPS => qw( TERM INT HUP );
 
 # The release of each sync lock this process takes or holds, by token, with the pid that took it: a
 # child forked under the lock – the heartbeat, a spawn before its exec – holds none.
@@ -375,7 +377,7 @@ sub with_lock {
   # one's handlers and adds none. A stop can never release a lock it was only waiting for, nor a
   # SIGKILL any: the next run breaks a lock a dead owner left (_dead_owner).
   local $held{$token} = [ $$, sub { $self->_release( $lock_dir, $owner, $token ) } ];
-  my @stops = $^O eq 'MSWin32' ? () : grep { ( $SIG{$_} // '' ) =~ /\A(?:DEFAULT)?\z/ } qw( TERM INT HUP );
+  my @stops = $^O eq 'MSWin32' ? () : grep { ( $SIG{$_} // '' ) =~ /\A(?:DEFAULT)?\z/ } STOPS;
   local @SIG{@stops} = map { my $name = $_; sub { _stopped($name) } } @stops;
 
   for ( ;; ) {
@@ -415,10 +417,11 @@ sub _stopped {
   my ($name) = @_;
   $_->[0] == $$ and $_->[1]->() for values %held;
   %held = ();
+  my $number = POSIX->can( 'SIG'.$name )->();
   $SIG{$name} = 'DEFAULT';
   kill $name, $$;
-  POSIX::sigprocmask( POSIX::SIG_UNBLOCK(), POSIX::SigSet->new( $STOP{$name} ) );
-  POSIX::_exit( 128 + $STOP{$name} );
+  POSIX::sigprocmask( POSIX::SIG_UNBLOCK(), POSIX::SigSet->new($number) );
+  POSIX::_exit( 128 + $number );
 }
 
 sub _acquire {
