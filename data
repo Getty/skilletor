@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T08:34:02Z
+id: 264
+priority: low
+status: backlog
+tags:
+- perl
+- test
+title: 't/00-load.t: its module list lacks Skilletor::Hooks'
+updated: 2026-11-19T08:34:02Z
+---
+
+Found during k261: t/00-load.t loads a hand-written list of modules and Skilletor::Hooks is not on it. t/03-load-win32-signals.t (k261) loads every module under lib/ and covers it, so nothing is unloaded today, but the hand list drifts. Done when t/00-load.t covers every module under lib/ (its list completed, or read from lib/ the way t/03 does).
