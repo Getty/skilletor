@@ -102,9 +102,16 @@ interface StaleLock {
 
 export class State {
   private readonly root: string;
+  /** One run's view of the files (k250): a check, which only reads, or the holder of the sync
+   *  lock, the one writer of the records a sync keeps, parses each file once. */
+  private readonly readOnce: boolean;
+  /** What a `readOnce` state parsed, by file name. A write drops the file, so the next read
+   *  parses what was written; `withLock` empties it as it takes the lock and as it gives it up. */
+  private readonly view = new Map<string, Record<string, unknown>>();
 
-  constructor(root: string) {
+  constructor(root: string, opts: { readOnce?: boolean } = {}) {
     this.root = root;
+    this.readOnce = opts.readOnce ?? false;
     mkdirSync(root, { recursive: true });
   }
 
@@ -112,16 +119,24 @@ export class State {
     return join(this.root, name);
   }
 
+  /** A state file as an object; anything unreadable or no object reads as an empty one. A
+   *  `readOnce` state hands out the object it parsed first: what a caller changes of it, it writes. */
   private readJson(name: string): Record<string, unknown> {
+    const seen = this.view.get(name);
+    if (seen) return seen;
+    let value: Record<string, unknown> = {};
     try {
-      const value = JSON.parse(readFileSync(this.path(name), "utf8"));
-      return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+      const parsed: unknown = JSON.parse(readFileSync(this.path(name), "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) value = parsed as Record<string, unknown>;
     } catch {
-      return {};
+      // unreadable: empty
     }
+    if (this.readOnce) this.view.set(name, value);
+    return value;
   }
 
   private writeJson(name: string, value: unknown): void {
+    this.view.delete(name);
     atomicWrite(this.path(name), JSON.stringify(value, null, 2) + "\n");
   }
 
@@ -269,6 +284,7 @@ export class State {
    *  target); the file is written only when it changes. */
   putHermesHome(home: string | undefined): void {
     if (this.hermesHome() === home) return;
+    this.view.delete("hermes-home.json"); // written or removed: read again
     if (home === undefined) rmSync(this.path("hermes-home.json"), { force: true });
     else this.writeJson("hermes-home.json", { home });
   }
@@ -355,6 +371,7 @@ export class State {
       await delay(pollMs);
     }
 
+    this.view.clear(); // what was read before the lock is not what holds under it
     const heartbeat = setInterval(() => touch(ownerFile), refreshMs);
     heartbeat.unref(); // never what keeps the process alive
     try {
@@ -363,6 +380,7 @@ export class State {
     } finally {
       clearInterval(heartbeat);
       this.release(lockDir, ownerFile, token);
+      this.view.clear(); // nor what was read under it once another run may write
     }
   }
 

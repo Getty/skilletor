@@ -10,6 +10,7 @@ import { claudeOnly } from "./helpers/harness.ts";
 import { defaultBackground, MOVE_DEADLINE_MS, runHook, type HookContext, type HookOutput } from "../src/hooks.ts";
 import { State } from "../src/state.ts";
 import { NO_SYMLINKS } from "./helpers/symlink.ts";
+import { readsOf } from "./helpers/reads.ts";
 
 function env() {
   const tmp = makeTmpDir();
@@ -287,6 +288,35 @@ test("k255: session-start and a due prompt drop the check marks of gone project 
     assert.deepEqual(await runHook("user-prompt-submit", {}, e.ctx), {});
     assert.equal(e.backgroundCalls.length, 1, "not due: none");
     assert.equal(readFileSync(file, "utf8"), before, "not due: nothing written, nothing dropped");
+  } finally {
+    e.cleanup();
+  }
+});
+
+// k250: a SessionStart of a synced machine – a user scope with a local source, which always
+// counts as changed, so the hook syncs, and a project scope – reads each record file twice: once
+// for the check (both scopes), once for the sync under the lock (both scopes, its puts
+// included). The check runs outside the lock, so the sync reads again: another session's sync
+// may have written in between. It writes none of them, and says nothing.
+test("k250: a session start reads each record file once for its check and once under the lock", async () => {
+  const e = env();
+  try {
+    const src = localSkill(e.tmp.dir, "s", "hello");
+    e.writeUserCfg({ sources: { s: { local: src } }, install: { skills: ["hello@s"] } });
+    const first = await runHook("session-start", { source: "startup" }, e.ctx);
+    assert.match(first.systemMessage ?? "", /1 item\(s\) updated/, "the first start syncs");
+    const root = e.ctx.stateRoot;
+    const before = ["sources-read.json", "render-inputs.json"].map((name) => readFileSync(join(root, name), "utf8"));
+    let out: HookOutput | undefined;
+    const reads = await readsOf(root, async () => {
+      out = await runHook("session-start", { source: "startup" }, e.ctx);
+    });
+    assert.deepEqual(out, {}, "synced: silent");
+    for (const name of ["sources-read.json", "unreached.json", "render-inputs.json"]) {
+      assert.equal(reads[name], 2, `${name}: read twice (the check, the sync)`);
+    }
+    assert.deepEqual(["sources-read.json", "render-inputs.json"].map((name) => readFileSync(join(root, name), "utf8")), before, "not written");
+    assert.equal(existsSync(join(root, "unreached.json")), false, "unreached.json: still none");
   } finally {
     e.cleanup();
   }

@@ -7,6 +7,7 @@ import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { NO_SYMLINKS } from "./helpers/symlink.ts";
+import { readsOf } from "./helpers/reads.ts";
 import { State } from "../src/state.ts";
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -344,6 +345,119 @@ test("k255: markChecked drops the marks of gone project dirs and relative keys, 
     assert.deepEqual(Object.keys(after), [live, plain, marked]);
     assert.deepEqual([after[live], after[plain]], [2, 5], "the live marks as they were");
     assert.equal(state.isDue(marked, 600), false);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+// ---- read once --------------------------------------------------------------
+// k250: a session start read sources-read.json six times – its check once per scope, its sync
+// twice per scope – and the Perl port took a quarter of a second for each parse of a 300 KB
+// file. A readOnce state parses each file once and drops a file from what it read when it writes
+// it, and withLock starts and ends with nothing read: so a check reads each file once, and so
+// does the holder of the sync lock, the one writer of the records a sync keeps.
+
+/** Two live scopes' lock paths: their `.claude` dirs exist, so no put drops them. */
+function liveScopes(dir: string): [string, string] {
+  const keys = ["a", "b"].map((name) => join(dir, name, ".claude", "skilletor.lock.json")) as [string, string];
+  for (const key of keys) mkdirSync(dirname(key), { recursive: true });
+  return keys;
+}
+
+test("k250: a readOnce state parses each file once; a plain state every time", async () => {
+  const tmp = makeTmpDir();
+  try {
+    const root = join(tmp.dir, "state");
+    const [a, b] = liveScopes(tmp.dir);
+    mkdirSync(root);
+    writeFileSync(join(root, "sources-read.json"), JSON.stringify({ [a]: readOf("git:1"), [b]: readOf("git:2") }, null, 2) + "\n");
+    const plain: string[] = [];
+    const once: string[] = [];
+    let reads = await readsOf(root, () => {
+      const state = new State(root);
+      for (const key of [a, b]) plain.push(state.sourcesRead(key).s!.version);
+    });
+    assert.equal(reads["sources-read.json"], 2, "plain: one read per call");
+    reads = await readsOf(root, () => {
+      const state = new State(root, { readOnce: true });
+      for (const key of [a, b]) once.push(state.sourcesRead(key).s!.version);
+      for (const key of [a, b]) state.unreached(key); // a missing file is read once too
+    });
+    assert.equal(reads["sources-read.json"], 1, "readOnce: one read for both scopes");
+    assert.equal(reads["unreached.json"], 1, "readOnce: a missing file once as well");
+    assert.deepEqual(once, plain);
+    assert.deepEqual(once, ["git:1", "git:2"]);
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("k250: a write drops the file from the view: the next read parses what was written, the bytes are a plain state's", async () => {
+  const tmp = makeTmpDir();
+  try {
+    const [a, b] = liveScopes(tmp.dir);
+    const bytes: Record<string, string>[] = [];
+    for (const readOnce of [false, true]) {
+      const root = join(tmp.dir, `state-${readOnce}`);
+      mkdirSync(root);
+      writeFileSync(join(root, "sources-read.json"), JSON.stringify({ [a]: readOf("git:1"), [b]: readOf("git:2") }, null, 2) + "\n");
+      const state = new State(root, { readOnce });
+      let after = "";
+      const reads = await readsOf(root, () => {
+        state.sourcesRead(a);
+        state.putSourcesRead(a, readOf("git:3"));
+        state.putRenderInputs(a, "sha256:1");
+        state.putUnreached(a, ["missing:skills/x@s"]);
+        after = state.sourcesRead(a).s!.version;
+        state.sourcesRead(b);
+      });
+      assert.equal(after, "git:3", `readOnce=${readOnce}: the read after the put is what was written`);
+      if (readOnce) assert.equal(reads["sources-read.json"], 2, "readOnce: once before the put, once after it");
+      bytes.push(Object.fromEntries(["sources-read.json", "render-inputs.json", "unreached.json"]
+        .map((name) => [name, readFileSync(join(root, name), "utf8")])));
+    }
+    assert.deepEqual(bytes[1], bytes[0], "a readOnce state writes the bytes a plain one writes");
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("k250: withLock reads afresh: what another run wrote before the lock or after it is seen", async () => {
+  const tmp = makeTmpDir();
+  try {
+    const root = join(tmp.dir, "state");
+    const [a] = liveScopes(tmp.dir);
+    const other = new State(root); // another run
+    other.putSourcesRead(a, readOf("git:1"));
+    const state = new State(root, { readOnce: true });
+    const seen: string[] = [];
+    const reads = await readsOf(root, async () => {
+      seen.push(state.sourcesRead(a).s!.version);
+      other.putSourcesRead(a, readOf("git:2"));
+      await state.withLock(() => {
+        seen.push(state.sourcesRead(a).s!.version);
+        seen.push(state.sourcesRead(a).s!.version);
+      }, { timeoutMs: 0 });
+      other.putSourcesRead(a, readOf("git:3"));
+      seen.push(state.sourcesRead(a).s!.version);
+    });
+    assert.deepEqual(seen, ["git:1", "git:2", "git:2", "git:3"], "the lock taken, and given up, the file is read again");
+    // The other run's puts read it too: one each.
+    assert.equal(reads["sources-read.json"], 2 + 3, "three reads of the readOnce state: before, under, after the lock");
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test("k250: a removed hermes-home.json leaves the view too", () => {
+  const tmp = makeTmpDir();
+  try {
+    const state = new State(join(tmp.dir, "state"), { readOnce: true });
+    state.putHermesHome(join(tmp.dir, "hermes-b"));
+    assert.equal(state.hermesHome(), join(tmp.dir, "hermes-b"), "recorded");
+    state.putHermesHome(undefined);
+    assert.equal(existsSync(join(tmp.dir, "state", "hermes-home.json")), false, "the record removed");
+    assert.equal(state.hermesHome(), undefined, "and read as none");
   } finally {
     tmp.cleanup();
   }

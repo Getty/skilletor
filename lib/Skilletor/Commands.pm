@@ -351,7 +351,7 @@ sub _bool { $_[0] ? JSON::MaybeXS::true() : JSON::MaybeXS::false() }
 # withSyncLock); $code gets the state.
 sub _with_sync_lock {
   my ( $engine, $code ) = @_;
-  my $state = Skilletor::State->new( root => $engine->state_root );
+  my $state = Skilletor::State->new( root => $engine->state_root, read_once => 1 );
   my $result = $state->with_lock(
     sub {
       Skilletor::Source::Url->sweep_cache( $engine->cache_root );

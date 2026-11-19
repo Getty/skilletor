@@ -9318,22 +9318,36 @@ function dropGoneScopes(all, keep, dirOf = dirname4) {
 }
 var State = class {
   root;
-  constructor(root) {
+  /** One run's view of the files (k250): a check, which only reads, or the holder of the sync
+   *  lock, the one writer of the records a sync keeps, parses each file once. */
+  readOnce;
+  /** What a `readOnce` state parsed, by file name. A write drops the file, so the next read
+   *  parses what was written; `withLock` empties it as it takes the lock and as it gives it up. */
+  view = /* @__PURE__ */ new Map();
+  constructor(root, opts = {}) {
     this.root = root;
+    this.readOnce = opts.readOnce ?? false;
     mkdirSync4(root, { recursive: true });
   }
   path(name) {
     return join12(this.root, name);
   }
+  /** A state file as an object; anything unreadable or no object reads as an empty one. A
+   *  `readOnce` state hands out the object it parsed first: what a caller changes of it, it writes. */
   readJson(name) {
+    const seen = this.view.get(name);
+    if (seen) return seen;
+    let value2 = {};
     try {
-      const value2 = JSON.parse(readFileSync10(this.path(name), "utf8"));
-      return value2 && typeof value2 === "object" && !Array.isArray(value2) ? value2 : {};
+      const parsed = JSON.parse(readFileSync10(this.path(name), "utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) value2 = parsed;
     } catch {
-      return {};
     }
+    if (this.readOnce) this.view.set(name, value2);
+    return value2;
   }
   writeJson(name, value2) {
+    this.view.delete(name);
     atomicWrite(this.path(name), JSON.stringify(value2, null, 2) + "\n");
   }
   // ---- trust ----------------------------------------------------------------
@@ -9460,6 +9474,7 @@ var State = class {
    *  target); the file is written only when it changes. */
   putHermesHome(home) {
     if (this.hermesHome() === home) return;
+    this.view.delete("hermes-home.json");
     if (home === void 0) rmSync7(this.path("hermes-home.json"), { force: true });
     else this.writeJson("hermes-home.json", { home });
   }
@@ -9536,6 +9551,7 @@ var State = class {
       }
       await delay(pollMs);
     }
+    this.view.clear();
     const heartbeat = setInterval(() => touch(ownerFile), refreshMs);
     heartbeat.unref();
     try {
@@ -9544,6 +9560,7 @@ var State = class {
     } finally {
       clearInterval(heartbeat);
       this.release(lockDir, ownerFile, token);
+      this.view.clear();
     }
   }
   /** Break a lock judged stale; true when it is gone, so taking it is worth a try at once. */
@@ -10261,7 +10278,7 @@ function mergeChainVars(chains, source, conflict) {
   return out;
 }
 function withSyncLock(ctx, fn) {
-  const state = new State(ctx.stateRoot);
+  const state = new State(ctx.stateRoot, { readOnce: true });
   return state.withLock(() => {
     const cacheRoot = cacheRootOf(ctx);
     sweepUrlCache(cacheRoot);
@@ -10990,7 +11007,7 @@ async function check(given, opts = {}) {
   const loaded = loadWithTargets(ctx, opts.scope !== "user");
   if ("error" in loaded) return { changed: false, sources: [], warnings: [], error: loaded.error };
   const { config, targets } = loaded;
-  const state = new State(ctx.stateRoot);
+  const state = new State(ctx.stateRoot, { readOnce: true });
   const cacheRoot = cacheRootOf(ctx);
   const sel = opts.scope ?? "all";
   const out = { changed: false, sources: [], warnings: [] };

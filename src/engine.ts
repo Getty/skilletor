@@ -521,7 +521,7 @@ function mergeChainVars(
  * no other can be inside a resolve.
  */
 export function withSyncLock<T>(ctx: EngineContext, fn: (state: State) => Promise<T>): Promise<T> {
-  const state = new State(ctx.stateRoot);
+  const state = new State(ctx.stateRoot, { readOnce: true });
   return state.withLock(() => {
     const cacheRoot = cacheRootOf(ctx);
     sweepUrlCache(cacheRoot);
@@ -1613,7 +1613,7 @@ export async function check(given: EngineContext, opts: CheckOptions = {}): Prom
   const loaded = loadWithTargets(ctx, opts.scope !== "user");
   if ("error" in loaded) return { changed: false, sources: [], warnings: [], error: loaded.error };
   const { config, targets } = loaded;
-  const state = new State(ctx.stateRoot);
+  const state = new State(ctx.stateRoot, { readOnce: true }); // it only reads
   const cacheRoot = cacheRootOf(ctx);
   const sel = opts.scope ?? "all";
   const out: CheckReport = { changed: false, sources: [], warnings: [] };

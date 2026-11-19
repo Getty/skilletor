@@ -126,6 +126,12 @@ Revision history for skilletor and Skilletor, its Perl distribution
     a project without .claude keeps its mark. On a machine with many removed
     worktrees this cut render-inputs.json from 126 KB to 23 KB and
     last-check.json from 16 KB to 8 KB.
+  - A SessionStart reads each state record file at most twice instead of up
+    to six times: its check once for both scopes, its sync once under the
+    sync lock (k250). The Perl port spends a quarter second on each parse of
+    a 300 KB sources-read.json, so its SessionStart on such a file takes
+    1.0 s instead of 2.0 s (the binary 1.2 s instead of 2.3 s). The files
+    written stay byte for byte the same.
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's

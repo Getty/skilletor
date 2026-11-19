@@ -144,7 +144,7 @@ sub resolve {
   my ( $self, %opts ) = @_;
   my $sel = $opts{scope} // 'all';
   croak 'scope must be user, project or all' unless $sel =~ /\A(?:user|project|all)\z/;
-  my $state = Skilletor::State->new( root => $self->state_root );
+  my $state = Skilletor::State->new( root => $self->state_root, read_once => 1 );
   return $state->with_lock(
     sub {
       Skilletor::Source::Url->sweep_cache( $self->cache_root );

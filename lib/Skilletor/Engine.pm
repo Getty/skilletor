@@ -389,7 +389,7 @@ sub _checked_version {
 sub sync {
   my ( $self, %opts ) = @_;
   my $sel = $opts{scope} // 'all';
-  my $state = Skilletor::State->new( root => $self->state_root );
+  my $state = Skilletor::State->new( root => $self->state_root, read_once => 1 );
   my $report = $state->with_lock(
     sub {
       Skilletor::Source::Url->sweep_cache( $self->cache_root );
@@ -1094,7 +1094,7 @@ sub check {
     return js_ordered( changed => _false, sources => [], warnings => [], error => _message($@) );
   }
   my @scopes = _scopes_of( $config, $sel );
-  my $state = Skilletor::State->new( root => $self->state_root );
+  my $state = Skilletor::State->new( root => $self->state_root, read_once => 1 );    # it only reads
   my $out = js_ordered( changed => _false, sources => [], warnings => [] );
   my %field = ( targets => 'targetsChanged', layout => 'layoutChanged', declared => 'declaredChanged' );
   push @{ $out->{warnings} }, @{ $targets->{warnings} }

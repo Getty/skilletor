@@ -22,6 +22,20 @@ has root => (
   required => 1,
 );
 
+# One run's view of the files (k250): a check, which only reads, or the holder of the sync lock,
+# the one writer of the records a sync keeps, parses each file once.
+has read_once => (
+  is => 'ro',
+);
+
+# What a read_once state parsed, by file name. A write drops the file, so the next read parses
+# what was written; with_lock empties it as it takes the lock and as it gives it up.
+has _view => (
+  is       => 'ro',
+  init_arg => undef,
+  default  => sub { {} },
+);
+
 sub BUILD {
   my ( $self ) = @_;
   path( $self->root )->mkpath;
@@ -39,15 +53,21 @@ sub default_root {
 
 sub _file { path_join( $_[0]->root, $_[1] ) }
 
-# A state file as an object; anything unreadable or no object reads as an empty one.
+# A state file as an object; anything unreadable or no object reads as an empty one. A read_once
+# state hands out the object it parsed first: what a caller changes of it, it writes.
 sub _read_json {
   my ( $self, $name ) = @_;
+  my $view = $self->_view;
+  return $view->{$name} if exists $view->{$name};
   my $value = eval { js_parse( read_text( $self->_file($name) ) ) };
-  return ( defined $value && js_type($value) eq 'object' ) ? $value : js_ordered();
+  $value = js_ordered() unless defined $value && js_type($value) eq 'object';
+  $view->{$name} = $value if $self->read_once;
+  return $value;
 }
 
 sub _write_json {
   my ( $self, $name, $value ) = @_;
+  delete $self->_view->{$name};
   write_text( $self->_file($name), js_stringify( $value, 2 )."\n" );
 }
 
@@ -305,6 +325,7 @@ sub put_hermes_home {
   my ( $self, $home ) = @_;
   my $have = $self->hermes_home;
   return if ( !defined $have && !defined $home ) || ( defined $have && defined $home && $have eq $home );
+  delete $self->_view->{'hermes-home.json'};    # written or removed: read again
   if ( defined $home ) { $self->_write_json( 'hermes-home.json', js_ordered( home => $home ) ) }
   else                 { unlink Skilletor::FSUtil::encode_text( $self->_file('hermes-home.json') ) }
 }
@@ -346,6 +367,7 @@ sub with_lock {
     Time::HiRes::sleep( $poll_ms / 1000 );
   }
 
+  %{ $self->_view } = ();    # what was read before the lock is not what holds under it
   my $heartbeat = $self->_heartbeat( $owner, $refresh_ms, $win32 );
   my $want = wantarray;
   my @result;
@@ -360,6 +382,7 @@ sub with_lock {
   my $err = $@;
   $self->_stop_heartbeat($heartbeat);
   $self->_release( $lock_dir, $owner, $token );
+  %{ $self->_view } = ();    # nor what was read under it once another run may write
   die $err unless $ok;
   return $want ? @result : $result[0];
 }
@@ -554,6 +577,17 @@ and when (C<{ cwd, at }>), for the 256 sessions recorded last.
 
 The state directory; created when the object is.
 
+=attr read_once
+
+True: the object parses each file once and hands out that object from then on
+(k250) – one run's view, for a C<check>, which only reads, and for the holder
+of the sync lock, the one writer of the records a sync keeps. A write, or the
+removal of F<hermes-home.json>, drops the file from the view, so the next read
+parses what was written; L</with_lock> empties the view as it takes the lock
+and as it gives it up. Off by default: a hook's records (F<last-check.json>,
+F<pending-report.json>, F<session-cwd.json>) are written outside the lock, and
+each read sees what another run wrote.
+
 =method for_home
 
   Skilletor::State->for_home($home);
@@ -683,6 +717,7 @@ fork to spare, the holder refreshes it itself, at most every C<refresh_ms>,
 each time it waits on a program through L<Skilletor::Process> – a resolve's git
 runs, not an HTTP download; C<< win32 => 1 >> takes this way on any system,
 for a test. The lock is released however the code ends; its result (in the
-caller's context) is returned and its exception rethrown.
+caller's context) is returned and its exception rethrown. A L</read_once>
+object reads every file afresh under the lock, and once more after it.
 
 =cut
