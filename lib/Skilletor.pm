@@ -1,5 +1,5 @@
 package Skilletor;
-# ABSTRACT: Install skills, agents and rules from remote sources – the Perl port of skilletor
+# ABSTRACT: Install and sync skills, agents and rules for Claude Code, Codex and Hermes Agent
 
 use utf8;
 use Moo;
@@ -224,6 +224,12 @@ sub resolve_rules {
 
 =synopsis
 
+  # The skilletor command this distribution installs:
+  skilletor add Getty                         # a source: github.com/Getty/skills
+  skilletor install getty-perl-moo@getty      # one of its items, then a sync
+  skilletor sync                              # bring every scope up to date
+
+  # The library: a skill, agent or rule where skilletor finds it.
   use Skilletor;
 
   my $sk = Skilletor->new( home => $ENV{HOME}, project_dir => $project );
@@ -241,7 +247,7 @@ sub resolve_rules {
   # Startup without the network: what the cache holds.
   my $offline = Skilletor->new( home => $ENV{HOME}, project_dir => $project, fetch => 'never' );
 
-  # Install for Claude Code, as `skilletor sync` does:
+  # Install for every target (Claude Code, Codex, Hermes), as `skilletor sync` does:
   use Skilletor::Report qw( report_text exit_code );
   my $report = $sk->sync;                      # the reference's SyncReport
   print report_text($report) || 'skilletor: up to date', "\n";
@@ -253,16 +259,74 @@ sub resolve_rules {
 
 =description
 
-L<skilletor|https://github.com/Getty/skilletor> installs skills, agents and
-rules from remote sources (git repositories, https tarballs, local
-directories) into Claude Code, Codex and Hermes, at user and project scope.
-Its reference implementation is TypeScript; this distribution is its Perl
-port, living in the same repository, for Perl programs – an agent such as
-L<Langertha::Raider> – that must resolve skills exactly as skilletor does,
-straight from the same config and the same cache, without Node, and sync them
-into Claude Code's directories as the CLI does.
+skilletor installs the skills, agents and rules a coding agent works with –
+Claude Code, Codex or Hermes Agent – from wherever they live: a git
+repository, an https tarball, a local directory, a Claude plugin repository,
+another project's own F<.claude/>. You name the items once, in a small
+F<skilletor.json>, for yourself or for one project. skilletor puts them where
+each agent reads them, renders templates per project, and at every session
+start brings them up to date and tells the model what changed. A project's
+committed F<skilletor.json> gives everyone who works on it the same set, and
+a source that only a cloned project declares is fetched once you trust it,
+never before.
 
-The port shares everything on disk with the reference: the config files
+=head2 Getting started
+
+Most people run skilletor as a plugin, from Getty's marketplace. In Claude
+Code:
+
+  /plugin marketplace add Getty/marketplace
+  /plugin install skilletor@getty
+  /reload-plugins
+
+For Codex, in a terminal; then, in Codex, trust skilletor's C<SessionStart>
+and C<UserPromptSubmit> hooks with C</hooks> – until then Codex skips them:
+
+  codex plugin marketplace add Getty/marketplace
+  codex plugin add skilletor@getty
+
+Hermes Agent gets skills, once you name it in the C<targets> of
+F<~/.claude/skilletor.json>; its plugin runs the C<skilletor> command:
+
+  hermes plugins install Getty/skilletor/hermes/skilletor --enable
+
+Then ask the session, or type in a shell:
+
+  $ skilletor add Getty
+  added source getty ({"git":"https://github.com/Getty/skills"})
+  skilletor: up to date
+  $ skilletor install getty-perl-moo@getty
+  skilletor: user scope
+    + skills/getty-perl-moo (active now)
+
+The guide – the install script, sources, patterns and bundles, project
+configs, templates, trust, Codex and Hermes, what is released and tested
+where – is the F<README.md> at L<https://github.com/Getty/skilletor>.
+
+=head2 This distribution
+
+This distribution is skilletor in Perl. It installs the L<skilletor> command,
+with the same commands, options, messages and exit codes as the plugin's, for
+Perl 5.40 and later without Node.js: in a shell, or as the command the Hermes
+plugin runs (C<$SKILLETOR_BIN>, else C<skilletor> on the C<PATH>). Only the
+version is spelled its own way: C<0.008> for the plugin's 0.8.0. It needs
+C<git>, as the plugin does.
+
+  cpanm Skilletor
+
+The plugin runs the same Perl code from its own copy on a machine without
+Node.js, and the standalone binaries the release workflow builds are packed
+from it.
+
+=head1 LIBRARY
+
+The distribution is also a library, for Perl programs that must find skills,
+agents and rules exactly as skilletor installs them – an agent such as
+L<Langertha::Raider> loads a skill or an agent straight from its source with
+it – and sync them as the command does. The TypeScript engine in the same
+repository is the reference implementation; this one follows it.
+
+It shares everything on disk with the reference: the config files
 (C<~/.claude/skilletor.json>, C<< <project>/.claude/skilletor.json >>,
 C<skilletor.local.json>), the source cache under C<~/.claude/skilletor/cache>
 (the same directory names, so one fetch serves both), C<trust.json>, the sync
@@ -275,8 +339,7 @@ The lookups (L</resolve_skill> and its siblings, L</items>) answer "where is
 skill X" the way a sync would install it, but without installing anything: an
 item is served from the source tree it lies in – a C<local> directory or the
 cache dir a git or url source was fetched into. L</sync>, L</check> and
-L</status> are the CLI's commands for the Claude Code target
-(L<Skilletor::Engine>).
+L</status> are the commands of the same name (L<Skilletor::Engine>).
 
 =head2 Scopes and precedence
 
@@ -386,6 +449,8 @@ directly; methods are snake_case. Paths are character strings, as the
 reference's are; Perl hands their UTF-8 bytes to the file system. A home
 directory is always passed in – nothing reads C<$ENV{HOME}> on its own.
 
+=head1 ATTRIBUTES
+
 =attr home
 
 Required: the home whose C<.claude/skilletor.json> and cache are used.
@@ -434,6 +499,8 @@ and C<CLAUDE_PLUGIN_ROOT>.
 =attr resolver
 
 The L<Skilletor::Engine> (a L<Skilletor::Resolver>) doing the work.
+
+=head1 METHODS
 
 =method engine
 
@@ -550,7 +617,11 @@ again (and fetches, by L</fetch>).
 
 =seealso
 
-L<https://github.com/Getty/skilletor> – the reference implementation and its
-design spec, F<docs/superpowers/specs/2026-09-22-skilletor-design.md>.
+L<skilletor> – the command.
+
+L<https://github.com/Getty/skilletor> – the plugin, its guide (F<README.md>),
+the reference implementation and its design spec,
+F<docs/superpowers/specs/2026-09-22-skilletor-design.md>, and the design of
+this port, F<docs/perl.md>.
 
 =cut

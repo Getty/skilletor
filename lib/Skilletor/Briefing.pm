@@ -116,7 +116,9 @@ installed without them fails when it is spawned. This reads the installed
 agent file – never renders it – and names the bare skill names no root the
 harness's briefing lookup searches holds: for Claude Code the project's
 C<.claude/skills> (a project agent), C<~/.claude/skills> and Claude Code's
-plugin cache. C<plugin:skill> names are not checked. Read-only; a file it
+plugin cache; for Codex the project's C<.agents/skills> and C<.codex/skills>
+(a project agent), C<$CODEX_HOME/skills> and C<~/.agents/skills>.
+C<plugin:skill> names are not checked. Read-only; a file it
 cannot parse yields nothing.
 
 =func declared_skills

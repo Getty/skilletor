@@ -1302,7 +1302,7 @@ C<check> and C<status> read without it.
 =head2 Claude Code, Codex and Hermes
 
 The port installs for Claude Code, Codex and Hermes, as the reference does (spec
-§14): skills of both in C<.agents/skills> when Codex alone is a target, each
+§14). For Codex: the skills of both scopes in C<.agents/skills>, each
 agent converted to Codex's TOML (L<Skilletor::Convert>), the rules as
 sections of one C<skilletor-rules.md> under C<$CODEX_HOME> or the project's
 C<.codex>, with a pointer block in the scope's C<AGENTS.md>

@@ -7,26 +7,72 @@
 Remote skills, agents and rules for Claude Code, Codex and Hermes Agent — declared once,
 synced on every session, templated per project.
 
-skilletor is a Claude Code and Codex plugin plus a standalone CLI. It installs **skills,
-agents and rules** from configured sources and keeps them up to date: it reconciles at session
-start, re-checks (throttled) during the session, pulls anything new, and tells the model
-what changed. Want shared skills? This is most likely the tool.
-[manage-skills](https://github.com/Getty/manage-skills) keeps its own niche: many projects on
-the same machine sharing one hardlinked copy of each skill.
+skilletor installs the skills, agents and rules your coding agent works with from wherever
+they live: a git repository, an HTTPS tarball, a local directory, a Claude plugin repository,
+another project's own `.claude/`. You name the items once, in a small `skilletor.json`, for
+yourself or for one project. skilletor puts them where Claude Code, Codex and Hermes Agent read
+them, renders templates per project, and at every session start brings them up to date and
+tells the model what changed. A project's committed `skilletor.json` gives everyone who works
+on it the same set, and a source that only a cloned project declares is fetched once you trust
+it, never before. Want shared skills? This is most likely the tool.
 
-## 30-second start
+It comes as a plugin for Claude Code and for Codex, from Getty's marketplace, as a plugin for
+Hermes Agent, and as a `skilletor` command for your shell.
 
-```bash
+## Install
+
+On the machine it needs `git` and Node.js ≥ 18, or Perl ≥ 5.40 with a few CPAN modules
+([Requirements](#requirements)). What is released and what is tested where:
+[Status](#status).
+
+### In Claude Code
+
+In Claude Code, type:
+
+```
 /plugin marketplace add Getty/marketplace
 /plugin install skilletor@getty
-skilletor add Getty && skilletor install getty-perl-moo@getty
+/reload-plugins
 ```
 
-`add` registers (and trusts) a source; `install` declares an item and syncs it onto disk.
-Using Codex? See [Codex](#codex) — the plugin works there too, with a few differences.
-Using Hermes Agent? See [Hermes Agent](#hermes-agent) — skills, and a plugin of its own.
+`/reload-plugins` loads the plugin into the running session; a new session does the same. Claude
+then has the bundled `skilletor` skill, and the `skilletor` command is on the `PATH` of its Bash
+tool. From the next session start on, the plugin's hooks keep your items current
+([How it works](#how-it-works)).
 
-## From the command line
+### In Codex
+
+In a terminal:
+
+```bash
+codex plugin marketplace add Getty/marketplace
+codex plugin add skilletor@getty
+```
+
+Then start Codex, type `/hooks` and trust skilletor's `SessionStart` and `UserPromptSubmit`
+hooks. Codex runs a plugin's hooks only once you trust them and skips them without a word until
+then: no syncs, no rules. An update that changes the hooks needs that trust again. Codex puts
+no plugin's `bin/` on `PATH`, but the bundled skill tells the session where skilletor's launcher
+is, so asking the session works; for your own terminal, [`install.sh`](#from-the-command-line)
+gives you a `skilletor` command. What Codex gets, and where: [Codex](#codex); the plugin
+there: [The plugin under Codex](#the-plugin-under-codex).
+
+### In Hermes Agent
+
+Hermes gets skills only, once you opt in: name it in the `targets` of
+`~/.claude/skilletor.json`, together with every other harness you use, since user `targets`
+replace detection:
+
+```json
+{ "targets": ["claude", "hermes"] }
+```
+
+It has a plugin of its own, installed with `hermes plugins install`, which runs the
+`skilletor` command (`$SKILLETOR_BIN`, else the one on `PATH`): see
+[The plugin under Hermes](#the-plugin-under-hermes). What Hermes gets, and where:
+[Hermes Agent](#hermes-agent).
+
+### From the command line
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh
@@ -35,14 +81,14 @@ skilletor add Getty && skilletor install getty-perl-moo@getty
 
 Outside a Claude Code session the plugin's `bin/` is not on `PATH`; `install.sh` gives you a
 `skilletor` command that is. With Node.js ≥ 18 and `claude` on `PATH` it runs
-`claude plugin marketplace add
-Getty/marketplace` (or `marketplace update getty` when it is known) and `claude plugin install
-skilletor@getty` in user scope (or `plugin update` when it is installed), then writes
-`~/.local/bin/skilletor`: a small script that looks up the plugin's current user-scope
-install in Claude Code's `installed_plugins.json` and runs its `bin/skilletor`, so plugin
-updates do not break it. Without Claude Code (Codex or Hermes only), or with `--no-plugin`, it
-clones this repository into `~/.local/share/skilletor` (`$XDG_DATA_HOME/skilletor`) and links
-the clone's `bin/skilletor` there instead. Run it again to update either one.
+`claude plugin marketplace add Getty/marketplace` (or `marketplace update getty` when it is
+known) and `claude plugin install skilletor@getty` in user scope (or `plugin update` when it is
+installed), then writes `~/.local/bin/skilletor`: a small script that looks up the plugin's
+current user-scope install in Claude Code's `installed_plugins.json` and runs its
+`bin/skilletor`, so plugin updates do not break it. Without Claude Code (Codex or Hermes only),
+or with `--no-plugin`, it clones this repository into `~/.local/share/skilletor`
+(`$XDG_DATA_HOME/skilletor`) and links the clone's `bin/skilletor` there instead. Run it again
+to update either one.
 
 **Without Node:** the installer leaves Claude Code's plugin state untouched and uses a
 CLI-only checkout. It first runs `bin/skilletor-start --help`, which fetches the pinned
@@ -50,8 +96,8 @@ release binary if there is one, then installs a link to that starter only if the
 succeeds. A downloaded binary must match a checksum pinned in the checkout. Updates are
 checked in a separate candidate checkout; a failed download or preflight leaves the existing
 command and its checkout working. Previous checkouts are kept. No release pins binaries yet
-(see [Which engine runs](#which-engine-runs)), so today this path needs Perl ≥ 5.40 with the
-Perl port's dependencies; without one, installation fails safely.
+([Status](#status)), so today this path needs Perl ≥ 5.40 with the modules in `cpanfile`;
+without one, installation fails safely.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh -s -- --no-plugin --bin-dir ~/bin
@@ -63,14 +109,215 @@ sh install.sh               # in a clone: the same, but the CLI-only path links 
 fork, a mirror). The normal plugin path needs Node.js ≥ 18 and `git`; the no-Node path
 needs `git` and a usable starter runtime. Binary startup requires `sha256sum` or `shasum`;
 provisioning additionally needs `curl` or `wget`. It never uses `sudo`, says what it did,
-warns when the directory is not on your `PATH`, and replaces
-no `skilletor` there that it did not write itself (a symlink excepted). Installing the plugin
-yourself (`claude plugin install …` in a dotfiles script, say)? Run the script afterwards
-for the command; it finds the plugin installed and only updates it.
+warns when the directory is not on your `PATH`, and replaces no `skilletor` there that it did
+not write itself (a symlink excepted). Installing the plugin yourself (`claude plugin install …`
+in a dotfiles script, say)? Run the script afterwards for the command; it finds the plugin
+installed and only updates it.
+
+**With Perl:** from 0.008 on, the CPAN distribution `Skilletor` installs the same `skilletor`
+command, in Perl (`cpanm Skilletor`, Perl ≥ 5.40). That release is not out yet: CPAN has 0.001,
+the library alone ([Status](#status)).
 
 Windows: the script is for macOS and Linux. Install the plugin in Claude Code, and for
 PowerShell or cmd clone this repository and put its `bin\` on your `PATH` — `skilletor`
 there runs `bin\skilletor.exe` (see [Requirements](#requirements)); `git pull` updates it.
+
+## First steps
+
+Tell the session what you want ("add Getty's skills with skilletor and install
+getty-perl-moo"), and it runs the commands. Or type them in a shell that has `skilletor` on its
+`PATH`:
+
+```console
+$ skilletor add Getty
+added source getty ({"git":"https://github.com/Getty/skills"})
+skilletor: up to date
+$ skilletor install getty-perl-moo@getty
+skilletor: user scope
+  + skills/getty-perl-moo (active now)
+```
+
+That is a machine with Claude Code alone. Where Codex is installed too, the report adds
+`+ codex:skills/getty-perl-moo (active from the next Codex session)`, and until you trust
+skilletor's hooks in Codex, every sync (the one `add` and `install` run too) and `status` end
+with a warning, `Codex has not trusted skilletor's SessionStart hook …`
+([trust the hooks](#the-plugin-under-codex)).
+
+`add` registers a source, trusts it and syncs: `Getty` is short for the git repository
+`https://github.com/Getty/skills`, kept as the source `getty` in your user config
+`~/.claude/skilletor.json`. `install` adds the item to that config and syncs it onto disk:
+`~/.claude/skills/getty-perl-moo/` for Claude Code, and `~/.agents/skills/getty-perl-moo/` too
+when Codex is on the machine. Each line of the report says when the item takes effect: in
+Claude Code a skill at once, an agent or a rule after `/reload-plugins` or a restart; in Codex
+and Hermes from the next session.
+
+From then on every session start checks your sources and brings what you installed up to date.
+During a session a background check does the same, at most every 30 minutes
+([how to quiet it](#the-in-session-check-and-how-to-quiet-it)).
+
+## Everyday use
+
+**More sources.** A git repository with `skills/`, `agents/` or `rules/`, a Claude plugin
+repository, a project that keeps its own items in `.claude/`, an HTTPS tarball or a directory
+of your own ([Sources](#sources)):
+
+```bash
+skilletor add obra/superpowers            # a Claude plugin repository: source "superpowers"
+skilletor add Getty/karr                  # a project: its .claude/ skills, agents and rules
+skilletor add mine ~/dev/my-skills        # a local directory, under the name "mine"
+skilletor available getty                 # what a source offers; ✓ marks what is installed
+```
+
+**Many items at once.** A name pattern, every item of a type, or a bundle: a named set the
+source defines. Quote a pattern, so the shell leaves the `*` alone:
+
+```bash
+skilletor install 'skill:getty-perl-*@getty'   # every skill whose name matches
+skilletor install 'rule:*@getty'               # every rule of the source
+skilletor install bundle:house@getty           # the bundle "house" of the source getty
+```
+
+What a pattern or a bundle stands for is worked out again on every sync, so items added
+upstream arrive by themselves ([Wildcards](#wildcards-and-name-patterns),
+[Bundles](#bundles-a-named-set-from-a-source)).
+
+**For one project, for everyone on it.** `--project` edits the project's
+`.claude/skilletor.json` instead of yours, and the items go into the project. On a machine
+with the Claude Code plugin installed from Getty's marketplace:
+
+```console
+$ cd ~/src/shop
+$ skilletor add Getty --project
+added source getty ({"git":"https://github.com/Getty/skills"})
+skilletor: project scope
+  .claude/.gitignore updated — commit it
+  .worktreeinclude updated — commit it
+  .claude/settings.json updated (enables skilletor@getty; declares marketplace getty) — commit it
+$ skilletor install bundle:house@getty --project
+skilletor: project scope
+  + rules/engineering-discipline (active after /reload-plugins or restart)
+  + rules/agent-delegation (active after /reload-plugins or restart)
+  + rules/publish-gate (active after /reload-plugins or restart)
+```
+
+Commit `.claude/skilletor.json`, `.claude/.gitignore`, `.worktreeinclude` and
+`.claude/settings.json`. The installed files stay out of git; each checkout gets them from its
+own sync. The `.claude/settings.json` line makes the plugin a requirement of the project, so a
+teammate's Claude Code offers to install it
+([Sharing a project](#sharing-a-project-require-the-plugin)); without the Claude Code plugin
+installed, that line is not there. What only this machine should use goes into
+`.claude/skilletor.local.json`, which stays out of git.
+
+**A project someone else set up.** A source that only the project's config declares is not
+fetched until you trust it: rendering a source's templates can run code
+([Security & trust](#security--trust)). The session start names it, and so does `sync`:
+
+```console
+$ skilletor sync
+skilletor: project scope
+  trust: source "getty" (git https://github.com/Getty/skills) — run: skilletor trust getty
+$ skilletor trust getty
+trusted source getty (git https://github.com/Getty/skills)
+$ skilletor sync
+skilletor: project scope
+  + rules/engineering-discipline (active after /reload-plugins or restart)
+  + rules/agent-delegation (active after /reload-plugins or restart)
+  + rules/publish-gate (active after /reload-plugins or restart)
+```
+
+**Keep an eye on it.** The hooks sync for you; by hand:
+
+```bash
+skilletor status          # per scope: what is declared, ✓ what is installed
+skilletor check           # is a sync due? exit 1 when it is; writes nothing
+skilletor sync            # bring everything in line now
+```
+
+**One source, many projects: templates and vars.** A source file ending in `.njk` is rendered
+with Nunjucks for each project, and `vars` in your config or the project's switch items on and
+off ([Templates](#templates)):
+
+```json
+{ "vars": { "kubernetes": true } }
+```
+
+**Taking things out.** `uninstall` removes the entry, and the sync it runs removes the files;
+`source remove` refuses while items of the source are installed, unless you pass `--force`:
+
+```bash
+skilletor uninstall getty-perl-moo@getty      # --project for the project's config
+skilletor source remove getty
+```
+
+Every command and option: [CLI reference](#cli-reference).
+
+## Status
+
+What is released, what is switched on, and what is tested where:
+
+- **Released.** The plugin's newest release is 0.7.0 (tag `v0.7.0`, MIT). This README
+  describes 0.8.0, which is prepared and not released yet; its CPAN spelling is `0.008`. On
+  CPAN, `Skilletor` 0.001 is the Perl library alone: Claude Code only, no template rendering,
+  no `skilletor` command. The marketplace entries name no version, so Claude Code and Codex
+  install this repository's `main` as it stands.
+- **Standalone binaries: prepared, not switched on.** The release workflow builds them for
+  linux-x86_64, linux-arm64, macos-arm64 and windows-x86_64, and no release has published them
+  yet. The starter downloads one only once `bin/skilletor-binaries.sha256` pins its checksum,
+  and that file is committed only after a release has published the binaries
+  ([docs/release.md](docs/release.md)). Until then the plugin and the command run Node.js,
+  else Perl ([Which engine runs](#which-engine-runs)).
+- **Tested.** On GitHub Actions, `ci.yml` runs the TypeScript tests on Ubuntu, macOS and
+  Windows with Node 24; the bundle is built for Node 18, the oldest version the launcher
+  accepts, which CI does not run. On Windows the native `bin/skilletor.exe` is run, and the
+  tests of the sh scripts (`install.sh`, the launcher, the starter) skip themselves, as do
+  those of the Hermes adapter, a Python plugin whose tests drive an sh script as a stand-in
+  CLI. `simpici.yml` rebuilds that `.exe` from `winlaunch/winlaunch.c` and checks that the
+  committed one is byte for byte that build. `perl.yml` runs the Perl tests on Linux with
+  Perl 5.40, including parity tests against the TypeScript engine. The Perl engine has no CI
+  run on macOS or Windows; the
+  `binaries` workflow smokes the packed binaries there when it runs (on a published release,
+  or started by hand). Both test suites run the shared conformance cases. The Hermes support
+  is tested against a real Hermes Agent on Linux only, on a machine that has one
+  (`test/hermes-real.test.ts`, skipped in CI). Live Claude Code, Codex and Hermes sessions are
+  not part of CI.
+- **Windows** runs the plugin on Node.js through `bin/skilletor.exe`, whatever else is
+  installed; `install.sh` does not run there.
+
+### Requirements
+
+- `git`, and one engine ([Which engine runs](#which-engine-runs)): Node.js ≥ 18, whose only
+  bundled runtime dependency is Nunjucks; or Perl ≥ 5.40 with the modules in `cpanfile`; or,
+  once a release pins it, the release binary for the platform, fetched with `curl` or `wget`
+  and checked with `sha256sum` or `shasum`.
+- Windows: Node.js ≥ 18 and `git`, without Git Bash. Claude Code starts the hooks through
+  `bin/skilletor.exe`, a small launcher next to the sh script that runs the bundle with
+  the first `node.exe` on `PATH` (without one it exits silently). It is also the
+  `skilletor` command in PowerShell and cmd once `bin/` is on `PATH`. Sources are checked
+  out with the repository's line endings, whatever `core.autocrlf` says, so a project
+  synced on Windows and on Linux gets the same files and lock.
+
+### Which engine runs
+
+`bin/skilletor` (what every plugin hook, the Hermes adapter in a checkout, npm and
+`install.sh`'s link run) hands over to `bin/skilletor-start`, which takes the first of:
+
+1. the release binary for this platform pinned in `bin/skilletor-binaries.sha256` (the
+   release's `SHA256SUMS`), cached under `<claudeConfigDir>/skilletor/bin/<version>/` and
+   checked against its pinned checksum on every start;
+2. Node.js ≥ 18 with `dist/skilletor.js`;
+3. Perl ≥ 5.40 with `lib/` and `script/skilletor`, once the modules in `cpanfile` load;
+4. else one line saying why: a hook prints it as its warning and exits 0, it never blocks.
+
+Only two things fetch the binary (`curl` or `wget`, checked with `sha256sum` or `shasum`): a
+CLI command, in the foreground, and a SessionStart hook, in the background. The session that
+starts it keeps running Node or Perl, the next one runs the binary. Other hooks never fetch.
+`--version` and `-v` never fetch either; they print the version of the engine that answers:
+`0.008` from the binary and Perl, `0.8.0` from Node. A failed SessionStart fetch is retried
+after 15 minutes.
+
+Without the pinned file the starter downloads nothing, and no release has pinned one yet; until
+one does, a plugin install runs Node, else Perl. Windows runs Node through
+`bin/skilletor.exe` either way.
 
 ## How it works
 
@@ -85,6 +332,7 @@ there runs `bin\skilletor.exe` (see [Requirements](#requirements)); `git pull` u
 |---|---|---|
 | Claude Code | `~/.claude/{skills,agents,rules}` | `<project>/.claude/{skills,agents,rules}` |
 | Codex | `~/.agents/skills`, `$CODEX_HOME/{agents,skilletor-rules.md}` | `<project>/.agents/skills`, `<project>/.codex/{agents,skilletor-rules.md}` |
+| Hermes Agent (skills only, opt-in) | `<Hermes home>/skills` | `<project>/.hermes/skills`, not while Codex is a target of that project |
 
 Hooks run it, in every harness the plugin supports:
 
@@ -125,8 +373,9 @@ left untouched. Worktrees Claude Code creates itself get the items copied throug
     `hermes skills trust <dir>` when skills landed, since Hermes hides a project's skills
     until it trusts that directory.
 
-Skills become usable immediately; agents and rules activate after `/reload-plugins` or a
-restart — the report says so per item. When an update changes the hooks, Codex runs them
+In Claude Code skills become usable immediately; agents and rules activate after
+`/reload-plugins` or a restart. Codex and Hermes list what a sync wrote from their next
+session. The report says so per item. When an update changes the hooks, Codex runs them
 only after you trust them again in `/hooks`. The Hermes plugin is updated on its own, with
 `hermes plugins update skilletor`.
 
@@ -480,8 +729,8 @@ Use the {{ project.name }} cluster in namespace {{ vars.k8s_namespace }}.
 ```
 
 Context: `vars.*` (source defaults < [bundle vars](#bundles-a-named-set-from-a-source) < user < project < local), `project.*` (project
-scope), `scope`, `harness` (`claude` or `codex`), `target.dir`, `host.*`, `user.*`,
-`item.*`. There is deliberately no `env.*`, and printing an undefined variable (`{{ vars.x }}`) is an error (so a typo can't
+scope: `dir`, `name`, `git_remote`), `scope`, `harness` (`claude`, `codex` or `hermes`),
+`target.dir`, `host.*`, `user.*`, `item.*`. There is deliberately no `env.*`, and printing an undefined variable (`{{ vars.x }}`) is an error (so a typo can't
 ship an empty skill). Testing one (`{% if vars.x %}`) is not: it is simply false.
 
 Tags are not whitespace-trimmed, so a `{% if %}` on its own line leaves a blank line. In
@@ -711,8 +960,8 @@ targets, leaving foreign files alone; ambiguous projects are preserved instead. 
 | agent | `<base>/.claude/agents/.local.<name>.md` | user: `$CODEX_HOME/agents/.local.<name>.toml`; project: `<project>/.codex/agents/.local.<name>.toml` |
 | rule | `<base>/.claude/rules/.local.<name>.md` | a section of `$CODEX_HOME/skilletor-rules.md` (user) or `<project>/.codex/skilletor-rules.md` (project), delivered by the `SessionStart` hook |
 
-Every item is rendered once per target, with `harness` (`claude` or `codex`) in the
-template context, so a source can branch on it. Gating a whole item works like any other
+Every item is rendered once per target, with `harness` (`claude`, `codex` or `hermes`) in
+the template context, so a source can branch on it. Gating a whole item works like any other
 [empty render](#switching-items-on-and-off-with-vars): a skill whose `SKILL.md.njk` is
 wrapped in `{% if harness == "claude" %}` is installed for Claude Code and skipped for
 Codex. Skills are copied as they are — Codex accepts Claude's SKILL.md format.
@@ -881,8 +1130,8 @@ is on disk at once but listed by Codex only from the next session.
 ## Hermes Agent
 
 skilletor also installs for NousResearch [Hermes Agent](https://github.com/NousResearch/hermes-agent)
-(`hermes`), on Linux: **skills**, in both scopes, from the same sources and the same
-`skilletor.json`.
+(`hermes`): **skills**, in both scopes, from the same sources and the same `skilletor.json`.
+The Hermes support is tested on Linux only.
 
 **Hermes is opt-in.** It is never auto-detected on the machine; name it in the `targets`
 of `~/.claude/skilletor.json`, together with every other harness you use, since user
@@ -1050,7 +1299,7 @@ rendered. This is the same trust level as installing a plugin.
   own `local` override (author mode) stays trusted.
 - What a config, a source or git's output puts into a report — a source name, an address,
   an error — shows control characters, terminal escapes and Unicode bidi overrides escaped
-  (`\u001b`, `‮`, a newline as `\n`), in the hook's session context and on the CLI
+  (`\u001b`, `\u202e`, a newline as `\n`), in the hook's session context and on the CLI
   alike, so it cannot recolor, move or hide text in your terminal or in the model's context.
 - Fixed target directories per harness; item names, tar entries and includes may not escape the
   source or target root; symlinks in sources are rejected; `url` is HTTPS-only.
@@ -1062,8 +1311,8 @@ rendered. This is the same trust level as installing a plugin.
 
 ## Coming from manage-skills
 
-manage-skills hardlinks a single source-of-truth file into each project. skilletor
-installs **build artifacts** (rendered per instance) from remote sources and keeps them
+[manage-skills](https://github.com/Getty/manage-skills) hardlinks a single source-of-truth
+file into each project. skilletor installs **build artifacts** (rendered per instance) from remote sources and keeps them
 current automatically. Use skilletor when you want templated, auto-updating items from a
 shared remote; manage-skills remains for hardlinked local sharing.
 
@@ -1109,19 +1358,25 @@ Every command that fetches sources — `sync`, `available`, `install`, and the s
 `add`, `uninstall` and `source remove` run — shares one lock with the hooks, so two runs
 never write the source cache or your items at once. While another skilletor run holds it
 (a session's sync, say), a command waits up to 5 s, then stops with `timed out acquiring
-sync lock`; run it again.
+sync lock at <dir>`; run it again.
 
-## Perl port
+## Develop
 
-The repository root is also `Skilletor`, a Perl distribution of skilletor (CPAN), for Perl
-programs that must resolve skills, agents and rules the way skilletor does, without Node:
-`lib/`, `script/skilletor`, `t/`, `cpanfile` and `dist.ini`. The root `bin/` is the plugin's
-starter and not part of it. [langertha-raider](https://github.com/Getty/langertha-raider) uses
-it to load a skill or agent straight from its source. It reads the same config files, fetches
-into the same cache (`~/.claude/skilletor/cache`, so one fetch serves both), takes the same
-sync lock and keeps the same trust records. It syncs, checks and reports status for Claude
-Code, Codex and Hermes Agent, with the same target layouts and lock format (Hermes receives
-skills only).
+The TypeScript engine in `src/` is the reference implementation. Its bundle,
+`dist/skilletor.js`, is committed, so a checkout runs without `npm install`, and every change
+to `src/` ships with a rebuilt bundle (CI diffs it). The design spec is
+[docs/superpowers/specs/2026-09-22-skilletor-design.md](docs/superpowers/specs/2026-09-22-skilletor-design.md);
+the release steps are in [docs/release.md](docs/release.md).
+
+The repository root is also the CPAN distribution `Skilletor`: `lib/`, `script/skilletor`,
+`t/`, `cpanfile` and `dist.ini` (the root `bin/` is the plugin's starter, not part of it). It
+is skilletor in Perl, following the TypeScript engine: the `skilletor` command for machines
+without Node, the engine the plugin falls back to and the standalone binaries are packed from,
+and a library for Perl programs that must find skills, agents and rules the way skilletor
+installs them — [langertha-raider](https://github.com/Getty/langertha-raider) loads a skill or
+an agent straight from its source with it. It reads the same config files, fetches into the
+same cache (`~/.claude/skilletor/cache`, so one fetch serves both), takes the same sync lock
+and keeps the same trust records.
 
 ```perl
 use Skilletor;
@@ -1129,55 +1384,32 @@ my $sk   = Skilletor->new( home => $ENV{HOME}, project_dir => $project );
 my $file = $sk->resolve_skill('perl-moo');   # path into the local source or the cache
 ```
 
-The TypeScript version stays the reference. `conformance/` holds shared cases:
-configs and source trees, plus the expected resolution and, for sync cases, the
-files, lock, check and status they should produce. Both
-`test/conformance.test.ts` and `t/60-conformance.t` run them, and
-`SKILLETOR_CONFORMANCE_UPDATE=1 npm test` regenerates them from TypeScript.
+The lookups (`resolve_skill` and its siblings) refuse a templated item rather than serve an
+unrendered template; a sync renders it through `Text::Nunjucks`. The API is in
+`perldoc Skilletor`, the design decisions in [docs/perl.md](docs/perl.md).
 
-Sync renders `.njk` templates through `Text::Nunjucks`. The source-file lookup helpers
-(`resolve_skill` and its siblings) still refuse templated items rather than serving
-unrendered templates. Running the port from source requires Perl ≥ 5.40 and the dependencies
-in `cpanfile`; its CLI is `script/skilletor`. The dist's version is the plugin's in CPAN
-spelling: 0.008 is 0.8.0. See `perldoc Skilletor` for the API and
-[`docs/perl.md`](docs/perl.md) for the design decisions.
+Build and test:
 
-### Which engine runs
+```bash
+npm ci
+npm run typecheck && npm test && npm run build && npm run check-dist
+cpanm --installdeps .
+prove -lr -j4 t
+DZIL_BINARY_SKIP=1 dzil build        # the CPAN tarball; without the variable it also packs the binary
+```
 
-`bin/skilletor` (what every plugin hook, the Hermes adapter in a checkout, npm and
-`install.sh`'s link run) hands over to `bin/skilletor-start`, which takes the first of:
+In a checkout's root, `perl -Ilib script/skilletor` runs the Perl CLI (Perl ≥ 5.40 and the
+modules in `cpanfile`). A CLI run from a checkout acts on your real `~/.claude`, Codex home and
+Hermes home, and on the project of the current directory (its git top level: in a checkout,
+the checkout itself). For a hand test, set a temporary `HOME` and `CODEX_HOME`, unset
+`CLAUDE_CONFIG_DIR` and `HERMES_HOME`, and run it from a temporary directory, or with
+`--project-dir` pointing at one.
 
-1. the release binary for this platform pinned in `bin/skilletor-binaries.sha256` (the
-   release's `SHA256SUMS`), cached under `<claudeConfigDir>/skilletor/bin/<version>/` and
-   checked against its pinned checksum on every start;
-2. Node.js ≥ 18 with `dist/skilletor.js`;
-3. Perl ≥ 5.40 with `lib/` and `script/skilletor`, once the modules in `cpanfile` load;
-4. else one line saying why: a hook prints it as its warning and exits 0, it never blocks.
-
-Only two things fetch the binary (`curl` or `wget`, checked with `sha256sum` or `shasum`): a
-CLI command, in the foreground, and a SessionStart hook, in the background. The session that
-starts it keeps running Node or Perl, the next one runs the binary. Other hooks never fetch.
-`--version` and `-v` never fetch either; they print the version of the engine that answers:
-`0.008` from the binary and Perl, `0.8.0` from Node. A failed SessionStart fetch is retried
-after 15 minutes.
-
-Without the pinned file the starter downloads nothing. No release has pinned one yet. The
-first release with binaries (linux-x86_64, linux-arm64, macos-arm64, windows-x86_64, from the
-`binaries` workflow) will, as [docs/release.md](docs/release.md) describes; until then a plugin
-install runs Node, else Perl. Windows runs Node through `bin/skilletor.exe` either way.
-
-## Requirements
-
-- `git`, and one engine ([Which engine runs](#which-engine-runs)): Node.js ≥ 18, whose only
-  bundled runtime dependency is Nunjucks; or Perl ≥ 5.40 with the dependencies in
-  `cpanfile`; or, once a release pins it, the release binary for the platform, fetched with
-  `curl` or `wget` and checked with `sha256sum` or `shasum`.
-- Windows: Node.js ≥ 18 and `git`, without Git Bash. Claude Code starts the hooks through
-  `bin/skilletor.exe`, a small launcher next to the sh script that runs the bundle with
-  the first `node.exe` on `PATH` (without one it exits silently). It is also the
-  `skilletor` command in PowerShell and cmd once `bin/` is on `PATH`. Sources are checked
-  out with the repository's line endings, whatever `core.autocrlf` says, so a project
-  synced on Windows and on Linux gets the same files and lock.
+`conformance/` holds cases both implementations must pass: configs and source trees, plus the
+expected resolution and, for sync cases, the files, lock, check and status they should produce.
+`test/conformance.test.ts` and `t/60-conformance.t` both run them, and
+`SKILLETOR_CONFORMANCE_UPDATE=1 npm test` regenerates them from TypeScript, to be reviewed by
+hand.
 
 ## License
 

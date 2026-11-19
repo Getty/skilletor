@@ -464,13 +464,16 @@ C<~/.claude> alone.
 It also holds the reference's layout table (C<LAYOUTS>, spec §14.2, §16.2):
 where each harness reads each item type in each scope, how a lock key names its
 harness, which types install as C<.local.> files. The Perl port writes for
-Claude Code and Codex; the table is whole because the managed blocks list every
-harness's roots and lock keys of every harness are parsed, kept and reported as
-the reference does.
+all three harnesses, Claude Code, Codex and Hermes. The project's
+C<.worktreeinclude> block lists every harness's roots; the C<.gitignore>
+blocks never go into a Hermes root (C<all_roots> skips it: an installed
+skill carries its own C<.gitignore>). Lock keys of every harness are parsed,
+kept and reported as the reference does.
 
-A root context (C<$rc>) is C<< { base, scope, codex_home?, hermes_home? } >>:
-the scope's base (the home or the project root), C<$CODEX_HOME> and the Hermes
-home, either empty for its default.
+A root context (C<$rc>) is C<< { base, scope, claude_dir?, codex_home?,
+hermes_home? } >>: the scope's base (the home or the project root), Claude
+Code's config dir (user scope), C<$CODEX_HOME> and the Hermes home, each empty
+for its default.
 
 =func default_markers
 

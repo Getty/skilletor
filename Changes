@@ -146,6 +146,15 @@ Revision history for skilletor and Skilletor, its Perl distribution
     SKILLETOR_BINARY_BASE_URL of another scheme (http://, file://) is refused
     unless SKILLETOR_STARTER_TESTING=1, as briefing's starter does; the
     starter's line says why, and Node or Perl run instead (k253).
+  - The README and the POD of Skilletor and skilletor open with the product
+    and its use: what it does, installing it in Claude Code, Codex and
+    Hermes Agent, first steps and everyday use with real output, and a Status
+    of what is released, switched on and tested where. The Perl
+    implementation, the CPAN library and the build move to a short Develop
+    part. New ASCII abstracts for Skilletor and skilletor. Module POD fixed
+    where it was false: Engine (Codex skills of both scopes in
+    .agents/skills), Targets (writes for Hermes too; the .gitignore blocks
+    skip Hermes roots), Briefing (the Codex skill roots) (k258).
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's
