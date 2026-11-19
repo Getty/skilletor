@@ -1,0 +1,32 @@
+---
+class: standard
+created: 2026-11-19T07:46:27Z
+id: 261
+priority: high
+started: 2026-11-19T07:46:44Z
+status: review
+tags:
+- perl
+- windows
+- lock
+- regression
+title: 'Perl on Windows: Skilletor::State does not compile, POSIX::SIGHUP() at load
+  time (k251 regression)'
+updated: 2026-11-19T08:37:43Z
+---
+
+Found by the binaries probe run 44481002159 (workflow_dispatch on ack-paket at a4cbd48), job "binaries / build windows-x86_64", Strawberry Perl 5.40.4: "Your vendor has not defined POSIX macro SIGHUP, used at lib/Skilletor/State.pm line 344", then "Compilation failed in require at lib/Skilletor/Engine.pm line 37". Linux, macOS and the other builds were green.
+
+Cause: k251 (46604fe) builds my %STOP = ( TERM => POSIX::SIGTERM(), INT => POSIX::SIGINT(), HUP => POSIX::SIGHUP() ) at file scope; Windows POSIX has no SIGHUP, so the module dies on require. The normal CI did not see it: ci.yml tests only the Node build on Windows, perl.yml runs on Linux only (gap: separate card).
+
+Done when: the Perl dist loads on Windows (no POSIX signal macro Windows lacks evaluated at load time or on a Windows path), the k251 stop release still works for TERM/INT/HUP on POSIX (t/25-sync-lock.t, t/54-parity-cli.t), and a regression test that is red on 46604fe guards it. Windows proof: the next binaries probe after the ACK session pushes shows "build windows-x86_64" green. Related: k251, k207.
+
+2026-11-19 08:00 Cause confirmed: State.pm built %STOP = (TERM => POSIX::SIGTERM(), INT => POSIX::SIGINT(), HUP => POSIX::SIGHUP()) at file scope (k251); Strawberry's POSIX has no SIGHUP and dies on evaluation, so require Skilletor::State failed. Fix: the stops are names only at load (use constant STOPS => qw(TERM INT HUP)); _stopped looks its number up when a stop comes (POSIX->can('SIG'.$name)->()), and _stopped never runs on Windows (with_lock installs no stop handler there). Chosen over $Config{sig_name}/sig_num because fetching sig_name loads Config_heavy.pl at load time on the hook path, and over a lazy dispatch of literal calls because it names no lacking macro. Regression test t/03-load-win32-signals.t (staged): makes this perl's POSIX die on every signal macro Windows lacks with Windows' message, loads all of lib/, and statically checks lib/ and script/ name none (POSIX::SIG_UNBLOCK in _stopped allowed with reason). Red on 46604fe (Your vendor has not defined POSIX macro SIGHUP, used at .../State.pm line 344), green now; t/25-sync-lock.t and the k251 subtest of t/54-parity-cli.t green.
+
+2026-11-19 08:20 Sweep (lib/, script/, maint/): the only load-time macro was %STOP's POSIX::SIGHUP (SIGTERM and SIGINT exist on Windows). Windows runtime paths: Process.pm _run_win32/_std_fds/_with_stdio use POSIX::WNOHANG (Perl's win32/win32.h defines WNOHANG 1), POSIX::O_RDWR (Fcntl, CRT fcntl.h), POSIX::dup/dup2/close/open/_exit (implemented on Win32; dup2 has a Win32 branch in POSIX.xs), Errno::ENOENT/EINVAL, Catalog's Errno::EISDIR (all in the CRT errno.h); none changed since 6718922, whose binaries run 44253898506 passed build windows-x86_64 and smoke windows-2022. POSIX-only: setsid (spawn_detached's fork path; Win32 POSIX has it as not_here), sigprocmask/SigSet/SIG_UNBLOCK (_stopped only; on Win32 sigprocmask and sigemptyset are not_here and SIG_UNBLOCK is undefined), the heartbeat child's $SIG{TERM}/getppid (Windows takes _wait_tick). Every $!{NAME} read (also ESRCH, ENOTEMPTY, EACCES, ENOTDIR, ELOOP and FSUtil's UV codes, which the first inventory missed) never dies: Errno's FETCH returns an empty string for a name the platform lacks. kill and %SIG by name use perl's own table; Win32's Config sig_name has HUP, INT, TERM, KILL, PIPE. TypeScript: STOPS are strings, os.constants.signals is read only in stopped(), releaseOnStop adds no listener on win32 (and Node has SIGHUP on Windows): no src change, dist unchanged. No conformance change: sync behaviour unchanged, t/60-conformance.t and test/conformance.test.ts green as they are. Also found: t/00-load.t's list lacks Skilletor::Hooks (t/03-load-win32-signals.t loads it, being derived from lib/); left as is.
+
+2026-11-19 08:21 Done: lib/Skilletor/State.pm no longer evaluates a POSIX signal macro at load: the stops are names (use constant STOPS => qw(TERM INT HUP)), _stopped looks the number up when a stop comes (POSIX->can('SIG'.$name)->()); POSIX stop release for TERM/INT/HUP unchanged. Regression test t/03-load-win32-signals.t (new, staged): this perl's POSIX dies on every signal macro Windows lacks with Windows' message, then all of lib/ loads; plus a static check that lib/ and script/ name none (SIG_UNBLOCK in _stopped allowed). Red on 46604fe (Your vendor has not defined POSIX macro SIGHUP, used at .../lib/Skilletor/State.pm line 344), green now. Verified: npm run typecheck && npm test && npm run build && npm run check-dist (1376 pass, 0 fail, 4 skipped; dist up to date, unchanged); prove -lr -j4 t (Files=58, Tests=2769, PASS; t/25-sync-lock.t and the k251 subtest of t/54-parity-cli.t green); DZIL_BINARY_SKIP=1 dzil build OK, tarball carries the new test (build output removed). No conformance change. Windows proof comes from the next binaries probe after the ACK session pushes: 'build windows-x86_64' green. Not committed: proposed subject 'Look up a stop's signal number only when it comes, so the Perl dist loads on Windows (k261)'; no Changes entry of its own, since k251 is unreleased (at most '(k251, k261)' on its entry).
+
+2026-11-19 08:34 Review (main agent): diff read; checks rerun with temp HOME/CODEX_HOME: npm typecheck/test/build/check-dist green (tests 1380, pass 1366, fail 0, skipped 14: 11 Hermes live tests find no Hermes Agent under the temp HOME, 3 native-Windows); prove -lr -j4 t Files=58, Tests=2769, Result: PASS; t/03-load-win32-signals.t red against 46604fe's lib/script (SIGHUP at State.pm line 344), green on the fix; DZIL_BINARY_SKIP=1 dzil build ok, tarball carries t/03. Approved for commit. Windows proof still open: next binaries probe after the ACK session pushes, job build windows-x86_64 green.
+
+2026-11-19 08:37 Committed as 8367051 on ack-paket-win-fix; stays in review until the next binaries probe after the push shows 'binaries / build windows-x86_64' green.
