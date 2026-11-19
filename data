@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T06:59:01Z
+id: 259
+priority: low
+status: backlog
+tags:
+- starter
+- binary
+title: 'Starter: with no checksum tool the line still promises a fetch'
+updated: 2026-11-19T06:59:01Z
+---
+
+Found on k252 (2026-11-19, ack-paket, 4176599). bin/skilletor-start: when neither sha256sum nor shasum is there, the line keeps that reason but the text after it still says 'a SessionStart hook or a CLI command other than --version fetches it' or 'it is being fetched in the background' - the fetch refuses at once without a checksum tool. An absent cache made the same wrong promise before k252; a failed CLI fetch now names the no-tool reason twice. Done when the no-tool case says what the user can do instead of promising a fetch, with a test (fake PATH without either tool).
