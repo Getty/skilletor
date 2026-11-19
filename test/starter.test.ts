@@ -8,9 +8,9 @@
 // a case decides which of curl, wget, sha256sum, shasum, setsid, node and perl exist (with
 // neither setsid nor perl a SessionStart provision is a plain background start). A case that
 // starts one waits for what it leaves before it ends. The "binary" is a sh script served by a
-// local HTTP server (or file://); the engines are stubs that print their name, arguments and
-// stdin. Every case runs a temp plugin copy, so a pinned checksum file in this checkout changes
-// nothing here.
+// local HTTP server (or file://), which the starter fetches only behind its test gate; the
+// engines are stubs that print their name, arguments and stdin. Every case runs a temp plugin
+// copy, so a pinned checksum file in this checkout changes nothing here.
 // POSIX only: Windows starts bin/skilletor.exe, which runs Node (decision k169).
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -158,6 +158,10 @@ async function until(done: () => boolean, what: string, ms = 10_000): Promise<vo
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
+
+/** The environment that points the starter at a release served here – http://127.0.0.1 or
+ *  file:// – which it fetches only behind its test gate (k253). */
+const testRelease = (url: string): NodeJS.ProcessEnv => ({ SKILLETOR_BINARY_BASE_URL: url, SKILLETOR_STARTER_TESTING: "1" });
 
 /** A base URL nothing listens on: the machine is offline. */
 async function offlineUrl(): Promise<string> {
@@ -377,7 +381,7 @@ test("wired (k191): hooks, package and adapter name bin/skilletor, never the sta
 test("without pinned checksums it runs Node and fetches nothing", { skip }, async () => {
   const root = makePlugin();
   const s = serve(BINARY);
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", "curl", SUM]), testRelease(s.url));
   assertBoth(await cliThenHook(root, m), "node");
   assert.equal(s.hits(), 0);
   assert.ok(!existsSync(join(m.config, "skilletor")), "no binary cache");
@@ -389,7 +393,7 @@ test("non-start hooks never provision a missing binary", { skip: noBinary }, asy
   const sum = sha256(BINARY);
   const root = makePlugin({ pinned: pinned(sum) });
   const s = serve(BINARY);
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", "curl", SUM]), testRelease(s.url));
   for (const args of NON_START_HOOK_ARGS) {
     assertEngine(await start(starter(root), args, m.env, HOOK_INPUT), "node", args, HOOK_INPUT);
   }
@@ -401,7 +405,7 @@ test("a verified cached binary runs before fallbacks and clears a failed Session
   const sum = sha256(BINARY);
   const root = makePlugin({ pinned: pinned(sum) });
   const s = serve(BINARY);
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", "curl", SUM]), testRelease(s.url));
   mkdirSync(versionDir(m), { recursive: true });
   writeFileSync(join(versionDir(m), cachedName(sum)), BINARY);
   chmodSync(join(versionDir(m), cachedName(sum)), 0o755);
@@ -416,7 +420,7 @@ test("a non-start hook refuses an unverified cache even with malformed retry sta
   const sum = sha256(BINARY);
   const root = makePlugin({ pinned: pinned(sum) });
   const s = serve(BINARY);
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", "curl", SUM]), testRelease(s.url));
   mkdirSync(versionDir(m), { recursive: true });
   writeFileSync(join(versionDir(m), cachedName(sum)), BINARY.replace("warm", "evil"));
   chmodSync(join(versionDir(m), cachedName(sum)), 0o755);
@@ -428,7 +432,7 @@ test("a non-start hook refuses an unverified cache even with malformed retry sta
 test("a failed SessionStart provision backs off by version and platform while CLI retries immediately", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve(BINARY.replace("warm", "evil"));
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url, SKILLETOR_STARTER_NOW: "1000" });
+  const m = machine(makeTools(["node", "curl", SUM]), { ...testRelease(s.url), SKILLETOR_STARTER_NOW: "1000" });
   const session = (now: string) => ({ ...m.env, SKILLETOR_STARTER_NOW: now });
   const failedAt = (now: string) => () => existsSync(retryFile(m)) && readFileSync(retryFile(m), "utf8") === `${now}\n`;
 
@@ -456,7 +460,7 @@ test("noncanonical retry timestamps never crash SessionStart hooks", { skip: noB
     const root = makePlugin({ pinned: pinned(sum) });
     const s = serve(BINARY);
     const m = machine(makeTools(["node", "curl", SUM]), {
-      SKILLETOR_BINARY_BASE_URL: s.url,
+      ...testRelease(s.url),
       SKILLETOR_STARTER_NOW: now,
     });
     mkdirSync(versionDir(m), { recursive: true });
@@ -475,7 +479,7 @@ test("a directory retry state cannot break a failed SessionStart fallback", { sk
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve(BINARY.replace("warm", "evil"));
   const m = machine(makeTools(["node", "curl", SUM]), {
-    SKILLETOR_BINARY_BASE_URL: s.url,
+    ...testRelease(s.url),
     SKILLETOR_STARTER_NOW: "1000",
   });
   mkdirSync(versionDir(m), { recursive: true });
@@ -492,7 +496,7 @@ test("a successful explicit provision clears a failed SessionStart state and ser
   const sum = sha256(BINARY);
   const root = makePlugin({ pinned: pinned(sum) });
   const s = serve(BINARY);
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url, SKILLETOR_STARTER_NOW: "1000" });
+  const m = machine(makeTools(["node", "curl", SUM]), { ...testRelease(s.url), SKILLETOR_STARTER_NOW: "1000" });
   mkdirSync(versionDir(m), { recursive: true });
   writeFileSync(retryFile(m), "1000\n");
 
@@ -506,7 +510,7 @@ test("a pinned binary is downloaded once, checked, warmed and then run from the 
   const sum = sha256(BINARY);
   const root = makePlugin({ pinned: pinned(sum) });
   const s = serve(BINARY);
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", "curl", SUM]), testRelease(s.url));
   const [hook, cli] = await cliThenHook(root, m);
   assertBoth([hook, cli], "binary");
   assertWarmBinary(hook, m, sum);
@@ -522,7 +526,7 @@ test("the release's SHA256SUMS as is: another binary of the dist and the .exe li
   const other = `skilletor-helper-${VERSION}-${OS}-${ARCH}`;
   const root = makePlugin({ pinned: `${sha256(other)}  ${other}\n` + pinned(sum) });
   const s = serve(BINARY);
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", "curl", SUM]), testRelease(s.url));
   assertEngine(await start(starter(root), CLI_ARGS, m.env), "binary", CLI_ARGS, "");
   assert.equal(s.hits(), 1);
   assertCached(m, sum, BINARY);
@@ -533,7 +537,7 @@ test("a file:// release works with curl", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sum) });
   const release = fresh("release");
   writeFileSync(join(release, ASSET), BINARY);
-  const m = machine(makeTools(["curl", SUM]), { SKILLETOR_BINARY_BASE_URL: pathToFileURL(release).href });
+  const m = machine(makeTools(["curl", SUM]), testRelease(pathToFileURL(release).href));
   assertBoth(await cliThenHook(root, m), "binary");
   assertCached(m, sum, BINARY);
 });
@@ -542,7 +546,7 @@ test("without curl it downloads with wget", { skip: noWget }, async () => {
   const sum = sha256(BINARY);
   const root = makePlugin({ pinned: pinned(sum) });
   const s = serve(BINARY);
-  const m = machine(makeTools(["wget", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["wget", SUM]), testRelease(s.url));
   assertBoth(await cliThenHook(root, m), "binary");
   assert.equal(s.hits(), 1);
   assertCached(m, sum, BINARY);
@@ -552,7 +556,7 @@ test("without sha256sum it checks with shasum -a 256", { skip: noShasum }, async
   const sum = sha256(BINARY);
   const root = makePlugin({ pinned: pinned(sum), dist: false, perl: false });
   const s = serve(BINARY);
-  const m = machine(makeTools(["curl", "shasum", ...(realPerl ? ["perl"] : [])]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["curl", "shasum", ...(realPerl ? ["perl"] : [])]), testRelease(s.url));
   assertBoth(await cliThenHook(root, m), "binary");
   assertCached(m, sum, BINARY);
 });
@@ -562,7 +566,7 @@ test("a binary already cached runs without a download, PAR_GLOBAL_TEMP beside it
   const root = makePlugin({ pinned: pinned(sum) });
   const s = serve(BINARY);
   // No CLAUDE_CONFIG_DIR: the cache is under $HOME/.claude.
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url }, false);
+  const m = machine(makeTools(["node", "curl", SUM]), testRelease(s.url), false);
   mkdirSync(versionDir(m), { recursive: true });
   writeFileSync(join(versionDir(m), cachedName(sum)), BINARY);
   chmodSync(join(versionDir(m), cachedName(sum)), 0o755);
@@ -576,7 +580,7 @@ test("a binary cached for other bytes of the same version is not run: the pinned
   const sum = sha256(BINARY);
   const root = makePlugin({ pinned: pinned(sum) });
   const s = serve(BINARY);
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", "curl", SUM]), testRelease(s.url));
   const stale = "#!/bin/sh\necho stale\n";
   mkdirSync(versionDir(m), { recursive: true });
   writeFileSync(join(versionDir(m), cachedName(sha256(stale))), stale);
@@ -589,7 +593,7 @@ test("a symlink to the starter finds the pinned checksums beside the real file",
   const sum = sha256(BINARY);
   const root = makePlugin({ pinned: pinned(sum) });
   const s = serve(BINARY);
-  const m = machine(makeTools(["curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["curl", SUM]), testRelease(s.url));
   const link = join(fresh("links"), "skilletor");
   symlinkSync(starter(root), link);
   assertEngine(await start(link, CLI_ARGS, m.env), "binary", CLI_ARGS, "");
@@ -599,7 +603,7 @@ test("two first starts at once each download into a temp file of their own; one 
   const sum = sha256(BINARY);
   const root = makePlugin({ pinned: pinned(sum) });
   const s = serve(BINARY, { hold: 2 });
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", "curl", SUM]), testRelease(s.url));
   const runs = await Promise.all([
     start(starter(root), CLI_ARGS, m.env),
     start(starter(root), CLI_ARGS, m.env),
@@ -653,7 +657,7 @@ test("SessionStart provisions in the background: the hook answers first; out of 
     const sum = sha256(BINARY);
     const root = makePlugin({ pinned: pinned(sum) });
     const s = serve(BINARY, { gate: true });
-    const m = machine(makeTools(["node", "curl", SUM, ...detacher]), { SKILLETOR_BINARY_BASE_URL: s.url });
+    const m = machine(makeTools(["node", "curl", SUM, ...detacher]), testRelease(s.url));
     const { group, run } = await sessionStartInGroup(root, m.env);
     assertEngine(run, "node", SESSION_START_ARGS, HOOK_INPUT);
     await until(() => s.hits() === 1, `${label}: the background download asks for the asset`);
@@ -688,7 +692,7 @@ test("a background provision stopped by SIGTERM removes its temp file and backs 
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve(BINARY, { stall: true });
   const m = machine(makeTools(["node", "curl", SUM, ...detacher]), {
-    SKILLETOR_BINARY_BASE_URL: s.url,
+    ...testRelease(s.url),
     SKILLETOR_STARTER_NOW: "1000",
   });
   const { run } = await sessionStartInGroup(root, m.env);
@@ -706,7 +710,7 @@ test("a background provision stopped by SIGTERM removes its temp file and backs 
 test("a checksum mismatch is refused, leaves nothing behind, and Node runs", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve(BINARY.replace("warm", "evil"));
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", "curl", SUM]), testRelease(s.url));
   assertBoth(await cliThenHook(root, m), "node");
   assert.equal(s.hits(), 1, "the explicit CLI start refused it; the prompt hook did not provision");
   assert.ok(!existsSync(versionDir(m)), "no binary, no temp file, no empty version directory");
@@ -715,7 +719,7 @@ test("a checksum mismatch is refused, leaves nothing behind, and Node runs", { s
 test("a mismatch with neither Node nor Perl: the line names the refusal", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sha256(BINARY)), perl: false });
   const s = serve("not the pinned bytes");
-  const m = machine(makeTools(["curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["curl", SUM]), testRelease(s.url));
   const r = await start(starter(root), CLI_ARGS, m.env);
   assert.equal(r.status, 1);
   assert.match(r.stderr, new RegExp(`; the downloaded ${ASSET} does not match its pinned checksum and was refused\\.\\n$`));
@@ -772,24 +776,78 @@ test("a refused cache is named in the line on every path, an absent one says 'no
 
   // What the lines promise: a CLI command fetches the pinned bytes over the refused ones.
   const s = serve(BINARY);
-  const m = machine(makeTools(["curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["curl", SUM]), testRelease(s.url));
   tamper(m);
   assertEngine(await start(starter(makePlugin({ pinned: pinned(sum), perl: false })), CLI_ARGS, m.env), "binary", CLI_ARGS, "");
   assert.equal(s.hits(), 1);
   assertCached(m, sum, BINARY);
 });
 
+// k253: a base URL in SKILLETOR_BINARY_BASE_URL is fetched only over https://, as the release
+// prefix is. Another scheme – the http:// and file:// the cases here serve – only with
+// SKILLETOR_STARTER_TESTING=1, as briefing's starter has it (BRIEFING_STARTER_TESTING=1): the
+// pinned checksum guards the bytes, the gate keeps a real fetch off plaintext. A refused URL is
+// a download that did not happen – nothing fetches, the line says why, SessionStart backs off.
+test("SKILLETOR_BINARY_BASE_URL: https:// is fetched; http:// and file:// only with SKILLETOR_STARTER_TESTING=1, else refused with why", { skip: noBinary }, async () => {
+  const sum = sha256(BINARY);
+  const line = (why: string) =>
+    "skilletor: Node.js is required but was not found on PATH (need >= 18); " +
+    `perl was not found on PATH (need >= 5.40); ${why}.`;
+  const release = fresh("release");
+  writeFileSync(join(release, ASSET), BINARY);
+  const s = serve(BINARY);
+  const refused = `SKILLETOR_BINARY_BASE_URL is not an https:// URL, so ${ASSET} was not downloaded ` +
+    "(another scheme is for tests, with SKILLETOR_STARTER_TESTING=1)";
+  const cases: [string, string, NodeJS.ProcessEnv][] = [
+    ["http://", s.url, {}],
+    ["file://", pathToFileURL(release).href, {}],
+    ["http:// with the gate not 1", s.url, { SKILLETOR_STARTER_TESTING: "true" }],
+  ];
+  for (const [label, url, gate] of cases) {
+    const root = makePlugin({ pinned: pinned(sum), perl: false });
+    const recorder = fetchRecorder([SUM]);
+    const m = machine(recorder.tools, { SKILLETOR_BINARY_BASE_URL: url, SKILLETOR_STARTER_NOW: "1000", ...gate });
+    assert.deepEqual(await start(starter(root), CLI_ARGS, m.env), { status: 1, stdout: "", stderr: line(refused) + "\n" }, label);
+    const session = await start(starter(root), SESSION_START_ARGS, m.env, HOOK_INPUT);
+    assert.deepEqual(session, {
+      status: 0,
+      stdout: JSON.stringify({ systemMessage: line("the pinned binary is not cached; it is being fetched in the background") }) + "\n",
+      stderr: "",
+    }, label);
+    await until(() => existsSync(retryFile(m)), `${label}: the background provision refuses it and backs off`);
+    assert.deepEqual(recorder.fetched(), [], `${label}: neither curl nor wget started`);
+    assert.ok(!existsSync(join(versionDir(m), cachedName(sum))), label);
+  }
+  assert.equal(s.hits(), 0);
+
+  // With the gate: what the cases serve is fetched, checked and run.
+  for (const url of [s.url, pathToFileURL(release).href]) {
+    const m = machine(makeTools(["curl", SUM]), { SKILLETOR_BINARY_BASE_URL: url, SKILLETOR_STARTER_TESTING: "1" });
+    assertEngine(await start(starter(makePlugin({ pinned: pinned(sum), perl: false })), CLI_ARGS, m.env), "binary", CLI_ARGS, "");
+    assertCached(m, sum, BINARY);
+  }
+  assert.equal(s.hits(), 1, "the gated http:// download");
+
+  // https:// needs no gate: the download is tried (here it fails), as before.
+  const recorder = fetchRecorder([SUM]);
+  const m = machine(recorder.tools, { SKILLETOR_BINARY_BASE_URL: "https://mirror.invalid/skilletor" });
+  const r = await start(starter(makePlugin({ pinned: pinned(sum), perl: false })), CLI_ARGS, m.env);
+  assert.deepEqual(r, { status: 1, stdout: "", stderr: line(`the download of ${ASSET} failed`) + "\n" });
+  assert.equal(recorder.fetched().length, 1);
+  assert.ok(recorder.fetched()[0]!.includes(`https://mirror.invalid/skilletor/${ASSET}`), recorder.fetched()[0]);
+});
+
 test("a binary that does not run here is not cached, and Node runs", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sha256(BROKEN_BINARY)) });
   const s = serve(BROKEN_BINARY);
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", "curl", SUM]), testRelease(s.url));
   assertBoth(await cliThenHook(root, m), "node");
   assert.ok(!existsSync(versionDir(m)));
 });
 
 test("offline: the download fails, Node runs, nothing is left", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
-  const m = machine(makeTools(["node", "curl", SUM]), { SKILLETOR_BINARY_BASE_URL: await offlineUrl() });
+  const m = machine(makeTools(["node", "curl", SUM]), testRelease(await offlineUrl()));
   assertBoth(await cliThenHook(root, m), "node");
   assert.ok(!existsSync(versionDir(m)));
 });
@@ -797,7 +855,7 @@ test("offline: the download fails, Node runs, nothing is left", { skip: noBinary
 test("neither curl nor wget: no download, Node runs", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve(BINARY);
-  const m = machine(makeTools(["node", SUM]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", SUM]), testRelease(s.url));
   assertBoth(await cliThenHook(root, m), "node");
   assert.ok(!existsSync(versionDir(m)));
 });
@@ -805,7 +863,7 @@ test("neither curl nor wget: no download, Node runs", { skip: noBinary }, async 
 test("neither sha256sum nor shasum: nothing is fetched that cannot be checked", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve(BINARY);
-  const m = machine(makeTools(["node", "curl"]), { SKILLETOR_BINARY_BASE_URL: s.url });
+  const m = machine(makeTools(["node", "curl"]), testRelease(s.url));
   assertBoth(await cliThenHook(root, m), "node");
   assert.equal(s.hits(), 0);
 });
@@ -820,7 +878,7 @@ test("no pinned line for this platform, or a malformed one: no download, Node ru
     pinned(sha256(BINARY), `skilletor-helper-${VERSION}-${OS}-${ARCH}`), // another binary's line only
     pinned(sha256(BINARY), `skilletor-${VERSION}_-${OS}-${ARCH}`),
   ]) {
-    const m = machine(tools, { SKILLETOR_BINARY_BASE_URL: s.url });
+    const m = machine(tools, testRelease(s.url));
     assertBoth(await cliThenHook(makePlugin({ pinned: file }), m), "node");
     assert.ok(!existsSync(join(m.config, "skilletor")));
   }
@@ -830,7 +888,7 @@ test("no pinned line for this platform, or a malformed one: no download, Node ru
 test("no HOME and no CLAUDE_CONFIG_DIR: no binary cache, Node runs", { skip: noBinary }, async () => {
   const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve(BINARY);
-  const env = { PATH: makeTools(["node", "curl", SUM]), SKILLETOR_BINARY_BASE_URL: s.url };
+  const env = { PATH: makeTools(["node", "curl", SUM]), ...testRelease(s.url) };
   assertEngine(await start(starter(root), HOOK_ARGS, env, HOOK_INPUT), "node", HOOK_ARGS, HOOK_INPUT);
   assert.equal(s.hits(), 0);
 });

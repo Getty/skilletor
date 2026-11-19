@@ -46,8 +46,10 @@
 pinned_sums=skilletor-binaries.sha256
 # Where the assets of release <version> are - its tag is the bare version (tag_format %v): this
 # prefix, then <version>/<asset>. SKILLETOR_BINARY_BASE_URL replaces "<prefix><version>" (the
-# tests serve a binary locally). That is safe from any source: nothing is kept or run unless its
-# checksum is the pinned one.
+# tests serve a binary locally). Its bytes are safe from any source: nothing is kept or run unless
+# its checksum is the pinned one. Its fetch is not, so it must be https://, as this prefix is;
+# another scheme (the tests' http:// and file://) only with SKILLETOR_STARTER_TESTING=1, as
+# briefing's starter has it with BRIEFING_STARTER_TESTING=1 (k253).
 release_url_prefix=https://github.com/Getty/skilletor/releases/download/
 # The binary cache: <claudeConfigDir>/skilletor/bin/<version>/ - beside skilletor's state,
 # shared by every harness that starts this file.
@@ -334,6 +336,17 @@ fetch_binary() {
     why_binary="neither curl nor wget is there to download $asset"
     return 1
   fi
+  base_url=${SKILLETOR_BINARY_BASE_URL:-$release_url_prefix$version}
+  if [ "${SKILLETOR_STARTER_TESTING-}" != 1 ]; then
+    case $base_url in
+      https://*) ;;
+      *)
+        # Fixed text only: the URL itself is never put in the line (it is not JSON-escaped).
+        why_binary="SKILLETOR_BINARY_BASE_URL is not an https:// URL, so $asset was not downloaded (another scheme is for tests, with SKILLETOR_STARTER_TESTING=1)"
+        return 1
+        ;;
+    esac
+  fi
   if ! mkdir -p -- "$cache_dir" 2>/dev/null; then
     why_binary="cannot create the binary cache"
     return 1
@@ -341,7 +354,7 @@ fetch_binary() {
   tmp=$cache_dir/.$asset.$$.tmp
   trap 'rm -f -- "$tmp"' EXIT
   trap 'rm -f -- "$tmp"; record_failed_session_start; exit $fail_status' HUP INT TERM
-  if ! download "${SKILLETOR_BINARY_BASE_URL:-$release_url_prefix$version}/$asset" "$tmp" ||
+  if ! download "$base_url/$asset" "$tmp" ||
     [ ! -f "$tmp" ]; then
     drop_download "the download of $asset failed"
     return 1

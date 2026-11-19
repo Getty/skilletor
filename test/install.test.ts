@@ -335,6 +335,8 @@ function pinnedBinary(body: string): string {
   return `${createHash("sha256").update(body).digest("hex")}  ${binaryAsset()}\n`;
 }
 
+/** The release asset over http://127.0.0.1: the starter fetches it only with
+ *  SKILLETOR_STARTER_TESTING=1 next to SKILLETOR_BINARY_BASE_URL (k253). */
 async function serveBinary(body: string, unavailable = false) {
   let hits = 0;
   const server = createServer((request, response) => {
@@ -425,7 +427,7 @@ test("without Node or Perl it installs a verified binary starter without touchin
       assert.notEqual(absent.status, 0);
       assert.equal(absent.stdout, "");
       const plugin = metadata ? writePluginMetadata(m) : undefined;
-      const env = { SKILLETOR_REPO: `file://${src.bare}`, SKILLETOR_BINARY_BASE_URL: release.url };
+      const env = { SKILLETOR_REPO: `file://${src.bare}`, SKILLETOR_BINARY_BASE_URL: release.url, SKILLETOR_STARTER_TESTING: "1" };
 
       const first = await pipeScriptAsync(m, [], env);
       assert.equal(first.status, 0, first.stdout + first.stderr);
@@ -490,7 +492,7 @@ test("without Node, a retained PID candidate does not block a later update", { s
     claude: false,
     env: { PATH: collisionTools },
   });
-  const env = { SKILLETOR_REPO: `file://${src.bare}`, SKILLETOR_BINARY_BASE_URL: release.url };
+  const env = { SKILLETOR_REPO: `file://${src.bare}`, SKILLETOR_BINARY_BASE_URL: release.url, SKILLETOR_STARTER_TESTING: "1" };
   try {
     const first = await pipeScriptAsync(m, [], env);
     assert.equal(first.status, 0, first.stdout + first.stderr);
@@ -517,7 +519,7 @@ test("without Node, a failed checkout update leaves the installed starter workin
   const release = await serveBinary(FAKE_BINARY);
   const src = sourceRepo("no-node-update", { pinned: pinnedBinary(FAKE_BINARY) });
   const m = noNodeMachine("no-node-update", { claude: false });
-  const env = { SKILLETOR_REPO: `file://${src.bare}`, SKILLETOR_BINARY_BASE_URL: release.url };
+  const env = { SKILLETOR_REPO: `file://${src.bare}`, SKILLETOR_BINARY_BASE_URL: release.url, SKILLETOR_STARTER_TESTING: "1" };
   try {
     const first = await pipeScriptAsync(m, [], env);
     assert.equal(first.status, 0, first.stdout + first.stderr);
@@ -566,7 +568,7 @@ test("without Node, starter provisioning failures leave the existing command and
       const { target, old } = oldLink(m);
       const env = {
         SKILLETOR_REPO: `file://${src.bare}`,
-        ...(release ? { SKILLETOR_BINARY_BASE_URL: release.url } : {}),
+        ...(release ? { SKILLETOR_BINARY_BASE_URL: release.url, SKILLETOR_STARTER_TESTING: "1" } : {}),
       };
 
       const r = await runScriptAsync(m, [], env);

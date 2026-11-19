@@ -142,6 +142,10 @@ Revision history for skilletor and Skilletor, its Perl distribution
     starter's line now says so on every path that falls through to it
     (--version, -v, any hook, a failed fetch, the SessionStart backoff)
     instead of "the pinned binary is not cached" (k252).
+  - bin/skilletor-start fetches the release binary only over https://. A
+    SKILLETOR_BINARY_BASE_URL of another scheme (http://, file://) is refused
+    unless SKILLETOR_STARTER_TESTING=1, as briefing's starter does; the
+    starter's line says why, and Node or Perl run instead (k253).
 
 0.001     2026-10-24 03:08:52Z
   - Follows the reference's k145: CLAUDE_CONFIG_DIR is the user scope's
