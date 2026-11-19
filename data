@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-19T04:04:59Z
+id: 257
+priority: low
+status: backlog
+tags:
+- state
+- perf
+title: 'State: pending-report.json keeps entries of gone project dirs'
+updated: 2026-11-19T04:04:59Z
+---
+
+Found on k255 (2026-11-19, ack-paket, read-only count on reuben): pending-report.json is keyed by project dir, like last-check.json, and nothing prunes it. On this host 1 key, its dir already gone, 3 KB, so small today. k255 (ead04cf) pruned last-check.json in markChecked with the rule 'no absolute path, or the key dir itself is gone' (src/state.ts dropGoneScopes with dirOf = identity, lib/Skilletor/State.pm _drop_gone_scopes alike). Done when pending-report.json is pruned the same way on its write path in Node and Perl, with a test red before / green after and parity bytes equal, or when the card says why it is not worth it.
