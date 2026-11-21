@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-21T06:59:29Z
+id: 271
+priority: low
+status: backlog
+tags:
+- version
+- release
+title: Between releases the Perl engine and package.json report different plugin versions
+updated: 2026-11-21T07:19:34Z
+---
+
+Seen in the 0.008000 release test (2026-11-21, reuben, plugin installed from the marketplace at 4017bda, the commit after the release). The same plugin checkout answers `skilletor --version` differently depending on which engine bin/skilletor-start picks: Node prints 0.8.0 (package.json; .codex-plugin/plugin.json says the same), Perl from source prints 0.008001 (lib/Skilletor.pm after "increment $VERSION after 0.008000 release"), the 0.008000 release binary prints 0.008000. The starter documents that each engine prints its own version (bin/skilletor-start lines 15-17), and the binary choice is unaffected because it reads the version from the pinned asset names. What remains: after the bundle bumps $VERSION, the two spellings of one version line (k269: dist x.yyyzzz = plugin x.y.z) disagree on main until the next release, so ack-doctor or a user comparing --version sees 0.8.0 next to 0.8.1-in-dist-spelling for one install. Question for the maintainer: accept as the next-version convention, or bump package.json and the manifests in the same post-release commit.
+
+briefing shows the same (0.006000 release test, plugin at f7968f1): .claude-plugin/plugin.json says 0.6.0, the plugin's Perl (lib/App/Briefing.pm, reached through bin/briefing --version without Python) says 0.006001, the CPAN install and the release binary say 0.006000. One convention decision covers both dists.
