@@ -1,0 +1,40 @@
+---
+class: standard
+created: 2026-11-16T16:24:31Z
+id: 241
+priority: high
+status: backlog
+tags:
+- perl
+- release
+- cpan
+title: Release Skilletor 0.008 to CPAN (maintainer gate)
+updated: 2026-11-21T01:33:23Z
+---
+
+Release the Perl dist Skilletor (perl/) as 0.002. The release itself waits for the maintainer's explicit go.
+
+State on 2026-11-16: 0.001 was released with dzil on 2026-10-24. The tag 0.001 is on origin and perl/Changes carries its version line. Whether the upload reached CPAN has not been checked from here. 31 commits under perl/ have landed since, and perl/Changes {{$NEXT}} is long.
+
+Blocker: perl/cpanfile now requires Text::Nunjucks 0.001, which was never released (p5-text-nunjucks has no tags). Skilletor 0.001 had no such dependency. A 0.002 on CPAN cannot install until Text::Nunjucks is there (see the needs link).
+
+Before the release:
+- Confirm that 0.001 is on CPAN.
+- Run the skilletor-release-manager pre-release audit of perl/: {{$NEXT}} written as one consumer-facing document, the cpanfile, and the tarball contents per gather_exclude_match in dist.ini.
+- Get a green `prove -lr t` against the released Text::Nunjucks rather than the checkout on PERL5LIB.
+
+Rewritten 2026-11-18: superseded as "0.002 from perl/" by the ACK package work (k242). The dist is at the root now and the next release is 0.008 (= plugin 0.8.0). Text::Nunjucks 0.001 is on CPAN since 2026-11-17, so the needs link is gone. The release is still the maintainer's gate.
+
+Before the release:
+- ack-paket merged into main (the hub merges; no session pushes main).
+- The binaries probe green on all four legs, bundle workflow pinned by commit (k242).
+- Release machine: Dist::Zilla::PluginBundle::Author::GETTY 0.328 or later, PAR::Packer, the dist's deps from CPAN.
+- skilletor-release-manager pre-release audit; the Changes section for 0.008 is written for users.
+
+Release: docs/release.md steps 1-6 -- dzil release on a clean main; binaries.yml runs on release: published; check SHA256SUMS; commit bin/skilletor-binaries.sha256 from it (k191's gate); marketplace license MIT -> Artistic-2.0.
+
+2026-11-19 03:12 Maintainer decision 2026-11-19: release only after k250-k255 are fixed on ack-paket, new probe binaries are built, the maintainer has run the ack-paket plugin with a local pin on reuben for 1-2 days, and windows-developer k22 has run with the new probe.
+
+Maintainer decision 2026-11-19 (via the agent-construction-kit session): ack-paket goes into main tonight once k250, k251, k252 and k253 are committed and CI is green on Linux, macOS and Windows; the full CI runs through a draft PR ack-paket -> main, main then moves by fast-forward push. The own Windows machine (windows-developer board, k22) tests the new probe natively. The CPAN upload and the pin commit stay with the maintainer.
+
+2026-11-21: the release version is 0.008000 (plugin 0.8.0), not 0.008 -- both sub-levels kept, the next bump is 0.008001. Prep is k269.
