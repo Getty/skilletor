@@ -1,0 +1,26 @@
+---
+class: standard
+created: 2026-11-21T07:14:44Z
+id: 272
+priority: medium
+status: backlog
+tags:
+- binary
+- par
+- starter
+title: 'PAR 1.021 cache race: parallel cold starts of the binary load half-written
+  modules'
+updated: 2026-11-21T07:15:11Z
+---
+
+Found in the 0.008000 release test (2026-11-21, reuben, release binary skilletor-0.008000-linux-x86_64). Several copies started at once on an empty PAR cache: some die.
+
+Measured: 8 parallel `skilletor status` per round, a fresh shared PAR_GLOBAL_TEMP each round: 20/64 starts failed, e.g. "Path/Tiny.pm did not return a true value at <par>/inc/lib/Skilletor/FSUtil.pm". 8 parallel `--version` (the warm-up the starter runs): 0/48 failed, but briefing's binary, same PAR, failed 5/48 there, so that is luck, not safety. Warm cache: no failures. After every round inc/ was complete (sha256 equal to a sequential extraction).
+
+Cause, read in the packed PAR.pm 1.021 (_extract_inc): `unless (-d $inc && -e $canary)` is tested before the flock and not again after it. A and B both see no canary; A extracts and writes the canary; B then takes the lock and extracts every member again, in place (Archive::Zip extractMember truncates and rewrites); C, arriving after the canary, skips the lock and loads inc/lib/*.pm while B rewrites them.
+
+Exposure today: the plugin at 4017bda has no pin file, so hooks run Node or Perl, not the binary. Affected: the standalone binary from install.sh / install.ps1 (default PAR dir under the temp directory, emptied by a reboot where /tmp is tmpfs; the installer warm-up covers only until then), and the plugin once a release pins binaries. There the design mitigates it (versioned PAR_GLOBAL_TEMP beside the binary, warm-up right after the download; --version extracts all of inc/, 389 files, canary set). Residual: concurrent cold provisioning (several sessions starting together after an update) runs the warm-ups into the race, and a session whose warm-up finished may start its hook while a losing warm-up still rewrites inc/ (inferred from the code, not measured).
+
+Fix options, not decided: (a) warm up into a private directory (<par>.tmp.<pid>) and rename it into place, dropping it when the versioned one exists, the same temp+rename the starter already uses for the binary. Measured viable with the briefing binary: a cache extracted under a temporary PAR_GLOBAL_TEMP and then renamed runs warm, with no re-extraction, the canary untouched, no temporary path baked in, same timing. (b) Upstream: re-check the canary after the flock in PAR::_extract_inc (public tracker, the maintainer's call). (c) A lock around the warm-up. The same race is filed on the briefing board.
+
+Briefing counterpart: briefing board k43.
