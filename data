@@ -1,0 +1,22 @@
+---
+class: standard
+created: 2026-11-18T03:59:10Z
+id: 246
+priority: medium
+status: backlog
+tags:
+- perl
+- dist
+- question
+title: 'Decision: misc/agent-context in the CPAN tarball carries skilletor-installed,
+  untracked files'
+updated: 2026-11-21T01:33:18Z
+---
+
+The [@Author::GETTY] bundle's GatherAgentContext puts misc/agent-context into the Skilletor tarball. Seen 2026-11-16 (k242): it also holds files that are not tracked in git but installed by skilletor itself -- .claude/rules/.local.*.md, .claude/skills/*, skilletor.lock.json -- so the tarball ships whatever the release machine's sync left there, which differs per machine and is not reviewed in a commit.
+
+Question for the maintainer: is that wanted? If not, it is a bundle change (GatherAgentContext gathering only tracked files, or an exclude knob), so it becomes a card on the bundle's board, not an edit here. Recheck what a DZIL_BINARY_SKIP=1 dzil build at the 0.008 release commit puts under misc/agent-context before deciding.
+
+Rechecked 2026-11-18 with DZIL_BINARY_SKIP=1 dzil build on ack-paket (the 0.008 candidate): misc/agent-context holds CLAUDE.md, the four tracked agents, skilletor-rules.md and the tracked skills skilletor-core and skill-assessment, plus untracked, skilletor-installed files: .claude/rules/.local.{agent-delegation,board-karr,engineering-discipline,publish-gate}.md, skills skill-authoring, skill-compressor, getty-skill-library, getty-git-commit-style, perl-par-binary-release, kanban-issues-karr-coordination, kanban-issues-karr-ticket, and .claude/skilletor.json + skilletor.lock.json. No secrets or credentials found; the only home path is the prove line in CLAUDE.md, which is tracked and public anyway. Decision still the maintainer's; nothing blocks 0.008 on it.
+
+Maintainer decision 2026-11-21: yes, keep it. The AI configuration used at dist time belongs in the tarball ("it is a small amount of data and can help the user understand what happened"). No bundle change needed.
