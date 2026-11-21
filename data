@@ -1,0 +1,24 @@
+---
+class: standard
+created: 2026-11-21T01:33:08Z
+id: 270
+priority: medium
+status: backlog
+tags:
+- windows
+- starter
+- binary
+- decision
+title: 'Windows: run the release binary like briefing'
+updated: 2026-11-21T01:33:08Z
+---
+
+Maintainer direction 2026-11-21: skilletor should run on its Perl binaries everywhere, the way briefing does. POSIX already starts the pinned release binary first, through bin/skilletor-start (k191 activates it with the pin). On Windows, bin/skilletor.exe still starts Node through winlaunch: k169 decided (a) extend winlaunch, (c) Node until then; the winlaunch extension never landed.
+
+briefing has a Windows bootstrap of its own: briefing-bootstrap.c, built reproducibly with build.py. It finds the cached binary under <config>/briefing/bin/<V>/<pin>/, downloads it, checks it against the pinned SHA256SUMS line, warms up PAR, and falls back to Python.
+
+To decide: does skilletor reuse that bootstrap, generalized by name, or get its own? Record on k169 that this supersedes its decision (a)/(c).
+
+Done when: bin/skilletor.exe (or its successor) starts the pinned, cached, checksum-verified release binary on Windows, with a fallback when none is cached; proven natively on Windows (windows-developer board), not only in CI.
+
+Not a blocker for the CPAN release: the plugin's Windows path comes from main.
