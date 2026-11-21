@@ -1,0 +1,38 @@
+---
+class: standard
+completed: 2026-11-21T02:19:29Z
+created: 2026-11-21T01:32:59Z
+id: 269
+priority: high
+started: 2026-11-21T02:19:29Z
+status: done
+tags:
+- release
+- perl
+- version
+title: 'Version 0.008000: keep both sub-levels (x.yyyzzz = plugin x.y.z)'
+updated: 2026-11-21T02:19:36Z
+---
+
+Maintainer decision 2026-11-21: like App-Briefing 0.006000, the dist version keeps both sub-levels. The release is 0.008000 (plugin 0.8.0); the bundle then bumps it to 0.008001 (0.8.1), not to 0.009. Prepares k241 (the release itself stays the maintainer gate).
+
+Scope:
+- `our $VERSION` 0.008 -> 0.008000 in all 62 files under lib/ (checked 2026-11-21: 62 files, all `0.008`). script/skilletor has no `our $VERSION` line, only `C<0.008>` in its POD (line 47): update that spelling, and check whether [@Author::GETTY] 0.329 (which commits a bumped script/ executable after a release) expects a $VERSION line there.
+- maint/version-tie.pl accepts exactly three decimals (`\A\d+\.\d{3}\z`, line 13, usage text line 14); make it accept the six-decimal form. version->parse("0.008000")->normal is v0.8.0, so package.json, package-lock.json and the Codex and Hermes manifests stay at 0.8.0.
+- t/02-version.t (line 28) asserts "x.yyy is the plugin's x.y.0". That claim becomes x.yyyzzz = x.y.z. Say so in the test and in the commit message.
+- Docs that spell the version as 0.008: README, CLAUDE.md, docs/release.md, conformance/README.md, the dist.ini comment, the {{$NEXT}} entry in Changes.
+- dist.ini: `author` to `Torsten Raudssus <torsten@raudssus.de>` (mail to cpan.org no longer arrives); `copyright_holder` already uses that address.
+
+Context: [@Author::GETTY] 0.329, already released, also commits a bumped script/ executable after a release, so script/skilletor no longer falls one version behind. The leftover untracked perl/ directory (an old Skilletor-0.001 build) was removed on 2026-11-21, so Git::Check does not stop `dzil release`.
+
+Done when: typecheck, npm test, build, check-dist green; prove -lr t green; `perl maint/version-tie.pl 0.008000` passes against package.json 0.8.0; `DZIL_BINARY_SKIP=1 dzil build` yields Skilletor-0.008000.tar.gz.
+
+Then: review, commit, push, `dzil release` (the maintainer runs it). After that the binaries workflow attaches SHA256SUMS, then the k191 pin switches on the POSIX binary path for plugin users.
+
+2026-11-21 01:37 Started. Findings: 62 lib/ modules at '0.008'; Version::Next gives 0.008000 -> 0.008001 (old 0.008 -> 0.009). t/02-version.t's after-release branch computes normal(sprintf '%.3f', $VERSION - 0.001), which for 0.008001 yields 0.7.0, not 0.8.0: it must step 0.000001 at six decimals. BumpVersionAfterRelease and RewriteVersion only log 'Skipping' for a file without an our $VERSION line, so script/skilletor (no such line) is passed over, not an error. Extra 0.008 spellings outside the brief: lib/Skilletor.pm POD (l.312), lib/Skilletor/CLI.pm comment (l.50), docs/release.md l.52 (bumps lib/ to 0.009).
+
+2026-11-21 01:44 Done so far: lib/ 62 modules at '0.008000'; t/02-version.t rewritten (six decimals, x.yyyzzz = x.y.z; after-release step 0.000001 at %.6f, own sub released_before with cases 0.008001->0.8.0 and 0.009000->0.8.999; black-box subtest for maint/version-tie.pl in a temp cwd); version-tie.pl accepts x.yyyzzz only; POD in script/skilletor and lib/Skilletor.pm, CLI.pm comment, conformance comments, dist.ini (author + comment), README, docs/release.md, design spec l.1405 updated; test/starter.test.ts fixture 9.876 -> 9.876543 (44/44 pass). Hand checks: version-tie 0.008000 exit 0, 0.008 exit 255 (usage), 0.008001 exit 1; perl -Ilib script/skilletor --version prints 0.008000. Not touched: CLAUDE.md:8 and .claude/rules/skilletor-rules.md:49 (not mine to edit, reported to main agent), Changes. Full suites running.
+
+2026-11-21 02:08 Done, commit-ready, not committed. lib/ 62 modules -> '0.008000'. maint/version-tie.pl accepts x.yyyzzz only (six decimals; x.yyy refused, so the gate and t/02-version.t agree on one spelling). t/02-version.t: old claim 'x.yyy is the plugin's x.y.0' replaced by 'x.yyyzzz is the plugin's x.y.z'; the after-release branch stepped 0.001 at %.3f (0.008001 -> 0.7.0, wrong) and now steps 0.000001 at %.6f (0.008001 -> 0.8.0), in sub released_before with fixed cases; new black-box subtest runs version-tie.pl in a temp cwd (0.008000 ok, 0.008001 exit 1, 0.008/0.0080/0.008000_01/0.8.0/v0.8.0 refused). Simulated post-release (lib 0.008001, package.json 0.8.0): 02-version.t passes. script/skilletor needs no $VERSION: RewriteVersion/BumpVersionAfterRelease ::Transitional find none and PkgVersion skips it (no package statement), so it stays byte-identical; --version comes from Skilletor::CLI. Spelling text updated in script/skilletor + lib/Skilletor.pm POD, CLI.pm comment, conformance comments (t/, test/, conformance/README.md), dist.ini (author torsten@raudssus.de + comment), README, docs/release.md, design spec; test/starter.test.ts fixture 9.876 -> 9.876543. Verified: typecheck ok; npm test 1380 tests, 1376 pass, 0 fail, 4 skipped (SKILLETOR_HERMES_INSTALL unset; 3 native-Windows); build + check-dist up to date; prove -lr -j4 t: Files=58, Tests=2772, PASS; version-tie 0.008000 exit 0, 0.008 exit 255; perl -Ilib script/skilletor --version = 0.008000; DZIL_BINARY_SKIP=1 dzil build -> Skilletor-0.008000.tar.gz (META author torsten@raudssus.de), removed afterwards. Left for main agent: CLAUDE.md:8 and .claude/rules/skilletor-rules.md:49 still say 0.008 / 0.00N (not edited by me); Changes {{$NEXT}} line 4 says 'Skilletor 0.008' (release-manager).
+
+Committed as 1d495f7 (Keep both version sub-levels: dist 0.008000 is plugin 0.8.0). Not pushed, no tag.
