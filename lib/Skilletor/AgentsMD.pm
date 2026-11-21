@@ -10,7 +10,7 @@ use Skilletor::Error::Block;
 use Skilletor::FSUtil qw( decode_utf8_lossy encode_text node_fs_error );
 use Skilletor::JSString qw( js_trim js_ws_re );
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 our @EXPORT_OK = qw(
   BEGIN_MARKER END_MARKER NOTE RULES_FILE RULES_MARKER MARKER_LINE normalize_section

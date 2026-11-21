@@ -230,7 +230,7 @@ any case.
   no stream or file is parsed and reserialized. Replacement runs first `${HOME}`, then
   `${PROJECT}`, then `${TMP}`, so the longer, nested paths win.
 - **`${VERSION}`** stands for the version the CLI reports, in either spelling: the plugin's
-  (`package.json`, `0.8.0`) or the Perl dist's (`$VERSION` in `lib/Skilletor.pm`, `0.008`) –
+  (`package.json`, `0.8.0`) or the Perl dist's (`$VERSION` in `lib/Skilletor.pm`, `0.008000`) –
   and only in the stdout and stderr of a `cli` step with `"version": true`: there every
   occurrence of either is replaced, after the paths. Anywhere else a version-shaped string
   stays as it is.

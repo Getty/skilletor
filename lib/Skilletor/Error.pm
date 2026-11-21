@@ -11,7 +11,7 @@ use overload
   'bool'   => sub { 1 },
   fallback => 1;
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 has message => (
   is       => 'ro',

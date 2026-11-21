@@ -46,8 +46,8 @@ plugin manifest, and the text of any skill, agent or rule file (this repo's `.cl
   silently, so a misnamed key hands an auditor write access.
 - **dzil gathers git-tracked files only** — `git add` a new file before `dzil build`, or the
   tarball lacks it.
-- **One version line** — lib `$VERSION` 0.00N is package.json 0.N.0; after `dzil release` lib is
-  one ahead until the next release prepares package.json (`t/02-version.t` accepts both,
-  `maint/version-tie.pl` gates the release).
+- **One version line** — lib `$VERSION` x.yyyzzz is package.json x.y.z (0.008000 = 0.8.0); after
+  `dzil release` lib is one bump ahead (0.008001) until the next release prepares package.json
+  (`t/02-version.t` accepts both, `maint/version-tie.pl` gates the release).
 - **Eval runs are billed** (`claude plugin eval` spawns full sessions) — start one only when the
   ticket or the user asks.

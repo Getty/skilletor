@@ -1,9 +1,10 @@
 Revision history for skilletor and Skilletor, its Perl distribution
 
 {{$NEXT}}
-  - One version line in two spellings: the CPAN dist Skilletor 0.008 is the
-    plugin's 0.8.0 (package.json, the Codex and Hermes manifests). The Perl
-    CLI reports it. The Claude Code manifest carries no version any more, so
+  - One version line in two spellings: the CPAN dist Skilletor 0.008000 is the
+    plugin's 0.8.0 (package.json, the Codex and Hermes manifests). The dist
+    keeps both sub-levels, x.yyyzzz for the plugin's x.y.z, so the next patch
+    is 0.008001 (0.8.1). The Perl CLI reports it. The Claude Code manifest carries no version any more, so
     every commit on main reaches marketplace users with auto-update.
   - The Perl distribution Skilletor lives at the root of the repository and is
     released with dzil; its tag is the bare version. It is now the whole tool,

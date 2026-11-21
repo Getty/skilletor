@@ -28,7 +28,7 @@ const UPDATE = process.env.SKILLETOR_CONFORMANCE_UPDATE === "1";
 /**
  * The version a `cli` step that asks for it writes as `${VERSION}` (README: placeholders), in either
  * spelling: the plugin's (package.json, 0.8.0), which this CLI reports, and the Perl dist's
- * (`$VERSION` in lib/Skilletor.pm, 0.008), which the Perl CLI reports.
+ * (`$VERSION` in lib/Skilletor.pm, 0.008000), which the Perl CLI reports.
  */
 const VERSIONS = [
   (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version,

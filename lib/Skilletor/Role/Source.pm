@@ -6,7 +6,7 @@ use warnings;
 
 use Moo::Role;
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 requires qw( resolve check );
 

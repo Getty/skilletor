@@ -11,7 +11,7 @@ use Skilletor::GitEnv qw( git_env );
 use Skilletor::Process qw( run_command );
 use Skilletor::URL qw( parse_url );
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 our @EXPORT_OK = qw( make_probe );
 

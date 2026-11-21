@@ -11,7 +11,7 @@ use Skilletor::Error::Unsupported;
 use Skilletor::FSUtil qw( path_join );
 use namespace::clean;
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 has home => (
   is       => 'ro',
@@ -309,8 +309,8 @@ This distribution is skilletor in Perl. It installs the L<skilletor> command,
 with the same commands, options, messages and exit codes as the plugin's, for
 Perl 5.40 and later without Node.js: in a shell, or as the command the Hermes
 plugin runs (C<$SKILLETOR_BIN>, else C<skilletor> on the C<PATH>). Only the
-version is spelled its own way: C<0.008> for the plugin's 0.8.0. It needs
-C<git>, as the plugin does.
+version is spelled its own way: C<x.yyyzzz> for the plugin's x.y.z, so
+C<0.008000> is 0.8.0. It needs C<git>, as the plugin does.
 
   cpanm Skilletor
 

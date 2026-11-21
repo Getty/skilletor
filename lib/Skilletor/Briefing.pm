@@ -11,7 +11,7 @@ use Skilletor::FSUtil qw( encode_text path_join read_text );
 use Skilletor::Frontmatter qw( split_frontmatter );
 use Skilletor::JSON qw( js_sort_keys js_type );
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 our @EXPORT_OK = qw( declared_skills skill_roots missing_skills briefing_warning );
 

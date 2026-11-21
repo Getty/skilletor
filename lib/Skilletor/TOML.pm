@@ -11,7 +11,7 @@ use Skilletor::Error::TOML;
 use Skilletor::JSON qw( js_number js_sort_keys js_stringify js_type );
 use Skilletor::JSON::OrderedHash;
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 our @EXPORT_OK = qw( stringify_toml toml_key toml_float is_toml_float );
 

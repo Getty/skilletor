@@ -32,7 +32,7 @@ const OS = process.platform === "linux" ? "linux" : process.platform === "darwin
 const ARCH = process.arch === "x64" ? "x86_64" : process.arch === "arm64" ? "arm64" : "";
 const noBinary = skip || (!OS || !ARCH ? `no binary is built for ${process.platform}-${process.arch}` : false);
 /** A dist version, as the house binary route names its assets with. */
-const VERSION = "9.876";
+const VERSION = "9.876543";
 const ASSET = `skilletor-${VERSION}-${OS}-${ARCH}`;
 const HOOK_INPUT = '{"cwd":"/nowhere","prompt":"hi"}';
 const CLI_ARGS = ["status", "--json"];

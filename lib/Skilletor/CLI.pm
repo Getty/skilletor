@@ -7,7 +7,7 @@ use utf8;
 
 use Exporter qw( import );
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 our @EXPORT_OK = qw( run parse_flags unknown_option project_root_of self_command is_packed USAGE );
 
@@ -47,8 +47,8 @@ sub _decode {
   return $text;
 }
 
-# The version the CLI reports is the dist's, $VERSION above: 0.008 is the plugin's 0.8.0
-# (package.json), which t/02-version.t ties to it. The usage text starts with it.
+# The version the CLI reports is the dist's, $VERSION above: x.yyyzzz is the plugin's x.y.z
+# (package.json; 0.008000 is 0.8.0), which t/02-version.t ties to it. The usage text starts with it.
 use constant USAGE_BODY => <<'END_USAGE';
 Remote skills, agents and rules for Claude Code, Codex and Hermes Agent.
 

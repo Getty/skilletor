@@ -1402,8 +1402,8 @@ target filesystem, `apply` nothing about sources. TypeScript, the only runtime
 dependency is Nunjucks (bundled); user requirements: `git` and one engine, `node ≥ 18`, Perl
 ≥ 5.40 with `cpanfile`'s modules, or the pinned release binary. Its own repo
 `Getty/skilletor`, an entry in `Getty/marketplace`, and the CPAN dist `Skilletor` from the
-same root (version 0.00N ≡ plugin 0.N.0, tag the bare dist version); develop locally with
-`claude --plugin-dir .`.
+same root (version x.yyyzzz ≡ plugin x.y.z, 0.008000 ≡ 0.8.0; tag the bare dist version);
+develop locally with `claude --plugin-dir .`.
 
 **From a plain shell** (`install.sh`, POSIX sh, k141): outside a Claude Code session the
 plugin's `bin/` is not on `PATH`. With Node ≥ 18 and `claude` on `PATH`, the script adds `Getty/marketplace`

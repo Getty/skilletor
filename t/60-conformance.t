@@ -29,7 +29,7 @@ plan skip_all => 'needs the shared conformance cases (conformance/, a skilletor 
 
 # The version a `cli` step that asks for it writes as ${VERSION} (README: placeholders), in either
 # spelling: the plugin's (package.json, 0.8.0), which the reference CLI reports, and the dist's
-# ($VERSION, 0.008), which the Perl CLI reports. t/02-version.t ties the two.
+# ($VERSION, 0.008000), which the Perl CLI reports. t/02-version.t ties the two.
 my @VERSIONS = ( js_parse( read_text( path( $FindBin::Bin, '..', 'package.json' ) ) )->{version}, $Skilletor::CLI::VERSION );
 
 # The CLI of `cli` steps as an argv prefix (README: which CLI): SKILLETOR_CONFORMANCE_CLI, a JSON

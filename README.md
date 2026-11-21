@@ -114,7 +114,7 @@ not write itself (a symlink excepted). Installing the plugin yourself (`claude p
 in a dotfiles script, say)? Run the script afterwards for the command; it finds the plugin
 installed and only updates it.
 
-**With Perl:** from 0.008 on, the CPAN distribution `Skilletor` installs the same `skilletor`
+**With Perl:** from 0.008000 on, the CPAN distribution `Skilletor` installs the same `skilletor`
 command, in Perl (`cpanm Skilletor`, Perl ≥ 5.40). That release is not out yet: CPAN has 0.001,
 the library alone ([Status](#status)).
 
@@ -256,7 +256,7 @@ Every command and option: [CLI reference](#cli-reference).
 What is released, what is switched on, and what is tested where:
 
 - **Released.** The plugin's newest release is 0.7.0 (tag `v0.7.0`, MIT). This README
-  describes 0.8.0, which is prepared and not released yet; its CPAN spelling is `0.008`. On
+  describes 0.8.0, which is prepared and not released yet; its CPAN spelling is `0.008000`. On
   CPAN, `Skilletor` 0.001 is the Perl library alone: Claude Code only, no template rendering,
   no `skilletor` command. The marketplace entries name no version, so Claude Code and Codex
   install this repository's `main` as it stands.
@@ -312,7 +312,7 @@ Only two things fetch the binary (`curl` or `wget`, checked with `sha256sum` or 
 CLI command, in the foreground, and a SessionStart hook, in the background. The session that
 starts it keeps running Node or Perl, the next one runs the binary. Other hooks never fetch.
 `--version` and `-v` never fetch either; they print the version of the engine that answers:
-`0.008` from the binary and Perl, `0.8.0` from Node. A failed SessionStart fetch is retried
+`0.008000` from the binary and Perl, `0.8.0` from Node. A failed SessionStart fetch is retried
 after 15 minutes.
 
 Without the pinned file the starter downloads nothing, and no release has pinned one yet; until
@@ -1413,5 +1413,5 @@ hand.
 
 ## License
 
-Artistic License 2.0 from 0.008 (plugin 0.8.0) on; the plugin releases up to 0.7.0 were MIT,
+Artistic License 2.0 from 0.008000 (plugin 0.8.0) on; the plugin releases up to 0.7.0 were MIT,
 the Perl dist's 0.001 on CPAN Perl 5. See [LICENSE](LICENSE).

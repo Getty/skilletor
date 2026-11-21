@@ -9,7 +9,7 @@ use namespace::clean;
 
 extends 'Text::Nunjucks::Loader';
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 has root => (
   is       => 'ro',

@@ -6,7 +6,7 @@ use namespace::clean;
 
 extends 'Skilletor::Error';
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 # The reference's class name: Nunjucks words an error thrown inside a template's include as
 # `NAME: MESSAGE`, and Text::Nunjucks asks the error for both.

@@ -5,9 +5,9 @@ skilletor is released as the CPAN dist `Skilletor` from the repository root, wit
 the tag, and publishes the GitHub release, which builds the binaries. All of that is
 outward-facing and is Getty's to run. Steps 1 to 3 are local and can run anytime.
 
-The version is one line in two spellings: the dist's `$VERSION` in `lib/` (`0.008`) is the
-plugin's `0.8.0` (`package.json`). The tag is the bare dist version (`0.008`); the plugin's
-older tags are `v0.1.0` to `v0.7.0`.
+The version is one line in two spellings: the dist's `$VERSION` in `lib/` keeps both sub-levels,
+`x.yyyzzz` for the plugin's `x.y.z` (`package.json`), so `0.008000` is `0.8.0`. The tag is the
+bare dist version (`0.008000`); the plugin's older tags are `v0.1.0` to `v0.7.0`.
 
 ## On the release machine
 
@@ -20,8 +20,9 @@ older tags are `v0.1.0` to `v0.7.0`.
 
 ## Per release
 
-1. **Version** — `lib/Skilletor.pm` already holds the version to release (`0.008`; after
-   every release the bundle bumps `lib/` to the next one). Set `package.json`,
+1. **Version** — `lib/Skilletor.pm` already holds the version to release (`0.008000`; after
+   every release the bundle bumps `lib/` to the next patch level, `0.008001` for `0.8.1`; a
+   release of `0.9.0` sets `0.009000` in every module of `lib/` by hand). Set `package.json`,
    `package-lock.json` (root and `packages[""]`), `.codex-plugin/plugin.json` and
    `hermes/skilletor/plugin.yaml` to its plugin spelling (`0.8.0`), and run `npm run build`
    (the Node CLI's version comes from `package.json` at build time).
@@ -35,7 +36,7 @@ older tags are `v0.1.0` to `v0.7.0`.
    `PERL5LIB=… prove -lr -j4 t`; `dzil build`, which packs the binary for this machine, checks
    it and runs `scripts/binary-smoke.sh` on it, the https url source included.
    `HOME=$(mktemp -d) node dist/skilletor.js --version` prints `0.8.0`,
-   `perl -Ilib script/skilletor --version` prints `0.008`.
+   `perl -Ilib script/skilletor --version` prints `0.008000`.
    When the Hermes plugin changed, also run the install case against real Hermes:
    `SKILLETOR_HERMES_INSTALL=1 node --test --import ./test/setup.ts test/hermes-real.test.ts`
    (network; Hermes downloads its plugin runtime, about 100 s).
@@ -48,13 +49,13 @@ older tags are `v0.1.0` to `v0.7.0`.
    builds the tarball and, as every `dzil build`, packs, verifies and smokes the binary for
    this machine; then `maint/version-tie.pl` checks `package.json`, the dist's tests run with
    `RELEASE_TESTING`, the tarball is test-installed into a scratch dir, and it asks before
-   uploading `Skilletor-0.008.tar.gz` to CPAN. It stamps `Changes`, commits, and tags `0.008`.
-   It bumps `lib/` to `0.009` in a commit of its own and pushes `main` and the tag. Then it
-   creates the GitHub release as a draft, attaches the CPAN tarball and publishes it with that
-   version's `Changes` entries as its notes, not marked latest (the binaries workflow does
-   that). Last it installs the release locally. From here `t/02-version.t` accepts `lib/` one
-   step ahead of `package.json`. Nothing in it writes the root `bin/`, so the starter and its
-   pin are untouched; the binary packed locally is not uploaded.
+   uploading `Skilletor-0.008000.tar.gz` to CPAN. It stamps `Changes`, commits, and tags
+   `0.008000`. It bumps `lib/` to `0.008001` in a commit of its own and pushes `main` and the
+   tag. Then it creates the GitHub release as a draft, attaches the CPAN tarball and publishes
+   it with that version's `Changes` entries as its notes, not marked latest (the binaries
+   workflow does that). Last it installs the release locally. From here `t/02-version.t`
+   accepts `lib/` one step ahead of `package.json`. Nothing in it writes the root `bin/`, so the
+   starter and its pin are untouched; the binary packed locally is not uploaded.
 5. **Binaries and pin** — the sequence below.
 6. **Marketplace** — only when the descriptions below changed or a harness listing is new:
    edit `Getty/marketplace`, then `python3 scripts/check-manifests.py`. Entries carry no
@@ -91,17 +92,18 @@ Every step here is outward-facing and needs Getty's go-ahead.
    macos-arm64 and windows-x86_64. Each binary is smoked on clean machines (AlmaLinux 8 and
    9, Debian bookworm slim, the macOS and Windows runners) with `scripts/binary-smoke.sh`,
    the https url source included. The
-   workflow attaches `skilletor-0.008-<platform>` (`.exe` on Windows), `SHA256SUMS`,
+   workflow attaches `skilletor-0.008000-<platform>` (`.exe` on Windows), `SHA256SUMS`,
    `install.sh` and `install.ps1` to the release, then marks it latest when it is newer than
    the current latest release (the release plugin leaves that to the workflow). A transient failure:
    `gh run rerun <run-id> --failed`; a rebuild of the same release:
-   `gh workflow run binaries.yml -f tag=0.008`. A fix in code is a new version, never a moved
+   `gh workflow run binaries.yml -f tag=0.008000`. A fix in code is a new version, never a moved
    tag.
-2. **Check the sums** — `gh release download 0.008 -p 'skilletor-0.008-*' -p SHA256SUMS -D <tmp>`,
-   then `(cd <tmp> && sha256sum -c SHA256SUMS)`: four lines, every one OK, all of version
-   0.008. On Linux x86_64, `<tmp>/skilletor-0.008-linux-x86_64 --version` prints `0.008`.
+2. **Check the sums** — `gh release download 0.008000 -p 'skilletor-0.008000-*' -p SHA256SUMS
+   -D <tmp>`, then `(cd <tmp> && sha256sum -c SHA256SUMS)`: four lines, every one OK, all of
+   version 0.008000. On Linux x86_64, `<tmp>/skilletor-0.008000-linux-x86_64 --version` prints
+   `0.008000`.
 3. **Commit the pin** on `main`: copy `SHA256SUMS` as is to `bin/skilletor-binaries.sha256` and
-   commit it alone ("Pin the 0.008 release binaries"). `npm test` stays green; the suite does
+   commit it alone ("Pin the 0.008000 release binaries"). `npm test` stays green; the suite does
    not depend on the file.
 4. **Push `main`** — `git push origin main`. From here a user's next SessionStart fetches the
    binary in the background and caches it, and the session after runs it. Until a fetch

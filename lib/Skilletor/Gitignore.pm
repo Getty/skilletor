@@ -11,7 +11,7 @@ use Skilletor::GitEnv qw( git_env );
 use Skilletor::JSON qw( js_sort_keys );
 use Skilletor::Process qw( run_command );
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 our @EXPORT_OK = qw(
   SKILL_GITIGNORE PROJECT_CLAUDE_ENTRIES LOCAL_ENTRIES CODEX_ENTRIES WORKTREE_INCLUDE

@@ -13,7 +13,7 @@ use Skilletor::FSUtil qw( decode_utf8_lossy encode_text is_executable path_join 
 use Skilletor::JSON qw( js_sort_keys );
 use Skilletor::JSString qw( js_ws_re );
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 our @EXPORT_OK = qw( build executables install_path renders_empty templates_of );
 

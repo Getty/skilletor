@@ -14,7 +14,7 @@ use IO::Select;
 use POSIX ();
 use Time::HiRes ();
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 our @EXPORT_OK = qw( run_command spawn_detached );
 

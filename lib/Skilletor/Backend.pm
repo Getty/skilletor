@@ -12,7 +12,7 @@ use Skilletor::Source::Git;
 use Skilletor::Source::Local;
 use Skilletor::Source::Url;
 
-our $VERSION = '0.008';
+our $VERSION = '0.008000';
 
 sub local_class { 'Skilletor::Source::Local' }
 sub git_class   { 'Skilletor::Source::Git' }

@@ -44,11 +44,11 @@ C</reload-plugins> or a restart; in Codex and Hermes from the next session.
 This is the command of the CPAN distribution L<Skilletor>, which needs Perl
 5.40 and C<git>. It has the same commands, options, messages and exit codes
 as the C<skilletor> command of the Claude Code and Codex plugin; only the
-version is spelled its own way, C<0.008> for the plugin's 0.8.0. The plugins
-keep your items current at every session start; this command is for a shell,
-a script, or as the command the Hermes plugin runs (C<$SKILLETOR_BIN>, else
-C<skilletor> on the C<PATH>). The guide is the F<README.md> at
-L<https://github.com/Getty/skilletor>.
+version is spelled its own way, C<x.yyyzzz> for the plugin's x.y.z (C<0.008000>
+is 0.8.0). The plugins keep your items current at every session start; this
+command is for a shell, a script, or as the command the Hermes plugin runs
+(C<$SKILLETOR_BIN>, else C<skilletor> on the C<PATH>). The guide is the
+F<README.md> at L<https://github.com/Getty/skilletor>.
 
 =head1 COMMANDS
 
