@@ -6,7 +6,7 @@ use namespace::clean;
 
 extends 'Skilletor::Error';
 
-our $VERSION = '0.008000';
+our $VERSION = '0.008001';
 
 1;
 

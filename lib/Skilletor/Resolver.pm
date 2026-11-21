@@ -19,7 +19,7 @@ use Skilletor::State;
 use Skilletor::Targets qw( default_markers detect_harnesses detect_project_harnesses select_targets );
 use namespace::clean;
 
-our $VERSION = '0.008000';
+our $VERSION = '0.008001';
 
 my %TYPE_DIR = ( skill => 'skills', agent => 'agents', rule => 'rules' );
 my %FETCH    = map { $_ => 1 } qw( always missing never );

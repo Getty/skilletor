@@ -9,7 +9,7 @@ use Exporter qw( import );
 use Skilletor::FSUtil qw( decode_utf8_lossy );
 use Unicode::Normalize ();
 
-our $VERSION = '0.008000';
+our $VERSION = '0.008001';
 
 our @EXPORT_OK = qw( parse_url punycode_encode );
 

@@ -15,7 +15,7 @@ use Skilletor::FSUtil qw( encode_text is_absolute path_join read_text real_or_re
 use Skilletor::JSON qw( js_parse js_stringify js_ordered js_sort_keys js_type );
 use namespace::clean;
 
-our $VERSION = '0.008000';
+our $VERSION = '0.008001';
 
 has root => (
   is       => 'ro',

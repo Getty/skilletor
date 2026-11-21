@@ -14,7 +14,7 @@ use Skilletor::JSON qw( js_number js_ordered js_stringify js_type );
 use Skilletor::JSString qw( js_trim );
 use Skilletor::TOML qw( stringify_toml toml_float );
 
-our $VERSION = '0.008000';
+our $VERSION = '0.008001';
 
 our @EXPORT_OK = qw( codex_agent_toml codex_rule_section convert_for_target );
 

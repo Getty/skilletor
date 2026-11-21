@@ -14,7 +14,7 @@ use Skilletor::GitEnv qw( git_env );
 use Skilletor::JSON qw( js_ordered js_type );
 use Skilletor::Process qw( run_command spawn_detached );
 
-our $VERSION = '0.008000';
+our $VERSION = '0.008001';
 
 our @EXPORT_OK = qw( run_hook project_root_of default_background SESSION_START_TIMEOUT_MS DEFAULT_INTERVAL MOVE_DEADLINE_MS );
 

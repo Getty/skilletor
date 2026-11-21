@@ -8,7 +8,7 @@ use namespace::clean;
 
 with 'Skilletor::Role::Source';
 
-our $VERSION = '0.008000';
+our $VERSION = '0.008001';
 
 has local_path => (
   is       => 'ro',

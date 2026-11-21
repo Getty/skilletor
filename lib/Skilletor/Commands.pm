@@ -25,7 +25,7 @@ use Skilletor::Source::Url;
 use Skilletor::Spec qw( resolve_spec );
 use Skilletor::State;
 
-our $VERSION = '0.008000';
+our $VERSION = '0.008001';
 
 our @EXPORT_OK = qw( add available config_path install source_list source_remove trust uninstall );
 

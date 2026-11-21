@@ -13,7 +13,7 @@ use Skilletor::JSON qw( js_parse js_type );
 use Skilletor::JSString qw( js_trim );
 use Skilletor::Lock qw( parse_lock_key );
 
-our $VERSION = '0.008000';
+our $VERSION = '0.008001';
 
 our @EXPORT_OK = qw(
   DETECTED default_markers detect_harnesses detect_project_harnesses select_targets default_hermes_home

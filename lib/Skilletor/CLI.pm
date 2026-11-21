@@ -7,7 +7,7 @@ use utf8;
 
 use Exporter qw( import );
 
-our $VERSION = '0.008000';
+our $VERSION = '0.008001';
 
 our @EXPORT_OK = qw( run parse_flags unknown_option project_root_of self_command is_packed USAGE );
 

@@ -1,5 +1,7 @@
 Revision history for skilletor and Skilletor, its Perl distribution
 
+{{$NEXT}}
+
 0.008000  2026-11-21 03:31:10Z
   - One version line in two spellings: the CPAN dist Skilletor 0.008000 is the
     plugin's 0.8.0 (package.json, the Codex and Hermes manifests). The dist

@@ -11,7 +11,7 @@ use Skilletor::Error::Unsupported;
 use Skilletor::FSUtil qw( path_join );
 use namespace::clean;
 
-our $VERSION = '0.008000';
+our $VERSION = '0.008001';
 
 has home => (
   is       => 'ro',

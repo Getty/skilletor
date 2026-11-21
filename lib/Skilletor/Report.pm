@@ -10,7 +10,7 @@ use Skilletor::Briefing qw( briefing_warning );
 use Skilletor::JSON qw( js_ordered js_stringify );
 use Skilletor::Lock qw( parse_lock_key );
 
-our $VERSION = '0.008000';
+our $VERSION = '0.008001';
 
 our @EXPORT_OK = qw(
   ACTIVATION empty_scope_report display_safe backend_label conflict_hint has_changes has_notable
