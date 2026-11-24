@@ -212,12 +212,13 @@ subtest 'removed cwd: an explicit project syncs a skill; otherwise the error is 
   my %env = %ENV;
   delete @env{qw( CLAUDE_CONFIG_DIR CLAUDE_PROJECT_DIR SKILLETOR_PROJECT_DIR HERMES_HOME )};
   @env{qw( HOME CODEX_HOME )} = ( "$home", path( $home, '.no-codex' )->stringify );
+  # The cwd is removed from a subshell elsewhere: Solaris refuses to remove the remover's own cwd.
   my $run_removed = sub {
     my ( $name, @args ) = @_;
     my $gone = path( $tmp, $name );
     $gone->mkpath;
     return run_command(
-      cmd => [ 'sh', '-c', 'cd "$1" && rmdir "$1" && shift && exec "$@"', 'sh', "$gone", $^X, "-I$lib", "$bin", @args ],
+      cmd => [ 'sh', '-c', 'cd "$1" && ( cd / && rmdir "$1" ) && shift && exec "$@"', 'sh', "$gone", $^X, "-I$lib", "$bin", @args ],
       env => \%env,
     );
   };

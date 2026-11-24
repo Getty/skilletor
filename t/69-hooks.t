@@ -473,7 +473,8 @@ sub run_cli {
   my %env = ( %ENV, HOME => $m->{home}, CODEX_HOME => "$m->{home}/.no-codex", %{ $opt{env} // {} } );
   delete @env{ grep { !defined $env{$_} } keys %env };
   my @perl = ( $^X, ( map { "-I$_" } @{ $opt{inc} // [ grep { !ref } @INC ] } ), "$BIN" );
-  my @cmd = $opt{removed} ? ( 'sh', '-c', 'cd "$1" && rmdir "$1" && shift && exec "$@"', 'sh', $opt{removed}, @perl, @$args ) : ( @perl, @$args );
+  # The cwd is removed from a subshell elsewhere: Solaris refuses to remove the remover's own cwd.
+  my @cmd = $opt{removed} ? ( 'sh', '-c', 'cd "$1" && ( cd / && rmdir "$1" ) && shift && exec "$@"', 'sh', $opt{removed}, @perl, @$args ) : ( @perl, @$args );
   path( $opt{removed} )->mkpath if $opt{removed};
   my $r = run_command( cmd => \@cmd, env => \%env, stdin => encode_text( $stdin // '' ), cwd => $opt{cwd} // $m->{root}, timeout_ms => 60_000 );
   return { exit => $r->{code}, stdout => Encode::decode( 'UTF-8', $r->{stdout} ), stderr => $r->{stderr} };
