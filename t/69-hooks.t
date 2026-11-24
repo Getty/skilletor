@@ -453,7 +453,9 @@ END
   isnt( $pgrp, getpgrp(), 'a process group of its own: a kill of ours spares it' );
   SKIP: {
     skip 'no /proc', 1 if $sid eq '?';
-    my $mine = ( split ' ', path('/proc/self/stat')->slurp_raw =~ s/\A.*\) //sr )[3];
+    # Read without a lock: Cygwin's /proc refuses flock, which Path::Tiny's slurp takes.
+    my $stat = do { open my $f, '<', '/proc/self/stat' or die "/proc/self/stat: $!"; local $/; <$f> };
+    my $mine = ( split ' ', $stat =~ s/\A.*\) //sr )[3];
     isnt( $sid, $mine, 'a session of its own' );
   }
   SKIP: {
