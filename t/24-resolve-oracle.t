@@ -109,7 +109,17 @@ subtest 'catalog scans and bundle expansion' => sub {
   my $base = tempdir;
   my $root = $base->realpath;
   my %tree = map { ( $_->{name} => $_ ) } @{ js_parse( read_text("$FindBin::Bin/data/catalog-trees.json") ) };
+  # A file system that ignores case (macOS, Cygwin) cannot hold a tree with case twins; the
+  # reference's tests skip those trees there too.
+  path("$root/CaseProbe")->spew_raw('');
+  my $nocase = -e "$root/caseprobe";
+  unlink "$root/CaseProbe";
   for my $case ( @{ $oracle->{catalogs} } ) {
+    my %seen;
+    if ( $nocase && grep { $seen{ lc $_ }++ } keys %{ $tree{ $case->{name} }{files} // {} } ) {
+      SKIP: { skip "$case->{name}: its case twins need a file system that keeps case", 1 }
+      next;
+    }
     my $dir = "$root/$case->{name}";
     path($dir)->mkpath;
     build( $dir, $tree{ $case->{name} } );
