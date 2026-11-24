@@ -5,6 +5,7 @@ use strict;
 use warnings;
 
 use Exporter qw( import );
+use File::Spec ();
 use IO::Compress::Gzip ();
 use IO::Socket::INET ();
 use POSIX ();
@@ -14,7 +15,7 @@ use Skilletor::FSUtil qw( encode_text );
 use Skilletor::JSON qw( js_stringify );
 use SkilletorTest::Server;
 
-our @EXPORT_OK = qw( error_of write_json home_with git_ok git_out make_repo commit_files clean_git_env bare_remote make_tar gzip_bytes pax_path serve_http );
+our @EXPORT_OK = qw( error_of write_json home_with git_ok git_out make_repo commit_files clean_git_env bare_remote needs_git make_tar gzip_bytes pax_path serve_http );
 
 # Test output is UTF-8: names and messages carry non-ASCII.
 binmode Test::More->builder->$_, ':encoding(UTF-8)' for qw( output failure_output todo_output );
@@ -66,8 +67,17 @@ sub home_with {
   return { root => $root, home => "$home", project => "$project" };
 }
 
+# A machine without git cannot run a git source: the test, or the subtest, that needs git (every
+# one that makes a repository) is skipped there.
+my $HAVE_GIT;
+sub needs_git {
+  $HAVE_GIT //= grep( { -f "$_/git" && -x _ || -f "$_/git.exe" } File::Spec->path ) ? 1 : 0;
+  Test::More::plan( skip_all => 'needs git on PATH' ) unless $HAVE_GIT;
+}
+
 sub _run_git {
   my ( $dir, @args ) = @_;
+  needs_git();
   my $pid = open( my $fh, '-|' ) // die 'fork: '.$!;
   if ( !$pid ) {
     open STDERR, '>&', \*STDOUT;

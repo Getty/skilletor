@@ -41,6 +41,7 @@ sub requests {
 sub stop {
   my ( $self ) = @_;
   return unless $self->{pid};
+  local $?;    # a stop in global destruction leaves the exit status of the test alone
   kill 'TERM', $self->{pid};
   waitpid $self->{pid}, 0;
   delete $self->{pid};

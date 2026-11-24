@@ -4,7 +4,7 @@ use warnings;
 use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/lib";
-use SkilletorTest qw( error_of git_ok git_out bare_remote );
+use SkilletorTest qw( error_of git_ok git_out bare_remote needs_git );
 
 use Path::Tiny qw( path tempdir );
 use Skilletor::Source::Git;
@@ -84,6 +84,7 @@ subtest 'offline fallback: the cache with a warning when the remote is gone' => 
 };
 
 subtest 'without a cache an unreachable remote names the fetch error' => sub {
+  needs_git();
   for my $ref ( undef, 'main' ) {
     my $tmp = tempdir;
     my $url = 'file://'.$tmp->child('does-not-exist.git');
