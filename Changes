@@ -1,6 +1,12 @@
 Revision history for skilletor and Skilletor, its Perl distribution
 
 {{$NEXT}}
+  - The Perl port reads and writes numbers as JavaScript's doubles on a perl
+    whose NV is a long double or a __float128 too: lock files, JSON output,
+    Codex agent TOML and frontmatter values carry the digits the TypeScript
+    CLI writes (0.1, not 0.10000000000000001), 1e999 is Infinity, and a
+    decimal is rounded to a double once. Skilletor::JSON gains js_to_number
+    and js_double.
 
 0.008000  2026-11-21 03:31:10Z
   - One version line in two spellings: the CPAN dist Skilletor 0.008000 is the

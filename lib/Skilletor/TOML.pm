@@ -8,7 +8,7 @@ use Exporter qw( import );
 use JSON::MaybeXS ();
 use Scalar::Util qw( blessed reftype );
 use Skilletor::Error::TOML;
-use Skilletor::JSON qw( js_number js_sort_keys js_stringify js_type );
+use Skilletor::JSON qw( js_double js_number js_sort_keys js_stringify js_type );
 use Skilletor::JSON::OrderedHash;
 
 our $VERSION = '0.008001';
@@ -83,8 +83,9 @@ sub _is_table {
 
 sub _scalar {
   my ( $v, $where, $multiline ) = @_;
+  # A number is the double JavaScript would hold, also where Perl's NV is wider.
   if ( is_toml_float($v) ) {
-    my $x = $v->value;
+    my $x = js_double( $v->value );
     _fail( $where.': '._number_text($x).' is not a finite float' ) unless _is_finite($x);
     my $text = js_number($x);
     return $text =~ /[.eE]/ ? $text : $text.'.0';
@@ -93,8 +94,9 @@ sub _scalar {
   return $multiline ? _multiline_string($v) : _basic_string($v) if $type eq 'string';
   return $v ? 'true' : 'false' if $type eq 'boolean';
   if ( $type eq 'number' ) {
-    _fail( $where.': '._number_text($v).' is not an integer (use TomlFloat)' ) unless _is_safe_integer($v);
-    return js_number($v);
+    my $n = js_double($v);
+    _fail( $where.': '._number_text($n).' is not an integer (use TomlFloat)' ) unless _is_safe_integer($n);
+    return js_number($n);
   }
   # JSON.stringify(v): undefined for what JSON cannot write.
   my $json = defined $v ? eval { js_stringify($v) } // 'undefined' : 'null';

@@ -9,7 +9,7 @@ use JSON::MaybeXS ();
 use Scalar::Util qw( blessed );
 use Skilletor::Error;
 use Skilletor::Error::Frontmatter;
-use Skilletor::JSON qw( js_ordered );
+use Skilletor::JSON qw( js_ordered js_to_number );
 use Skilletor::JSString qw( js_trim js_ws_re );
 
 our $VERSION = '0.008001';
@@ -261,8 +261,7 @@ sub _typed_plain {
     return $safe ? 0 + $s : $s;
   }
   if ( $s =~ /\A[-+]?(?:\.[0-9]+|[0-9]+\.[0-9]*|[0-9]+(?=[eE]))(?:[eE][-+]?[0-9]+)?\z/ ) {
-    no warnings 'numeric';
-    return Skilletor::Frontmatter::Float->new( 0 + $s );
+    return Skilletor::Frontmatter::Float->new( js_to_number($s) );
   }
   return $s;
 }

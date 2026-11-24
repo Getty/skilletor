@@ -55,7 +55,8 @@ subtest 'plain Perl hashes are written with sorted keys, as Object.keys().sort()
 subtest 'Perl scalars: numbers, strings, booleans, undef' => sub {
   is( js_stringify(10), '10', 'integer' );
   is( js_stringify(1.5), '1.5', 'float' );
-  is( js_stringify( 0.1 + 0.2 ), '0.30000000000000004', 'shortest round trip' );
+  # 0.1 + 0.2 in doubles; written as its bits, since a long double perl adds in its own NV.
+  is( js_stringify(0x1.3333333333334p-2), '0.30000000000000004', 'shortest round trip' );
   is( js_stringify(1e21), '1e+21', 'exponent form from 1e21' );
   is( js_stringify(1e-7), '1e-7', 'exponent form below 1e-6' );
   is( js_stringify(-0.0), '0', 'negative zero' );

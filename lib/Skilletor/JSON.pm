@@ -14,9 +14,15 @@ use Skilletor::JSON::OrderedHash;
 
 our $VERSION = '0.008001';
 
-our @EXPORT_OK = qw( js_parse js_stringify js_ordered js_sort_keys js_number js_type );
+our @EXPORT_OK = qw( js_parse js_stringify js_ordered js_sort_keys js_number js_to_number js_double js_type );
 
 use constant CORE_BOOL => defined &builtin::is_bool;
+
+# JavaScript's numbers are doubles. Where Perl's NV is wider (long double, __float128), a
+# decimal read into it and then rounded to a double is rounded twice, and a decimal just beside
+# the midpoint of two doubles lands on the midpoint and goes to the even neighbour. There the
+# decimals are read by C's strtod, which POSIX::strtod returns as a double. True on such a perl.
+our $STRTOD = length( pack 'F', 0 ) > 8 ? 1 : 0;
 
 #### Writing ###########################################################
 
@@ -137,23 +143,43 @@ sub _quote {
   return '"'.$s.'"';
 }
 
+# The double nearest a Perl number: what JavaScript holds for it.
+sub js_double { unpack 'd', pack 'd', $_[0] }
+
+# Number(text) of a decimal literal: the double nearest it, read once, whatever the NV.
+sub js_to_number {
+  my ( $text ) = @_;
+  return unpack 'd', pack 'd', 0 + $text unless $STRTOD;
+  my ( $sign, $int, $frac, $esign, $edigits ) = $text =~ /\A([-+]?)([0-9]*)(?:\.([0-9]*))?(?:[eE]([-+]?)([0-9]+))?\z/
+    or croak __PACKAGE__.'->js_to_number needs a decimal literal, not '.$text;
+  $frac //= '';
+  croak __PACKAGE__.'->js_to_number needs a decimal literal, not '.$text if $int eq '' && $frac eq '';
+  ( my $exp = $edigits // '0' ) =~ s/\A0+(?=.)//;
+  $exp = '999999999' if length $exp > 9;    # beyond any double: strtod gives 0 or the infinity
+  $exp = ( ( $esign // '' ) eq '-' ? -$exp : $exp ) - length $frac;
+  # No radix character: strtod reads the one of the locale (LC_NUMERIC), "1.5" is 1 under de_DE.
+  require POSIX;
+  return scalar POSIX::strtod( $sign.$int.$frac.'e'.$exp );
+}
+
 # Number::toString for a finite double; JSON.stringify writes NaN and the infinities as null.
+# A Perl number is first the double nearest it, as JavaScript would hold it.
 sub js_number {
   my ( $n ) = @_;
   $n = 0 + $n;
-  return 'null' if $n != $n || $n == 9**9**9 || $n == -9**9**9;
-  return '0' if $n == 0;
   my $flags = B::svref_2object( \$n )->FLAGS;
   if ( ( $flags & B::SVf_IOK() ) && !( $flags & B::SVf_NOK() ) && abs($n) <= 9007199254740992 ) {
     return "$n";
   }
-  $n = unpack 'd', pack 'd', $n;
+  $n = js_double($n);
+  return 'null' if $n != $n || $n == 9**9**9 || $n == -9**9**9;
+  return '0' if $n == 0;
   my $neg = $n < 0 ? '-' : '';
   my $abs = abs $n;
   my ( $digits, $exp );
   for my $p ( 1 .. 17 ) {
     my $s = sprintf '%.*e', $p - 1, $abs;
-    next unless ( 0 + $s ) == $abs || $p == 17;
+    next unless $p == 17 || js_to_number($s) == $abs;
     ( $digits, $exp ) = $s =~ /\A([0-9.]+)e([-+][0-9]+)\z/;
     $digits =~ s/\.//;
     $digits =~ s/0+\z// if length $digits > 1;
@@ -308,10 +334,10 @@ sub _number {
     $p->{i} = pos( $p->{s} );
   }
   my $text = substr( $p->{s}, $start, $p->{i} - $start );
-  my $n = 0 + $text;
-  # A JavaScript number is a double: an integer beyond 2**53 loses its low digits there.
-  $n = unpack 'd', pack 'd', $n unless $simple && $p->{i} - $int_start <= 15;
-  return $n;
+  # A JavaScript number is a double: an integer beyond 2**53 loses its low digits there. Up to
+  # 15 digits an integer is exact in any NV.
+  return 0 + $text if $simple && $p->{i} - $int_start <= 15;
+  return js_to_number($text);
 }
 
 my %UNESCAPE = ( '"' => '"', '\\' => '\\', '/' => '/', b => "\b", f => "\f", n => "\n", r => "\r", t => "\t" );
@@ -496,6 +522,25 @@ characters beyond U+FFFF sort before U+E000 .. U+FFFF.
 C<Number.prototype.toString> of a double: the shortest digits that read back
 as the same double, in JavaScript's fixed or exponent form (C<1e+21>,
 C<1e-7>); C<null> for NaN and the infinities, as C<JSON.stringify> writes them.
+A Perl number is first the double nearest it (L</js_double>), so a perl whose
+NV is a long double or a C<__float128> writes the digits JavaScript writes.
+
+=func js_to_number
+
+  js_to_number('1.5e-7');   # the double nearest 1.5e-7
+
+C<Number(text)> of a decimal literal: the double nearest it, rounded once. On a
+perl whose NV is wider than a double the text is read by C's C<strtod>
+(L<POSIX/strtod>), not into the NV and then rounded again; the text is handed
+over without a radix character, so the locale's C<LC_NUMERIC> does not matter.
+L</js_parse> reads numbers with it.
+
+=func js_double
+
+  js_double( 1e400 );   # Infinity on every perl
+
+The double nearest a Perl number: what JavaScript holds for it. The same number
+on a perl whose NV is a double.
 
 =func js_type
 
