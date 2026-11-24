@@ -7,6 +7,9 @@ Revision history for skilletor and Skilletor, its Perl distribution
     CLI writes (0.1, not 0.10000000000000001), 1e999 is Infinity, and a
     decimal is rounded to a double once. Skilletor::JSON gains js_to_number
     and js_double.
+  - A Codex rules file that is a directory is named as unreadable (EISDIR) on
+    every system, also where reading a directory gives its entries; they no
+    longer reach the session as rules.
 
 0.008000  2026-11-21 03:31:10Z
   - One version line in two spellings: the CPAN dist Skilletor 0.008000 is the

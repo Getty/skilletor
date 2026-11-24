@@ -6,6 +6,7 @@ use warnings;
 use utf8;
 
 use Cwd ();
+use Errno ();
 use Exporter qw( import );
 use Scalar::Util qw( blessed );
 use Time::HiRes ();
@@ -213,10 +214,12 @@ sub _with_codex_rules {
   return $result;
 }
 
-# A file's text as readFileSync(file, "utf8") gives it, or a reference to Node's message.
+# A file's text as readFileSync(file, "utf8") gives it, or a reference to Node's message. A
+# directory is EISDIR also where read(2) gives its entries (NetBSD, DragonFly, GNU/Hurd).
 sub _read_rules {
   my ( $file ) = @_;
   open( my $fh, '<:raw', encode_text($file) ) or return \node_fs_error( 0 + $!, 'open', $file );
+  return \node_fs_error( Errno::EISDIR(), 'read' ) if -d $fh;
   my $raw = do { local $/; <$fh> };
   return \node_fs_error( 0 + $!, 'read' ) unless defined $raw;
   return decode_utf8_lossy($raw);
