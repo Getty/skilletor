@@ -10,7 +10,7 @@ use utf8;
 use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/lib";
-use SkilletorTest qw( write_json );
+use SkilletorTest qw( modes_ignored write_json );
 
 use Path::Tiny qw( path tempdir );
 use Skilletor;
@@ -267,6 +267,8 @@ subtest 'apply: a run that throws leaves a lock owning what landed, marked parti
 
 SKIP: {
   skip 'root writes into a read-only directory', 1 unless $> != 0;
+  my $why = modes_ignored('write');
+  skip $why, 1 if $why;
   subtest 'sync: a write that fails midway' => sub {
     my $m = machine( 'skills/a/SKILL.md' => skill('a'), 'skills/b/SKILL.md' => skill('b') );
     write_json( "$m->{home}/.claude/skilletor.json", { sources => { s => { local => $m->{src} } }, install => { skills => [ 'a@s', 'b@s' ] } } );

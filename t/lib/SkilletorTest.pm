@@ -15,7 +15,7 @@ use Skilletor::FSUtil qw( encode_text );
 use Skilletor::JSON qw( js_stringify );
 use SkilletorTest::Server;
 
-our @EXPORT_OK = qw( error_of write_json home_with git_ok git_out make_repo commit_files clean_git_env bare_remote needs_git make_tar gzip_bytes pax_path serve_http );
+our @EXPORT_OK = qw( error_of write_json home_with git_ok git_out make_repo commit_files clean_git_env bare_remote modes_ignored needs_git make_tar gzip_bytes pax_path serve_http );
 
 # Test output is UTF-8: names and messages carry non-ASCII.
 binmode Test::More->builder->$_, ':encoding(UTF-8)' for qw( output failure_output todo_output );
@@ -65,6 +65,31 @@ sub home_with {
   write_json( $project->child( '.claude', 'skilletor.json' ), $files{project} ) if exists $files{project};
   write_json( $project->child( '.claude', 'skilletor.local.json' ), $files{local} ) if exists $files{local};
   return { root => $root, home => "$home", project => "$project" };
+}
+
+# Why the mode bits do not keep this user from reading a file at mode 0 ('read') or from writing
+# into a directory at mode 0555 ('write') here, or undef where they do: root and an administrator
+# on Cygwin pass them, a file system without POSIX modes has none.
+sub modes_ignored {
+  my ( $what ) = @_;
+  my $dir = tempdir;
+  my $probe = $dir->child('probe');
+  $probe->spew_raw("x\n");
+  my $passed;
+  if ( $what eq 'read' ) {
+    chmod 0, "$probe";
+    $passed = open( my $fh, '<:raw', "$probe" );
+    chmod 0644, "$probe";
+  }
+  else {
+    chmod 0555, "$dir";
+    $passed = open( my $fh, '>:raw', "$dir/new" );
+    chmod 0755, "$dir";
+  }
+  return undef unless $passed;
+  return $what eq 'read'
+    ? 'mode 0 does not keep this user from reading a file here'
+    : 'mode 0555 does not keep this user from writing into a directory here';
 }
 
 # A machine without git cannot run a git source: the test, or the subtest, that needs git (every

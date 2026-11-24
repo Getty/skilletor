@@ -4,7 +4,7 @@ use warnings;
 use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/lib";
-use SkilletorTest qw( error_of write_json );
+use SkilletorTest qw( error_of modes_ignored write_json );
 
 use JSON::MaybeXS ();
 use Path::Tiny qw( path tempdir );
@@ -101,10 +101,14 @@ subtest 'unreadable file' => sub {
   plan skip_all => 'root reads everything' if $> == 0;
   my $t = SkilletorTest::home_with( user => {} );
   my $f = path( $t->{home}, '.claude', 'skilletor.json' );
-  chmod 0000, "$f";
-  is( error_of( sub { Skilletor::Config->load( home => $t->{home} ) } ),
-    "$f: cannot read config (EACCES: permission denied, open '$f')", 'EACCES as Node words it' );
-  chmod 0644, "$f";
+  SKIP: {
+    my $why = modes_ignored('read');
+    skip $why, 1 if $why;
+    chmod 0000, "$f";
+    is( error_of( sub { Skilletor::Config->load( home => $t->{home} ) } ),
+      "$f: cannot read config (EACCES: permission denied, open '$f')", 'EACCES as Node words it' );
+    chmod 0644, "$f";
+  }
   $f->remove;
   $f->mkpath;
   is( error_of( sub { Skilletor::Config->load( home => $t->{home} ) } ),

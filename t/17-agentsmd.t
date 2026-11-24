@@ -7,6 +7,7 @@ use utf8;
 use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/lib";
+use SkilletorTest qw( modes_ignored );
 
 use Path::Tiny qw( path tempdir );
 use Scalar::Util qw( blessed );
@@ -123,6 +124,8 @@ subtest 'inspectAgentsMd' => sub {
   }
   SKIP: {
     skip 'root reads any file', 1 if $> == 0;
+    my $why = modes_ignored('read');
+    skip $why, 1 if $why;
     my ( undef, $p ) = place( { hex => '780a' }, 'AGENTS.md' );
     chmod 0, $p;
     is_deeply( inspect_agents_md($p), { ok => 0, reason => "unreadable (EACCES: permission denied, open '$p')" }, 'unreadable: Node\'s message' );

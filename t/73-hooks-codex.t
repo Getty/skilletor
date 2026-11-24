@@ -11,7 +11,7 @@ use utf8;
 use Test::More;
 use FindBin;
 use lib "$FindBin::Bin/lib";
-use SkilletorTest qw( git_ok write_json );
+use SkilletorTest qw( git_ok modes_ignored write_json );
 
 use Cwd ();
 use Path::Tiny qw( path tempdir );
@@ -156,6 +156,8 @@ subtest 'a rules file that cannot be read is named in the line, escaped, in Node
   # message is pinned on the reader itself.
   SKIP: {
     skip 'root reads any file', 1 if $> == 0;
+    my $why = modes_ignored('read');
+    skip $why, 1 if $why;
     my $file = "$m->{dir}/denied.md";
     path($file)->spew_raw("x\n");
     chmod 0, $file;

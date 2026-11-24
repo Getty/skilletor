@@ -10,6 +10,8 @@ use warnings;
 use utf8;
 use Test::More;
 use FindBin;
+use lib "$FindBin::Bin/lib";
+use SkilletorTest qw( modes_ignored );
 
 use IPC::Open2 qw( open2 );
 use JSON::MaybeXS ();
@@ -205,6 +207,8 @@ subtest 'a check mark dropped: the next check is due at once' => sub {
   SKIP: {
     skip 'root ignores the mode', 2 if $> == 0;
     skip 'no mode bits on Windows', 2 if $^O eq 'MSWin32';
+    my $why = modes_ignored('write');
+    skip $why, 2 if $why;
     $s->mark_checked($p);
     chmod 0500, "$root";
     my $ok = eval { $s->due_again($p); 1 };
