@@ -102,6 +102,9 @@ subtest 'the holder refreshes its record' => sub {
       my $owner = "$root/sync.lock/owner.json";
       $before = ( Time::HiRes::stat($owner) )[9];
       Time::HiRes::sleep(0.4);
+      # Where mtimes are whole seconds (Android, GNU/Hurd), the next second shows the move.
+      my $deadline = Time::HiRes::time() + 3;
+      Time::HiRes::sleep(0.05) until ( Time::HiRes::stat($owner) )[9] - $before > 0.1 || Time::HiRes::time() > $deadline;
       $after = ( Time::HiRes::stat($owner) )[9];
     },
     refresh_ms => 50,
@@ -122,6 +125,17 @@ subtest 'win32: the holder refreshes its record while it waits on a program, and
   symlink $^X, "$exe" or die "symlink: $!" unless $^O eq 'MSWin32';
   my @os = $^O eq 'MSWin32' ? () : ( win32 => win32_os() );
   my $wait = [ "$exe", '-e', 'select undef, undef, undef, 0.4' ];
+  # Programs waited on until $file's mtime moved past $from; where mtimes are whole seconds
+  # (Android, GNU/Hurd), that takes the next second.
+  my $wait_moved = sub {
+    my ( $file, $from ) = @_;
+    my $deadline = Time::HiRes::time() + 3;
+    for ( ;; ) {
+      my $r = run_command( @os, cmd => $wait );
+      die "the program did not run: ".( $r->{spawn_error} // {} )->{message}."\n" unless defined $r->{code} && $r->{code} == 0;
+      last if mtime($file) - $from > 0.1 || Time::HiRes::time() > $deadline;
+    }
+  };
   my %m;
   state($root)->with_lock(
     sub {
@@ -134,8 +148,7 @@ subtest 'win32: the holder refreshes its record while it waits on a program, and
           my $inner = "$other/sync.lock/owner.json";
           $m{inner_start} = mtime($inner);
           $m{outer_before} = mtime($owner);
-          my $r = run_command( @os, cmd => $wait );
-          die "the program did not run: ".( $r->{spawn_error} // {} )->{message}."\n" unless defined $r->{code} && $r->{code} == 0;
+          $wait_moved->( $inner, $m{inner_start} );
           $m{inner_end} = mtime($inner);
           $m{outer_after} = mtime($owner);
         },
@@ -143,7 +156,7 @@ subtest 'win32: the holder refreshes its record while it waits on a program, and
         win32      => 1,
       );
       $m{nested_done} = mtime($owner);
-      my $r = run_command( @os, cmd => $wait );
+      $wait_moved->( $owner, $m{nested_done} );
       $m{waited} = mtime($owner);
     },
     refresh_ms => 50,
