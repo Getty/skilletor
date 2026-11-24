@@ -9,7 +9,8 @@ use SkilletorTest qw( write_json );
 
 use Path::Tiny qw( tempdir );
 use Time::HiRes ();
-use Skilletor::JSON qw( js_ordered );
+use Skilletor::FSUtil qw( read_text );
+use Skilletor::JSON qw( js_ordered js_parse );
 use Skilletor::State;
 
 # A big state file reads in linear time (k196). A real sources-read.json of 307 KB stalled
@@ -41,9 +42,7 @@ my $file = write_json( $root->child('sources-read.json'), $all );
 cmp_ok( -s $file, '>', 290_000, 'the file is as big as the one that stalled' );
 
 my $state = Skilletor::State->new( root => "$root" );
-my $start = Time::HiRes::time();
 my $read  = $state->sources_read('/tmp/work/project-0180/.claude/skilletor.lock.json');
-my $took  = Time::HiRes::time() - $start;
 is_deeply(
   { %{ $read->{'source-06'} } },
   { kind => 'git', address => 'https://github.com/example-org/skills-repository-180-06', version => 'git:'.sprintf( '%040x', 180_006 ), ref => 'main', path => [ 'skills', 'sub-06' ] },
@@ -52,9 +51,23 @@ is_deeply(
 is( scalar keys %$read, 6, 'all six sources of that scope' );
 is( $state->sources_read('/home/jürgen/.claude/skilletor.lock.json')->{mine}{address}, '/home/jürgen/dev/skills', 'the non-ASCII scope reads back' );
 
-# Unpatched this took 10 s and more; linear it takes a fraction of a second. The bound leaves
-# a slow or busy machine room to spare and still fails the quadratic parse.
-cmp_ok( $took, '<', 3, 'reading it takes well under the quadratic time' ) or diag sprintf 'took %.2f s', $took;
-note sprintf 'sources_read on %d bytes: %.3f s', -s $file, $took;
+# Linear, the flagged text parses in about the time of the same characters as bytes, which have
+# no offsets to look up; unpatched it took 40 times as long. A ratio on this machine holds on a
+# slow one too (a 3 s bound did not on an armv6l). The offsets cache is on, as on a perl built
+# without DEBUGGING: a DEBUGGING perl checks every cached offset by a scan from the start
+# (${^UTF8CACHE} -1), which makes any parse by offset quadratic.
+sub parse_time {
+  my $start = Time::HiRes::time();
+  js_parse( $_[0] );
+  return Time::HiRes::time() - $start;
+}
+my $text = read_text("$file");
+ok( utf8::is_utf8($text), 'the text as State reads it: UTF-8 flagged' );
+my $bytes = $text;
+utf8::downgrade($bytes);
+my ( $flagged, $plain ) = do { local ${^UTF8CACHE} = 1; ( parse_time($text), parse_time($bytes) ) };
+cmp_ok( $flagged, '<', 10 * $plain, 'the flagged text parses in about the time of its bytes, not the quadratic time' )
+  or diag sprintf 'flagged %.2f s, bytes %.2f s', $flagged, $plain;
+note sprintf 'js_parse of %d bytes: %.3f s flagged, %.3f s as bytes', -s $file, $flagged, $plain;
 
 done_testing;
