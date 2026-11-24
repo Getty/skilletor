@@ -80,9 +80,13 @@ for my $name ( sort keys %PATH ) {
       cwd => "$dir",
       env => { ONLY => 'this' },
     );
-    my ( $cwd, $rest ) = split /\n/, $r->{stdout}, 2;
+    my ( $cwd, $keys, $only ) = split /\n/, $r->{stdout}, 3;
+    # What the system itself hands every program, given or not: Cygwin's SYSTEMROOT and WINDIR,
+    # which Windows needs; the GNU/Hurd's LD_ORIGIN_PATH, for its dynamic loader.
+    my $system = { cygwin => qr/\A(?:SYSTEMROOT|WINDIR)\z/, gnu => qr/\ALD_ORIGIN_PATH\z/ }->{$^O};
+    $keys = join ',', grep { !/$system/ } split /,/, $keys if $system;
     is( path($cwd)->realpath->stringify, $dir->realpath->stringify, 'its cwd' );
-    is( $rest, "ONLY\nthis", 'nothing but the given environment' );
+    is( "$keys\n$only", "ONLY\nthis", 'nothing but the given environment' );
     is( Cwd::getcwd(), $before, 'our cwd unchanged' );
     is_deeply( \%ENV, \%env_before, 'our environment unchanged' );
   };
