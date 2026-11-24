@@ -47,15 +47,13 @@
    }
   },
   {
-   "text": "tools: Read, Bash\nbriefing:\n  skills:\n    - skilletor-core\n    - 'kanban: karr'\ncodex:\n  model: gpt-5\n  nickname_candidates: [Ada, \"B, C\"]\n  features:\n    web: true\nlist_same_indent:\n- a\n- b\nflow_map: {a: 1, b: two}",
+   "text": "tools: Read, Bash\nskills:\n  - skilletor-core\n  - 'kanban: karr'\ncodex:\n  model: gpt-5\n  nickname_candidates: [Ada, \"B, C\"]\n  features:\n    web: true\nlist_same_indent:\n- a\n- b\nflow_map: {a: 1, b: two}",
    "result": {
     "tools": "Read, Bash",
-    "briefing": {
-     "skills": [
-      "skilletor-core",
-      "kanban: karr"
-     ]
-    },
+    "skills": [
+     "skilletor-core",
+     "kanban: karr"
+    ],
     "codex": {
      "model": "gpt-5",
      "nickname_candidates": [
@@ -726,7 +724,7 @@
    "class": "FrontmatterError"
   },
   {
-   "text": "sequences and nested mappings (the briefing and codex shapes)",
+   "text": "sequences and nested mappings (the skills and codex shapes)",
    "error": "line 1: expected `key: value`",
    "class": "FrontmatterError"
   },
@@ -737,23 +735,18 @@
    }
   },
   {
-   "text": "briefing:",
+   "text": "skills:",
    "result": {
-    "briefing": null
+    "skills": null
    }
   },
   {
-   "text": "  skills:",
+   "text": "  - skilletor-core",
    "error": "line 1: unexpected indentation",
    "class": "FrontmatterError"
   },
   {
-   "text": "    - skilletor-core",
-   "error": "line 1: unexpected indentation",
-   "class": "FrontmatterError"
-  },
-  {
-   "text": "    - 'kanban: karr'",
+   "text": "  - 'kanban: karr'",
    "error": "line 1: unexpected indentation",
    "class": "FrontmatterError"
   },
@@ -861,6 +854,80 @@
   },
   {
    "text": "two",
+   "error": "line 1: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "block mappings keep __proto__ as own data without changing their prototype",
+   "error": "line 1: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "__proto__:\n  description: nested\ndescription: top",
+   "result": {
+    "__proto__": {
+     "description": "nested"
+    },
+    "description": "top"
+   }
+  },
+  {
+   "text": "__proto__",
+   "error": "line 1: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "nested",
+   "error": "line 1: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "description",
+   "error": "line 1: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "top",
+   "error": "line 1: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "flow mappings keep prototype-named scalar keys as own data",
+   "error": "line 1: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "flow: {__proto__: kept, constructor: ctor, toString: text}",
+   "result": {
+    "flow": {
+     "__proto__": "kept",
+     "constructor": "ctor",
+     "toString": "text"
+    }
+   }
+  },
+  {
+   "text": "kept",
+   "error": "line 1: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "constructor",
+   "error": "line 1: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "ctor",
+   "error": "line 1: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "toString",
+   "error": "line 1: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "text",
    "error": "line 1: expected `key: value`",
    "class": "FrontmatterError"
   },
@@ -1054,15 +1121,13 @@
    "body": "BODY\n"
   },
   {
-   "text": "---\ntools: Read, Bash\nbriefing:\n  skills:\n    - skilletor-core\n    - 'kanban: karr'\ncodex:\n  model: gpt-5\n  nickname_candidates: [Ada, \"B, C\"]\n  features:\n    web: true\nlist_same_indent:\n- a\n- b\nflow_map: {a: 1, b: two}\n---\nBODY\n",
+   "text": "---\ntools: Read, Bash\nskills:\n  - skilletor-core\n  - 'kanban: karr'\ncodex:\n  model: gpt-5\n  nickname_candidates: [Ada, \"B, C\"]\n  features:\n    web: true\nlist_same_indent:\n- a\n- b\nflow_map: {a: 1, b: two}\n---\nBODY\n",
    "data": {
     "tools": "Read, Bash",
-    "briefing": {
-     "skills": [
-      "skilletor-core",
-      "kanban: karr"
-     ]
-    },
+    "skills": [
+     "skilletor-core",
+     "kanban: karr"
+    ],
     "codex": {
      "model": "gpt-5",
      "nickname_candidates": [
@@ -1780,7 +1845,7 @@
    "class": "FrontmatterError"
   },
   {
-   "text": "---\nsequences and nested mappings (the briefing and codex shapes)\n---\nBODY\n",
+   "text": "---\nsequences and nested mappings (the skills and codex shapes)\n---\nBODY\n",
    "error": "frontmatter line 2: expected `key: value`",
    "class": "FrontmatterError"
   },
@@ -1792,24 +1857,19 @@
    "body": "BODY\n"
   },
   {
-   "text": "---\nbriefing:\n---\nBODY\n",
+   "text": "---\nskills:\n---\nBODY\n",
    "data": {
-    "briefing": null
+    "skills": null
    },
    "body": "BODY\n"
   },
   {
-   "text": "---\n  skills:\n---\nBODY\n",
+   "text": "---\n  - skilletor-core\n---\nBODY\n",
    "error": "frontmatter line 2: unexpected indentation",
    "class": "FrontmatterError"
   },
   {
-   "text": "---\n    - skilletor-core\n---\nBODY\n",
-   "error": "frontmatter line 2: unexpected indentation",
-   "class": "FrontmatterError"
-  },
-  {
-   "text": "---\n    - 'kanban: karr'\n---\nBODY\n",
+   "text": "---\n  - 'kanban: karr'\n---\nBODY\n",
    "error": "frontmatter line 2: unexpected indentation",
    "class": "FrontmatterError"
   },
@@ -1921,6 +1981,82 @@
   },
   {
    "text": "---\ntwo\n---\nBODY\n",
+   "error": "frontmatter line 2: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "---\nblock mappings keep __proto__ as own data without changing their prototype\n---\nBODY\n",
+   "error": "frontmatter line 2: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "---\n__proto__:\n  description: nested\ndescription: top\n---\nBODY\n",
+   "data": {
+    "__proto__": {
+     "description": "nested"
+    },
+    "description": "top"
+   },
+   "body": "BODY\n"
+  },
+  {
+   "text": "---\n__proto__\n---\nBODY\n",
+   "error": "frontmatter line 2: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "---\nnested\n---\nBODY\n",
+   "error": "frontmatter line 2: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "---\ndescription\n---\nBODY\n",
+   "error": "frontmatter line 2: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "---\ntop\n---\nBODY\n",
+   "error": "frontmatter line 2: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "---\nflow mappings keep prototype-named scalar keys as own data\n---\nBODY\n",
+   "error": "frontmatter line 2: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "---\nflow: {__proto__: kept, constructor: ctor, toString: text}\n---\nBODY\n",
+   "data": {
+    "flow": {
+     "__proto__": "kept",
+     "constructor": "ctor",
+     "toString": "text"
+    }
+   },
+   "body": "BODY\n"
+  },
+  {
+   "text": "---\nkept\n---\nBODY\n",
+   "error": "frontmatter line 2: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "---\nconstructor\n---\nBODY\n",
+   "error": "frontmatter line 2: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "---\nctor\n---\nBODY\n",
+   "error": "frontmatter line 2: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "---\ntoString\n---\nBODY\n",
+   "error": "frontmatter line 2: expected `key: value`",
+   "class": "FrontmatterError"
+  },
+  {
+   "text": "---\ntext\n---\nBODY\n",
    "error": "frontmatter line 2: expected `key: value`",
    "class": "FrontmatterError"
   },

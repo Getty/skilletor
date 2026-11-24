@@ -13,8 +13,8 @@ const NASTY_BODIES = [
   "plain\n", "no final newline", "\n\nafter blank lines\n", "trailing spaces   \n\n\n", "ends with a quote'",
   "ends with two quotes''\n", "has ''' inside\n", 'has """ inside\n', "C:\\path\\to\\file\n", "a\\\n  b\n",
   "crlf\r\nlines\r\n", "bare \r cr\n", "tab\tindented\n\tline\n", "nul \u0000 and esc \u001b and del \u007f\n",
-  "unicode — ümlaut 日本語 🎉 \u2028 \u2029 \u0085\n", "# briefing: skills = [\"evil\"]\nB\n",
-  "it's '''quoted''' \\ \"x\"\n# briefing: skills = [\"evil\"]\n", "---\nlooks like frontmatter\n---\n",
+  "unicode — ümlaut 日本語 🎉 \u2028 \u2029 \u0085\n", "# skills = [\"evil\"]\nB\n",
+  "it's '''quoted''' \\ \"x\"\n# skills = [\"evil\"]\n", "---\nlooks like frontmatter\n---\n",
   "[table]\nkey = \"value\"\n", "\u00a0nbsp-led\n", "x\u0085", "\ufeffbom-led\n", "'", "'''", '"""', "\\",
 ];
 
@@ -28,18 +28,18 @@ const agents = [
   ["no frontmatter\n", "a"],
   [["description: &a x"], "B\n", "a"],
   [[D], "\n   \n\t\n", "a"],
-  [[D, "codex:", "  model: m", "  sandbox_workspace_write:", "    network_access: true", "briefing:", "  skills:", "    - a",
-    '    - "plug:b c"'], "B\n"],
-  [[D, "briefing:", "  skills: [good]"], '# briefing: skills = ["evil"]\nB\n'],
-  [[D, "briefing:", "  skills: [good]"], "it's '''quoted''' \\ \"x\"\n# briefing: skills = [\"evil\"]\n"],
-  [[D], '# briefing: skills = ["evil"]\n'],
-  [[D, "briefing:", "  skills: []"]],
-  [[D, "briefing:", "  other: x"]],
-  ...['""', '"a\\"b"', "'a\\b'", "a]b", '"a\\nb"', '"a\\rb"', '"a\\u0001b"', "3", "true", "null"]
-    .map((item) => [[D, "briefing:", "  skills:", "    - ok", `    - ${item}`]]),
-  [[D, "briefing:", "  skills: a"]],
-  [[D, "codex:", "  briefing:", "    skills: [a]"]],
-  [[D, "codex:", "  briefing: x"]],
+  [[D, "codex:", "  model: m", "  sandbox_workspace_write:", "    network_access: true", "skills:", "  - a",
+    '  - "plug:b c"'], "B\n"],
+  [[D, "skills: [good]"], '# skills = ["evil"]\nB\n'],
+  [[D, "skills: [good]"], "it's '''quoted''' \\ \"x\"\n# skills = [\"evil\"]\n"],
+  [[D], '# skills = ["evil"]\n'],
+  [[D, "skills: []"]],
+  [[D, "legacy:", "  skills: [a]"]],
+  ...['""', "3", "true", "null", "'a]b'"].map((item) => [[D, "skills:", "  - ok", `  - ${item}`]]),
+  [[D, "skills: a"]],
+  [[D, "codex:", "  skills: [a]"]],
+  [[D, "codex:", "  legacy:", "    skills: [a]"]],
+  [[D, "codex:", "  legacy: x"]],
   [["name: claude-name", D, "codex:", "  name: codex_name", "  model: gpt-5", "  model_reasoning_effort: high",
     "  sandbox_mode: read-only", "  temperature: 0.5", "  retries: 3", "  web: true", "  nickname_candidates: [Ada, Grace]",
     "  mcp_servers:", "    enabled: true", "    names: [a]"], "B"],
@@ -112,19 +112,16 @@ const agents = [
   // Object-prototype names are ordinary own keys, including tables.
   [[D, "codex:", "  constructor:", "    x: 1", "  toString:", "    s: text", "  valueOf:", "    y: 2",
     "  __proto__:", "    z: 3", "  hasOwnProperty: h"]],
-  // briefing skill names
-  [[D, "briefing:", "  skills:", "    - 日本語", "    - with space", "    - 'has #hash'", "    - \"it's\"", "    - a:b@c",
-    "    - \"\\u0085\"", "    - \"\\u2028\"", "    - x[y", "    - 🎉"]],
-  ...["1.5", "1e999", '""', '"\\t"', '"\\x7f"', '"a]"', '"a\\\\b"', "-1", "false", "~", '"\\x1f"']
-    .map((item) => [[D, "briefing:", "  skills:", `    - ${item}`]]),
-  ...["  skills: ~", "  skills:", "  skills: {a: b}", "  skills: 3", "  skills: ''"].map((s) => [[D, "briefing:", s]]),
-  ...["briefing: x", "briefing: null", "briefing: [a]", "briefing: {skills: [a, b]}", "briefing: {}"].map((b) => [[D, b]]),
+  // skills frontmatter shapes
+  [[D, "skills:", "  - 日本語", "  - with space", "  - 'has #hash'", "  - \"it's\"", "  - a:b@c", "  - \"\\u0085\"", "  - 🎉"]],
+  ...["skills: ~", "skills:", "skills: {a: b}", "skills: 3", "skills: ''", "legacy: x", "legacy: null", "legacy: {skills: [a, b]}"]
+    .map((c) => [[D, c]]),
   // which error comes first
-  [[D, "briefing:", "  skills: a", "codex:", "  briefing: x"]],
-  [["name: a", "codex:", "  briefing: x"]],
+  [[D, "skills: a", "codex:", "  legacy: x"]],
+  [["name: a", "codex:", "  legacy: x"]],
   [["name: a", "codex:", "  nothing: ~"]],
   [[D, "codex:", "  nothing: ~", "  inf: 1e999"]],
-  [[D, "briefing:", "  skills: [a]", "codex:", "  name: ''"]],
+  [[D, "skills: [a]", "codex:", "  name: ''"]],
   // frontmatter the reader refuses
   ["---\ndescription: d\nB\n", "x"],
   ["---\ndescription: d\n\tname: x\n---\nB\n", "x"],
@@ -191,7 +188,7 @@ const targets = [
   ["codex", "agent", "x", [["agents/x.md", hex(md([D], "日本語 🎉\n"))], ["agents/other.txt", hex("extra")]]],
   ["codex", "agent", "Ünï", [["agents/Ünï.md", hex(md([D], "B\n"))]]],
   // Escaped UTF-16 pairs join before output; lone, reversed and separated halves stay replacement characters.
-  ["codex", "agent", "x", [["agents/x.md", hex(md(['description: "\\uD83D\\uDE00 pair \\uD83D lone \\uDE00 reversed \\uDE00\\uD83D mixed \\uD83D\\uD83D\\uDE00 separated \\uD83D x \\uDE00 upper \\U0000D83D\\U0000DE00 lower-upper \\uD83D\\U0000DE00 upper-lower \\U0000D83D\\uDE00"', "briefing:", '  skills: ["\\uDFFF"]']))]]],
+  ["codex", "agent", "x", [["agents/x.md", hex(md(['description: "\\uD83D\\uDE00 pair \\uD83D lone \\uDE00 reversed \\uDE00\\uD83D mixed \\uD83D\\uD83D\\uDE00 separated \\uD83D x \\uDE00 upper \\U0000D83D\\U0000DE00 lower-upper \\uD83D\\U0000DE00 upper-lower \\U0000D83D\\uDE00"', 'skills: ["\\uDFFF"]']))]]],
   ["codex", "rule", "r", [["rules/r.md", hex("---\npaths: [a]\n---\nR\n")]]],
   ["codex", "rule", "r", [["rules/r.md", hex("\n")]]],
   ["codex", "rule", "r", [["rules/q.md", hex("R\n")]]],

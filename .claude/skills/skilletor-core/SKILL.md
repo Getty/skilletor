@@ -22,7 +22,7 @@ config.ts     load/merge/validate + edit operations   spec.ts      shorthand →
 probe.ts      real probe for `add` (ls-remote, HEAD)  sources/*    resolve(), check() per backend
 catalog.ts    scan a source dir → items (plugin.json) bundles.ts   bundle files, `*` name patterns
 render.ts     build one item in memory (Nunjucks)     apply.ts     diff → atomic write → clean
-gitignore.ts  .gitignore/.worktreeinclude blocks §6.4 briefing.ts  installed agent's briefing skills present? (§6.7)
+gitignore.ts  .gitignore/.worktreeinclude blocks §6.4 agent-skills.ts  installed agent's skills present? (§6.7)
 lock.ts       lock read/write                         state.ts     trust, last-check, pending-report, mutex
 engine.ts     sync / check / status pipeline          hooks.ts     SessionStart, UserPromptSubmit, CwdChanged, PostToolUse; black box
 report.ts     text / json / hook output               targets.ts   harness detection, LAYOUTS, lock keys
@@ -45,7 +45,7 @@ claudesettings.ts  plan the project settings.json plugin requirement (§6.8); en
   location must not decide whether user-scope `.gitignore` blocks appear.
 - Before touching `catalog.ts`, a source's `path` or backend-less source entries in
   `config.ts`, read [references/sources.md](references/sources.md).
-- `briefing.ts` reads installed agent files (never renders) — a warning source, not a
+- `agent-skills.ts` reads installed agent files (never renders) — a warning source, not a
   pipeline stage; it must not block a sync.
 - `apply` knows nothing about harnesses: it gets a lock key → root function.
   Per-harness knowledge lives in `LAYOUTS` (`targets.ts`); output conversion

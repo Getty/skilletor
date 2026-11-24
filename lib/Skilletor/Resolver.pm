@@ -658,7 +658,7 @@ The project; none, or the home dir itself, means no project scope.
 C<CLAUDE_CONFIG_DIR> by default; an empty value counts as unset, then F<< <home>/.claude >>.
 Claude Code's config dir is the user scope's C<.claude>: the user config, the lock, the
 Claude roots, the state dir, Claude's own marker (C<.claude.json>) and plugin state, and
-the briefing lookup's skills all lie under it.
+the skills lookup of the agent check all lie under it.
 
 =attr state_root
 

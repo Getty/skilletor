@@ -108,12 +108,12 @@ new members wait. Broken = not in the catalog, unparseable, unknown key, no `des
 both `.yaml` and `.yml`, a refused `@<spec>` (never a missing source to add), a cycle.
 `available` shows the error under the bundle, `sync` warns with it, `install` refuses it.
 
-## An agent and its `briefing.skills`
+## An agent and its `skills:`
 
-An agent's `briefing.skills` must be installed where its harness looks: a user agent never
-sees project skills; a skill installed for claude only is missing for codex. Sync warns
-`agent X (codex): briefing skills not installed: …`, `status` shows `briefingMissing`;
-`plugin:skill` names are not checked. Put an agent and its skills in one bundle.
+An agent's top-level `skills:` list must be installed where Claude Code looks: a user agent
+never sees project skills. Sync warns
+`agent X (claude): skills not installed: …`, `status` shows `skillsMissing`;
+`plugin:skill` names are not checked, and Codex agents carry no list. Put an agent and its skills in one bundle.
 
 ## Seeing it
 

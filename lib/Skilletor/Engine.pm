@@ -12,7 +12,7 @@ use Skilletor::AgentsMD qw(
 );
 use Skilletor::Apply qw( apply );
 use Skilletor::Backend;
-use Skilletor::Briefing qw( briefing_warning missing_skills skill_roots );
+use Skilletor::AgentSkills qw( skills_warning missing_skills skill_roots );
 use Skilletor::Bundles qw( matches_pattern );
 use Skilletor::ClaudeSettings qw( plan_claude_settings );
 use Skilletor::Config;
@@ -677,10 +677,10 @@ sub _sync_scope_run {
     push @$warnings, $shown->($l).' is a symbolic link: files of '.$l->{key}.' behind it left in place (never deleted through a link)';
   }
 
-  # Briefing check (spec §6.7): every agent the lock holds now, from its installed file.
-  my @briefing = $self->_briefing_of( $scope, $final_lock );
-  push @$warnings, briefing_warning( parse_lock_key( $_->{key} )->{name}, $_->{harness}, $_->{missing} ) for @briefing;
-  $out->{briefingMissing} = \@briefing if @briefing;
+  # Skills check (spec §6.7): every agent the lock holds now, from its installed file.
+  my @skills = $self->_skills_of( $scope, $final_lock );
+  push @$warnings, skills_warning( parse_lock_key( $_->{key} )->{name}, $_->{harness}, $_->{missing} ) for @skills;
+  $out->{skillsMissing} = \@skills if @skills;
 
   # The records `check` compares with (spec §14.3). A source counts as reached when it was
   # resolved and scanned: what a sync left in place although it read every source it needed – an
@@ -932,21 +932,21 @@ sub _tracked_warnings {
   return @out;
 }
 
-# Installed agents of a scope's lock whose declared briefing skills do not resolve (spec §6.7).
-sub _briefing_of {
+# Installed Claude agents of a scope's lock whose declared skills do not resolve (spec §6.7).
+sub _skills_of {
   my ( $self, $scope, $lock, $only ) = @_;
   my $rc = $self->_root_context($scope);
-  my $roots = { home => $self->home, claude_dir => $self->claude_dir, codex_home => $self->_codex_home_of, project_dir => $scope eq 'project' ? $self->project_dir_of : undef };
-  my ( %roots_of, @out );
+  my $roots = { home => $self->home, claude_dir => $self->claude_dir, project_dir => $scope eq 'project' ? $self->project_dir_of : undef };
+  my ( $skill_dirs, @out );
   for my $key ( keys %$lock ) {
     my $entry = $lock->{$key};
     my $k = parse_lock_key($key);
-    next if !defined $k->{harness} || $k->{type} ne 'agent' || $entry->{skipped} || $entry->{block} || ( $only && !$only->{$key} );
+    next if ( $k->{harness} // '' ) ne 'claude' || $k->{type} ne 'agent' || $entry->{skipped} || $entry->{block} || ( $only && !$only->{$key} );
     my $root = root_of_key( $rc, $key );
     my ($file) = keys %{ $entry->{files} // {} };
     next unless defined $root && defined $file;
-    $roots_of{ $k->{harness} } //= skill_roots( $k->{harness}, $scope, $roots );
-    my $missing = missing_skills( $k->{harness}, path_join( $root, $file ), $roots_of{ $k->{harness} } );
+    $skill_dirs //= skill_roots( $scope, $roots );
+    my $missing = missing_skills( path_join( $root, $file ), $skill_dirs );
     push @out, js_ordered( key => $key, harness => $k->{harness}, missing => $missing ) if $missing && @$missing;
   }
   return @out;
@@ -1223,8 +1223,8 @@ sub status {
       $via{ refaddr $_ }{ $k->{target} } = 1 for @covering;
     }
     my %installed = map { ( $_->{key} => 1 ) } grep { $_->{installed} } @declared;
-    my %missing = map { ( $_->{key} => $_->{missing} ) } $self->_briefing_of( $scope, $lock, \%installed );
-    $_->{briefingMissing} = $missing{ $_->{key} } for grep { $missing{ $_->{key} } } @declared;
+    my %missing = map { ( $_->{key} => $_->{missing} ) } $self->_skills_of( $scope, $lock, \%installed );
+    $_->{skillsMissing} = $missing{ $_->{key} } for grep { $missing{ $_->{key} } } @declared;
     my $installed_via = sub { 0 + keys %{ $via{ refaddr $_[0] } // {} } };
     push @{ $out->{scopes} }, js_ordered(
       scope     => $scope,
@@ -1281,8 +1281,8 @@ and C<status> for Claude Code, Codex and Hermes. It extends L<Skilletor::Resolve
 the very resolve that class reports, then builds every declared item in memory,
 applies it (L<Skilletor::Apply>), writes the managed blocks
 (L<Skilletor::Gitignore>) and the project's plugin requirement
-(L<Skilletor::ClaudeSettings>), runs the briefing check
-(L<Skilletor::Briefing>) and keeps the records C<check> compares with
+(L<Skilletor::ClaudeSettings>), runs the skills check
+(L<Skilletor::AgentSkills>) and keeps the records C<check> compares with
 (L<Skilletor::State>). Most callers want L<Skilletor/sync>.
 
 What it writes is the reference's, byte for byte – installed files with their
@@ -1420,7 +1420,7 @@ reference's does.
       gitignoreUpdated? => [ '.claude/.gitignore', '.worktreeinclude' ],
       settingsSkipped?  => [...],
       settingsUpdated?  => { path, enabled => [...], declared => [...] },
-      briefingMissing?  => [ { key, harness, missing => [...] } ],
+      skillsMissing?  => [ { key, harness, missing => [...] } ],
     } ],
     warnings? => [...],     # the run's: Codex has not trusted the SessionStart hook
     notes?    => [...],     # what an active harness got no copy of (spec §16.3)
@@ -1471,7 +1471,7 @@ alone. Untrusted sources are named either way.
 
   my $status = $engine->status( scope => 'all' );
   # { scopes => [ { scope, targets, declared => [ { key, source, installed, via?, skipped?,
-  #   partial?, briefingMissing? } ], orphans, wildcards, bundles, trustRequests,
+  #   partial?, skillsMissing? } ], orphans, wildcards, bundles, trustRequests,
   #   sourceVersions } ], projectIsHome?, warnings?, error? }
 
 Offline and read-only: the lock and the config.

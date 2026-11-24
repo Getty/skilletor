@@ -6,7 +6,7 @@ use warnings;
 use utf8;
 
 use Exporter qw( import );
-use Skilletor::Briefing qw( briefing_warning );
+use Skilletor::AgentSkills qw( skills_warning );
 use Skilletor::JSON qw( js_ordered js_stringify );
 use Skilletor::Lock qw( parse_lock_key );
 
@@ -128,7 +128,7 @@ sub report_text {
   return join "\n", map { display_safe($_) } @lines;
 }
 
-# The report without its briefing warnings – and without the settings warnings of a scope whose
+# The report without its skills warnings – and without the settings warnings of a scope whose
 # settings file this run left as it was: the hooks show them only in a run that changed something.
 sub _without_repeats {
   my ( $r ) = @_;
@@ -137,12 +137,12 @@ sub _without_repeats {
     map {
       my $s = $_;
       my @settings = $s->{settingsUpdated} ? () : @{ $s->{settingsSkipped} // [] };
-      my @briefing = @{ $s->{briefingMissing} // [] };
-      if ( !@briefing && !@settings ) { $s }
+      my @skills = @{ $s->{skillsMissing} // [] };
+      if ( !@skills && !@settings ) { $s }
       else {
-        my %lines = map { ( $_ => 1 ) } ( map { briefing_warning( parse_lock_key( $_->{key} )->{name}, $_->{harness}, $_->{missing} ) } @briefing ),
+        my %lines = map { ( $_ => 1 ) } ( map { skills_warning( parse_lock_key( $_->{key} )->{name}, $_->{harness}, $_->{missing} ) } @skills ),
           @settings;
-        my $rest = js_ordered( map { ( $_ => $s->{$_} ) } grep { $_ ne 'briefingMissing' } keys %$s );
+        my $rest = js_ordered( map { ( $_ => $s->{$_} ) } grep { $_ ne 'skillsMissing' } keys %$s );
         $rest->{warnings} = [ grep { !$lines{$_} } @{ $s->{warnings} } ];
         $rest;
       }
@@ -209,7 +209,7 @@ sub status_text {
     for my $d ( @{ $s->{declared} } ) {
       my $mark = $d->{installed} ? '✓' : $d->{skipped} ? '-' : '·';
       my $note = ( $d->{skipped} ? ' (skipped: renders empty)' : '' ).( $d->{partial} ? ' (partial: the last sync stopped midway)' : '' )
-        .( $d->{briefingMissing} ? ' (briefing skills not installed: '.join( ', ', @{ $d->{briefingMissing} } ).')' : '' );
+        .( $d->{skillsMissing} ? ' (skills not installed: '.join( ', ', @{ $d->{skillsMissing} } ).')' : '' );
       push @lines, '  '.$mark.' '.$d->{key}.' @'.$d->{source}.( defined $d->{via} ? ' via '.$d->{via} : '' ).$note;
     }
     for my $w ( @{ $s->{wildcards} } ) {
@@ -286,7 +286,7 @@ item (its activation hint; an item of another harness than Claude Code names
 it) and per counted warning, each line through L</display_safe>. A report with
 an C<error> gives that line alone; one with nothing to say an empty hash. A run
 that added, updated or removed nothing leaves out what it would say in every
-session: an agent's missing briefing skills, and the settings warnings of a
+session: an agent's missing skills, and the settings warnings of a
 scope whose C<.claude/settings.json> it did not update. The report itself is
 not changed.
 

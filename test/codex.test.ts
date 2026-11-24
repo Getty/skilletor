@@ -726,31 +726,20 @@ test("an agent with a blank body is skipped for Codex only (Codex rejects blank 
   }
 });
 
-test("briefing.skills reaches the Codex agent as a comment line; no run note", async () => {
+test("an agent's skills: stays out of the Codex role file; no run note, no warning", async () => {
   const e = env(["claude", "codex"]);
   try {
-    const briefed = (n: string) => `---\nname: ${n}\ndescription: d\nbriefing:\n  skills:\n    - a\n---\nB\n`;
-    const src = source(e.tmp.dir, "s", { "agents/b1.md": briefed("b1"), "agents/b2.md": briefed("b2") });
+    const skilled = (n: string) => `---\nname: ${n}\ndescription: d\nskills:\n  - a\n---\nB\n`;
+    const src = source(e.tmp.dir, "s", { "agents/b1.md": skilled("b1"), "agents/b2.md": skilled("b2") });
     e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["b1@mine", "b2@mine"] } });
     const r = await sync(e.ctx, { scope: "user" });
     const text = readFileSync(join(e.home, ".codex/agents/.local.b1.toml"), "utf8");
-    assert.match(text, /^# briefing: skills = \["a"\]\ndeveloper_instructions = /m);
-    assert.equal("briefing" in (parseToml(text) as Record<string, unknown>), false);
+    assert.doesNotMatch(text, /skills|legacy/);
+    assert.deepEqual(Object.keys(parseToml(text) as Record<string, unknown>), ["name", "description", "developer_instructions"]);
     assert.doesNotMatch(reportHook(r).additionalContext ?? "", /not written/);
-  } finally {
-    e.cleanup();
-  }
-});
-
-test("a bad briefing skill name fails the Codex copy only; the Claude copy is written", async () => {
-  const e = env(["claude", "codex"]);
-  try {
-    const src = source(e.tmp.dir, "s", { "agents/b.md": "---\ndescription: d\nbriefing:\n  skills: [\"a]b\"]\n---\nB\n" });
-    e.writeCfg("user", { sources: { mine: { local: src } }, install: { agents: ["b@mine"] } });
-    const r = await sync(e.ctx, { scope: "user" });
-    assert.match(r.scopes[0]!.warnings.join("\n"), /agent b \(codex\): briefing\.skills/);
-    assert.equal(existsSync(join(e.home, ".claude/agents/.local.b.md")), true);
-    assert.equal(existsSync(join(e.home, ".codex/agents/.local.b.toml")), false);
+    // Only the Claude copy is checked: `a` is installed nowhere, so one warning, for claude.
+    assert.deepEqual(r.scopes[0]!.warnings.map((w) => w.split(" — ")[0]).sort(),
+      ["agent b1 (claude): skills not installed: a", "agent b2 (claude): skills not installed: a"]);
   } finally {
     e.cleanup();
   }

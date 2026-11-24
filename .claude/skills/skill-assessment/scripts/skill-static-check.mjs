@@ -45,7 +45,7 @@ function splitFrontmatter(text) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text);
   return m ? { fm: m[1], body: m[2], hasFm: true } : { fm: "", body: text, hasFm: false };
 }
-// Minimal YAML: top-level "key: value", nested "briefing:\n  skills:\n    - x", flow lists.
+// Minimal YAML: top-level "key: value", block lists "skills:\n  - x", flow lists.
 function fmValue(fm, key) {
   const m = new RegExp(`^${key}:[ \\t]*(.*)$`, "m").exec(fm);
   if (!m) return undefined;
@@ -67,11 +67,8 @@ function listValue(fm, key) {
   const inline = fmValue(fm, key);
   return inline ? inline.split(",").map((s) => s.trim()).filter(Boolean) : [];
 }
-function briefingSkills(fm) {
-  const m = /^briefing:[ \t]*\n((?:[ \t]+[^\n]*\n?)+)/m.exec(fm);
-  if (!m) return null;
-  const block = m[1].replace(/^[ \t]{2}/gm, "");
-  return listValue(block, "skills");
+function agentSkills(fm) {
+  return /^skills:/m.test(fm) ? listValue(fm, "skills") : null;
 }
 // Project root of a file: the parent of the nearest `.claude` ancestor, else cwd.
 function projectRootOf(file) {
@@ -166,14 +163,13 @@ function checkFile(file) {
     const stem = basename(file, ".md");
     if (name !== stem) report(file, "ERROR", `name '${name}' differs from filename stem '${stem}'`);
     if (/^allowed-tools:/m.test(fm)) report(file, "ERROR", "'allowed-tools' is not an agent field — Claude Code ignores it silently; use 'tools:' (the agent currently inherits every tool)");
-    if (/^skills:/m.test(fm) && !briefingSkills(fm)) report(file, "WARN", "top-level 'skills:' — native preload; the briefing plugin only reads 'briefing.skills' and does not hard-fail on this key");
     const tools = listValue(fm, "tools");
     if (AUDIT_ROLE.test(description) && !/\b(fix|implement|write|edit)\b/i.test(description) && (tools.length === 0 || tools.some((t) => /^(Edit|Write|MultiEdit|NotebookEdit)$/.test(t))))
       report(file, "WARN", "audit/report role but Edit/Write available (E4) — an auditor that can edit starts fixing");
-    const skills = briefingSkills(fm);
-    if (skills === null) report(file, "WARN", "no briefing.skills block — the agent runs unbriefed");
-    else for (const s of skills) if (!resolveSkill(s, projectRootOf(file))) report(file, "ERROR", `briefing skill does not resolve: ${s} (the spawn will be denied)`);
-    if (bodyLines > AGENT_BODY_MAX_LINES) report(file, "WARN", `agent body ${bodyLines} lines — check it is not restating briefed skills (E5)`);
+    const skills = agentSkills(fm);
+    if (skills === null) report(file, "WARN", "no top-level skills: list — the agent starts without preloaded skills");
+    else for (const s of skills) if (!resolveSkill(s, projectRootOf(file))) report(file, "ERROR", `declared skill does not resolve: ${s} (Claude Code skips it without a word)`);
+    if (bodyLines > AGENT_BODY_MAX_LINES) report(file, "WARN", `agent body ${bodyLines} lines — check it is not restating preloaded skills (E5)`);
     if (!/non-negotiable/.test(body)) report(file, "WARN", "body lacks the 'conventions are non-negotiable — apply silently' close");
   }
   const prose = body.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "").replace(/\S*\/\S*/g, ""); // no code spans, no paths

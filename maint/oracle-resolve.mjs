@@ -41,7 +41,7 @@ const yaml = [
   "name: my-agent\ndescription: \"Audit — says \\\"hi\\\"\\n and \\u00e9\"\nsingle: 'it''s # not a comment'\nplain: value # a comment\ncolon: a: b\nurl: https://example.com/x\nint: 42\nneg: -3\nfloat: 1.0\nyes: true\nno: False\nnothing: ~\nempty:\n# full-line comment",
   "lit: |\n  line one\n    indented\n\n  line three\nfold: >-\n  folded\n  together\nkeep: |+\n  k\n\nafter: x",
   "description: a long\n  description here\nq: \"two\n  lines\"",
-  "tools: Read, Bash\nbriefing:\n  skills:\n    - skilletor-core\n    - 'kanban: karr'\ncodex:\n  model: gpt-5\n  nickname_candidates: [Ada, \"B, C\"]\n  features:\n    web: true\nlist_same_indent:\n- a\n- b\nflow_map: {a: 1, b: two}",
+  "tools: Read, Bash\nskills:\n  - skilletor-core\n  - 'kanban: karr'\ncodex:\n  model: gpt-5\n  nickname_candidates: [Ada, \"B, C\"]\n  features:\n    web: true\nlist_same_indent:\n- a\n- b\nflow_map: {a: 1, b: two}",
   "a: &anchor x", "a: *alias", "a: !tag x", "list:\n  - key: value", "a: [x, [nested]]", "a: \"unterminated", "a: b\na: c",
   "  indented: first", "not a mapping line", "a: 1\nb: &x 2\n", "a:\n\t- x", "a: [1, 2", "a: {x: 1, y}", "a: {: 1}", "a: [] # c", "a: {} trailing",
   "a: \"\\x41\\u00e9\\U0001F600\\N\\_\\L\\P\\0\\e\"", "a: \"\\q\"", "a: \"\\xZZ\"", "a: \"\\U00110000\"", "a: \"tail\\\"", "a: 'x' y",

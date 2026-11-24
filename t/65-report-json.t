@@ -45,14 +45,14 @@ subtest 'report_json: JSON.stringify(report, null, 2), every line display-safe' 
 
 # The key order of engine.ts, pinned here too, so a machine without node still holds it: a user
 # scope with an installed skill and agent, a hand-written skill in the way and an agent's missing
-# briefing skill; a project scope with an untrusted source and a rules wildcard.
+# missing skill; a project scope with an untrusted source and a rules wildcard.
 subtest "the reports' keys come in the reference's order" => sub {
   my $root = tempdir->realpath;
   my ( $home, $proj, $src ) = ( "$root/home", "$root/project", "$root/src" );
   my %files = (
     "$src/skills/a/SKILL.md"              => "---\ndescription: a\n---\na\n",
     "$src/skills/taken/SKILL.md"          => "---\ndescription: taken\n---\ntaken\n",
-    "$src/agents/r.md"                    => "---\nname: r\ndescription: reviews\nbriefing:\n  skills: [a, nowhere]\n---\nReview.\n",
+    "$src/agents/r.md"                    => "---\nname: r\ndescription: reviews\nskills: [a, nowhere]\n---\nReview.\n",
     "$src/rules/team-style.md"            => "Short.\n",
     "$home/.claude.json"                  => "{}\n",
     "$home/.claude/skills/taken/SKILL.md" => "mine\n",
@@ -72,11 +72,11 @@ subtest "the reports' keys come in the reference's order" => sub {
   my ( $user, $project ) = @{ $sync->{scopes} };
   my @scope_keys = qw( scope added updated removed unchanged skipped conflicts overwritten warnings trustRequests );
   is_deeply( $keys->($sync), ['scopes'], 'sync: scopes' );
-  is_deeply( $keys->($user), [ @scope_keys, 'briefingMissing' ], 'a scope: the fixed keys, then what this run had to say' );
+  is_deeply( $keys->($user), [ @scope_keys, 'skillsMissing' ], 'a scope: the fixed keys, then what this run had to say' );
   is_deeply( $keys->($project), [ @scope_keys, 'gitignoreUpdated' ], 'the project scope: its commit hints last' );
   is_deeply( $keys->( $user->{added}[0] ), [qw( key type name source )], 'an item' );
   is_deeply( $keys->( $user->{conflicts}[0] ), ['path'], 'a conflict' );
-  is_deeply( $keys->( $user->{briefingMissing}[0] ), [qw( key harness missing )], 'a missing briefing' );
+  is_deeply( $keys->( $user->{skillsMissing}[0] ), [qw( key harness missing )], 'a missing skill' );
   is_deeply( $keys->( $project->{trustRequests}[0] ), [qw( name kind url )], 'a trust request' );
 
   my $check = $e->check;
@@ -89,7 +89,7 @@ subtest "the reports' keys come in the reference's order" => sub {
   is_deeply( $keys->($status), ['scopes'], 'status: scopes' );
   is_deeply( $keys->($su), [qw( scope targets declared orphans wildcards bundles trustRequests sourceVersions )], 'a status scope' );
   is_deeply( [ map { $keys->($_) } @{ $su->{declared} } ],
-    [ [qw( key source installed )], [qw( key source installed )], [qw( key source installed briefingMissing )] ], 'declared items' );
+    [ [qw( key source installed )], [qw( key source installed )], [qw( key source installed skillsMissing )] ], 'declared items' );
   is_deeply( $keys->( $sp->{declared}[1] ), [qw( key source installed via )], 'one a wildcard installed' );
   is_deeply( $keys->( $sp->{wildcards}[0] ), [qw( type source entry installed )], 'a wildcard' );
   my $at_home = Skilletor::Engine->new( home => $home, project_dir => $home, codex_home => "$home/.codex",

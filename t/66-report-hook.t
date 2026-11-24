@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # The hooks' output of a sync report (k180): Skilletor::Report::report_hook is the reference's
 # reportHook (report.ts), withoutRepeats with it – a one-line systemMessage and a terse
-# additionalContext, every line display-safe, a config error alone as one line; the briefing and
+# additionalContext, every line display-safe, a config error alone as one line; the skills and
 # settings warnings shown only by a run that changed something. The inputs of report.test.ts are
 # pinned here as that file pins them, more beside them; with node, the reference's answer to each
 # input must be the same bytes.
@@ -14,7 +14,7 @@ use FindBin;
 use IPC::Open2 qw( open2 );
 use JSON::MaybeXS ();
 use Path::Tiny qw( path );
-use Skilletor::Briefing qw( briefing_warning );
+use Skilletor::AgentSkills qw( skills_warning );
 use Skilletor::FSUtil qw( decode_utf8_lossy encode_text );
 use Skilletor::JSON qw( js_ordered js_parse js_stringify );
 use Skilletor::Report qw( conflict_hint empty_scope_report report_hook );
@@ -48,8 +48,8 @@ sub sample {
 my $EVIL  = "\x{1b}[31mred\x{07}\x{202e}evil\nnext";
 my $SHOWN = '\\u001b[31mred\\u0007\\u202eevil\\nnext';
 
-my $brief      = briefing_warning( 'rev', 'claude', [ 'gone', 'gone2' ] );
-my $brief_cx   = briefing_warning( 'rev', 'codex', ['pa'] );
+my $skills_w    = skills_warning( 'rev', 'claude', [ 'gone', 'gone2' ] );
+my $skills_cx   = skills_warning( 'rev', 'codex', ['pa'] );
 my $missing    = js_ordered( key => 'agents/rev', harness => 'claude', missing => [ 'gone', 'gone2' ] );
 my $missing_cx = js_ordered( key => 'codex:agents/rev', harness => 'codex', missing => ['pa'] );
 my $settings   = js_ordered( path => '.claude/settings.json', enabled => ['skilletor@getty'], declared => [ 'getty', 'other' ] );
@@ -127,27 +127,27 @@ my @cases = (
     { systemMessage => "skilletor: sources.team$SHOWN: unknown key" } ],
 
   # ---- more: withoutRepeats ------------------------------------------------------------------
-  [ 'a briefing warning of a run that changed nothing is not repeated' =>
-      report( scope( 'user', warnings => [$brief], briefingMissing => [$missing] ) ), {} ],
-  [ 'only the briefing line goes; the other warnings stay' =>
-      report( scope( 'user', warnings => [ 'source a offline', $brief, 'source b offline' ], briefingMissing => [$missing] ) ), {
+  [ 'a skills warning of a run that changed nothing is not repeated' =>
+      report( scope( 'user', warnings => [$skills_w], skillsMissing => [$missing] ) ), {} ],
+  [ 'only the skills line goes; the other warnings stay' =>
+      report( scope( 'user', warnings => [ 'source a offline', $skills_w, 'source b offline' ], skillsMissing => [$missing] ) ), {
       systemMessage     => 'skilletor: 2 warning(s)',
       additionalContext => "- warning: source a offline\n- warning: source b offline",
   } ],
-  [ 'a run that changed something shows the briefing warning' =>
-      report( scope( 'user', added => [ item( 'skills/foo', 'skill', 'foo', 's' ) ], warnings => [$brief], briefingMissing => [$missing] ) ), {
+  [ 'a run that changed something shows the skills warning' =>
+      report( scope( 'user', added => [ item( 'skills/foo', 'skill', 'foo', 's' ) ], warnings => [$skills_w], skillsMissing => [$missing] ) ), {
       systemMessage     => 'skilletor: 1 item(s) updated, 1 warning(s)',
-      additionalContext => "skilletor synced items:\n- skill foo\@s: active now\n- warning: $brief",
+      additionalContext => "skilletor synced items:\n- skill foo\@s: active now\n- warning: $skills_w",
   } ],
   [ "a change in another scope counts: hasChanges is the run's" => report(
-      scope( 'user', warnings => [$brief], briefingMissing => [$missing] ),
+      scope( 'user', warnings => [$skills_w], skillsMissing => [$missing] ),
       scope( 'project', removed => [ item( 'rules/old', 'rule', 'old', 's' ) ] ),
     ), {
       systemMessage     => 'skilletor: 1 removed, 1 warning(s)',
-      additionalContext => "- warning: $brief",
+      additionalContext => "- warning: $skills_w",
   } ],
   [ 'every copy of a repeated line goes, a Codex agent named with its harness' =>
-      report( scope( 'user', warnings => [ $brief_cx, 'kept', $brief_cx ], briefingMissing => [$missing_cx] ) ), {
+      report( scope( 'user', warnings => [ $skills_cx, 'kept', $skills_cx ], skillsMissing => [$missing_cx] ) ), {
       systemMessage     => 'skilletor: 1 warning(s)',
       additionalContext => '- warning: kept',
   } ],
@@ -158,8 +158,8 @@ my @cases = (
       systemMessage     => 'skilletor: 1 warning(s), .claude/settings.json updated — commit it',
       additionalContext => "- .claude/settings.json updated (enables skilletor\@getty; declares marketplaces getty, other) — commit it\n- warning: $skipped_w",
   } ],
-  [ 'empty briefingMissing and settingsSkipped leave the scope as it is' =>
-      report( scope( 'user', warnings => ['w'], briefingMissing => [], settingsSkipped => [] ) ),
+  [ 'empty skillsMissing and settingsSkipped leave the scope as it is' =>
+      report( scope( 'user', warnings => ['w'], skillsMissing => [], settingsSkipped => [] ) ),
     { systemMessage => 'skilletor: 1 warning(s)', additionalContext => '- warning: w' } ],
 
   # ---- more: the counts, the marks, the hints ------------------------------------------------

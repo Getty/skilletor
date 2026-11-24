@@ -1,0 +1,4 @@
+user scope:
+  ✓ skills/writing @shared
+  ✓ agents/planner @shared (skills not installed: testing)
+project scope:

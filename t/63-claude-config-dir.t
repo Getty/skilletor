@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # k145: CLAUDE_CONFIG_DIR is the user scope's `.claude` – config, lock, roots, state, detection
-# and the briefing lookup – as for Claude Code itself; an empty value is unset.
+# and the agent skills lookup – as for Claude Code itself; an empty value is unset.
 use strict;
 use warnings;
 use Test::More;
@@ -9,7 +9,7 @@ use lib "$FindBin::Bin/lib";
 use SkilletorTest qw( write_json );
 
 use Path::Tiny qw( path tempdir );
-use Skilletor::Briefing qw( skill_roots );
+use Skilletor::AgentSkills qw( skill_roots );
 use Skilletor::Config;
 use Skilletor::Engine;
 use Skilletor::State;
@@ -55,7 +55,7 @@ subtest 'pieces' => sub {
   my $cfg = Skilletor::Config->new( home => $home, claude_config_dir => $alt );
   is $cfg->user_path, "$alt/skilletor.json";
   path( $alt, 'plugins/cache/m/p/skills' )->mkpath;
-  my $roots = skill_roots( claude => user => { home => $home, claude_dir => $alt } );
+  my $roots = skill_roots( user => { home => $home, claude_dir => $alt } );
   is $roots->[0], "$alt/skills";
   ok( ( grep { $_ eq "$alt/plugins/cache/m/p/skills" } @$roots ), 'plugin cache of the config dir' );
   ok( !( grep { index( $_, "$home/.claude" ) == 0 } @$roots ), 'nothing under ~/.claude' );

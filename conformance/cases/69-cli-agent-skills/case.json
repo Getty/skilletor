@@ -1,0 +1,12 @@
+{
+  "description": "k56: an agent whose skills (a flow list) name a skill installed nowhere and a plugin:skill. Through the CLI's first sync: the agent installed, one warning naming the missing skill and the fix, exit 0 (--json: skillsMissing on the resync); status names it (text and --json); the plugin's skill is never checked.",
+  "git": {
+    "shared": { "url": "https://conformance.invalid/shared.git", "commits": [{ "tree": "sources/shared" }] }
+  },
+  "steps": [
+    { "id": "sync", "op": "cli", "argv": ["sync"], "tree": true },
+    { "id": "resync-json", "op": "cli", "argv": ["sync", "--json", "--scope", "user"] },
+    { "id": "status", "op": "cli", "argv": ["status", "--scope", "user"] },
+    { "id": "status-json", "op": "cli", "argv": ["status", "--json", "--scope", "user"] }
+  ]
+}

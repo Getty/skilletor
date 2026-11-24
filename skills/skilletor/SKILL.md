@@ -130,9 +130,9 @@ A source's `bundles/<name>.yaml` (or `.yml`) names a set of items; a config decl
 once. Vars: `source defaults < bundle < user < project < local`. A bundle naming another
 source's items (`name@<address>`): `install bundle:` offers to add it (no TTY: exit 1,
 prints `skilletor add …`); **`sync` and hooks never add sources** — they warn and skip those
-items. Put an agent and the skills its `briefing.skills` names in one bundle (a user agent
+items. Put an agent and the skills its `skills:` list names in one bundle (a user agent
 never sees project skills). Read [references/bundles.md](references/bundles.md) before
-writing one, and on a bundle error or a `briefing skills not installed` warning.
+writing one, and on a bundle error or a `skills not installed` warning.
 
 ## Templates
 
@@ -140,7 +140,7 @@ A source file ending in `.njk` is rendered with Nunjucks (installed with `.njk` 
 every other file is copied byte for byte. A `.njk` main file that renders empty (after its
 frontmatter) switches the item off in that scope and target, installed copy removed. A
 `{% if %}` in frontmatter opens with `{%-`, or its blank line silently truncates a
-`briefing:` block. Read [references/templates.md](references/templates.md) before writing or
+`skills:` list. Read [references/templates.md](references/templates.md) before writing or
 debugging a template (context variables, undefined `vars.*`, `f` beside `f.njk`, the on/off
 pattern).
 

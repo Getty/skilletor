@@ -75,13 +75,12 @@ test("multi-line plain and quoted scalars fold with spaces", () => {
   assert.equal(data.q, "two lines");
 });
 
-test("sequences and nested mappings (the briefing and codex shapes)", () => {
+test("sequences and nested mappings (the skills and codex shapes)", () => {
   const { data } = fm([
     "tools: Read, Bash",
-    "briefing:",
-    "  skills:",
-    "    - skilletor-core",
-    "    - 'kanban: karr'",
+    "skills:",
+    "  - skilletor-core",
+    "  - 'kanban: karr'",
     "codex:",
     "  model: gpt-5",
     "  model_reasoning_effort: high",
@@ -94,7 +93,7 @@ test("sequences and nested mappings (the briefing and codex shapes)", () => {
     "flow_map: {a: 1, b: two}",
   ].join("\n"));
   assert.equal(data.tools, "Read, Bash");
-  assert.deepEqual(data.briefing, { skills: ["skilletor-core", "kanban: karr"] });
+  assert.deepEqual(data.skills, ["skilletor-core", "kanban: karr"]);
   assert.deepEqual(data.codex, {
     model: "gpt-5", model_reasoning_effort: "high", nickname_candidates: ["Ada", "B, C"], features: { web: true },
   });

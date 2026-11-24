@@ -426,8 +426,8 @@ L<Skilletor::Tar> and L<Skilletor::Gzip>.
 =item * L<Skilletor::Render> – an item's files in memory; L<Skilletor::Apply> – onto
 the disk, against the lock; L<Skilletor::Lock> – lock files.
 
-=item * L<Skilletor::Gitignore>, L<Skilletor::ClaudeSettings>, L<Skilletor::Briefing>
-– the managed blocks, the project's plugin requirement, the briefing check.
+=item * L<Skilletor::Gitignore>, L<Skilletor::ClaudeSettings>, L<Skilletor::AgentSkills>
+– the managed blocks, the project's plugin requirement, the agent skills check.
 
 =item * L<Skilletor::State> – trust, the sync lock and the records C<check> reads.
 

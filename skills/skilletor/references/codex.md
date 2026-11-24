@@ -51,10 +51,8 @@ codex:
 - `codex:` values: strings, numbers, booleans, string arrays, one level of tables. Anything
   else is dropped with a warning. Codex validates the values and ignores the whole role on
   a bad one.
-- `briefing.skills` becomes the comment line `# briefing: skills = ["a", "b"]` before
-  `developer_instructions` (read by briefing 0.3.1+; Codex drops a role with unknown keys,
-  so never a `[briefing]` table). `briefing` under `codex:`, or a skill name that is empty
-  or holds `"`, `\`, `]` or a line break, is a conversion error for the Codex copy.
+- The top-level `skills:` list stays on the Claude side: the Codex role file carries no
+  skills, and the list is neither converted nor checked for the Codex copy.
 - No `description` → not written for Codex, warning. Blank body → skipped for Codex.
 - Project agents in `<repo>/.codex/agents/` load only in a project Codex trusts.
 

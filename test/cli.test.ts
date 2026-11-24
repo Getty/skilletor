@@ -698,22 +698,22 @@ test("every documented option still works for its command", () => {
   assert.deepEqual([scoped.status, scoped.stderr], [0, ""]);
 });
 
-// k56: status names an agent's missing briefing skills, in text and --json.
-test("status shows an agent's briefing skills that are not installed", () => {
-  const home = join(tmp.dir, "brief-home");
-  const src = join(tmp.dir, "brief-src");
+// k56: status names an agent's missing skills, in text and --json.
+test("status shows an agent's skills that are not installed", () => {
+  const home = join(tmp.dir, "skills-home");
+  const src = join(tmp.dir, "skills-src");
   mkdirSync(join(home, ".claude"), { recursive: true });
   mkdirSync(join(src, "agents"), { recursive: true });
-  writeFileSync(join(src, "agents", "rev.md"), "---\ndescription: d\nbriefing:\n  skills: [gone, \"p:x\"]\n---\nB\n");
+  writeFileSync(join(src, "agents", "rev.md"), "---\ndescription: d\nskills: [gone, \"p:x\"]\n---\nB\n");
   writeFileSync(join(home, ".claude", "skilletor.json"), JSON.stringify({ sources: { s: { local: src } }, install: { agents: ["rev@s"] } }));
   const env = claudeOnlyEnv(home);
   const sy = runCli(["sync", "--project-dir", home], env);
   assert.equal(sy.status, 0, sy.stderr);
-  assert.match(sy.stdout, /warning: agent rev \(claude\): briefing skills not installed: gone —/);
+  assert.match(sy.stdout, /warning: agent rev \(claude\): skills not installed: gone —/);
   const st = runCli(["status", "--project-dir", home], env);
-  assert.match(st.stdout, /✓ agents\/rev @s \(briefing skills not installed: gone\)/);
+  assert.match(st.stdout, /✓ agents\/rev @s \(skills not installed: gone\)/);
   const js = JSON.parse(runCli(["status", "--json", "--project-dir", home], env).stdout);
-  assert.deepEqual(js.scopes[0].declared[0].briefingMissing, ["gone"]);
+  assert.deepEqual(js.scopes[0].declared[0].skillsMissing, ["gone"]);
 });
 
 // k85: a ref that would reach git as an option is a config error. Asserts: through the built

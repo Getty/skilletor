@@ -1,6 +1,15 @@
 Revision history for skilletor and Skilletor, its Perl distribution
 
 {{$NEXT}}
+  - The briefing plugin is gone from skilletor. The check for an installed
+    agent's skills reads the agent's top-level `skills:` list (the one Claude
+    Code preloads) and warns "agent <name> (claude): skills not installed: …";
+    the JSON field `briefingMissing` is now `skillsMissing` in sync and status
+    reports. A Codex role file carries no skills, so Codex agents are not
+    checked, and the `# briefing: skills = [...]` comment line is no longer
+    written. A `briefing:` key left in a source's frontmatter is an ordinary
+    unknown key. The project's `settings.json` requirement names only the
+    skilletor plugin. In Perl, Skilletor::Briefing is Skilletor::AgentSkills.
   - The Perl port reads and writes numbers as JavaScript's doubles on a perl
     whose NV is a long double or a __float128 too: lock files, JSON output,
     Codex agent TOML and frontmatter values carry the digits the TypeScript

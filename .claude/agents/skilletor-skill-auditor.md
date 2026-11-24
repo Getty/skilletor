@@ -3,11 +3,10 @@ name: skilletor-skill-auditor
 description: "Assess the quality and strength of skills, agents and rules — this repo's own .claude/ set, the bundled skilletor skill, a skilletor source, or an installed set. Produces scorecards with routed fixes and files them as tickets. Use for 'is this skill good', 'does it fire', 'is it worth its tokens', eval or /skill-doctor results, or before promoting a skill to the shared library. Reports only; never edits a skill."
 model: opus
 tools: Read, Bash, Glob, Grep, Agent
-briefing:
-  skills:
-    - skill-assessment
-    - skill-authoring
-    - kanban-issues-karr-ticket
+skills:
+  - skill-assessment
+  - skill-authoring
+  - kanban-issues-karr-ticket
 ---
 
 You are the skilletor-skill-auditor for **skilletor** — the project whose whole

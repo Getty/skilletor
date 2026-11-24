@@ -1,0 +1,9 @@
+{
+  "agents/rev": {
+    "source": "shared",
+    "version": "git:df1f1b1",
+    "files": {
+      "agents/.local.rev.md": "sha256:423a34a9a43e53fe4868a73b84bec96c8890a66bef23cbc51d0859166dfc9724"
+    }
+  }
+}

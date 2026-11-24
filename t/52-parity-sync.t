@@ -117,7 +117,7 @@ my $remote = bare_remote("$root/remote");
 $remote->{commit}->( {
   'skills/lint/SKILL.md'  => skill('lint'),
   'skills/taken/SKILL.md' => skill('taken'),
-  'agents/rev.md'         => "---\nname: rev\ndescription: reviews\nbriefing:\n  skills: [lint, nowhere]\n---\nReview.\n",
+  'agents/rev.md'         => "---\nname: rev\ndescription: reviews\nskills: [lint, nowhere]\n---\nReview.\n",
   'rules/style.md'        => "Short sentences.\n",
   'bundles/team.yaml'     => "description: The team set\nskills: [lint]\nrules: [style]\nvars: {from: bundle}\n",
   # Templates (spec §5): the user's vars as the template sees them, a main file gated off in the

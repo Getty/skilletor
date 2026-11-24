@@ -6,7 +6,7 @@
 // Hermes items (`hermes:…`, spec §16.2) theirs.
 import type { BackendKind, Harness, ItemType } from "./config.ts";
 import { parseLockKey } from "./targets.ts";
-import { briefingWarning, type BriefingMissing } from "./briefing.ts";
+import { skillsWarning, type SkillsMissing } from "./agent-skills.ts";
 
 export const ACTIVATION: Record<ItemType, string> = {
   skill: "active now",
@@ -81,9 +81,9 @@ export interface ScopeReport {
   overwritten: { path: string }[];
   warnings: string[];
   trustRequests: TrustRequest[];
-  /** Installed agents whose briefing skills do not resolve (spec §6.7); each also has
+  /** Installed agents whose declared skills do not resolve (spec §6.7); each also has
    *  its line in `warnings`. Absent when empty. */
-  briefingMissing?: BriefingMissing[];
+  skillsMissing?: SkillsMissing[];
   /** `.gitignore` files – and the project's `.worktreeinclude` – whose skilletor block this
    *  sync created or changed, to be committed (spec §6.4): `.claude/.gitignore`,
    *  `~/.claude/.gitignore`, `.worktreeinclude`. Absent when empty. */
@@ -200,7 +200,7 @@ function settingsHint(u: SettingsUpdate): string {
   return `${u.path} updated (${what.join("; ")}) — commit it`;
 }
 
-/** `r` without its briefing warnings (spec §6.7) – and without the settings warnings
+/** `r` without its skills warnings (spec §6.7) – and without the settings warnings
  *  (spec §6.8) of a scope whose settings file this run left as it was: the hooks show them
  *  only in a run that changed something, instead of in every session. */
 function withoutRepeats(r: SyncReport): SyncReport {
@@ -208,12 +208,12 @@ function withoutRepeats(r: SyncReport): SyncReport {
     ...r,
     scopes: r.scopes.map((s) => {
       const settings = s.settingsUpdated ? [] : s.settingsSkipped ?? [];
-      if (!s.briefingMissing?.length && !settings.length) return s;
+      if (!s.skillsMissing?.length && !settings.length) return s;
       const lines = new Set([
-        ...(s.briefingMissing ?? []).map((b) => briefingWarning(parseLockKey(b.key).name, b.harness, b.missing)),
+        ...(s.skillsMissing ?? []).map((b) => skillsWarning(parseLockKey(b.key).name, b.harness, b.missing)),
         ...settings,
       ]);
-      const { briefingMissing: _, ...rest } = s;
+      const { skillsMissing: _, ...rest } = s;
       return { ...rest, warnings: s.warnings.filter((w) => !lines.has(w)) };
     }),
   };

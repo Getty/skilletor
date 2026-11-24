@@ -49,29 +49,6 @@ function asText(v: YamlValue | undefined): string | undefined {
   return String(v);
 }
 
-/** A briefing skill name the comment line cannot carry: `"`, `\`, `]`, or any control
- *  character (line breaks included; TOML allows none but tab in a comment). */
-const BAD_SKILL_CHAR = /["\\\]\u0000-\u001f\u007f]/;
-
-/**
- * `briefing.skills` as the comment line the briefing plugin reads for Codex
- * (spec §14.7): Codex drops a role with any unknown key, so a `[briefing]` table
- * is not an option. Undefined when there is nothing to declare.
- */
-function briefingComment(briefing: YamlValue | undefined): string | undefined {
-  if (!isMapping(briefing) || briefing.skills === undefined) return undefined;
-  const skills = briefing.skills;
-  if (!Array.isArray(skills)) throw new ConvertError("briefing.skills must be a list of skill names");
-  if (skills.length === 0) return undefined;
-  skills.forEach((s, i) => {
-    if (typeof s !== "string" || s === "" || BAD_SKILL_CHAR.test(s)) {
-      throw new ConvertError(`briefing.skills item ${i + 1} (${JSON.stringify(s)}) must be a non-empty string ` +
-        "without a double quote, backslash, ] or line break");
-    }
-  });
-  return `# briefing: skills = [${(skills as string[]).map((s) => `"${s}"`).join(", ")}]\n`;
-}
-
 export function codexAgentToml(markdown: string, itemName: string): AgentConversion {
   let fm: ReturnType<typeof splitFrontmatter>;
   try {
@@ -89,18 +66,12 @@ export function codexAgentToml(markdown: string, itemName: string): AgentConvers
   };
   const tables: Record<string, Record<string, TomlValue>> = {};
 
-  const briefing = briefingComment(data.briefing);
-
   let instructions: TomlValue = body;
   const codex = data.codex;
   if (codex !== undefined && !isMapping(codex)) {
     warnings.push("codex: must be a mapping; ignored");
   } else if (codex) {
     for (const [key, v] of Object.entries(codex)) {
-      if (key === "briefing") {
-        throw new ConvertError("codex.briefing: would become a [briefing] table, and Codex ignores a role with one; " +
-          "declare skills in the top-level briefing.skills");
-      }
       if (isMapping(v) && (Object.hasOwn(top, key) || key === "developer_instructions" || Object.hasOwn(tables, key))) {
         warnings.push(`codex.${key}: a table cannot replace the ${key} key; dropped`);
         continue;
@@ -136,10 +107,9 @@ export function codexAgentToml(markdown: string, itemName: string): AgentConvers
   if (typeof instructions !== "string") throw new ConvertError("developer_instructions must be a string");
   if (instructions.trim() === "") return { warnings };
 
-  // `top` holds no tables, so its keys come out first; the briefing line sits between
-  // them and developer_instructions, never inside the multi-line string.
+  // `top` holds no tables, so its keys come out first.
   const rest: TomlTable = { developer_instructions: instructions, ...tables };
-  const text = stringifyToml(top) + (briefing ?? "") + stringifyToml(rest, { multiline: ["developer_instructions"] });
+  const text = stringifyToml(top) + stringifyToml(rest, { multiline: ["developer_instructions"] });
   return { toml: text, warnings };
 }
 

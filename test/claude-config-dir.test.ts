@@ -1,5 +1,5 @@
 // k145: CLAUDE_CONFIG_DIR is the user scope's `.claude` – config, lock, roots, detection,
-// briefing lookup – as Claude Code itself reads it; an empty value is unset.
+// skills lookup – as Claude Code itself reads it; an empty value is unset.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -8,7 +8,7 @@ import { makeTmpDir } from "./helpers/tmp.ts";
 import { sync, targetDirOf, type EngineContext } from "../src/engine.ts";
 import { loadConfig } from "../src/config.ts";
 import { defaultMarkers } from "../src/targets.ts";
-import { skillRoots } from "../src/briefing.ts";
+import { skillRoots } from "../src/agent-skills.ts";
 
 function put(path: string, content: string) {
   mkdirSync(join(path, ".."), { recursive: true });
@@ -68,11 +68,11 @@ test("k145: without CLAUDE_CONFIG_DIR a marker inside it is not looked for, and 
   }
 });
 
-test("k145: the briefing lookup searches the config dir's skills and plugin cache", () => {
+test("k145: the skills lookup searches the config dir's skills and plugin cache", () => {
   const f = fixture();
   try {
     put(join(f.alt, "plugins", "cache", "m", "p", "skills", "x", "SKILL.md"), "x");
-    const roots = skillRoots("claude", "user", { home: f.home, claudeConfigDir: f.alt });
+    const roots = skillRoots("user", { home: f.home, claudeConfigDir: f.alt });
     assert.equal(roots[0], join(f.alt, "skills"));
     assert.ok(roots.includes(join(f.alt, "plugins", "cache", "m", "skills")));
     assert.ok(roots.includes(join(f.alt, "plugins", "cache", "m", "p", "skills")));

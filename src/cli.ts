@@ -155,7 +155,7 @@ function statusText(report: ReturnType<typeof status>): string {
       const mark = d.installed ? "✓" : d.skipped ? "-" : "·";
       const note = (d.skipped ? " (skipped: renders empty)" : "") +
         (d.partial ? " (partial: the last sync stopped midway)" : "") +
-        (d.briefingMissing ? ` (briefing skills not installed: ${d.briefingMissing.join(", ")})` : "");
+        (d.skillsMissing ? ` (skills not installed: ${d.skillsMissing.join(", ")})` : "");
       lines.push(`  ${mark} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}${note}`);
     }
     for (const w of s.wildcards) {

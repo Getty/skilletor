@@ -26,7 +26,7 @@ is `skill-mining`'s. This skill produces the verdict and the routed fix list.
 2. **Static check** (execute): `node scripts/skill-static-check.mjs <paths…>`.
    Mechanical criteria only — frontmatter keys, description budget, body
    length, unresolved references, chained references, time-sensitive
-   wording, pleading, agent tool keys, briefing resolution, rules budget.
+   wording, pleading, agent tool keys, skills resolution, rules budget.
    One line per finding, non-zero exit on errors.
 3. **Rubric pass** (read): [references/rubric.md](references/rubric.md).
    Walk sections A–C for every item, E for agents, F for rules. Score yes/no
@@ -84,9 +84,9 @@ pressure (deadline, sunk cost, "just this once") and collect the
 rationalizations — each becomes a counter in the text. One run per side is a
 smoke test; S3 needs repeated runs.
 
-For a briefed agent the retrieval question is different: the skill is forced
+For an agent with preloaded skills the retrieval question is different: the skill is forced
 into context, so measure whether the agent answers a skill-only question
-**without** calling the `Skill` tool. Reaching for `Skill` means the briefing
+**without** calling the `Skill` tool. Reaching for `Skill` means the preload
 did not fire.
 
 ### 3. Field signal — `/skill-doctor`

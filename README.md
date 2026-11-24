@@ -685,14 +685,14 @@ marks items `via bundle:perl@shared` and adds `* bundle:perl@shared (7 installed
 only a bundle declares cannot be uninstalled by name: the error names the bundle — uninstall
 the bundle, or switch the item off via vars.
 
-**Agents and their briefing skills.** An agent that declares skills for the briefing plugin
-(`briefing: { skills: [...] }`) fails at spawn time when they are missing. After every sync
-skilletor checks each installed agent, per target, against the skill roots that agent's
-harness searches (Claude: `~/.claude/skills`, plus the project's `.claude/skills` for a
-project agent, plus Claude plugin caches; Codex: `$CODEX_HOME/skills`, `~/.agents/skills`,
-plus the project's `.agents/skills` and `.codex/skills`) and warns:
-`agent reviewer (codex): briefing skills not installed: perl-core`. `plugin:skill` names
-are not checked. `status` shows the same per agent (`briefingMissing` in `--json`); the
+**Agents and their skills.** A Claude agent lists the skills Claude Code preloads for it in
+the top-level `skills:` of its frontmatter (`skills: [a, b]` or a block list); Claude Code
+skips a name it cannot find without a word. After every sync skilletor checks each installed
+Claude agent against the skill roots Claude Code searches (`~/.claude/skills`, plus the
+project's `.claude/skills` for a project agent, plus Claude plugin caches) and warns:
+`agent reviewer (claude): skills not installed: perl-core`. `plugin:skill` names
+are not checked, and a Codex role file carries no skills, so Codex agents are not checked.
+`status` shows the same per agent (`skillsMissing` in `--json`); the
 `SessionStart` hook mentions it only when it changed something. Ship an agent and its
 skills together in one bundle so they are always installed as a set.
 
@@ -734,8 +734,7 @@ scope: `dir`, `name`, `git_remote`), `scope`, `harness` (`claude`, `codex` or `h
 ship an empty skill). Testing one (`{% if vars.x %}`) is not: it is simply false.
 
 Tags are not whitespace-trimmed, so a `{% if %}` on its own line leaves a blank line. In
-frontmatter that matters: briefing stops reading a `briefing:` list at the first blank
-line. Use `{%- if … %}` / `{%- endif %}` there (left side only – `-%}` would also eat the
+frontmatter that matters: a `skills:` list stays gap-free. Use `{%- if … %}` / `{%- endif %}` there (left side only – `-%}` would also eat the
 next line break and glue the list items together).
 
 ### Switching items on and off with vars
@@ -844,7 +843,7 @@ rules of your own that may mention skilletor, but none of the installed items un
 skilletor syncs it. So a project sync makes the plugin a requirement of the project in its
 committed `.claude/settings.json`: it enables `skilletor@<marketplace>` — the marketplace
 your Claude Code installed skilletor from — and declares in `extraKnownMarketplaces` every
-marketplace an `enabledPlugins` entry there needs (`briefing@getty` as well), with the
+marketplace an `enabledPlugins` entry there needs, with the
 source Claude Code knows it by. The report says what it added once:
 
 ```
@@ -1012,12 +1011,8 @@ You review code. …
 - `codex:` values may be strings, numbers, booleans, string arrays, or one level of tables
   of those. Anything else is dropped with a warning naming the key. skilletor does not
   check the values against Codex's schema — Codex ignores the whole role on a bad value.
-- **`briefing.skills` becomes a comment line**, `# briefing: skills = ["a", "b"]`, directly
-  before `developer_instructions` — the form the briefing plugin (0.3.1+) reads for Codex.
-  Codex reads agent-role files strictly and ignores the whole role over any unknown key, so
-  a `[briefing]` table is not an option: a `briefing` key under `codex:` is an error, and so
-  is a skill name that is empty or contains `"`, `\`, `]` or a line break (the Codex copy
-  stays as it was; the Claude copy is written).
+- **`skills:` stays on the Claude side.** The Codex role file carries no skills, so the
+  top-level `skills:` list is not converted and not checked for the Codex copy.
 - An agent without a `description` is not written for Codex (warning) — Codex rejects
   such a role. An agent whose body is empty is skipped for Codex.
 

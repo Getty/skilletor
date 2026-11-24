@@ -39,7 +39,7 @@ names the fix route so a fail turns into work, not a remark.
 | B8 | Progressive disclosure | Body ≤ ~150 lines; `references/`, `templates/`, `scripts/` linked one level deep, links resolve, no chain | move material out |
 | B9 | Does not duplicate the environment | Nothing `--help`, a config file, or the directory listing reveals on its own | point at the lookup |
 | B10 | Scripts say execute or read | Each linked script is labelled as one or the other | label it |
-| B11 | No pleading | No "MANDATORY: load X first", no "IMPORTANT" shouting — briefing or the description carries that | delete |
+| B11 | No pleading | No "MANDATORY: load X first", no "IMPORTANT" shouting — the agent's `skills:` or the description carries that | delete |
 
 ## C. Truth — is it real?
 
@@ -71,12 +71,12 @@ Procedure and prompt shapes: `SKILL.md` → "Measuring strength".
 | # | Criterion | How to check | Fix route |
 |---|---|---|---|
 | E1 | Description written for the dispatcher | Says what the agent owns, what it never does, trigger keywords | rewrite |
-| E2 | `briefing.skills` all resolve | Static check; the hook denies the spawn otherwise | fix names / add skill |
-| E3 | Uses `briefing.skills`, not top-level `skills:` | Static check — the bare key is ignored by briefing | move the list |
+| E2 | `skills:` all resolve | Static check; Claude Code skips an unknown name without a word | fix names / add skill |
+| E3 | Lists skills in the top-level `skills:` | Static check — a list nested under another key is not read | move the list |
 | E4 | Tools match the role | Audit/report roles have no `Edit`/`Write`; workers do | fix `allowed-tools` |
-| E5 | Body restates no skill content | Diff body against briefed skills; overlap → fail | delete from body |
+| E5 | Body restates no skill content | Diff body against preloaded skills; overlap → fail | delete from body |
 | E6 | Body holds only repo truth | ADR pointers, exact commands and traps, invariants that live nowhere else | move the rest to a skill |
-| E7 | Briefing list is lean | Every listed skill is needed for the lane; a worker briefed with nine skills burns context before its first thought | trim |
+| E7 | Skills list is lean | Every listed skill is needed for the lane; a worker preloaded with nine skills burns context before its first thought | trim |
 | E8 | Model matches judgment | `inherit` for the default worker, `sonnet` for checklist lanes, `opus` where architecture judgment is the job | adjust |
 
 ## F. Rules

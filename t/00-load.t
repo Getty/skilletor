@@ -8,7 +8,7 @@ for (qw(
   Skilletor::AgentsMD
   Skilletor::Apply
   Skilletor::Backend
-  Skilletor::Briefing
+  Skilletor::AgentSkills
   Skilletor::Bundles
   Skilletor::Cache
   Skilletor::CLI

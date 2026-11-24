@@ -836,7 +836,7 @@ a commit hint.
 
 **Worktrees** (k124). A git worktree is a fresh checkout, so the gitignored items of the
 project scope are missing there – and a plugin that resolves skills from
-`<cwd>/.claude/skills` (briefing) fails in an agent worktree. Claude Code copies into every
+`<cwd>/.claude/skills` fails in an agent worktree. Claude Code copies into every
 worktree it creates with git (`--worktree`, subagents with `isolation: worktree`, desktop
 parallel sessions) the files that are gitignored and match `<repo>/.worktreeinclude`
 (gitignore syntax; a worktree a `WorktreeCreate` hook creates gets none). skilletor keeps a
@@ -1006,37 +1006,34 @@ both files. Config error →
 nothing is touched, clear message. Write error while applying → the sync stops with that
 error; the lock keeps what landed (§6.2), and the next sync resumes.
 
-### 6.7 Briefing check for agents (#56)
+### 6.7 Skills check for agents (#56)
 
-An agent may declare skills for the briefing plugin (`briefing: { skills: [...] }` in its
-frontmatter; for Codex the comment line of §14.7). An agent installed without those skills
-fails at spawn time. After a sync, skilletor checks every agent it has installed, per
-target, and warns about declared skills that would not resolve:
+A Claude agent lists the skills Claude Code preloads for it in the top-level `skills:` of its
+frontmatter (a block or inline list); Claude Code skips a name it cannot find without a word.
+After a sync, skilletor checks every Claude agent it has installed and warns about declared
+skills that would not resolve. A Codex role file carries no skills (§14.7), so Codex agents
+are not checked.
 
 - Names with a plugin namespace (`plugin:skill`) are not checked – they belong to a
   plugin, not to skilletor.
-- A bare name resolves when `<root>/<name>/SKILL.md` exists in a root the harness's
-  briefing lookup searches from where the agent is used, whether skilletor or someone else
-  put it there. **Claude:** project agent → `<project>/.claude/skills`, `~/.claude/skills`;
-  user agent → `~/.claude/skills` only (a project skill does not follow a user agent into
-  other projects); both also accept Claude plugin caches
-  (`~/.claude/plugins/cache/*/skills/<name>`, `…/cache/*/*/skills/<name>`). **Codex:**
-  project agent → `<project>/.agents/skills`, `<project>/.codex/skills`,
-  `$CODEX_HOME/skills`, `~/.agents/skills`; user agent → `$CODEX_HOME/skills`,
-  `~/.agents/skills`.
-- The warning names the agent, the target and the missing skills, one line per agent and
-  target, with the hint on the same line: `agent reviewer (codex): briefing skills not
-  installed: perl-core — install them, or ship the agent and its skills together as a
-  bundle`. A name that is not a single path segment (contains `/` or `\`, or is `.`/`..`)
-  is never looked up and counts as missing.
+- A bare name resolves when `<root>/<name>/SKILL.md` exists in a root Claude Code searches
+  from where the agent is used, whether skilletor or someone else put it there: project agent
+  → `<project>/.claude/skills`, `~/.claude/skills`; user agent → `~/.claude/skills` only (a
+  project skill does not follow a user agent into other projects); both also accept Claude
+  plugin caches (`~/.claude/plugins/cache/*/skills/<name>`, `…/cache/*/*/skills/<name>`).
+- The warning names the agent, the target and the missing skills, one line per agent, with
+  the hint on the same line: `agent reviewer (claude): skills not installed: perl-core —
+  install them, or ship the agent and its skills together as a bundle`. A name that is not a
+  single path segment (contains `/` or `\`, or is `.`/`..`) is never looked up and counts as
+  missing.
 - It goes into the sync report's warnings like any other (§8), so `skilletor sync` shows it
-  every time it holds (`briefingMissing` per scope in `sync --json`). Hook output (both
+  every time it holds (`skillsMissing` per scope in `sync --json`). Hook output (both
   hooks) carries it only in runs that changed something, to avoid repeating it every
   session; `status` shows it too (per agent,
-  `briefingMissing` in `--json`), read-only from disk.
-- The check reads the installed files (frontmatter of the Claude agent, the comment line
-  of the Codex TOML); it never renders. A file it cannot parse is skipped silently – the
-  conversion or render warning already covers it.
+  `skillsMissing` in `--json`), read-only from disk.
+- The check reads the installed files (the frontmatter of the Claude agent); it never
+  renders. A file it cannot parse is skipped silently – the conversion or render warning
+  already covers it.
 
 ### 6.8 Plugin requirement in the project's `.claude/settings.json` (k140)
 
@@ -1050,7 +1047,7 @@ therefore keeps two things in that file:
 
 1. `enabledPlugins["skilletor@<m>"]: true`, `<m>` the marketplace skilletor is installed from;
 2. `extraKnownMarketplaces[<n>]` for every marketplace `<n>` an `enabledPlugins` entry of the
-   file needs (`briefing@getty` as well as `skilletor@getty`) and the file does not declare.
+   file needs (`skilletor@getty`, say) and the file does not declare.
 
 - **When.** Project scope only, while the project has a committed `skilletor.json` (a
   `skilletor.local.json` alone is this machine's and gitignored), `claude` is a target of the
@@ -1324,8 +1321,8 @@ error and a removal put nothing there for Hermes to hide. The hook's limit is
 plugin 25 s (Hermes abandons a callback at 30 s), so the 20 s deadline keeps every kill out of a
 write. Claude Code's `UserPromptSubmit` notices no move: `CwdChanged` and `PostToolUse` do.
 
-Where a session "works" is the harness' session cwd – where its skill lookup and briefing
-resolve – not the directory of each command it runs.
+Where a session "works" is the harness' session cwd – where its skill lookup
+resolves – not the directory of each command it runs.
 
 - With no change and no source awaiting trust, the plugin is silent.
 - With a change: one `systemMessage` line for the user, a terse `additionalContext` for
@@ -1388,7 +1385,7 @@ src/agentsmd.ts                 # Codex rules file and AGENTS.md pointer (§14.8
 src/engine.ts                   # the pipeline (§6.1), wiring everything
 src/apply.ts                    # diff, write atomically, clean up
 src/gitignore.ts                # managed .gitignore blocks (§6.4)
-src/briefing.ts                 # briefing check for installed agents (§6.7)
+src/agent-skills.ts             # skills check for installed agents (§6.7)
 src/lock.ts  src/state.ts       # lock; trust, last-check, pending-report, mutex
 src/hooks.ts  src/report.ts  src/fsutil.ts  src/gitenv.ts
 hermes/skilletor/               # native Hermes Agent plugin: plugin.yaml, __init__.py (§16.4)
@@ -1692,7 +1689,7 @@ Claude-only output is unchanged. Codex items appear under their lock key (`codex
 in the text report, and the hook context marks them `(codex)` with the activation hint
 "active from the next Codex session". Measured on Codex 0.153.4 (k149): a skill written
 during a session – by a `UserPromptSubmit` that synced a checkout the session moved into – is
-on disk in time for that turn's `SubagentStart`, where briefing reads it, but Codex itself
+on disk in time for that turn's `SubagentStart`, but Codex itself
 lists it only from the next session. `status` lists each declared item
 once per target and names the targets in the scope header when they are not just `claude`;
 `status --json` carries `targets` per scope.
@@ -1721,7 +1718,7 @@ once per target and names the targets in the scope header when they are not just
 - Config, lock and state stay under `.claude/` (`~/.claude/skilletor.json`,
   `<repo>/.claude/skilletor.json`) for both harnesses, even on a Codex-only machine.
 - `CLAUDE_CONFIG_DIR` (k145) is the user scope's `.claude`, as it is Claude Code's: the user config, the
-  lock, the Claude roots, the state dir (`<dir>/skilletor`), the briefing lookup's skills and plugin
+  lock, the Claude roots, the state dir (`<dir>/skilletor`), the agent skills lookup and plugin
   cache, Claude Code's plugin state (§6.8) and its detection markers (`<dir>/.claude.json`,
   `settings.json`, `projects`) all lie under it; an empty value is unset. The project scope is
   unaffected. Codex and Hermes homes have their own variables.
@@ -1756,17 +1753,10 @@ Markdown (`agents/<name>.md[.njk]`) **for the `codex` harness** – so a templat
   and nothing is reported for them: there is no faithful mapping, and a silent guess
   (`model: sonnet` → some Codex model) would be worse than none. Put Codex values under
   `codex:` instead, e.g. `codex: { model_reasoning_effort: high, sandbox_mode: read-only }`.
-- **`briefing.skills` becomes a comment line** (#52). Codex deserializes agent-role files
-  strictly: any unknown key – a `[briefing]` table included – makes it ignore the whole role
-  (measured on Codex 0.153.4). The briefing plugin (0.3.1+) therefore reads a comment:
-  `# briefing: skills = ["a", "b"]`, placed among the top-level keys directly before
-  `developer_instructions`, never inside a multi-line string. Items are written as
-  double-quoted TOML strings. A skill name that is not a non-empty string, or that
-  contains `"`, `\`, `]` or a control character (TOML forbids them in comments), is a
-  conversion error (see below), and so is a `skills` that is not a list. An empty
-  `skills` list or a `briefing` without `skills` writes no line. A `briefing` key under
-  `codex:` is a conversion error too – passed through it would become the very table that
-  makes Codex drop the role.
+- **`skills:` stays on the Claude side.** Codex deserializes agent-role files strictly: any
+  unknown key makes it ignore the whole role (measured on Codex 0.153.4), and the role file
+  has no field for skills. The top-level `skills:` list is therefore not converted, like
+  every Claude-only key; it is neither written nor checked for the Codex copy.
 - **Empty body = skipped for Codex** (§5 per target): Codex rejects a blank
   `developer_instructions`, so an agent whose body is whitespace-only after the frontmatter
   is skipped for Codex – template or not – and a copy installed earlier is removed.

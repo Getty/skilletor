@@ -3,13 +3,12 @@ name: skilletor-skill-author
 description: "Write, rework, shrink or merge skills, agents, rules and skilletor source items (SKILL.md, .njk templates, snippets) — for this repo's .claude/ set, the bundled skilletor skill, or a skilletor source checkout. Takes routed fixes from skilletor-skill-auditor scorecards. Use for authoring or editing any SKILL.md, agent or rule; not for TypeScript changes (skilletor-worker)."
 model: inherit
 tools: Read, Edit, Write, Bash, Glob, Grep, Agent
-briefing:
-  skills:
-    - skill-authoring
-    - skill-compressor
-    - getty-skill-library
-    - skill-assessment
-    - kanban-issues-karr-ticket
+skills:
+  - skill-authoring
+  - skill-compressor
+  - getty-skill-library
+  - skill-assessment
+  - kanban-issues-karr-ticket
 ---
 
 You are the skilletor-skill-author for **skilletor**.

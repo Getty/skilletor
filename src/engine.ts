@@ -38,7 +38,7 @@ import {
   blockEntries, CODEX_ENTRIES, gitTracked, hasBlock, isGitWorkTree, LOCAL_ENTRIES, PROJECT_CLAUDE_ENTRIES, SKILL_GITIGNORE,
   skillGitignorePath, updateGitignore, updateWorktreeInclude, withSkillGitignore, WORKTREE_INCLUDE,
 } from "./gitignore.ts";
-import { briefingWarning, missingSkills, skillRoots, type BriefingMissing } from "./briefing.ts";
+import { skillsWarning, missingSkills, skillRoots, type SkillsMissing } from "./agent-skills.ts";
 import { planClaudeSettings, type SettingsPlan } from "./claudesettings.ts";
 import {
   emptyScopeReport, keyToTypeName, type ItemChange, type ScopeReport, type SyncReport, type TrustRequest,
@@ -1137,10 +1137,10 @@ async function syncScopeRun(
     rep.warnings.push(`${shown(l).path} is a symbolic link: files of ${l.key} behind it left in place (never deleted through a link)`);
   }
 
-  // Briefing check (spec §6.7): every agent the lock holds now, from its installed file.
-  const briefing = briefingOf(ctx, scope, finalLock);
-  for (const b of briefing) rep.warnings.push(briefingWarning(parseLockKey(b.key).name, b.harness, b.missing));
-  if (briefing.length) rep.briefingMissing = briefing;
+  // Skills check (spec §6.7): every agent the lock holds now, from its installed file.
+  const skills = skillsOf(ctx, scope, finalLock);
+  for (const b of skills) rep.warnings.push(skillsWarning(parseLockKey(b.key).name, b.harness, b.missing));
+  if (skills.length) rep.skillsMissing = skills;
 
   // What this sync left in place although every source it needed was read – an item its
   // source lacks, a lasting conflict, a template error, a wildcard matching nothing – is not
@@ -1316,21 +1316,21 @@ function shellWord(s: string): string {
   return /^[\w./@%+=:,-]+$/.test(s) ? s : `'${s.replace(/'/g, "'\\''")}'`;
 }
 
-/** Installed agents of a scope's lock whose declared briefing skills do not resolve
+/** Installed Claude agents of a scope's lock whose declared `skills:` do not resolve
  *  (spec §6.7). Reads only the disk; a file that cannot be parsed is skipped. */
-function briefingOf(ctx: EngineContext, scope: ScopeName, lock: Lock, only?: Set<string>): BriefingMissing[] {
+function skillsOf(ctx: EngineContext, scope: ScopeName, lock: Lock, only?: Set<string>): SkillsMissing[] {
   const rc = rootContextOf(ctx, scope);
-  const roots = { home: ctx.home, claudeConfigDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), codexHome: codexHomeOf(ctx), projectDir: scope === "project" ? ctx.projectDir : undefined };
-  const rootsOf = new Map<Harness, string[]>();
-  const out: BriefingMissing[] = [];
+  const roots = { home: ctx.home, claudeConfigDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), projectDir: scope === "project" ? ctx.projectDir : undefined };
+  let skillDirs: string[] | undefined;
+  const out: SkillsMissing[] = [];
   for (const [key, entry] of Object.entries(lock)) {
     const k = parseLockKey(key);
-    if (!k.harness || k.type !== "agent" || entry.skipped || entry.block || (only && !only.has(key))) continue;
+    if (k.harness !== "claude" || k.type !== "agent" || entry.skipped || entry.block || (only && !only.has(key))) continue;
     const root = rootOfKey(rc, key);
     const file = Object.keys(entry.files)[0];
     if (!root || !file) continue;
-    if (!rootsOf.has(k.harness)) rootsOf.set(k.harness, skillRoots(k.harness, scope, roots));
-    const missing = missingSkills(k.harness, join(root, file), rootsOf.get(k.harness)!);
+    skillDirs ??= skillRoots(scope, roots);
+    const missing = missingSkills(join(root, file), skillDirs);
     if (missing?.length) out.push({ key, harness: k.harness, missing });
   }
   return out;
@@ -1860,10 +1860,10 @@ export interface StatusReport {
     /** The harnesses this scope installs for (spec §14.1). */
     targets: Harness[];
     /** `via` names the wildcard entry or bundle (`bundle:perl@shared`) an item was installed through. */
-    /** `briefingMissing`: an installed agent's declared briefing skills that do not resolve (spec §6.7). */
+    /** `skillsMissing`: an installed agent's declared skills that do not resolve (spec §6.7). */
     /** `partial`: the last sync stopped midway through the item (spec §6.2, k71). */
     declared: {
-      key: string; source: string; installed: boolean; via?: string; skipped?: SkipReason; briefingMissing?: string[];
+      key: string; source: string; installed: boolean; via?: string; skipped?: SkipReason; skillsMissing?: string[];
       partial?: true;
     }[];
     orphans: string[];
@@ -1944,8 +1944,8 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
       for (const c of covering) via.set(c, (via.get(c) ?? new Set()).add(k.target));
     }
     const installed = new Set(declared.filter((d) => d.installed).map((d) => d.key));
-    const missing = new Map(briefingOf(ctx, scope, lock, installed).map((b) => [b.key, b.missing]));
-    for (const d of declared) if (missing.has(d.key)) d.briefingMissing = missing.get(d.key);
+    const missing = new Map(skillsOf(ctx, scope, lock, installed).map((b) => [b.key, b.missing]));
+    for (const d of declared) if (missing.has(d.key)) d.skillsMissing = missing.get(d.key);
     out.scopes.push({
       scope,
       targets: active,

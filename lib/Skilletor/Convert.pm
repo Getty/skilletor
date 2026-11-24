@@ -72,29 +72,6 @@ sub _json {
   return js_stringify( is_yaml_float($v) ? js_ordered( value => $v->value ) : $v );
 }
 
-# A briefing skill name the comment line cannot carry: `"`, `\`, `]`, or any control character
-# (line breaks included; TOML allows none but tab in a comment).
-my $BAD_SKILL_CHAR = qr/["\\\]\x00-\x1F\x7F]/;
-
-# briefing.skills as the comment line the briefing plugin reads for Codex (spec §14.7): Codex
-# drops a role with any unknown key, so a [briefing] table is not an option. Undef when there
-# is nothing to declare.
-sub _briefing_comment {
-  my ( $briefing ) = @_;
-  return undef unless _is_mapping($briefing) && exists $briefing->{skills};
-  my $skills = $briefing->{skills};
-  _fail('briefing.skills must be a list of skill names') unless js_type($skills) eq 'array';
-  return undef unless @$skills;
-  my $i = 0;
-  for my $s (@$skills) {
-    $i++;
-    next if js_type($s) eq 'string' && $s ne '' && $s !~ $BAD_SKILL_CHAR;
-    _fail( 'briefing.skills item '.$i.' ('._json($s).') must be a non-empty string '
-        .'without a double quote, backslash, ] or line break' );
-  }
-  return '# briefing: skills = ['.join( ', ', map { '"'.$_.'"' } @$skills )."]\n";
-}
-
 sub codex_agent_toml {
   my ( $markdown, $item_name ) = @_;
   my $fm = _split($markdown);
@@ -108,8 +85,6 @@ sub codex_agent_toml {
   );
   my $tables = js_ordered();
 
-  my $briefing = _briefing_comment( $data->{briefing} );
-
   my $instructions = $body;
   my $codex        = $data->{codex};
   if ( exists $data->{codex} && !_is_mapping($codex) ) {
@@ -118,10 +93,6 @@ sub codex_agent_toml {
   elsif ( _is_mapping($codex) ) {
     for my $key ( keys %$codex ) {
       my $v = $codex->{$key};
-      if ( $key eq 'briefing' ) {
-        _fail( 'codex.briefing: would become a [briefing] table, and Codex ignores a role with one; '
-            .'declare skills in the top-level briefing.skills' );
-      }
       if ( _is_mapping($v) && ( exists $top->{$key} || $key eq 'developer_instructions' || exists $tables->{$key} ) ) {
         push @warnings, "codex.$key: a table cannot replace the $key key; dropped";
         next;
@@ -150,11 +121,10 @@ sub codex_agent_toml {
   _fail('developer_instructions must be a string') unless js_type($instructions) eq 'string';
   return { warnings => \@warnings } if js_trim($instructions) eq '';
 
-  # $top holds no tables, so its keys come out first; the briefing line sits between them and
-  # developer_instructions, never inside the multi-line string.
+  # $top holds no tables, so its keys come out first.
   my $rest = js_ordered( developer_instructions => $instructions );
   $rest->{$_} = $tables->{$_} for keys %$tables;
-  my $text = stringify_toml($top).( $briefing // '' ).stringify_toml( $rest, { multiline => ['developer_instructions'] } );
+  my $text = stringify_toml($top).stringify_toml( $rest, { multiline => ['developer_instructions'] } );
   return { toml => $text, warnings => \@warnings };
 }
 
@@ -227,10 +197,8 @@ A Claude agent becomes a Codex agent role: C<name> (else the item's name),
 C<description> and the body as C<developer_instructions>, a multi-line string.
 A C<codex:> mapping in the frontmatter passes its scalars, string lists and one
 level of tables through and overrides the derived keys; a value outside those
-shapes is dropped with one warning. C<briefing.skills> becomes the comment line
-C<# briefing: skills = [...]> the briefing plugin reads, right before
-C<developer_instructions>. Claude-only keys (C<tools>, C<model>, …) are not
-carried.
+shapes is dropped with one warning. Claude-only keys (C<tools>, C<model>,
+C<skills>, …) are not carried.
 
 A rule becomes its section of the Codex rules file: the body without
 frontmatter, led by an "Applies when working with files matching: …" line for

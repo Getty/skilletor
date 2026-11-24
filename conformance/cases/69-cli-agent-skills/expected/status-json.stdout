@@ -1,0 +1,27 @@
+{
+  "scopes": [
+    {
+      "scope": "user",
+      "targets": [
+        "claude"
+      ],
+      "declared": [
+        {
+          "key": "agents/rev",
+          "source": "shared",
+          "installed": true,
+          "skillsMissing": [
+            "gone"
+          ]
+        }
+      ],
+      "orphans": [],
+      "wildcards": [],
+      "bundles": [],
+      "trustRequests": [],
+      "sourceVersions": {
+        "shared": "git:df1f1b1"
+      }
+    }
+  ]
+}

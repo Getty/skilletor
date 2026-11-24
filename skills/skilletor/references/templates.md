@@ -44,15 +44,13 @@ a var printed inside the gate (`k8s_context`) needs a default in the source's `s
 ## Tags inside frontmatter: `{%-`
 
 Nunjucks runs without trimBlocks, so a tag on its own line leaves a blank line — and
-briefing's parser stops at the first blank line in a `briefing:` block, silently dropping
-every skill after it. Open each tag with `{%-` (left side only; `-%}` also eats the next
+a blank line inside a `skills:` list can drop the skills after it. Open each tag with `{%-` (left side only; `-%}` also eats the next
 newline and merges the lines):
 
 ```njk
-briefing:
-  skills:
-    - code-review
-    {%- if vars.perl %}
-    - perl-style
-    {%- endif %}
+skills:
+  - code-review
+  {%- if vars.perl %}
+  - perl-style
+  {%- endif %}
 ```

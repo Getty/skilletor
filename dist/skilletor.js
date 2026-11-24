@@ -7870,20 +7870,6 @@ function asText(v) {
   if (v === void 0 || v === null || typeof v === "object") return void 0;
   return String(v);
 }
-var BAD_SKILL_CHAR = /["\\\]\u0000-\u001f\u007f]/;
-function briefingComment(briefing) {
-  if (!isMapping(briefing) || briefing.skills === void 0) return void 0;
-  const skills = briefing.skills;
-  if (!Array.isArray(skills)) throw new ConvertError("briefing.skills must be a list of skill names");
-  if (skills.length === 0) return void 0;
-  skills.forEach((s, i) => {
-    if (typeof s !== "string" || s === "" || BAD_SKILL_CHAR.test(s)) {
-      throw new ConvertError(`briefing.skills item ${i + 1} (${JSON.stringify(s)}) must be a non-empty string without a double quote, backslash, ] or line break`);
-    }
-  });
-  return `# briefing: skills = [${skills.map((s) => `"${s}"`).join(", ")}]
-`;
-}
 function codexAgentToml(markdown, itemName2) {
   let fm;
   try {
@@ -7899,16 +7885,12 @@ function codexAgentToml(markdown, itemName2) {
     description: asText(data.description) ?? ""
   };
   const tables = {};
-  const briefing = briefingComment(data.briefing);
   let instructions = body;
   const codex = data.codex;
   if (codex !== void 0 && !isMapping(codex)) {
     warnings.push("codex: must be a mapping; ignored");
   } else if (codex) {
     for (const [key, v] of Object.entries(codex)) {
-      if (key === "briefing") {
-        throw new ConvertError("codex.briefing: would become a [briefing] table, and Codex ignores a role with one; declare skills in the top-level briefing.skills");
-      }
       if (isMapping(v) && (Object.hasOwn(top, key) || key === "developer_instructions" || Object.hasOwn(tables, key))) {
         warnings.push(`codex.${key}: a table cannot replace the ${key} key; dropped`);
         continue;
@@ -7943,7 +7925,7 @@ function codexAgentToml(markdown, itemName2) {
   if (typeof instructions !== "string") throw new ConvertError("developer_instructions must be a string");
   if (instructions.trim() === "") return { warnings };
   const rest = { developer_instructions: instructions, ...tables };
-  const text2 = stringifyToml(top) + (briefing ?? "") + stringifyToml(rest, { multiline: ["developer_instructions"] });
+  const text2 = stringifyToml(top) + stringifyToml(rest, { multiline: ["developer_instructions"] });
   return { toml: text2, warnings };
 }
 function codexRuleSection(markdown, itemName2) {
@@ -9728,37 +9710,21 @@ function touch(path) {
   }
 }
 
-// src/briefing.ts
+// src/agent-skills.ts
 import { existsSync as existsSync10, readdirSync as readdirSync7, readFileSync as readFileSync11 } from "node:fs";
 import { join as join13 } from "node:path";
-var COMMENT = /^[ \t]*#[ \t]*briefing:[ \t]*skills[ \t]*=[ \t]*\[([^\]\r\n]*)\]/;
-function declaredSkills(harness, text2) {
-  if (harness === "codex") {
-    for (const line of text2.split("\n")) {
-      if (/^developer_instructions[ \t]*=/.test(line)) break;
-      const m = COMMENT.exec(line);
-      if (m) return [...m[1].matchAll(/"([^"]*)"|'([^']*)'/g)].map((x) => x[1] ?? x[2]);
-    }
-    return [];
-  }
+function declaredSkills(text2) {
   let data;
   try {
     data = splitFrontmatter(text2).data;
   } catch {
     return void 0;
   }
-  const briefing = data.briefing;
-  if (briefing === null || typeof briefing !== "object" || Array.isArray(briefing)) return [];
-  const skills = briefing.skills;
+  const skills = data.skills;
   return Array.isArray(skills) ? skills.filter((s) => typeof s === "string" && s !== "") : [];
 }
-function skillRoots(harness, scope, r) {
+function skillRoots(scope, r) {
   const project = scope === "project" && r.projectDir ? r.projectDir : void 0;
-  if (harness === "codex") {
-    const codexHome = r.codexHome || join13(r.home, ".codex");
-    const user2 = [join13(codexHome, "skills"), join13(r.home, ".agents", "skills")];
-    return project ? [join13(project, ".agents", "skills"), join13(project, ".codex", "skills"), ...user2] : user2;
-  }
   const claudeDir2 = claudeConfigDirOf(r.home, r.claudeConfigDir);
   const user = join13(claudeDir2, "skills");
   return [...project ? [join13(project, ".claude", "skills")] : [], user, ...pluginCacheRoots(claudeDir2)];
@@ -9779,14 +9745,14 @@ function subdirs(dir) {
     return [];
   }
 }
-function missingSkills(harness, file, roots) {
+function missingSkills(file, roots) {
   let text2;
   try {
     text2 = readFileSync11(file, "utf8");
   } catch {
     return void 0;
   }
-  const declared = declaredSkills(harness, text2);
+  const declared = declaredSkills(text2);
   if (declared === void 0) return void 0;
   const missing = [];
   for (const name of declared) {
@@ -9796,8 +9762,8 @@ function missingSkills(harness, file, roots) {
   }
   return missing;
 }
-function briefingWarning(name, harness, missing) {
-  return `agent ${name} (${harness}): briefing skills not installed: ${missing.join(", ")} \u2014 install them, or ship the agent and its skills together as a bundle`;
+function skillsWarning(name, harness, missing) {
+  return `agent ${name} (${harness}): skills not installed: ${missing.join(", ")} \u2014 install them, or ship the agent and its skills together as a bundle`;
 }
 
 // src/claudesettings.ts
@@ -10033,12 +9999,12 @@ function withoutRepeats(r) {
     ...r,
     scopes: r.scopes.map((s) => {
       const settings = s.settingsUpdated ? [] : s.settingsSkipped ?? [];
-      if (!s.briefingMissing?.length && !settings.length) return s;
+      if (!s.skillsMissing?.length && !settings.length) return s;
       const lines = /* @__PURE__ */ new Set([
-        ...(s.briefingMissing ?? []).map((b) => briefingWarning(parseLockKey(b.key).name, b.harness, b.missing)),
+        ...(s.skillsMissing ?? []).map((b) => skillsWarning(parseLockKey(b.key).name, b.harness, b.missing)),
         ...settings
       ]);
-      const { briefingMissing: _, ...rest } = s;
+      const { skillsMissing: _, ...rest } = s;
       return { ...rest, warnings: s.warnings.filter((w) => !lines.has(w)) };
     })
   };
@@ -10779,9 +10745,9 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   for (const l of result.leftInPlace) {
     rep.warnings.push(`${shown(l).path} is a symbolic link: files of ${l.key} behind it left in place (never deleted through a link)`);
   }
-  const briefing = briefingOf(ctx, scope, finalLock);
-  for (const b of briefing) rep.warnings.push(briefingWarning(parseLockKey(b.key).name, b.harness, b.missing));
-  if (briefing.length) rep.briefingMissing = briefing;
+  const skills = skillsOf(ctx, scope, finalLock);
+  for (const b of skills) rep.warnings.push(skillsWarning(parseLockKey(b.key).name, b.harness, b.missing));
+  if (skills.length) rep.skillsMissing = skills;
   const reachable = (name) => Boolean(resolved.get(name)) && catalogs.get(name) !== null;
   const served = new Map(expansions.map((x) => [x.label, x.foreign.flatMap((f) => f.served ? [f.served] : [])]));
   state.putUnreached(lockPath, scopeDrift(ctx, config, scope, harnesses, finalLock, served).filter((d) => d.sources.every(reachable)).map((d) => d.id));
@@ -10894,19 +10860,19 @@ function shellWord(s) {
   if (s.startsWith("~/")) return "~/" + shellWord(s.slice(2));
   return /^[\w./@%+=:,-]+$/.test(s) ? s : `'${s.replace(/'/g, "'\\''")}'`;
 }
-function briefingOf(ctx, scope, lock, only) {
+function skillsOf(ctx, scope, lock, only) {
   const rc = rootContextOf(ctx, scope);
-  const roots = { home: ctx.home, claudeConfigDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), codexHome: codexHomeOf(ctx), projectDir: scope === "project" ? ctx.projectDir : void 0 };
-  const rootsOf = /* @__PURE__ */ new Map();
+  const roots = { home: ctx.home, claudeConfigDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), projectDir: scope === "project" ? ctx.projectDir : void 0 };
+  let skillDirs;
   const out = [];
   for (const [key, entry] of Object.entries(lock)) {
     const k = parseLockKey(key);
-    if (!k.harness || k.type !== "agent" || entry.skipped || entry.block || only && !only.has(key)) continue;
+    if (k.harness !== "claude" || k.type !== "agent" || entry.skipped || entry.block || only && !only.has(key)) continue;
     const root = rootOfKey(rc, key);
     const file = Object.keys(entry.files)[0];
     if (!root || !file) continue;
-    if (!rootsOf.has(k.harness)) rootsOf.set(k.harness, skillRoots(k.harness, scope, roots));
-    const missing = missingSkills(k.harness, join15(root, file), rootsOf.get(k.harness));
+    skillDirs ??= skillRoots(scope, roots);
+    const missing = missingSkills(join15(root, file), skillDirs);
     if (missing?.length) out.push({ key, harness: k.harness, missing });
   }
   return out;
@@ -11258,8 +11224,8 @@ function status(given, opts = {}) {
       for (const c of covering2) via.set(c, (via.get(c) ?? /* @__PURE__ */ new Set()).add(k.target));
     }
     const installed = new Set(declared.filter((d) => d.installed).map((d) => d.key));
-    const missing = new Map(briefingOf(ctx, scope, lock, installed).map((b) => [b.key, b.missing]));
-    for (const d of declared) if (missing.has(d.key)) d.briefingMissing = missing.get(d.key);
+    const missing = new Map(skillsOf(ctx, scope, lock, installed).map((b) => [b.key, b.missing]));
+    for (const d of declared) if (missing.has(d.key)) d.skillsMissing = missing.get(d.key);
     out.scopes.push({
       scope,
       targets: active,
@@ -12271,7 +12237,7 @@ function statusText(report) {
     lines.push(claudeOnly ? `${s.scope} scope:` : `${s.scope} scope (${s.targets.join(", ") || "no targets"}):`);
     for (const d of s.declared) {
       const mark = d.installed ? "\u2713" : d.skipped ? "-" : "\xB7";
-      const note = (d.skipped ? " (skipped: renders empty)" : "") + (d.partial ? " (partial: the last sync stopped midway)" : "") + (d.briefingMissing ? ` (briefing skills not installed: ${d.briefingMissing.join(", ")})` : "");
+      const note = (d.skipped ? " (skipped: renders empty)" : "") + (d.partial ? " (partial: the last sync stopped midway)" : "") + (d.skillsMissing ? ` (skills not installed: ${d.skillsMissing.join(", ")})` : "");
       lines.push(`  ${mark} ${d.key} @${d.source}${d.via ? ` via ${d.via}` : ""}${note}`);
     }
     for (const w of s.wildcards) {

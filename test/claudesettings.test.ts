@@ -224,7 +224,7 @@ test("k140: an existing settings.json keeps its keys, order and indent; only mis
     e.writeCfg("project", {});
     const start = {
       permissions: { allow: ["Bash(npm test)"] },
-      enabledPlugins: { "briefing@getty": true, "superpowers@claude-plugins-official": true, "caveman@caveman": true, "x@other": true },
+      enabledPlugins: { "notes@getty": true, "superpowers@claude-plugins-official": true, "caveman@caveman": true, "x@other": true },
       extraKnownMarketplaces: { other: { source: { source: "github", repo: "mine/other" } } },
       model: "opus",
     };
@@ -276,10 +276,10 @@ test("k140: a directory-sourced or unknown marketplace is not written, and the r
     e.plugins({ "getty-dev": { source: "directory", path: "/home/me/dev-marketplace" }, getty: GETTY,
       local: { source: "git", url: "/srv/git/market" } }, [["getty-dev", "user"]]);
     e.writeCfg("project", {});
-    writeFileSync(e.settings, json({ enabledPlugins: { "briefing@getty": true, "irc@getty-dev": true, "a@local": true, "b@nowhere": true } }));
+    writeFileSync(e.settings, json({ enabledPlugins: { "notes@getty": true, "irc@getty-dev": true, "a@local": true, "b@nowhere": true } }));
     const r = await sync(e.ctx);
     const got = JSON.parse(readFileSync(e.settings, "utf8"));
-    assert.deepEqual(Object.keys(got.enabledPlugins), ["briefing@getty", "irc@getty-dev", "a@local", "b@nowhere"]);
+    assert.deepEqual(Object.keys(got.enabledPlugins), ["notes@getty", "irc@getty-dev", "a@local", "b@nowhere"]);
     assert.deepEqual(got.extraKnownMarketplaces, { getty: { source: GETTY } });
     const w = projectOf(r).warnings;
     assert.ok(w.some((l) => l.startsWith(`skilletor's marketplace "getty-dev" has a directory source on this machine; .claude/settings.json does not get skilletor@getty-dev`)), w.join("\n"));
@@ -379,7 +379,7 @@ test("k140: the user scope's settings.json is never touched", async () => {
     const userSettings = join(e.home, ".claude", "settings.json");
     await sync({ ...e.ctx, projectDir: undefined });
     assert.equal(existsSync(userSettings), false);
-    const text = json({ enabledPlugins: { "briefing@getty": true } });
+    const text = json({ enabledPlugins: { "notes@getty": true } });
     writeFileSync(userSettings, text);
     await sync({ ...e.ctx, projectDir: e.home });
     assert.equal(readFileSync(userSettings, "utf8"), text);

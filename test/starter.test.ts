@@ -785,7 +785,7 @@ test("a refused cache is named in the line on every path, an absent one says 'no
 
 // k253: a base URL in SKILLETOR_BINARY_BASE_URL is fetched only over https://, as the release
 // prefix is. Another scheme – the http:// and file:// the cases here serve – only with
-// SKILLETOR_STARTER_TESTING=1, as briefing's starter has it (BRIEFING_STARTER_TESTING=1): the
+// SKILLETOR_STARTER_TESTING=1: the
 // pinned checksum guards the bytes, the gate keeps a real fetch off plaintext. A refused URL is
 // a download that did not happen – nothing fetches, the line says why, SessionStart backs off.
 test("SKILLETOR_BINARY_BASE_URL: https:// is fetched; http:// and file:// only with SKILLETOR_STARTER_TESTING=1, else refused with why", { skip: noBinary }, async () => {
