@@ -1,0 +1,60 @@
+---
+claimed_at: 2026-11-24T21:20:49Z
+claimed_by: ct-1124
+class: standard
+completed: 2026-11-24T21:20:49Z
+created: 2026-11-24T18:49:26Z
+id: 273
+priority: critical
+started: 2026-11-24T21:20:49Z
+status: done
+tags:
+- cpantesters
+- tests
+- bug
+title: 'CPAN Testers: fix the 22 FAIL reports of 0.008000'
+updated: 2026-11-24T21:20:56Z
+---
+
+Skilletor 0.008000 on CPAN Testers (2026-11-24): 22 FAIL, 26 PASS, 36 NA.
+
+1. Numbers on long double and quadmath perls (x86_64-linux-ld, -quadmath, amd64-freebsd-ld,
+   also armv6l and i686): t/14-toml.t "stringifyToml: the reference" (9), t/10-json.t
+   "stringify matches JSON.stringify for every oracle text" (pretty: 5e-324, 4.35, 1e-7;
+   compact: 0.2) (6), t/15-convert.t (6), t/24-resolve-oracle.t (9),
+   t/27-state-read-large.t (4). The Perl side must write numbers as JSON.stringify does,
+   whatever the NV of the perl.
+2. t/73-hooks-codex.t test 7 (6 reports: DragonFly, NetBSD, GNU/Hurd, Cygwin): "a rules file
+   that cannot be read is named in the line, escaped, in Node's words", with it "one line,
+   the name escaped" and "no context: no rules to give".
+3. t/69-hooks.t and t/68-cli.t (5 each: DragonFly, Solaris, Cygwin); DragonFly fails a row
+   of files once each (t/31, t/40, t/61, t/67, t/71, t/75, t/76, t/77), Cygwin t/16, t/17,
+   t/20, t/26, t/62; t/25-sync-lock.t on Android and GNU/Hurd.
+
+Sample reports: the NetBSD 5.40.5 and 5.44.0 reports of t/73.
+
+Done: each cause fixed with a test red before, or skipped with the reason where the
+platform cannot do it; full suite green; Changes entry for each lib fix.
+
+2026-11-24 19:01 Cause 1 (numbers) reproduced on a long-double perl (x86_64-linux-ld 5.40.1 under ~/.cache on reuben): t/10, t/14, t/15, t/24 red. js_number compares sprintf('%.*e') read back as NV with the double; on a wider NV the read-back is a long double, so no shorter digit count matches and 17 digits come out; 1e999 is finite there. t/27 is a different cause: 3 of 4 reports are -DDEBUGGING perls, reproduced with Debian's debugperl in a container: sources_read on 300 KB takes 41.8 s (plain perl 0.47 s), so the parse is superlinear under DEBUGGING; armv6l is slow hardware (suite 48x slower).
+
+2026-11-24 19:09 t/27 cause: perl's intrpvar.h sets PL_utf8cache to -1 under DEBUGGING (or PERL_UTF8_CACHE_ASSERT), so every UTF-8 char/byte offset lookup is verified by a linear scan from the start; any walk by offset over a flagged text is quadratic there by design (debugperl: 30 records 0.96 s, 60 records 3.79 s; the same text downgraded to bytes 0.10/0.15 s). Not a lib bug; armv6l is slow but linear. Plan: t/27 measures with ${^UTF8CACHE} = 1 and against the same text as bytes on the same machine instead of an absolute 3 s; own commit.
+
+2026-11-24 20:30 Commits on branch ct-1124 (one per cause, each red before, see below):
+- 049479c cause 1, lib: JSON.pm js_to_number (POSIX::strtod, a C double on every build incl. quadmath, fed digits+exponent without radix so LC_NUMERIC cannot bite) and js_double; js_number writes from the double; Frontmatter floats and TOML numbers go through them. t/18-numbers.t red on the ld perl before (midpoint decimals, 1e999, shortest digits), comma-locale subtest. Decision: two new public functions in Skilletor::JSON (POD'd), no conformance change, TS untouched.
+- a8f50d8 cause 2, lib: Hooks _read_rules answers EISDIR for a directory before reading; NetBSD/DragonFly/Hurd read(2) a directory's entries. t/83 simulates that read; red before.
+- baf86e9 DragonFly row: git is not on PATH there. SkilletorTest needs_git skips the test/subtest without git (every git helper asks it); test server stop keeps the exit status (t/31 exited 15). Red/green shown with a PATH without git.
+- 8fb3743 t/16: Cygwin adds SYSTEMROOT+WINDIR, the Hurd LD_ORIGIN_PATH to every child; filtered for those OS only.
+- 96500a1 Cygwin t/17 t/20 t/26 t/62 t/73: modes_ignored probes whether mode 0 / 0555 keeps this user out on this file system; skip only where it does not (probe verified as userns root).
+- a048537 t/24 darwin+Cygwin: case-insensitive FS cannot hold the case twins of layout/claude-layout; probe as test/helpers/tmp.ts does, only those trees skip.
+- e66ce63 t/25 Android+Hurd: whole-second mtimes; the refresh tests wait until the mtime moves (3 s max). Simulated with a whole-second Time::HiRes::stat: old 4/4 red, new 5/5 green.
+- 6b899da t/68+t/69 Solaris: rmdir(2) refuses the caller's own cwd (EINVAL); the cwd is removed from a subshell in /. Simulated Solaris rmdir reproduces both report failures; new green.
+- 68b655a t/69 Cygwin: Path::Tiny slurp flocks, Cygwin /proc refuses flock; plain open.
+- a940892 Cygwin t/68, lib: getcwd still names a removed cwd there; CLI and hooks treat a cwd that is no directory as gone. t/84 red before.
+- 026c97b t/14 32-bit IV: Cpanel::JSON::XS gives 16-digit integers as strings; oracle read with JSON::PP allow_bignum, each bignum through js_to_number (cpanfile test requires JSON::PP, Math::BigInt).
+- 9342a71 t/27 (DEBUGGING, armv6l): ratio against the same text as bytes with ${^UTF8CACHE}=1 instead of 3 s; pre-k196 JSON.pm red (39x) on this perl and on Debian debugperl, new green on both.
+Also found: t/25 output on both Android reports warns 'Deep recursion' in State.pm _stopped (released line 381/424): kill of the own pid re-enters the handler after $SIG{name}='DEFAULT'; the stop tests pass, not pursued. The 0.008000 Changes entry has a line over 78 columns.
+
+2026-11-24 20:50 Done on branch ct-1124 (12 commits 049479c..9342a71 on main 4017bda, main unchanged): every cause fixed; platform skips only where the platform cannot (no git on PATH, mode bits that do not keep the user out, a file system that ignores case), each behind a probe of exactly that. Verified offline: full suite on the system perl green (61 files, 2591 tests, nice -n 19 as load stayed over 6); t/50-t/53 skipped there for want of node_modules in the worktree, run green from an archive of HEAD with the main checkout's node_modules (53 tests); ld perl: earlier full suite green, the number/timing files green again at HEAD (50 tests); t/27 old/new on Debian debugperl. New tests red against main's lib: t/18 (ld perl), t/83, t/84. Changes: three lib entries (numbers, rules directory, removed cwd).
+
+2026-11-24 21:20 Merged to main (049479c..9342a71, 12 commits) and pushed. bin/smoke on main: perl 5.40, ld, quadmath and a 32-bit-IV perl PASS.
