@@ -185,6 +185,7 @@ sub _engine {
   unless ( defined $project_dir && ( $project_dir eq '' || Skilletor::FSUtil::is_absolute($project_dir) ) ) {
     require Cwd;
     my $cwd = Cwd::getcwd();
+    undef $cwd if defined $cwd && !-d $cwd;    # Cygwin's getcwd still names a removed cwd
     die "the current directory no longer exists; pass --project-dir <dir>\n" unless defined $cwd;
     $cwd = decode_utf8_lossy($cwd);
     $project_dir = defined $project_dir ? Skilletor::FSUtil::path_resolve( $cwd, $project_dir ) : project_root_of($cwd);

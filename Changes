@@ -10,6 +10,8 @@ Revision history for skilletor and Skilletor, its Perl distribution
   - A Codex rules file that is a directory is named as unreadable (EISDIR) on
     every system, also where reading a directory gives its entries; they no
     longer reach the session as rules.
+  - A removed current directory is noticed also where the system still names
+    it (Cygwin): the CLI asks for --project-dir, a hook says the cwd is gone.
 
 0.008000  2026-11-21 03:31:10Z
   - One version line in two spellings: the CPAN dist Skilletor 0.008000 is the

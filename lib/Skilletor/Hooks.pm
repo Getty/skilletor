@@ -130,6 +130,7 @@ sub _engine {
 
 sub _cwd {
   my $cwd = Cwd::getcwd();
+  undef $cwd if defined $cwd && !-d $cwd;    # Cygwin's getcwd still names a removed cwd
   die "ENOENT: process.cwd failed with error no such file or directory, uv_cwd\n" unless defined $cwd;
   return decode_utf8_lossy($cwd);
 }
