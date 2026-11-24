@@ -8,15 +8,25 @@ use lib "$FindBin::Bin/lib";
 use SkilletorTest qw( error_of );
 
 use JSON::MaybeXS ();
+use JSON::PP ();
 use Path::Tiny qw( path );
 use Scalar::Util qw( blessed reftype );
-use Skilletor::JSON qw( js_stringify js_ordered js_type );
+use Skilletor::JSON qw( js_stringify js_ordered js_to_number js_type );
 use Skilletor::TOML qw( stringify_toml toml_key toml_float is_toml_float );
 
 # t/data/toml-oracle.json is the reference's answer (maint/oracle-toml.mjs). It is read with
-# JSON::MaybeXS: js_parse needs some 20 s for its 200 KB, and the format carries a table's
-# key order itself.
-my $oracle = JSON::MaybeXS->new( utf8 => 1 )->decode( path( $FindBin::Bin, 'data', 'toml-oracle.json' )->slurp_raw );
+# JSON::PP: js_parse needs seconds for its 200 KB, and the format carries a table's key order
+# itself. Its floats, and the integers a Perl integer does not hold, come as bignums (JSON::MaybeXS
+# gives a 16-digit integer as a string on a perl with 32-bit integers); js_to_number reads each
+# as Node does.
+my $oracle = numbers( JSON::PP->new->utf8->allow_bignum->decode( path( $FindBin::Bin, 'data', 'toml-oracle.json' )->slurp_raw ) );
+
+sub numbers {
+  my ( $v ) = @_;
+  return [ map { numbers($_) } @$v ] if ref $v eq 'ARRAY';
+  return { map { ( $_ => numbers( $v->{$_} ) ) } keys %$v } if ref $v eq 'HASH';
+  return blessed $v && ( $v->isa('Math::BigInt') || $v->isa('Math::BigFloat') ) ? js_to_number("$v") : $v;
+}
 
 my $INF = 9**9**9;
 my %NON_FINITE = ( Infinity => $INF, '-Infinity' => -$INF, NaN => $INF - $INF );
@@ -28,9 +38,8 @@ sub decode_value {
   return [ map { decode_value($_) } @$v ] if ref $v && reftype $v eq 'ARRAY';
   return $v unless ref $v && reftype $v eq 'HASH' && !JSON::MaybeXS::is_bool($v);
   if ( exists $v->{'$float'} ) {
-    # A string: a non-finite float, or an integer too long for Cpanel::JSON::XS to read as a number.
     my $x = $v->{'$float'};
-    return toml_float( js_type($x) ne 'string' ? $x : $NON_FINITE{$x} // 0 + $x );
+    return toml_float( js_type($x) ne 'string' ? $x : $NON_FINITE{$x} );    # a string: a non-finite float
   }
   return $NON_FINITE{ $v->{'$number'} } if exists $v->{'$number'};
   my $t = js_ordered();

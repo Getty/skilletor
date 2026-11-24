@@ -38,6 +38,8 @@ on test => sub {
   requires 'IO::Compress::Gzip';
   requires 'IO::Socket::INET';
   requires 'IPC::Open2';
+  requires 'JSON::PP';
+  requires 'Math::BigInt';
   requires 'Test::More', '0.96';
   requires 'version', '0.77';
 };
