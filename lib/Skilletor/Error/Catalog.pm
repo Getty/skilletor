@@ -4,7 +4,7 @@ package Skilletor::Error::Catalog;
 use strict;
 use warnings;
 
-our $VERSION = '0.009000';
+our $VERSION = '0.009001';
 
 1;
 

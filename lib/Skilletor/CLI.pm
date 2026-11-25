@@ -4,7 +4,7 @@ package Skilletor::CLI;
 use strict;
 use warnings;
 
-our $VERSION = '0.009000';
+our $VERSION = '0.009001';
 
 our $NOTICE = q{skilletor's Perl port is retired: the CPAN distribution Skilletor ships only empty stubs now. Install skilletor as the plugin for Claude Code (/plugin marketplace add Getty/marketplace, then /plugin install skilletor@getty), Codex or Hermes Agent, or with install.sh for the command line: https://github.com/Getty/skilletor#install. Then remove this distribution with cpanm --uninstall Skilletor.};
 
