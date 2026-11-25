@@ -1,17 +1,29 @@
 package Skilletor::Error::Lock;
-# ABSTRACT: A scope's lock file cannot be read (the reference's LockError)
+# ABSTRACT: Retired stub, see Skilletor
 
-use Moo;
-use namespace::clean;
+use strict;
+use warnings;
 
-extends 'Skilletor::Error';
-
-our $VERSION = '0.008001';
+our $VERSION = '0.009000';
 
 1;
 
 =description
 
-Thrown by L<Skilletor::Lock> where the reference throws its C<LockError>. See L<Skilletor::Error> for the interface.
+An empty stub: skilletor's Perl port is retired. L<Skilletor> names the
+replacement.
+
+This last release of the distribution ships its modules as empty stubs, so an
+upgrade replaces the earlier library code.
+
+=seealso
+
+=over
+
+=item * L<Skilletor>
+
+=item * L<https://github.com/Getty/skilletor#install>
+
+=back
 
 =cut

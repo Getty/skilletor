@@ -1,21 +1,29 @@
 package Skilletor::Error::Block;
-# ABSTRACT: The skilletor markers in an AGENTS.md are malformed (the reference's BlockError)
+# ABSTRACT: Retired stub, see Skilletor
 
-use Moo;
-use namespace::clean;
+use strict;
+use warnings;
 
-extends 'Skilletor::Error';
-
-our $VERSION = '0.008001';
+our $VERSION = '0.009000';
 
 1;
 
 =description
 
-Thrown by L<Skilletor::AgentsMD/parse_block> where the reference throws its
-C<BlockError>: a C<< <!-- skilletor:begin --> >> or C<< <!-- skilletor:end -->
->> twice, one without the other, or the end before the begin.
-L<Skilletor::AgentsMD/inspect_agents_md> turns it into the reason a sync
-leaves the pointer alone. See L<Skilletor::Error> for the interface.
+An empty stub: skilletor's Perl port is retired. L<Skilletor> names the
+replacement.
+
+This last release of the distribution ships its modules as empty stubs, so an
+upgrade replaces the earlier library code.
+
+=seealso
+
+=over
+
+=item * L<Skilletor>
+
+=item * L<https://github.com/Getty/skilletor#install>
+
+=back
 
 =cut

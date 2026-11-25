@@ -1,8 +1,7 @@
 # The Perl dist Skilletor (lib/, script/, t/ at the root, a [@Author::GETTY] dist; dist.ini).
-# Separate from ci.yml, which builds and tests the TypeScript reference. Node is installed too:
-# t/50-parity.t drives the reference in src/ against the port; without node it would skip.
-# load-windows loads every module on Strawberry Perl (k262); workflow_dispatch runs both jobs on
-# any branch.
+# Separate from ci.yml, which builds and tests the TypeScript reference. Since the farewell
+# release the dist is stubs only: t/00-stubs.t loads every module and runs the notice, on Linux
+# and on Strawberry Perl; workflow_dispatch runs both jobs on any branch.
 name: Perl
 
 on:
@@ -24,22 +23,14 @@ jobs:
       PERL_CPANM_OPT: --mirror https://cpan.metacpan.org --mirror-only
     steps:
       - uses: actions/checkout@v6
-      - name: Fix safe.directory
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-      - run: npm ci
       - name: Install dependencies
         run: cpanm -nq --installdeps .
       - name: prove
-        run: prove -lr -j4 t
+        run: prove -lr t
 
-  # Windows, Strawberry Perl as the binaries workflow builds on it (dzil-binary.yml): the
-  # dependencies installed, then only the load tests – every module loads, also with no POSIX
-  # signal macro the C runtime lacks (k261). Not the whole suite: prove -lr t has never run on
-  # Windows. The default shell, pwsh, finds setup-perl's perl first (Git Bash would put its own
-  # ahead of it); perl -S runs cpanm and prove with that perl, as the binaries' legs do.
+  # Windows, Strawberry Perl: the same stub test. The default shell, pwsh, finds setup-perl's
+  # perl first (Git Bash would put its own ahead of it); perl -S runs cpanm and prove with that
+  # perl.
   load-windows:
     runs-on: windows-latest
     timeout-minutes: 30
@@ -53,5 +44,5 @@ jobs:
           distribution: strawberry
       - name: Install dependencies
         run: perl -S cpanm -nq --installdeps .
-      - name: prove (load tests)
-        run: perl -S prove -l t/00-load.t t/03-load-win32-signals.t
+      - name: prove
+        run: perl -S prove -lr t

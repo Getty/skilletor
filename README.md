@@ -21,8 +21,7 @@ Hermes Agent, and as a `skilletor` command for your shell.
 
 ## Install
 
-On the machine it needs `git` and Node.js ≥ 18, or Perl ≥ 5.40 with a few CPAN modules
-([Requirements](#requirements)). What is released and what is tested where:
+On the machine it needs `git` and Node.js ≥ 18 ([Requirements](#requirements)). What is released and what is tested where:
 [Status](#status).
 
 ### In Claude Code
@@ -96,8 +95,8 @@ release binary if there is one, then installs a link to that starter only if the
 succeeds. A downloaded binary must match a checksum pinned in the checkout. Updates are
 checked in a separate candidate checkout; a failed download or preflight leaves the existing
 command and its checkout working. Previous checkouts are kept. No release pins binaries yet
-([Status](#status)), so today this path needs Perl ≥ 5.40 with the modules in `cpanfile`;
-without one, installation fails safely.
+([Status](#status)) and the Perl port is retired, so today this path finds no engine and
+installation fails safely.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh -s -- --no-plugin --bin-dir ~/bin
@@ -114,9 +113,9 @@ not write itself (a symlink excepted). Installing the plugin yourself (`claude p
 in a dotfiles script, say)? Run the script afterwards for the command; it finds the plugin
 installed and only updates it.
 
-**With Perl:** from 0.008000 on, the CPAN distribution `Skilletor` installs the same `skilletor`
-command, in Perl (`cpanm Skilletor`, Perl ≥ 5.40). That release is not out yet: CPAN has 0.001,
-the library alone ([Status](#status)).
+**With Perl:** the CPAN distribution `Skilletor` is retired. Its last release, 0.009000, ships
+its modules as empty stubs, and its `skilletor` command only says where to go instead. Remove it
+with `cpanm --uninstall Skilletor` and install skilletor one of the ways above.
 
 Windows: the script is for macOS and Linux. Install the plugin in Claude Code, and for
 PowerShell or cmd clone this repository and put its `bin\` on your `PATH` — `skilletor`
@@ -1363,46 +1362,27 @@ to `src/` ships with a rebuilt bundle (CI diffs it). The design spec is
 [docs/superpowers/specs/2026-09-22-skilletor-design.md](docs/superpowers/specs/2026-09-22-skilletor-design.md);
 the release steps are in [docs/release.md](docs/release.md).
 
-The repository root is also the CPAN distribution `Skilletor`: `lib/`, `script/skilletor`,
-`t/`, `cpanfile` and `dist.ini` (the root `bin/` is the plugin's starter, not part of it). It
-is skilletor in Perl, following the TypeScript engine: the `skilletor` command for machines
-without Node, the engine the plugin falls back to and the standalone binaries are packed from,
-and a library for Perl programs that must find skills, agents and rules the way skilletor
-installs them — [langertha-raider](https://github.com/Getty/langertha-raider) loads a skill or
-an agent straight from its source with it. It reads the same config files, fetches into the
-same cache (`~/.claude/skilletor/cache`, so one fetch serves both), takes the same sync lock
-and keeps the same trust records.
-
-```perl
-use Skilletor;
-my $sk   = Skilletor->new( home => $ENV{HOME}, project_dir => $project );
-my $file = $sk->resolve_skill('perl-moo');   # path into the local source or the cache
-```
-
-The lookups (`resolve_skill` and its siblings) refuse a templated item rather than serve an
-unrendered template; a sync renders it through `Text::Nunjucks`. The API is in
-`perldoc Skilletor`, the design decisions in [docs/perl.md](docs/perl.md).
+The repository root is also the CPAN distribution `Skilletor` (`lib/`, `script/skilletor`,
+`t/`, `cpanfile`, `dist.ini`), which used to be skilletor in Perl. That port is retired: the
+last release, 0.009000, ships its modules as empty stubs whose documentation names the
+replacement, so an upgrade replaces the earlier library code. Its design notes stay in
+[docs/perl.md](docs/perl.md) and in the history.
 
 Build and test:
 
 ```bash
 npm ci
 npm run typecheck && npm test && npm run build && npm run check-dist
-cpanm --installdeps .
-prove -lr -j4 t
-DZIL_BINARY_SKIP=1 dzil build        # the CPAN tarball; without the variable it also packs the binary
 ```
 
-In a checkout's root, `perl -Ilib script/skilletor` runs the Perl CLI (Perl ≥ 5.40 and the
-modules in `cpanfile`). A CLI run from a checkout acts on your real `~/.claude`, Codex home and
-Hermes home, and on the project of the current directory (its git top level: in a checkout,
-the checkout itself). For a hand test, set a temporary `HOME` and `CODEX_HOME`, unset
-`CLAUDE_CONFIG_DIR` and `HERMES_HOME`, and run it from a temporary directory, or with
-`--project-dir` pointing at one.
+A CLI run from a checkout acts on your real `~/.claude`, Codex home and Hermes home, and on the
+project of the current directory (its git top level: in a checkout, the checkout itself). For
+a hand test, set a temporary `HOME` and `CODEX_HOME`, unset `CLAUDE_CONFIG_DIR` and
+`HERMES_HOME`, and run it from a temporary directory, or with `--project-dir` pointing at one.
 
-`conformance/` holds cases both implementations must pass: configs and source trees, plus the
-expected resolution and, for sync cases, the files, lock, check and status they should produce.
-`test/conformance.test.ts` and `t/60-conformance.t` both run them, and
+`conformance/` holds cases the engine must pass: configs and source trees, plus the expected
+resolution and, for sync cases, the files, lock, check and status they should produce.
+`test/conformance.test.ts` runs them, and
 `SKILLETOR_CONFORMANCE_UPDATE=1 npm test` regenerates them from TypeScript, to be reviewed by
 hand.
 

@@ -1,47 +1,29 @@
 package Skilletor::Role::Source;
-# ABSTRACT: The interface of a source backend (local, git, url)
+# ABSTRACT: Retired stub, see Skilletor
 
 use strict;
 use warnings;
 
-use Moo::Role;
-
-our $VERSION = '0.008001';
-
-requires qw( resolve check );
+our $VERSION = '0.009000';
 
 1;
 
-=synopsis
-
-  package My::Source;
-  use Moo;
-  with 'Skilletor::Role::Source';
-
-  sub resolve { return { dir => $dir, version => 'local' } }
-  sub check   { my ( $self, $cached_version ) = @_; return 1 }
-
 =description
 
-The reference's C<sources/types.ts>. A backend knows how to bring its source
-to a local directory and how to tell cheaply whether it moved; it knows nothing
-about templating or the target file system.
+An empty stub: skilletor's Perl port is retired. L<Skilletor> names the
+replacement.
 
-=head2 resolve
+This last release of the distribution ships its modules as empty stubs, so an
+upgrade replaces the earlier library code.
 
-  my $loc = $source->resolve;
-  # { dir => '/abs/tree', version => 'git:ab12cd3', warning => '...' }
+=seealso
 
-Fetch or prepare the source. C<version> is opaque: C<local>, C<git:E<lt>shaE<gt>>,
-C<etag:E<lt>etagE<gt>>, C<sha256:E<lt>hexE<gt>> or C<unknown>. C<warning> is set
-when the backend fell back to a stale cache (offline). What a backend compares
-with is its own cache's, never the caller's lock. Throws
-L<Skilletor::Error::Source> when there is nothing to serve.
+=over
 
-=head2 check
+=item * L<Skilletor>
 
-  my $changed = $source->check($cached_version);
+=item * L<https://github.com/Getty/skilletor#install>
 
-Has the source changed since C<$cached_version>? True when it cannot tell.
+=back
 
 =cut
