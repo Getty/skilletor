@@ -22,8 +22,8 @@ is `skill-mining`'s. This skill produces the verdict and the routed fix list.
 
 1. **Inventory.** List every item under assessment with type (skill / agent /
    rule), size and description length:
-   `node scripts/skill-static-check.mjs --inventory <paths…>`.
-2. **Static check** (execute): `node scripts/skill-static-check.mjs <paths…>`.
+   `bun scripts/skill-static-check.mjs --inventory <paths…>`.
+2. **Static check** (execute): `bun scripts/skill-static-check.mjs <paths…>`.
    Mechanical criteria only — frontmatter keys, description budget, body
    length, unresolved references, chained references, time-sensitive
    wording, pleading, agent tool keys, skills resolution, rules budget.

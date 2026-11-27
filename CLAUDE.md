@@ -2,10 +2,12 @@
 
 Claude Code plugin + CLI that installs skills, agents and rules from remote
 sources. Design: `docs/superpowers/specs/2026-09-22-skilletor-design.md`.
-Build/test: `npm run typecheck && npm test && npm run build && npm run check-dist`.
+Runtime and toolchain: Bun, pinned in `package.json` `gettyBun.bunVersion`; no Node, no npm.
+Build/test: `bun install --frozen-lockfile && bun run typecheck && bun run test && bun run build && bun run check-dist`.
 
 `conformance/` holds cases that `test/conformance.test.ts` runs. A change to sync or resolve
-behaviour updates the cases (`SKILLETOR_CONFORMANCE_UPDATE=1`, then hand-review them).
+behaviour updates the cases (`SKILLETOR_CONFORMANCE_UPDATE=1 bun test --preload
+./test/setup.ts ./test/conformance.test.ts`, then hand-review them).
 
 ## Delegation
 

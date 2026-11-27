@@ -1,6 +1,6 @@
 ---
 name: skilletor-core
-description: "Use when changing skilletor's own code, tests, build or plugin wiring — src/, test/, dist/, hooks.json, plugin.json, the bundled skilletor skill — or when a change must be verified against a real Claude Code or Codex session. Also when a test passes under tsc but fails under node, or dist/ drifts from src/."
+description: "Use when changing skilletor's own code, tests, build or plugin wiring — src/, test/, dist/, hooks.json, plugin.json, the bundled skilletor skill — or when a change must be verified against a real Claude Code or Codex session. Also when a test passes under tsc but fails under bun test, dist/ drifts from src/, check-starters fails, or the getty-bun starter or the pinned Bun changes."
 ---
 
 # skilletor — architecture and invariants
@@ -69,7 +69,7 @@ claudesettings.ts  plan the project settings.json plugin requirement (§6.8); en
 - **Codex rules: the rules file is owned, `AGENTS.md` is shared.** Rules are
   `block: true` lock entries keyed on `skilletor-rules.md`; `apply` never touches disk
   for them — the engine rebuilds the whole rules file from the new lock. The Codex
-  `SessionStart` hook (`--harness codex`) injects it on startup/clear, never on resume.
+  `SessionStart` hook (`hook session-start codex`) injects it on startup/clear, never on resume.
   `AGENTS.md` gets only a fixed pointer between `<!-- skilletor:begin -->`/`end`; text
   outside the markers is never modified, and a refusal (malformed markers, symlink,
   `CLAUDE.md` identity) skips only the pointer, even with `--force`.
@@ -123,36 +123,45 @@ when adding item types, harnesses or changing the report.
 
 ## Code conventions
 
-- **Erasable TypeScript only.** Tests run `.ts` through Node's type-stripping:
-  constructor parameter properties, `enum`, runtime `namespace` fail with
-  `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`, and `tsc --noEmit` does **not** catch it.
-  Assign fields in the constructor body; `npm test` is the check that counts.
+- **Runtime is Bun, pinned** in `package.json` `gettyBun.bunVersion`; no Node, no npm.
+  `bun run test` is the check that counts; mocking builtins: `skilletor-rules.md` Hazards.
+- **Startup goes through the getty-bun starter.** Hooks run `sh bootstrap/getty-bun.sh run
+  dist/skilletor.js hook <event> <host>` (host positional: `claude-code`, `codex`, `hermes`;
+  `--harness` is the deprecated spelling); `bin/skilletor` is a sh wrapper doing the same for
+  the CLI. The starter installs the pinned Bun on first use and exits 1 (one `getty-bun:` line)
+  when it cannot — "a hook exits 0" holds only once skilletor runs.
 - Runtime dependency is Nunjucks alone. Adding another is a design decision.
 - Public artifacts (code, comments, docs, README, this skill) are English.
 
 ## Verify — every code change
 
 ```bash
-npm run typecheck && npm test        # node:test, temp dirs
-node --test --import ./test/setup.ts test/<file>.test.ts   # one file; setup.ts drops GIT_DIR, HERMES_HOME, CLAUDE_PLUGIN_ROOT & co.
-npm run build && npm run check-dist  # dist/skilletor.js is committed; CI diffs it
+bun install --frozen-lockfile && bun run typecheck && bun run test   # bun test --parallel, per-file isolation, temp dirs
+bun test --preload ./test/setup.ts ./test/<file>.test.ts             # one file; setup.ts drops GIT_DIR, HERMES_HOME, CLAUDE_PLUGIN_ROOT & co.
+bun run build && bun run check-dist   # dist/skilletor.js is committed; check-dist rebuilds and byte-compares, refuses a Bun other than the pin
 ```
 
-- **`dist/` ships.** Any `src/` change without `npm run build` fails CI's
+- **`dist/` ships.** Any `src/` change without `bun run build` fails CI's
   `check-dist`. Commit `dist/skilletor.js` with the source change.
+- **The starters are rendered** (`skills/getty-bun-install/`, `"into": "plugin"`) and copied
+  to `bootstrap/`; re-render (fresh clone: `skilletor trust agent-bun-runtime`, then
+  `skilletor sync --scope project`), copy and Bun bump steps: `skilletor-rules.md` Hazards.
 - Test git fixtures use `git init -b main` (the default branch name is not
   portable). Path comparisons go through `realpathSync` (macOS `/var` →
-  `/private/var`). Several tests create symlinks — Windows is not in CI. A spawned
-  CLI's env comes from `homeEnv()` (`test/helpers/harness.ts`): on Windows the home is
+  `/private/var`). Several tests create symlinks. CI: SimpiCI runs `.cicd/` (suite,
+  `check-starters`; image `oven/bun:<pin>`) on every push; `ci.yml` (pushed from the
+  maintainer's side): Ubuntu required, macOS and Windows advisory until getty-bun supports
+  them. A spawned CLI's env comes from `homeEnv()` (`test/helpers/harness.ts`): on Windows the home is
   `USERPROFILE`, and `LOCALAPPDATA` holds Hermes' default home — `HOME` alone leaks.
 - **A CLI run from the checkout acts on the real `~/.claude/`, `~/.agents/`, Codex
-  home and this repo's real `.claude/skilletor.json`.** Before a hand test, a hook
+  home, `~/.getty` and this repo's real `.claude/skilletor.json`.** Before a hand test, a hook
   drive or a live Claude Code check, read [references/hand-tests.md](references/hand-tests.md).
 
 ## Release surface (audit, never perform)
 
 `package.json`, `.codex-plugin/plugin.json` and `hermes/skilletor/plugin.yaml` carry the
-same version (tests enforce it); `.claude-plugin/plugin.json` carries none, Claude Code
+same version (tests enforce it); `package.json` `gettyBun.bunVersion` equals
+`.claude/skilletor.json` `vars.bun_version` and the starters' pin; `.claude-plugin/plugin.json` carries none, Claude Code
 takes the plugin version from the commit; a tag `vX.Y.Z` matches the three; `README.md` and `skills/skilletor/SKILL.md` restate the
 CLI reference and must match `src/cli.ts` usage text. Steps and the marketplace
 entry: `docs/release.md`. Tagging, pushing and marketplace edits are the
