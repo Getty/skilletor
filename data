@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-11-27T06:15:40Z
+claimed_by: skilletor-skill-author-k276
+class: standard
+completed: 2026-11-27T06:15:40Z
+created: 2026-11-27T06:06:36Z
+id: 276
+priority: high
+started: 2026-11-27T06:15:40Z
+status: done
+tags:
+- getty-bun
+- skills
+title: Install the getty-bun consumer skills
+updated: 2026-11-27T06:15:40Z
+---
+
+.claude/skilletor.json: source agent-bun-runtime (git https://github.com/Getty/agent-bun-runtime, ref v0.1.0, path skills), vars.bun_version 1.4.5, skills getty-bun-install, getty-bun-integration, getty-bun. trust + sync; add getty-bun-integration to the skills: of skilletor-worker.
+Rendered skills under .claude/skills are not tracked (as the other shared skills). F3 (K12) adds the shipped copy of getty-bun-install.
+Branch getty-bun, hub task agent-developer k5.
+
+Committed 4413251 on getty-bun (pushed). Rendered starters cmp-equal to agent-bun-runtime v0.1.0 bootstrap/.
