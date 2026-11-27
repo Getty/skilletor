@@ -1,12 +1,13 @@
 // The plugin starter bin/skilletor-start (k190): the release binary cached for the plugin's
 // version, else downloaded once – by a CLI command, by SessionStart in the background, never by
 // --version – and checked against the checksum pinned in the plugin (the house route's
-// SHA256SUMS), else Node, else Perl (lib/, script/skilletor), else one line – on `hook …` the
+// SHA256SUMS), else Node, else one line – on `hook …` the
 // hook's warning line with exit 0. Wired by k191: bin/skilletor, which every hook command names,
 // execs it; the last section starts it the way the harnesses do. Every start gets an
 // environment of its own: a temp HOME and CLAUDE_CONFIG_DIR, and a PATH of symlinked tools, so
 // a case decides which of curl, wget, sha256sum, shasum, setsid, node and perl exist (with
-// neither setsid nor perl a SessionStart provision is a plain background start). A case that
+// neither setsid nor perl a SessionStart provision is a plain background start; perl only for its
+// setsid(), and on Linux as the interpreter of shasum). A case that
 // starts one waits for what it leaves before it ends. The "binary" is a sh script served by a
 // local HTTP server (or file://), which the starter fetches only behind its test gate; the
 // engines are stubs that print their name, arguments and stdin. Every case runs a temp plugin
@@ -62,7 +63,6 @@ function findOnPath(name: string): string | undefined {
 }
 
 const realPerl = findOnPath("perl");
-const noPerl = skip || (realPerl ? false : "no perl on PATH");
 const noWget = noBinary || (findOnPath("wget") ? false : "no wget on PATH");
 const noShasum = noBinary || (findOnPath("shasum") ? false : "no shasum on PATH");
 /** The checksum tool the cases link: sha256sum, else (macOS) shasum. */
@@ -183,19 +183,6 @@ function pinned(sum: string, asset = ASSET): string {
   return names.map((name) => (name === ASSET ? `${sum}  ${asset}` : `${sha256(name)}  ${name}`)).join("\n") + "\n";
 }
 
-/** The stub port's cpanfile: core modules at runtime, and a test-phase module that is nowhere –
- *  the check reads the runtime phase only. */
-const CPANFILE =
-  "requires 'perl', '5.020';\nrequires 'JSON::PP', '2.0';\nrequires 'File::Spec';\n\n" +
-  "on test => sub {\n  requires 'Skilletor::Test::Only::Dependency';\n};\n";
-
-interface PerlOpts {
-  /** The port module that does not compile: a dependency of its own is missing. */
-  broken?: "Skilletor::CLI" | "Skilletor::Engine";
-  /** cpanfile; null = none (default CPANFILE). */
-  cpanfile?: string | null;
-}
-
 interface PluginOpts {
   /** The plugin directory's name (default "my plugin": its path has a space). */
   name?: string;
@@ -205,9 +192,6 @@ interface PluginOpts {
   starter?: "missing" | "not-executable";
   /** dist/skilletor.js present (default true). */
   dist?: boolean;
-  /** The stub port at the root – lib/, script/skilletor, cpanfile – (default: one that loads);
-   *  false = none of them. */
-  perl?: PerlOpts | false;
 }
 
 /** A plugin checkout – its path has a space – with the real bin/skilletor, starter and hook
@@ -232,26 +216,6 @@ function makePlugin(opts: PluginOpts = {}): string {
       'process.stdout.write(`node ${process.argv.slice(2).join(" ")} | ${require("node:fs").readFileSync(0, "utf8")}\\n`);\n',
     );
   }
-  const perl = opts.perl ?? {};
-  if (perl) {
-    mkdirSync(join(root, "script"));
-    mkdirSync(join(root, "lib", "Skilletor"), { recursive: true });
-    writeFileSync(
-      join(root, "script", "skilletor"),
-      "use strict;\nuse warnings;\nuse Skilletor::CLI;\nexit Skilletor::CLI::run(@ARGV);\n",
-    );
-    const head = (module: string) =>
-      `package ${module};\nuse strict;\nuse warnings;\n` +
-      (perl.broken === module ? "use Skilletor::Some::Missing::Dependency;\n" : "");
-    writeFileSync(
-      join(root, "lib", "Skilletor", "CLI.pm"),
-      head("Skilletor::CLI") +
-        "sub run { my $in = do { local $/; <STDIN> }; $in = '' unless defined $in; print \"perl @_ | $in\\n\"; return 0 }\n1;\n",
-    );
-    // The CLI loads it only for a command that runs it, as the real port does.
-    writeFileSync(join(root, "lib", "Skilletor", "Engine.pm"), head("Skilletor::Engine") + "1;\n");
-    if (perl.cpanfile !== null) writeFileSync(join(root, "cpanfile"), perl.cpanfile ?? CPANFILE);
-  }
   return root;
 }
 
@@ -273,17 +237,12 @@ function makeTools(links: string[] = [], scripts: Record<string, string> = {}): 
   return dir;
 }
 
-/** perl, except that it answers the starter's version question – the one whose code reads
- *  `$]` – with `answer`: the Perl path runs on a machine whose perl is older than 5.40. */
-const fakePerl = (answer: string) =>
-  `#!/bin/sh\ncase "$*" in *'$]'*) printf '%s' '${answer}'; exit 0 ;; esac\nexec '${realPerl}' "$@"\n`;
-const PERL_540 = fakePerl("5040 5.40.0");
 const NODE_16 = "#!/bin/sh\ncase \"$1\" in -e) printf 16 ;; --version) echo v16.20.2 ;; *) echo \"node 16 ran $*\" >&2; exit 9 ;; esac\n";
 
 interface Machine { env: NodeJS.ProcessEnv; config: string; home: string }
 
 /** The environment of one start: nothing of the test process's, so no CLAUDE_CONFIG_DIR,
- *  PERL5LIB or PAR_GLOBAL_TEMP of the developer's leaks in. */
+ *  PAR_GLOBAL_TEMP of the developer's leaks in. */
 function machine(tools: string, extra: NodeJS.ProcessEnv = {}, withConfigDir = true): Machine {
   const home = fresh("home");
   const config = withConfigDir ? fresh("claude-config") : join(home, ".claude");
@@ -554,7 +513,7 @@ test("without curl it downloads with wget", { skip: noWget }, async () => {
 
 test("without sha256sum it checks with shasum -a 256", { skip: noShasum }, async () => {
   const sum = sha256(BINARY);
-  const root = makePlugin({ pinned: pinned(sum), dist: false, perl: false });
+  const root = makePlugin({ pinned: pinned(sum), dist: false });
   const s = serve(BINARY);
   const m = machine(makeTools(["curl", "shasum", ...(realPerl ? ["perl"] : [])]), testRelease(s.url));
   assertBoth(await cliThenHook(root, m), "binary");
@@ -716,8 +675,8 @@ test("a checksum mismatch is refused, leaves nothing behind, and Node runs", { s
   assert.ok(!existsSync(versionDir(m)), "no binary, no temp file, no empty version directory");
 });
 
-test("a mismatch with neither Node nor Perl: the line names the refusal", { skip: noBinary }, async () => {
-  const root = makePlugin({ pinned: pinned(sha256(BINARY)), perl: false });
+test("a mismatch without Node: the line names the refusal", { skip: noBinary }, async () => {
+  const root = makePlugin({ pinned: pinned(sha256(BINARY)) });
   const s = serve("not the pinned bytes");
   const m = machine(makeTools(["curl", SUM]), testRelease(s.url));
   const r = await start(starter(root), CLI_ARGS, m.env);
@@ -734,8 +693,7 @@ test("a refused cache is named in the line on every path, an absent one says 'no
   const TAMPERED = BINARY.replace("warm", "evil");
   const refused = `the cached ${ASSET} does not match its pinned checksum and was refused`;
   const line = (why: string) =>
-    "skilletor: Node.js is required but was not found on PATH (need >= 18); " +
-    `perl was not found on PATH (need >= 5.40); ${why}.`;
+    `skilletor: Node.js is required but was not found on PATH (need >= 18); ${why}.`;
   /** A hook: the line as its systemMessage, exit 0. The CLI: the line on stderr, exit 1. */
   const answer = (args: string[], why: string): Run =>
     args[0] === "hook"
@@ -760,8 +718,8 @@ test("a refused cache is named in the line on every path, an absent one says 'no
     [SESSION_START_ARGS, backoff, `${refused}; ${backoff}`],
   ];
   for (const tampered of [false, true]) {
-    const root = makePlugin({ pinned: pinned(sum), perl: false });
-    // Neither Node nor Perl, and every download fails: what the binary step says reaches the line.
+    const root = makePlugin({ pinned: pinned(sum) });
+    // No Node, and every download fails: what the binary step says reaches the line.
     const recorder = fetchRecorder([SUM]);
     const m = machine(recorder.tools, { SKILLETOR_STARTER_NOW: "1000" });
     if (tampered) tamper(m);
@@ -778,7 +736,7 @@ test("a refused cache is named in the line on every path, an absent one says 'no
   const s = serve(BINARY);
   const m = machine(makeTools(["curl", SUM]), testRelease(s.url));
   tamper(m);
-  assertEngine(await start(starter(makePlugin({ pinned: pinned(sum), perl: false })), CLI_ARGS, m.env), "binary", CLI_ARGS, "");
+  assertEngine(await start(starter(makePlugin({ pinned: pinned(sum) })), CLI_ARGS, m.env), "binary", CLI_ARGS, "");
   assert.equal(s.hits(), 1);
   assertCached(m, sum, BINARY);
 });
@@ -791,8 +749,7 @@ test("a refused cache is named in the line on every path, an absent one says 'no
 test("SKILLETOR_BINARY_BASE_URL: https:// is fetched; http:// and file:// only with SKILLETOR_STARTER_TESTING=1, else refused with why", { skip: noBinary }, async () => {
   const sum = sha256(BINARY);
   const line = (why: string) =>
-    "skilletor: Node.js is required but was not found on PATH (need >= 18); " +
-    `perl was not found on PATH (need >= 5.40); ${why}.`;
+    `skilletor: Node.js is required but was not found on PATH (need >= 18); ${why}.`;
   const release = fresh("release");
   writeFileSync(join(release, ASSET), BINARY);
   const s = serve(BINARY);
@@ -804,7 +761,7 @@ test("SKILLETOR_BINARY_BASE_URL: https:// is fetched; http:// and file:// only w
     ["http:// with the gate not 1", s.url, { SKILLETOR_STARTER_TESTING: "true" }],
   ];
   for (const [label, url, gate] of cases) {
-    const root = makePlugin({ pinned: pinned(sum), perl: false });
+    const root = makePlugin({ pinned: pinned(sum) });
     const recorder = fetchRecorder([SUM]);
     const m = machine(recorder.tools, { SKILLETOR_BINARY_BASE_URL: url, SKILLETOR_STARTER_NOW: "1000", ...gate });
     assert.deepEqual(await start(starter(root), CLI_ARGS, m.env), { status: 1, stdout: "", stderr: line(refused) + "\n" }, label);
@@ -823,7 +780,7 @@ test("SKILLETOR_BINARY_BASE_URL: https:// is fetched; http:// and file:// only w
   // With the gate: what the cases serve is fetched, checked and run.
   for (const url of [s.url, pathToFileURL(release).href]) {
     const m = machine(makeTools(["curl", SUM]), { SKILLETOR_BINARY_BASE_URL: url, SKILLETOR_STARTER_TESTING: "1" });
-    assertEngine(await start(starter(makePlugin({ pinned: pinned(sum), perl: false })), CLI_ARGS, m.env), "binary", CLI_ARGS, "");
+    assertEngine(await start(starter(makePlugin({ pinned: pinned(sum) })), CLI_ARGS, m.env), "binary", CLI_ARGS, "");
     assertCached(m, sum, BINARY);
   }
   assert.equal(s.hits(), 1, "the gated http:// download");
@@ -831,7 +788,7 @@ test("SKILLETOR_BINARY_BASE_URL: https:// is fetched; http:// and file:// only w
   // https:// needs no gate: the download is tried (here it fails), as before.
   const recorder = fetchRecorder([SUM]);
   const m = machine(recorder.tools, { SKILLETOR_BINARY_BASE_URL: "https://mirror.invalid/skilletor" });
-  const r = await start(starter(makePlugin({ pinned: pinned(sum), perl: false })), CLI_ARGS, m.env);
+  const r = await start(starter(makePlugin({ pinned: pinned(sum) })), CLI_ARGS, m.env);
   assert.deepEqual(r, { status: 1, stdout: "", stderr: line(`the download of ${ASSET} failed`) + "\n" });
   assert.equal(recorder.fetched().length, 1);
   assert.ok(recorder.fetched()[0]!.includes(`https://mirror.invalid/skilletor/${ASSET}`), recorder.fetched()[0]);
@@ -893,19 +850,7 @@ test("no HOME and no CLAUDE_CONFIG_DIR: no binary cache, Node runs", { skip: noB
   assert.equal(s.hits(), 0);
 });
 
-// --- Perl, then the line ---------------------------------------------------------------------
-
-test("no Node: Perl runs once its modules load", { skip: noPerl }, async () => {
-  const m = machine(makeTools([], { perl: PERL_540 }));
-  assertBoth(await cliThenHook(makePlugin(), m), "perl");
-});
-
-test("Node too old, or dist/ missing: Perl runs", { skip: noPerl }, async () => {
-  const old = machine(makeTools([], { perl: PERL_540, node: NODE_16 }));
-  assertBoth(await cliThenHook(makePlugin(), old), "perl");
-  const unbuilt = machine(makeTools(["node"], { perl: PERL_540 }));
-  assertBoth(await cliThenHook(makePlugin({ dist: false }), unbuilt), "perl");
-});
+// --- the line ---------------------------------------------------------------------------------
 
 /** The line: on stderr with exit 1; on a hook its one warning line on stdout, with exit 0. */
 async function assertLine(root: string, m: Machine, line: string) {
@@ -922,57 +867,21 @@ test("nothing to run: one line, Node's message first; exit 1, a hook exit 0", { 
   await assertLine(
     makePlugin(),
     machine(makeTools()),
-    "skilletor: Node.js is required but was not found on PATH (need >= 18); " +
-      "perl was not found on PATH (need >= 5.40); no binary checksums are pinned in the plugin.",
+    "skilletor: Node.js is required but was not found on PATH (need >= 18); no binary checksums are pinned in the plugin.",
   );
 });
 
-test("Node too old and Perl too old: the line names both versions", { skip: noPerl }, async () => {
+test("Node too old, or dist/ missing: the line names why", { skip }, async () => {
   await assertLine(
     makePlugin(),
-    machine(makeTools([], { perl: fakePerl("5038 5.38.2"), node: NODE_16 })),
-    "skilletor: Node.js >= 18 is required, but found v16.20.2; " +
-      "Perl >= 5.40 is required, but found 5.38.2; no binary checksums are pinned in the plugin.",
+    machine(makeTools([], { node: NODE_16 })),
+    "skilletor: Node.js >= 18 is required, but found v16.20.2; no binary checksums are pinned in the plugin.",
   );
-});
-
-test("a Perl port that cannot run – a module, a dependency or its version, a file – : the line names why", { skip: noPerl }, async () => {
-  const cases: [PluginOpts["perl"], string][] = [
-    [{ broken: "Skilletor::CLI" }, "Skilletor::CLI does not load"],
-    // The CLI loads, the engine its commands load does not.
-    [{ broken: "Skilletor::Engine" }, "Skilletor::Engine does not load"],
-    // A dependency the port loads only when a command needs it (as Text::Nunjucks): the
-    // cpanfile names it.
-    [{ cpanfile: CPANFILE + "requires 'Skilletor::Test::Lazy::Dependency';\n" }, "Skilletor::Test::Lazy::Dependency is missing"],
-    [{ cpanfile: CPANFILE.replace("'2.0'", "'999'") }, "JSON::PP is older than 999"],
-    [{ cpanfile: null }, "cpanfile is missing"],
-    [false, "script/skilletor is missing"],
-  ];
-  for (const [perl, problem] of cases) {
-    await assertLine(
-      makePlugin({ perl }),
-      machine(makeTools([], { perl: PERL_540 })),
-      "skilletor: Node.js is required but was not found on PATH (need >= 18); " +
-        `skilletor's Perl port cannot run: ${problem}; no binary checksums are pinned in the plugin.`,
-    );
-  }
-});
-
-test("this machine's own perl: the starter reads its version", { skip: noPerl }, async () => {
-  const m = machine(makeTools(["perl"]));
-  const root = makePlugin();
-  const recent = execFileSync(realPerl!, ["-e", "print $] >= 5.040 ? 1 : 0"], { encoding: "utf8" }) === "1";
-  if (recent) {
-    assertBoth(await cliThenHook(root, m), "perl");
-  } else {
-    const found = execFileSync(realPerl!, ["-e", 'printf "%vd", $^V'], { encoding: "utf8" });
-    await assertLine(
-      root,
-      m,
-      "skilletor: Node.js is required but was not found on PATH (need >= 18); " +
-        `Perl >= 5.40 is required, but found ${found}; no binary checksums are pinned in the plugin.`,
-    );
-  }
+  await assertLine(
+    makePlugin({ dist: false }),
+    machine(makeTools(["node"])),
+    "skilletor: Node.js is there, but dist/skilletor.js is missing; no binary checksums are pinned in the plugin.",
+  );
 });
 
 // --- the wired entry points (k191) ------------------------------------------------------------
@@ -1086,7 +995,7 @@ test("wired: a pinned binary that is not cached – non-start hooks fetch nothin
 
 // --version and -v answer from the runtime that runs, as it prints them – ack-doctor reads it
 // (hub finding ACK c14) – and never provision: a pin without a cached binary fetches nothing.
-test("wired: --version and -v never provision; they answer from Node, else Perl, else a cached binary, as the engine prints it", { skip: noBinary }, async () => {
+test("wired: --version and -v never provision; they answer from Node, else a cached binary, as the engine prints it", { skip: noBinary }, async () => {
   const sum = sha256(BINARY);
   for (const flag of ["--version", "-v"]) {
     const root = makePlugin({ pinned: pinned(sum) });
@@ -1098,12 +1007,6 @@ test("wired: --version and -v never provision; they answer from Node, else Perl,
     assert.deepEqual(await start(cli, [flag], m.env), answer(`node ${flag} | \n`), `${flag}: Node`);
     assert.deepEqual(withNode.fetched(), [], `${flag}: nothing fetched with Node`);
     assert.ok(!existsSync(join(m.config, "skilletor")), `${flag}: no binary cache state`);
-
-    if (realPerl) {
-      const withPerl = fetchRecorder([SUM], { perl: PERL_540 });
-      assert.deepEqual(await start(cli, [flag], machine(withPerl.tools).env), answer(`perl ${flag} | \n`), `${flag}: Perl`);
-      assert.deepEqual(withPerl.fetched(), [], `${flag}: nothing fetched with Perl`);
-    }
 
     // Nothing to run: the line, and still no download.
     const bare = fetchRecorder([SUM]);
@@ -1121,14 +1024,7 @@ test("wired: --version and -v never provision; they answer from Node, else Perl,
   }
 });
 
-test("wired: without Node every hook and the CLI run Perl, and nothing is fetched", { skip: noPerl }, async () => {
-  const recorder = fetchRecorder([], { perl: PERL_540 });
-  const m = machine(recorder.tools);
-  for (const e of wiredEntries()) assertEngine(await e.run(m.env), "perl", e.args, e.input);
-  assert.deepEqual(recorder.fetched(), []);
-});
-
-test("wired: with neither Node nor Perl on PATH a cached, verified binary runs every hook and the CLI", { skip: noBinary }, async () => {
+test("wired: without Node on PATH a cached, verified binary runs every hook and the CLI", { skip: noBinary }, async () => {
   const sum = sha256(BINARY);
   const recorder = fetchRecorder([SUM]);
   const m = machine(recorder.tools);
@@ -1142,15 +1038,14 @@ test("wired: with neither Node nor Perl on PATH a cached, verified binary runs e
 test("wired: with nothing to run every hook exits 0 with the one warning line; the CLI exits 1", { skip }, async () => {
   const recorder = fetchRecorder();
   const m = machine(recorder.tools, { SKILLETOR_STARTER_NOW: "1000" });
-  const line = "skilletor: Node.js is required but was not found on PATH (need >= 18); " +
-    "perl was not found on PATH (need >= 5.40); no binary checksums are pinned in the plugin.";
+  const line = "skilletor: Node.js is required but was not found on PATH (need >= 18); no binary checksums are pinned in the plugin.";
   for (const e of wiredEntries()) assertFailOpen(await e.run(m.env), e, line);
   assert.deepEqual(recorder.fetched(), []);
   if (noBinary) return;
   // Pinned but not cached, and the download fails: the line ends with why, a hook still exits 0.
   const pinnedRecorder = fetchRecorder([SUM]);
   const pm = machine(pinnedRecorder.tools, { SKILLETOR_STARTER_NOW: "1000" });
-  const why = /^skilletor: Node\.js is required [^;]*; perl was not found [^;]*; (the pinned binary is not cached|the download of|the last SessionStart binary provision failed).*\.\n?$/;
+  const why = /^skilletor: Node\.js is required [^;]*; (the pinned binary is not cached|the download of|the last SessionStart binary provision failed).*\.\n?$/;
   for (const e of wiredEntries({ pinned: pinned(sha256(BINARY)) })) {
     assertFailOpen(await e.run(pm.env), e, why);
     if (e.session) await until(() => existsSync(retryFile(pm)), `${e.label}: the background provision ends`);

@@ -1,4 +1,4 @@
-// k144: oddities the Perl port found in the reference (docs/perl.md, conformance/).
+// k144: oddities the retired Perl port found in the reference (conformance/).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";

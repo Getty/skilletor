@@ -396,7 +396,7 @@ function starterCheckout(f: ReturnType<typeof fixture>, opts: { dist?: boolean }
 }
 
 // k191: in a checkout, bin/skilletor runs the starter, which picks the engine. find_cli no longer
-// asks for dist/ beside it on POSIX: the starter may run the release binary or Perl without one.
+// asks for dist/ beside it on POSIX: the starter may run the release binary without one.
 test("on POSIX a checkout's bin/skilletor is the CLI with or without dist/: the starter picks the engine", { skip }, () => {
   const f = fixture();
   try {
@@ -420,10 +420,9 @@ test("through the starter: Node's answer reaches the model; with nothing to run,
       { context: "node hook session-start --harness hermes" },
       { context: "node hook user-prompt-submit --harness hermes" },
     ]);
-    // No node, no perl, no pinned binary: the starter exits 0 with its line as a systemMessage.
+    // No node, no pinned binary: the starter exits 0 with its line as a systemMessage.
     const none = drive({ mode: "adapter", plugin, environ: { PATH: tools(false), HOME: f.tmp.dir }, cwd: f.cwd, steps });
-    const line = "skilletor: Node.js is required but was not found on PATH (need >= 18); " +
-      "perl was not found on PATH (need >= 5.40); no binary checksums are pinned in the plugin.";
+    const line = "skilletor: Node.js is required but was not found on PATH (need >= 18); no binary checksums are pinned in the plugin.";
     assert.deepEqual(none.results.map((r) => r.ret), [null, { context: line }, { context: line }]);
   } finally {
     f.cleanup();

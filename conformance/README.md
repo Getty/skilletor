@@ -1,21 +1,14 @@
 # skilletor conformance cases
 
-Shared cases that every skilletor engine runs, so the TypeScript engine (`src/`, the
-reference) and the Perl port (the dist `Skilletor`: `lib/`, `t/`, `script/skilletor`) resolve and install the same
-way. Each case is a config, a few source trees and what an engine must make of them: the
+Cases that pin how a skilletor engine resolves and installs, run against the TypeScript
+engine (`src/`, the reference) and its CLI. Each case is a config, a few source trees and what an engine must make of them: the
 items each scope resolves to and, for sync cases, the files written for the selected targets,
 the lock bytes and what `check` and `status` say afterwards; for `cli` steps, what a
 command line prints and exits with, byte for byte.
 
-Runners:
-
-- TypeScript: `test/conformance.test.ts` (part of `npm test`).
-- Perl: `t/60-conformance.t` (every step; the Perl engine syncs for Claude Code, Codex and
-  Hermes).
-
-Both run the `cli` steps against their own CLI by default and against any other on request
-(below), so one set of expectations holds the TS bundle, `script/skilletor` and, later, a
-packed binary to the same bytes.
+Runner: `test/conformance.test.ts` (part of `npm test`). It runs the `cli` steps against this
+checkout's CLI by default and against any other on request (below), so one set of expectations
+holds the TS bundle and a packed binary to the same bytes.
 
 The format is plain JSON and plain file trees, nothing language-specific: a runner needs a
 JSON parser, a directory copy, `git`, a way to run a program, and its engine.
@@ -48,7 +41,7 @@ them. Every path segment starting with `.git` is stored with the prefix `dot`
 case: `home/`, `project/`, `sources/<tree>/` and the expected trees. A runner unescapes
 (`dot.git…` → `.git…`) when it copies an input or source tree in, and escapes when it names a
 file of a snapshot, for the comparison and when it writes expectations; JSON contents and a
-commit's `executable` list use the real names. Both runners fail a case that holds an
+commit's `executable` list use the real names. The runner fails a case that holds an
 unescaped name.
 
 A case has a project scope exactly when it has a `project/` directory; without one the engine
@@ -77,11 +70,11 @@ Cases run in name order, each in a fresh temp dir; none depends on another.
     { "id": "help", "op": "cli", "argv": ["--help"], "version": true }
   ],
   "engines": {
-    "perl": {
+    "other": {
       "skip": "why the whole case does not apply (optional)",
       "steps": {
         "sync": { "skip": "why this step does not apply" },
-        "status": { "expected": "expected.perl/status" }
+        "status": { "expected": "expected.other/status" }
       }
     }
   }
@@ -93,7 +86,7 @@ Cases run in name order, each in a fresh temp dir; none depends on another.
 | `description` | Required. What the case pins. |
 | `git` | Optional. Git sources, by repository name (below). |
 | `git.<name>.commits[].executable` | Optional. Paths in the commit's tree made executable before it is committed (below). |
-| `env` | Optional. Environment variables set for the whole case – the engine ops' and every `cli` step's – `${HOME}`, `${PROJECT}` and `${TMP}` replaced. Perl runners encode character values as UTF-8 bytes at the environment boundary. |
+| `env` | Optional. Environment variables set for the whole case – the engine ops' and every `cli` step's – `${HOME}`, `${PROJECT}` and `${TMP}` replaced. |
 | `claude` | Optional. `false`: the runner writes no Claude Code marker (`.claude.json`, below), so – Codex not in use either – no agent harness is detected. Default `true`. |
 | `gitInit` | Optional. `["home"]`, `["project"]` or both: those directories become git work trees – `git init -q -b main` in each, after its inputs are copied, nothing committed – so a `cli` step's CLI takes git's top level as its project and git answers for them (below). |
 | `steps` | Required, run in order on the same temp dirs: a step sees what the steps before it wrote. |
@@ -108,7 +101,7 @@ Cases run in name order, each in a fresh temp dir; none depends on another.
 ### Engine variants
 
 TypeScript is the reference: its runner ignores `engines` and runs every step against
-`expected/`. Every other engine reads `engines.<its name>` (`perl`), and nothing else is
+`expected/`. Any other engine would read `engines.<its name>`, and nothing else is
 implied – a step without an entry there must match `expected/` exactly.
 
 - `skip` on the engine: the whole case is skipped by that engine, with the reason as the
@@ -145,7 +138,7 @@ The engine ops run with:
 - `CODEX_HOME` = `${HOME}/.codex`, which does not exist, so Codex is not detected – a case
   that seeds `home/.codex/config.toml` (cases 100-108) makes it detected, and that file's
   `trusted_hash` for skilletor's SessionStart hook decides the untrusted-hook warning;
-  `HERMES_HOME` = `${HOME}/.hermes` – both runners pass it to the engine ops as the Hermes home,
+  `HERMES_HOME` = `${HOME}/.hermes` – the runner passes it to the engine ops as the Hermes home,
   and a step's `env` `HERMES_HOME` reaches only a `cli` step, whose CLI otherwise uses Hermes'
   default home under `${HOME}`. Hermes is never detected: a case opts in with `"targets"` in
   `home/.claude/skilletor.json` (cases 110-125); `CLAUDE_PLUGIN_ROOT` and `CLAUDE_CONFIG_DIR` unset,
@@ -229,10 +222,9 @@ any case.
   escapes (`\\n`, `\\t`, `\\uNNNN`), formatting, ordering and all unrelated bytes remain exact;
   no stream or file is parsed and reserialized. Replacement runs first `${HOME}`, then
   `${PROJECT}`, then `${TMP}`, so the longer, nested paths win.
-- **`${VERSION}`** stands for the version the CLI reports, in either spelling: the plugin's
-  (`package.json`, `0.8.0`) or the Perl dist's (`$VERSION` in `lib/Skilletor.pm`, `0.008000`) –
-  and only in the stdout and stderr of a `cli` step with `"version": true`: there every
-  occurrence of either is replaced, after the paths. Anywhere else a version-shaped string
+- **`${VERSION}`** stands for the version the CLI reports, the plugin's (`package.json`) – and
+  only in the stdout and stderr of a `cli` step with `"version": true`: there every occurrence
+  is replaced, after the paths. Anywhere else a version-shaped string
   stays as it is.
 
 ## Operations
@@ -269,8 +261,7 @@ A command line: the CLI runs with `argv` and what it writes and exits with is co
 a missing file means it wrote nothing there. They compare byte for byte – no canonical form,
 no newline or encoding normalised.
 
-The CLI's environment is built from nothing: `PATH`, `PERL5LIB` when the runner has one (a
-Perl CLI's modules), `HOME` = `${HOME}`, `CODEX_HOME` = `${HOME}/.codex`, `GIT_CONFIG_GLOBAL` =
+The CLI's environment is built from nothing: `PATH`, `HOME` = `${HOME}`, `CODEX_HOME` = `${HOME}/.codex`, `GIT_CONFIG_GLOBAL` =
 `${TMP}/gitconfig`, `GIT_CONFIG_NOSYSTEM=1` and `LC_ALL=C`; then the case's `env`; then the
 step's. On Windows it also sets `USERPROFILE` = `${HOME}`, `LOCALAPPDATA` under `${HOME}`, and
 `TEMP`/`TMP` = `${TMP}`: the native home and temporary-directory APIs must stay inside the case.
@@ -284,22 +275,16 @@ project from `--project-dir` or the git top level of its cwd, and git itself ans
 a directory lies in a work tree (none under `${TMP}` does, but what `gitInit` made one).
 
 Which CLI runs: `SKILLETOR_CONFORMANCE_CLI`, a JSON array of strings, is put before `argv`.
-Unset, each runner runs its own:
-
-- TS: `node` and the bundle `buildToString` (`scripts/esbuild.config.mjs`) makes of this
-  checkout, as `test/cli.test.ts` does;
-- Perl: `[$^X, "-I<checkout>/lib", "<checkout>/script/skilletor"]`.
-
-Either runner runs any CLI against the same expectations – the other's, a packed binary:
+Unset, the runner runs `node` and the bundle `buildToString` (`scripts/esbuild.config.mjs`)
+makes of this checkout, as `test/cli.test.ts` does. Any other CLI – a packed binary, say – runs
+against the same expectations:
 
 ```bash
-SKILLETOR_CONFORMANCE_CLI='["perl", "-I'"$PWD"'/lib", "'"$PWD"'/script/skilletor"]' \
+SKILLETOR_CONFORMANCE_CLI='["'"$PWD"'/skilletor-binary"]' \
   node --test --import ./test/setup.ts test/conformance.test.ts
-SKILLETOR_CONFORMANCE_CLI='["node", "'"$PWD"'/dist/skilletor.js"]' prove -l t/60-conformance.t
 ```
 
-(A Perl CLI needs its modules in `PERL5LIB`, which the runner passes on.) The variable is not
-`SKILLETOR_BIN`, which the Hermes adapter reads.
+The variable is not `SKILLETOR_BIN`, which the Hermes adapter reads.
 
 A CLI that does not start, runs past the step's timeout (30 s) or dies of a signal fails the
 step. Windows has no POSIX child-signal result, so only that runner self-test assertion is skipped
@@ -433,7 +418,7 @@ Of the file modes, only the owner's executable bit is compared: the tree's files
 it, as a sorted JSON array of their paths as the expected tree names them (`home/…`,
 `project/…`, `cwd/…`, escaped), must equal
 `expected/<id>.executables.json` – no such file means none may carry it. A source file gets
-the bit through its commit's `executable` list alone: both runners write each source file
+the bit through its commit's `executable` list alone: the runner writes each source file
 new, never copying the mode the case's own checkout gives it, so a checkout without file
 modes – or with a stray bit – still builds the same commits.
 Directories, empty or not, and every other mode bit are not compared.
@@ -501,7 +486,7 @@ show it, its `description` saying which.
 | `31-claude-config-dir` | `CLAUDE_CONFIG_DIR` moves Claude Code's plugin state: the settings requirement reads the install and marketplaces there, a decoy under `~/.claude/plugins` is ignored (k142) |
 | `30-untrusted-status` | an untrusted project-only source: `status` names it before any sync, the sync installs nothing but writes the project's blocks, `check` lists the trust request and asks for no sync; the CLI's status, resync and check say so |
 | `32-claude-config-dir-user` | `CLAUDE_CONFIG_DIR` is the user scope's `.claude`: config, skill, lock and the detection marker (`<dir>/.claude.json`) live there, a decoy config under `~/.claude` is ignored (k145); the CLI's state root is `<dir>/skilletor` |
-| `33-error-source-vars` | a source's `skilletor.json` with an array as `vars` fails its scan (k145); a lock `via` that is no array of strings is refused by `readLock`, pinned by each engine's own tests (a throw is no resolve answer) |
+| `33-error-source-vars` | a source's `skilletor.json` with an array as `vars` fails its scan (k145); a lock `via` that is no array of strings is refused by `readLock`, pinned by the engine's own tests (a throw is no resolve answer) |
 | `40-cli-args` | the CLI's argument layer, nothing run: `--version` only first, `--help` anywhere and alone (usage bytes), the options each command accepts and an unknown one, an unknown command, an invalid `--scope` (a missing value is the string `undefined`, k170), each missing operand (an empty source name for `trust` too), an unsafe command name escaped; the config stays untouched |
 | `41-cli-project-root` | no `--project-dir`: the git top level of the CLI's cwd is the project – a sync from a subdirectory installs at the top level; from a subdirectory of a home that is a checkout the project is the home, so no project scope; `~/.claude` in a work tree gets its `.gitignore` block (`gitInit`) |
 | `42-cli-unused-project` | a git checkout that never used skilletor: the user scope syncs, nothing is written in the checkout, no file is named to commit (k65) |
@@ -548,7 +533,7 @@ show it, its `description` saying which.
 | `87-cli-add-refused-spec` | refusals before any file is read: an invalid name (k95), an empty or `-` spec (k85), an `http://` or `file://` tarball (k110), a tree link whose ref or path load refuses (k119, k126), beside a project config that is no JSON; then a valid `--project` add fails on that file |
 | `88-cli-add-forge-link` | k119, k126: a GitHub tree link (insteadOf) is the repo at that ref with its skills beneath the link's directory, synced; kept again, by the bare repo link and by an entry whose path names the same directory (`./perl/`, `["perl"]`); another ref, no ref, another path, no path or two paths exit 1 naming what the entry has |
 | `89-cli-add-no-harness` | k103: `add` with no harness (`"claude": false`): a new source is written and the sync's config error exits 2 naming the saved file (user or project); a kept entry wrote nothing, so its exit 2 carries the sync's own report |
-| `90-cli-add-probe` | the probe of a generic host: `git ls-remote` through insteadOf makes it git at `https://<host>/<path>` (a trailing `/` dropped) or `/skills`, named after the host; kept again, refused under the taken name; at 127.0.0.1:1, where nothing listens, neither git nor the HEAD on the tarball answers: exit 1 naming both URLs (the HEAD's 2xx is each engine's own test: no TLS server here) |
+| `90-cli-add-probe` | the probe of a generic host: `git ls-remote` through insteadOf makes it git at `https://<host>/<path>` (a trailing `/` dropped) or `/skills`, named after the host; kept again, refused under the taken name; at 127.0.0.1:1, where nothing listens, neither git nor the HEAD on the tarball answers: exit 1 naming both URLs (the HEAD's 2xx is the engine's own test: no TLS server here) |
 | `91-cli-add-escaped` | k87: an added local path with an escape sequence, a bidi override and a newline is one escaped line in the added message; a refused add naming it escapes it on stderr, its newline a line break |
 | `92-cli-add-claude-config-dir` | `add` under `CLAUDE_CONFIG_DIR` (k145): the user config written there, the decoy in `~/.claude` untouched, the saved file named when the sync stops at a project install of an undeclared source (k103); a project source trusted in the state root there |
 | `93-cli-available` | `available` (text, `--json`): the merged map's trusted sources in order, a source's items then its bundles; `✓` for an item an entry of either scope declares or a lock of either scope holds for that source (a `codex:` key too, a skipped entry not), for a bundle either scope's config declares; a user source read by the user config's definition, a git source fetched; a project-only source skipped until trusted, by name too (an empty line, `[]`), then listed; `--project-dir ~` the user config and lock alone |
@@ -614,30 +599,23 @@ show it, its `description` saying which.
 | `205-cli-uninstall-no-harness` | k103: an undeclared item is refused before a sync; a valid user or project removal is saved, then the no-harness sync error exits 2 and names the edited config file |
 | `241-include-syntax-error` | k160: a syntax error in an included template becomes a warning without a delayed process crash; the unaffected skill is installed and owns its lock entry, while the failed skill is absent |
 
-The state files two engines on one machine share – `render-inputs.json` with its hash,
-`sources-read.json`, `unreached.json` – are not compared here: their keys are absolute lock
-paths and the hash covers the project dir, so they differ from one temp dir to the next. The
-Perl port's `t/52-parity-sync.t` has both engines sync one machine and compares them byte for
-byte.
+The state files – `render-inputs.json` with its hash, `sources-read.json`, `unreached.json` –
+are not compared here: their keys are absolute lock paths and the hash covers the project dir,
+so they differ from one temp dir to the next.
 
-Not covered yet: `available` waiting for the sync lock another run holds (k74; each engine's
-own tests pin it:
-`test/commands.test.ts`, the Perl port's `t/76-commands-available.t`); of `add`, a generic
-host whose tarball answers the probe's HEAD (it needs a TLS server; the Perl port's
-`t/31-probe.t` pins the HEAD against a local HTTP server, the reference has no test of it yet);
-the bytes `trust` and `add` write to `trust.json` (state, outside the compared trees; each
-engine's own tests pin them); the Hermes home a user-scope lock serves as
+Not covered yet: `available` waiting for the sync lock another run holds (k74;
+`test/commands.test.ts` pins it); of `add`, a generic host whose tarball answers the probe's
+HEAD (it needs a TLS server; no test pins it yet); the bytes `trust` and `add` write to
+`trust.json` (state, outside the compared trees; the engine's own tests pin them); the Hermes home a user-scope lock serves as
 recorded in `hermes-home.json` (state, outside the compared trees; cases 113, 114 and 117 prove
-it through the syncs that follow, each engine's own tests pin the record); of the hooks, a due
+it through the syncs that follow, the engine's own tests pin the record); of the hooks, a due
 prompt's real background sync, the in-session interval, the sync lock held by another run – a
 move's wait on it and the race of one `cd`'s two hooks too – and the 20 s pre-write deadlines
-of SessionStart and checkout moves (each engine's own tests pin these, the interval on an
+of SessionStart and checkout moves (the engine's own tests pin these, the interval on an
 injected clock, the deadlines injected); a `url`
 source actually fetched (the engine takes `https://` only, so it needs a local TLS server), a
 source whose fetch fails (the warning quotes git's own message), symbolic links in a target –
-a `CLAUDE.md` that is the Codex `AGENTS.md`, an `AGENTS.md` that is a link (the Perl port's
-`t/72-engine-codex.t` syncs those with both engines) –, and a sync that fails midway
+a `CLAUDE.md` that is the Codex `AGENTS.md`, an `AGENTS.md` that is a link –, and a sync that fails midway
 (`partial`; `67` starts from the lock one left). Starting a CLI from an already-removed
-working directory is covered by child-process tests in `test/cli.test.ts` and
-`t/68-cli.t` (k192, k193); the shared case format does not remove the running process's
+working directory is covered by child-process tests in `test/cli.test.ts` (k192, k193); the shared case format does not remove the running process's
 cwd.

@@ -30,7 +30,7 @@ and skips it for a minute; a child that runs into ours is killed.
 The CLI is $SKILLETOR_BIN if set – then that or nothing; Hermes loads the
 Hermes home's .env into the environment, so it can be set there. Else
 bin/skilletor of the checkout this directory is a symlink into – it runs the
-starter, which picks the engine (the release binary, Node, Perl); on Windows
+starter, which picks the engine (the release binary, Node); on Windows
 bin/skilletor.exe, the launcher Claude Code starts there (bin/skilletor is a sh
 script), which runs node with dist/skilletor.js, so only beside that – else
 `skilletor` on PATH. A copy `hermes plugins install` made is no checkout's: it
@@ -78,7 +78,7 @@ def find_cli(environ, here, windows=WINDOWS):
     root = os.path.dirname(os.path.dirname(os.path.realpath(here)))
     shim = os.path.join(root, "bin", "skilletor.exe" if windows else "skilletor")
     # bin/skilletor runs the starter, which picks the engine there itself (the release binary,
-    # Node, Perl). bin/skilletor.exe runs node with dist/skilletor.js only (k169).
+    # Node). bin/skilletor.exe runs node with dist/skilletor.js only (k169).
     if os.path.isfile(shim) and os.access(shim, os.X_OK) and (
             not windows or os.path.isfile(os.path.join(root, "dist", "skilletor.js"))):
         return shim

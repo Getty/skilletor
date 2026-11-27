@@ -4,16 +4,8 @@ Claude Code plugin + CLI that installs skills, agents and rules from remote
 sources. Design: `docs/superpowers/specs/2026-09-22-skilletor-design.md`.
 Build/test: `npm run typecheck && npm test && npm run build && npm run check-dist`.
 
-The Perl port is the CPAN dist `Skilletor` at the root (`lib/`, `script/skilletor`, `t/`,
-`cpanfile`, `dist.ini`; design notes in `docs/perl.md`); its version 0.008000 is the plugin's
-0.8.0 in the other spelling (x.yyyzzz = x.y.z). Test it from the root with
-`PERL5LIB=/home/getty/dev/p5-text-nunjucks/lib:/home/getty/dev/langertha/lib:$PERL5LIB prove -lr -j4 t`;
-`DZIL_BINARY_SKIP=1 dzil build` builds the tarball (without the variable it also packs, verifies
-and smokes the binary). TypeScript is the reference. `conformance/` holds cases that both
-`test/conformance.test.ts` and `t/60-conformance.t` run. A change to sync or resolve behaviour
-updates the cases (`SKILLETOR_CONFORMANCE_UPDATE=1`, then hand-review them) and the Perl port
-together, or notes the divergence on the card. `lib/`, `script/`, `t/`, `maint/`, `cpanfile` and
-`dist.ini` count as behaviour-relevant code, so they are the `skilletor-worker`'s lane.
+`conformance/` holds cases that `test/conformance.test.ts` runs. A change to sync or resolve
+behaviour updates the cases (`SKILLETOR_CONFORMANCE_UPDATE=1`, then hand-review them).
 
 ## Delegation
 
