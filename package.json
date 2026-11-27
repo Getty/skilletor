@@ -15,6 +15,7 @@
   "scripts": {
     "build": "bun scripts/build.mjs",
     "check-dist": "bun scripts/check-dist.mjs",
+    "check-starters": "bun scripts/check-starters.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bun test --preload ./test/setup.ts --parallel --timeout=60000 ./test/"
   },
