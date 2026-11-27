@@ -1,0 +1,42 @@
+---
+class: standard
+completed: 2026-11-27T06:08:58Z
+created: 2026-11-13T20:42:09Z
+id: 169
+priority: medium
+started: 2026-11-16T18:49:23Z
+status: done
+tags:
+- decision
+- windows
+- starter
+title: 'Decision: how the starter runs on Windows (winlaunch)'
+updated: 2026-11-27T06:08:58Z
+---
+
+Decision for the maintainer: options and a recommendation, not decided here.
+
+Claude Code on Windows starts bin/skilletor.exe (winlaunch). What winlaunch can and cannot do (winlaunch/winlaunch.c header, scouted 2026-11-13):
+- It runs `node`, `python` or a path relative to the plugin root.
+- {root}, {self} and {data} expand only in arguments, env values and the skip glob, never in the program word.
+- It has no conditional run and no network.
+- So it can neither start a binary under {data} or ~/.claude nor download one.
+
+Options:
+(a) Extend winlaunch. Its source of truth is tools/winlaunch in the windows-developer hub, so this is a card on that board, not an edit here. Placeholders get expanded in the program word, and several `run` lines are tried in order, the first whose program exists winning:
+    1. {data}\skilletor.exe, or the cached binary;
+    2. powershell -NoProfile -File {root}\bin\skilletor-fetch.ps1 (download, checksum, then exec);
+    3. node;
+    4. perl.
+(b) winlaunch always runs a PowerShell starter. No winlaunch change, but PowerShell's own start (roughly 0.3 to 1 s) is added to every hook, UserPromptSubmit included.
+(c) Windows keeps the Node path in the plugin; the Windows binary is for manual installs only.
+
+Recommendation: (a), with (c) until the winlaunch change has landed.
+
+From k189: the Windows asset is skilletor-<V>-windows-x86_64.exe; the pinned file bin/skilletor-binaries.sha256 includes its line (the sh starter ignores it).
+
+2026-11-16 18:49 Maintainer decision 2026-11-16 (via the perl-developer hub, design ~/dev/perl-developer/docs/superpowers/specs/2026-11-16-ack-paket-design.md): (a) extend winlaunch (several run lines tried in order, placeholders in the program word) via a card on the windows-developer board; (c) Windows stays on Node until that has landed.
+
+2026-11-21: maintainer direction -- Windows should run the release binary the way briefing does (its own bootstrap, not winlaunch + Node). k270 decides reuse of briefing-bootstrap vs. an own one and supersedes (a)/(c) here once decided.
+
+superseded by hub decision F2 (2026-11-27): Claude Code on Windows gets the .cmd polyglot built by agent-bun-runtime; skilletor adopts it (k281)
