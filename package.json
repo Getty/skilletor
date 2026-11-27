@@ -8,12 +8,13 @@
   "bin": {
     "skilletor": "bin/skilletor"
   },
-  "engines": {
-    "node": ">=18"
+  "gettyBun": {
+    "contractVersion": 1,
+    "bunVersion": "1.4.5"
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "check-dist": "node scripts/check-dist.mjs",
+    "build": "bun scripts/build.mjs",
+    "check-dist": "bun scripts/check-dist.mjs",
     "typecheck": "tsc --noEmit",
     "test": "bun test --preload ./test/setup.ts --parallel --timeout=60000 ./test/"
   },
@@ -23,7 +24,6 @@
   "devDependencies": {
     "@types/node": "^26.6.2",
     "@types/nunjucks": "^3.2.6",
-    "esbuild": "^0.28.2",
     "smol-toml": "^1.9.0",
     "typescript": "^7.0.2"
   }

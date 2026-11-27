@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
-import { buildToString } from "../scripts/esbuild.config.mjs";
+import { buildTo } from "../scripts/bundle.mjs";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 import { homeEnv } from "./helpers/harness.ts";
 import { check, status, sync, type EngineContext } from "../src/engine.ts";
@@ -666,7 +666,7 @@ let bundle: string;
 before(async () => {
   built = makeTmpDir();
   bundle = join(built.dir, "skilletor.mjs");
-  writeFileSync(bundle, await buildToString());
+  buildTo(bundle);
 });
 
 after(() => built.cleanup());

@@ -8,7 +8,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 import { claudeOnlyEnv } from "./helpers/harness.ts";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
-import { buildToString } from "../scripts/esbuild.config.mjs";
+import { buildTo } from "../scripts/bundle.mjs";
 
 const GIT = { GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@e", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@e" };
 
@@ -18,7 +18,7 @@ let bundle: string;
 before(async () => {
   bundleTmp = makeTmpDir();
   bundle = join(bundleTmp.dir, "skilletor.mjs");
-  writeFileSync(bundle, await buildToString());
+  buildTo(bundle);
 });
 after(() => bundleTmp.cleanup());
 

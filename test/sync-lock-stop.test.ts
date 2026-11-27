@@ -10,7 +10,7 @@ import { once } from "node:events";
 import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { buildToString } from "../scripts/esbuild.config.mjs";
+import { buildTo } from "../scripts/bundle.mjs";
 import { State } from "../src/state.ts";
 import { claudeOnlyEnv } from "./helpers/harness.ts";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
@@ -29,7 +29,7 @@ let bundle: string;
 before(async () => {
   bundleTmp = makeTmpDir();
   bundle = join(bundleTmp.dir, "skilletor.mjs");
-  writeFileSync(bundle, await buildToString());
+  buildTo(bundle);
 });
 after(() => bundleTmp.cleanup());
 

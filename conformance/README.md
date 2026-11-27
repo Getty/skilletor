@@ -276,13 +276,13 @@ project from `--project-dir` or the git top level of its cwd, and git itself ans
 a directory lies in a work tree (none under `${TMP}` does, but what `gitInit` made one).
 
 Which CLI runs: `SKILLETOR_CONFORMANCE_CLI`, a JSON array of strings, is put before `argv`.
-Unset, the runner runs `node` and the bundle `buildToString` (`scripts/esbuild.config.mjs`)
+Unset, the runner runs the running Bun and the bundle `buildTo` (`scripts/bundle.mjs`)
 makes of this checkout, as `test/cli.test.ts` does. Any other CLI – a packed binary, say – runs
 against the same expectations:
 
 ```bash
 SKILLETOR_CONFORMANCE_CLI='["'"$PWD"'/skilletor-binary"]' \
-  node --test --import ./test/setup.ts test/conformance.test.ts
+  bun test --preload ./test/setup.ts ./test/conformance.test.ts
 ```
 
 The variable is not `SKILLETOR_BIN`, which the Hermes adapter reads.
@@ -440,7 +440,7 @@ verification runs normally, but Windows update mode is refused because no existi
 there to distinguish native separators from literal escape data):
 
 ```bash
-SKILLETOR_CONFORMANCE_UPDATE=1 node --test --import ./test/setup.ts test/conformance.test.ts
+SKILLETOR_CONFORMANCE_UPDATE=1 bun test --preload ./test/setup.ts ./test/conformance.test.ts
 ```
 
 It writes `expected/<id>.json` and, for tree steps, replaces `expected/<id>/` and writes

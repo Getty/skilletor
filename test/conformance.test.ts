@@ -18,7 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { buildToString } from "../scripts/esbuild.config.mjs";
+import { buildTo } from "../scripts/bundle.mjs";
 import { check, resolveItems, status, sync, type EngineContext, type ResolveReport } from "../src/engine.ts";
 import { homeEnv } from "./helpers/harness.ts";
 import { makeTmpDir } from "./helpers/tmp.ts";
@@ -483,7 +483,7 @@ function cli(): Promise<string[]> {
     }
     bundleDir = mkdtempSync(join(tmpdir(), "skilletor-conformance-cli-"));
     const bundle = join(bundleDir, "skilletor.mjs"); // .mjs: Node runs the ESM bundle as ESM
-    writeFileSync(bundle, await buildToString());
+    buildTo(bundle);
     return [process.execPath, bundle];
   })();
   return cliPrefix;

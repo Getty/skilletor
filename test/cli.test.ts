@@ -5,7 +5,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildToString } from "../scripts/esbuild.config.mjs";
+import { buildTo } from "../scripts/bundle.mjs";
 import { claudeOnlyEnv, homeEnv } from "./helpers/harness.ts";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
 
@@ -20,7 +20,7 @@ let noProject: string;
 before(async () => {
   tmp = makeTmpDir();
   bundle = join(tmp.dir, "skilletor.mjs");
-  writeFileSync(bundle, await buildToString());
+  buildTo(bundle);
   noProject = join(tmp.dir, "no-project");
   mkdirSync(noProject);
 });

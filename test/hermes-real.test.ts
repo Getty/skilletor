@@ -17,7 +17,7 @@ import {
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { delimiter, dirname, join } from "node:path";
-import { buildToString } from "../scripts/esbuild.config.mjs";
+import { buildTo } from "../scripts/bundle.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const PLUGIN = join(root, "hermes", "skilletor");
@@ -44,7 +44,7 @@ before(async () => {
   if (skip) return;
   mkdirSync(run, { recursive: true });
   const bundle = join(run, "skilletor.mjs");
-  writeFileSync(bundle, await buildToString());
+  buildTo(bundle);
   cli = join(run, "skilletor");
   writeFileSync(cli, `#!/bin/sh\nexec '${process.execPath}' '${bundle}' "$@"\n`);
   chmodSync(cli, 0o755);
