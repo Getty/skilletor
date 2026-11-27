@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-27T15:03:09Z
+id: 289
+priority: low
+status: backlog
+tags:
+- report
+- ux
+title: 'Conflict report: ''use --force to adopt'' reads as keeping a hand edit'
+updated: 2026-11-27T15:03:09Z
+---
+
+For a file that differs from the render, sync --force overwrites it with the render (src/apply.ts write loop), but the report says 'already exists (use --force to adopt)' and the conflict table in skills/skilletor/references/sync.md says --force 'adopts the file'. A reader can take 'adopt' as 'keep my version'. Since branch getty-bun also reports identical files as 'adopted', the words now mean two things. Decide the wording (e.g. 'use --force to overwrite with the render'), conformance cases change with it. Found on branch getty-bun (hub task agent-developer k5).
