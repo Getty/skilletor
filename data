@@ -1,0 +1,20 @@
+---
+class: standard
+completed: 2026-11-27T06:08:14Z
+created: 2026-11-14T02:08:42Z
+id: 215
+priority: medium
+started: 2026-11-27T06:08:14Z
+status: done
+tags:
+- perl
+- cli
+- windows
+title: 'Perl CLI: the home on Windows is USERPROFILE, as Node''s os.homedir() takes
+  it'
+updated: 2026-11-27T06:08:14Z
+---
+
+Found by the k205/k210 worker, checked by the dispatcher. src/cli.ts takes the home from node:os homedir(): libuv reads USERPROFILE on Windows (HOME is ignored there) and HOME then getpwuid on POSIX. perl/lib/Skilletor/CLI.pm _home reads $ENV{HOME} first on every OS and falls back to getpwuid, which is unimplemented on MSWin32 (dies). Under Git Bash HOME is set, so both CLIs on one Windows machine can pick different homes, different configs, locks and installs. Fix: on MSWin32 USERPROFILE first (then the reference fallback, GetUserProfileDirectory / the same ENOENT wording when nothing), with a test through an injected $^O or a seam, as k186 did for the process layer. Related: k207, k209, k210 (the Windows leg smoke sets USERPROFILE and HOME to the same dir, so it would not see this).
+
+superseded by hub decision 2026-11-25 (no Perl runtime); removal in k275 on branch getty-bun
