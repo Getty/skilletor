@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-11-27T14:17:41Z
+claimed_by: skilletor-skill-author-k284
+class: standard
+completed: 2026-11-27T14:17:41Z
+created: 2026-11-27T06:07:05Z
+id: 284
+priority: medium
+started: 2026-11-27T14:17:41Z
+status: done
+tags:
+- getty-bun
+- skills
+title: 'Bundled skill: runtime, launch, diagnosis on getty-bun'
+updated: 2026-11-27T14:17:41Z
+---
+
+Bundled skill skills/skilletor: runtime, launch, diagnosis — engine section (Bun via getty-bun, no Node/Perl/binary), Codex starter, new references/runtime.md (status, ensure, mismatch, ExecutionPolicy), references/hermes.md. Audited by skilletor-skill-auditor. README and docs/release.md by the main session.
+Branch getty-bun, hub task agent-developer k5.
+
+2026-11-27 07:27 Draft done: SKILL.md launch/runtime section rewritten (Bun via getty-bun, no Node/Perl), new references/runtime.md (status/ensure/mismatch/ExecutionPolicy/offline, platform table, points to skill getty-bun), references/hermes.md CLI order + ensure, references/sync.md 'Into the plugin' (k286). Body 152 lines = unchanged. A/B with skilletor-skill-auditor running.
+
+Committed 364a7d4 (pushed); A/B-tested with fresh readers on three prompts, audited by skilletor-skill-auditor (pass with fixes, applied). Docs in 5cc477f.
