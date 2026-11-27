@@ -1,6 +1,33 @@
 Revision history for skilletor and Skilletor, its Perl distribution
 
 {{$NEXT}}
+  - Runtime: skilletor runs on Bun, pinned to 1.4.5, started through the
+    getty-bun starters (bootstrap/getty-bun.sh and .ps1) from
+    agent-bun-runtime. The first start after an install or update downloads
+    Bun under ~/.getty ($GETTY_HOME); the hooks allow 600 s for it. Offline
+    without an installed Bun the starter prints one `getty-bun:` line and
+    exits 1 before skilletor runs. Node.js, the Perl port and the planned
+    release binaries (bin/skilletor.exe, the Windows launcher) are gone.
+  - Platforms: Linux. On Windows, the Codex hooks run from the installed
+    plugin (commandWindows through getty-bun.ps1) and Hermes from a
+    checkout; Claude Code on Windows waits for agent-bun-runtime's .cmd
+    starter and macOS for its darwin target. The release waits for both.
+  - Codex: the hook lines changed, so trust them again in /hooks. Hooks name
+    the host as a word (`hook <event> codex`); `--harness` still works.
+  - Install: install.sh needs only sh, awk and git. A `skilletor` script
+    written by an older installer ran Node; run install.sh again.
+  - Hermes: the adapter runs the starter and calls `ensure` once per session
+    in the background (600 s).
+  - Install entries: {"skill": "name@source", "into": "plugin"} (project
+    scope, skills only) renders into the plugin repo's own shipped skills
+    directory. The lock owns it as plugin:skills/<name>; identical files on a
+    fresh checkout are adopted. The plugin ships the skill getty-bun-install
+    (the rendered starters) that way.
+  - Config: a JSON syntax error in a skilletor.json reads the same on every
+    engine ("unexpected 'x' at line L column C" or "unexpected end of
+    input").
+  - Add: the tarball probe of `add` fetches in-process. The background sync
+    under Bun starts without the project's bunfig.toml and .env.
 
 0.009000  2026-11-25 04:39:00Z
   - CPAN: skilletor's Perl port is retired. Skilletor ships the 62 modules of
