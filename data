@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-11-27T15:02:57Z
+claimed_by: skilletor-worker-k282
+class: standard
+completed: 2026-11-27T15:02:57Z
+created: 2026-11-27T06:06:58Z
+id: 282
+priority: high
+started: 2026-11-27T15:02:57Z
+status: done
+tags:
+- getty-bun
+- ci
+title: CI on Bun with the starter drift check
+updated: 2026-11-27T15:02:57Z
+---
+
+CI on Bun: ci.yml with setup-bun 1.4.5, bun install --frozen-lockfile, typecheck, bun test, rebuild + cmp, starter render + cmp; perl.yml goes (K1); simpici.yml per F2; windows-ci-contract test adjusted. macOS (F5) and Windows Claude Code (F2) legs are owned by agent-bun-runtime: handled as decided on the branch.
+All .github/ changes are separate commits at the end of the branch; the deploy key cannot push workflows, the hub pushes them.
+Branch getty-bun, hub task agent-developer k5.
+
+Part A committed 9e8fcab (pushed): SimpiCI jobs in oven/bun:1.4.5 (suite, check-starters). Part B local only, for the hub to push: perl.yml removal and ci.yml on Bun (macOS/Windows advisory, continue-on-error) — hashes change once they are moved to the branch end.
+
+Workflow commits re-appended at the branch end, local only for the hub to push: 97c27a1 (perl.yml removal, k275), e072995 (ci.yml on Bun, macOS/Windows advisory).
+
+ci.yml on Bun e072995 pushed by the hub. Follow-up (hub task agent-developer k5, N1-N4): SC2016 fixed 7e54cc5, Windows portability 29a533b, getty-bun.ps1 tests on Windows 21adf02 (CI on 21adf02: ubuntu and windows success); Windows leg required in local workflow commit 4e4611e for the hub to push.
