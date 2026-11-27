@@ -1,1 +1,1 @@
-skilletor: ${PROJECT}/.claude/skilletor.json: invalid JSON (Expected property name or '}' in JSON at position 2 (line 1 column 3))
+skilletor: ${PROJECT}/.claude/skilletor.json: invalid JSON (unexpected 'b' at line 1 column 3)

@@ -333,12 +333,14 @@ test("k133: the default background spawn is detached, silent and hides its windo
     calls.push({ command, args, options: options as Record<string, unknown> });
     return { unref: () => void unrefs++ };
   };
-  const ctx = { home: "/h", projectDir: "/p/proj", binPath: "/bin/skilletor.js" } as HookContext;
+  const ctx = { home: "/h", projectDir: "/p/proj", binPath: "/bin/skilletor.js", stateRoot: "/s" } as HookContext;
   defaultBackground(ctx, fake);
   assert.equal(calls.length, 1);
   const { command, args, options } = calls[0]!;
   assert.equal(command, process.execPath);
-  assert.deepEqual(args, ["/bin/skilletor.js", "hook", "__sync-background"]);
+  const isolation = process.versions.bun ? ["--no-install", "--config=/dev/null", "--no-env-file"] : [];
+  if (process.platform === "win32" && process.versions.bun) isolation[1] = `--config=${join("/s", "empty-bunfig.toml")}`;
+  assert.deepEqual(args, [...isolation, "/bin/skilletor.js", "hook", "__sync-background"]);
   assert.equal(options.detached, true);
   assert.equal(options.stdio, "ignore");
   assert.equal(options.windowsHide, true);
@@ -347,6 +349,59 @@ test("k133: the default background spawn is detached, silent and hides its windo
 
   defaultBackground({ ...ctx, binPath: undefined }, fake);
   assert.equal(calls.length, 1);
+});
+
+// Asserts (k278): under Bun the background child starts as the getty-bun starters start Bun –
+// `--no-install --config=<empty> --no-env-file`, without the variables they remove – so the
+// project it inherits as cwd cannot reach it: neither its bunfig.toml preload nor its .env, nor a
+// BUN_OPTIONS preload or NODE_PATH from the session's environment. A real spawn of a stub entry
+// that reports what it got.
+test("k278: under Bun the background child gets the starters' isolation from the project", { skip: !process.versions.bun && "Bun's own flags" }, async () => {
+  const tmp = makeTmpDir();
+  const cwd = process.cwd();
+  const saved = { BUN_OPTIONS: process.env.BUN_OPTIONS, NODE_PATH: process.env.NODE_PATH };
+  try {
+    const proj = join(tmp.dir, "proj");
+    const out = join(tmp.dir, "out");
+    mkdirSync(proj);
+    mkdirSync(out);
+    const preload = (name: string) => {
+      const file = join(tmp.dir, `${name}.mjs`);
+      writeFileSync(file, `globalThis.k278 = [...(globalThis.k278 ?? []), ${JSON.stringify(name)}];\n`);
+      return file;
+    };
+    writeFileSync(join(proj, "bunfig.toml"), `preload = [${JSON.stringify(preload("bunfig"))}]\n`);
+    writeFileSync(join(proj, ".env"), "K278_DOTENV=leaked\n");
+    const entry = join(tmp.dir, "entry.mjs");
+    writeFileSync(entry, [
+      'import { writeFileSync } from "node:fs";',
+      'import { join } from "node:path";',
+      "writeFileSync(join(process.env.SKILLETOR_PROJECT_DIR, \"got.json\"), JSON.stringify({",
+      "  args: process.argv.slice(2), preloads: globalThis.k278 ?? [], dotenv: process.env.K278_DOTENV ?? null,",
+      "  BUN_OPTIONS: process.env.BUN_OPTIONS ?? null, NODE_PATH: process.env.NODE_PATH ?? null,",
+      "}));",
+    ].join("\n"));
+    process.env.BUN_OPTIONS = `--preload=${preload("options")}`;
+    process.env.NODE_PATH = tmp.dir;
+    process.chdir(proj); // the hook's cwd: the user's project
+    try {
+      defaultBackground({ home: tmp.dir, projectDir: out, binPath: entry, stateRoot: join(tmp.dir, "state") });
+    } finally {
+      process.chdir(cwd);
+    }
+    const got = join(out, "got.json");
+    for (let i = 0; i < 200 && !existsSync(got); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.deepEqual(JSON.parse(readFileSync(got, "utf8")), {
+      args: ["hook", "__sync-background"], preloads: [], dotenv: null, BUN_OPTIONS: null, NODE_PATH: null,
+    });
+  } finally {
+    process.chdir(cwd);
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    tmp.cleanup();
+  }
 });
 
 test("checkInterval: 0 disables the in-session check entirely", async () => {

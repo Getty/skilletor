@@ -4,7 +4,9 @@
 // error falls back to the cache with a warning, a template error leaves the item
 // as it was.
 import { execFileSync } from "node:child_process";
-import { hostname, platform, userInfo } from "node:os";
+// userInfo is called through the module object so a test can fault it (k161, test/engine.test.ts):
+// on Bun a named import of a builtin never follows a patched property.
+import os, { hostname, platform } from "node:os";
 import { existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import {
@@ -465,7 +467,7 @@ function makeContext(
     harness,
     target: { dir: targetDir },
     host: ctx.host ?? { name: hostname(), os: platform() },
-    user: ctx.user ?? { name: userInfo().username, home: ctx.home },
+    user: ctx.user ?? { name: os.userInfo().username, home: ctx.home },
     item: { name: item.name, type: item.type, source: item.source },
   };
 }

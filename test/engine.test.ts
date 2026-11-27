@@ -3,7 +3,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import { basename, join, resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -75,7 +74,6 @@ test("k161: a missing passwd entry leaves plain items alone but still fails a te
       userInfoCalls += 1;
       throw new Error("mock passwd ENOENT");
     };
-    syncBuiltinESMExports();
 
     const src = join(e.tmp.dir, "k161");
     mkdirSync(join(src, "rules"), { recursive: true });
@@ -102,7 +100,6 @@ test("k161: a missing passwd entry leaves plain items alone but still fails a te
     assert.equal(readFileSync(join(skillPath, "references/context.md"), "utf8"), before, "a template error keeps the whole installed item");
   } finally {
     os.userInfo = originalUserInfo;
-    syncBuiltinESMExports();
     e.cleanup();
   }
 });

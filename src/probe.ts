@@ -1,13 +1,14 @@
 // Real probe for generic hosts during `skilletor add` (spec §4.2): try
-// `git ls-remote`, then a HEAD on <url>.tar.gz. Both run synchronously (the
-// Probe interface is sync); the HEAD is done in a short-lived child node so we
-// can await fetch without making resolveSpec async.
+// `git ls-remote`, then a HEAD on <url>.tar.gz, fetched in this process (k278:
+// no child runtime). Asynchronous, so `add` resolves through resolveSpecProbing.
 import { execFileSync } from "node:child_process";
+import { statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { gitEnv } from "./gitenv.ts";
-import type { Probe } from "./spec.ts";
+import type { AsyncProbe } from "./spec.ts";
 
-export function makeProbe(timeoutMs = 5_000): Probe {
-  return (baseUrl) => {
+export function makeProbe(timeoutMs = 5_000): AsyncProbe {
+  return async (baseUrl) => {
     try {
       execFileSync("git", ["ls-remote", "--", baseUrl], { // `--`: never an option (k85)
         stdio: "ignore",
@@ -18,19 +19,17 @@ export function makeProbe(timeoutMs = 5_000): Probe {
     } catch {
       // fall through to the tarball probe
     }
-    if (headOk(`${baseUrl}.tar.gz`, timeoutMs)) return { tarball: true };
+    if (await headOk(`${baseUrl}.tar.gz`, timeoutMs)) return { tarball: true };
     return {};
   };
 }
 
-function headOk(url: string, timeoutMs: number): boolean {
-  const script =
-    `const c=new AbortController();const t=setTimeout(()=>c.abort(),${timeoutMs});` +
-    `fetch(${JSON.stringify(url)},{method:'HEAD',signal:c.signal})` +
-    `.then(r=>{clearTimeout(t);process.exit(r.ok?0:1)}).catch(()=>process.exit(1));`;
+async function headOk(url: string, timeoutMs: number): Promise<boolean> {
   try {
-    execFileSync(process.execPath, ["-e", script], { stdio: "ignore", timeout: timeoutMs + 1_000 });
-    return true;
+    // A file: URL is a file that exists or not: Bun's fetch answers 200 for a missing one (k278).
+    if (url.startsWith("file:")) return statSync(fileURLToPath(url)).isFile();
+    const r = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(timeoutMs) });
+    return r.ok;
   } catch {
     return false;
   }

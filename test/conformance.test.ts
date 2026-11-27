@@ -503,6 +503,9 @@ function cliEnv(c: Case, step: Step, r: Roots): Record<string, string> {
     GIT_CONFIG_GLOBAL: join(r.tmp, "gitconfig"),
     GIT_CONFIG_NOSYSTEM: "1",
     LC_ALL: "C",
+    // Bun keeps its transpiler cache under HOME (`.bun/install/cache/@t@`), which every tree
+    // step would see; "0" turns it off, any other runtime ignores it (k278).
+    BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0",
   };
   if (process.platform === "win32") Object.assign(env, { TEMP: r.tmp, TMP: r.tmp });
   for (const [k, v] of Object.entries(c.env ?? {})) env[k] = concrete(v, r);
@@ -913,7 +916,7 @@ test("conformance: a cli step's CLI gets the README's environment, argv, cwd and
     assert.equal(got.stdin, JSON.stringify({ cwd: r.home, n: [1] }));
     const want: Record<string, string> = {
       PATH: process.env.PATH ?? "", ...homeEnv(r.home), CODEX_HOME: join(r.home, ".codex"),
-      GIT_CONFIG_GLOBAL: join(tmp, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1", LC_ALL: "C",
+      GIT_CONFIG_GLOBAL: join(tmp, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1", LC_ALL: "C", BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0",
       CLAUDE_CONFIG_DIR: concrete("${HOME}/cfg", r), EXTRA: concrete("${TMP}/e", r),
     };
     if (process.platform === "win32") Object.assign(want, { TEMP: r.tmp, TMP: r.tmp });

@@ -40,7 +40,7 @@
 // too, where one skill directory has no "which item wins" question (k113).
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { basename, join, posix, relative } from "node:path";
-import { innerSegments, toPosix } from "./fsutil.ts";
+import { innerSegments, parseJson, toPosix } from "./fsutil.ts";
 import { nameKey, type ItemType } from "./config.ts";
 import { BundleError, parseBundle, type BundleDef } from "./bundles.ts";
 import { SKILL_GITIGNORE } from "./gitignore.ts";
@@ -350,7 +350,7 @@ function pluginSkills(dir: string, found: CatalogItem[]): CatalogItem[] {
   noSymlink(p);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(p, "utf8"));
+    parsed = parseJson(readFileSync(p, "utf8"));
   } catch (err) {
     throw new CatalogError(`${p}: invalid JSON (${(err as Error).message})`);
   }
@@ -501,7 +501,7 @@ function readSourceMeta(dir: string): SourceMeta {
   noSymlink(p);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(p, "utf8"));
+    parsed = parseJson(readFileSync(p, "utf8"));
   } catch (err) {
     throw new CatalogError(`${p}: invalid JSON (${(err as Error).message})`);
   }

@@ -262,7 +262,8 @@ a missing file means it wrote nothing there. They compare byte for byte – no c
 no newline or encoding normalised.
 
 The CLI's environment is built from nothing: `PATH`, `HOME` = `${HOME}`, `CODEX_HOME` = `${HOME}/.codex`, `GIT_CONFIG_GLOBAL` =
-`${TMP}/gitconfig`, `GIT_CONFIG_NOSYSTEM=1` and `LC_ALL=C`; then the case's `env`; then the
+`${TMP}/gitconfig`, `GIT_CONFIG_NOSYSTEM=1`, `LC_ALL=C` and `BUN_RUNTIME_TRANSPILER_CACHE_PATH=0` (Bun would
+otherwise keep its transpiler cache under `${HOME}`); then the case's `env`; then the
 step's. On Windows it also sets `USERPROFILE` = `${HOME}`, `LOCALAPPDATA` under `${HOME}`, and
 `TEMP`/`TMP` = `${TMP}`: the native home and temporary-directory APIs must stay inside the case.
 The child runtime may add only its documented/platform execution values (macOS

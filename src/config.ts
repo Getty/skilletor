@@ -9,7 +9,7 @@
 // that can go wrong throws a ConfigError naming the file and the offending key.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { atomicWrite, claudeConfigDirOf, innerSegments } from "./fsutil.ts";
+import { atomicWrite, claudeConfigDirOf, innerSegments, parseJson } from "./fsutil.ts";
 
 export type ItemType = "skill" | "agent" | "rule";
 export const ITEM_TYPES: readonly ItemType[] = ["skill", "agent", "rule"];
@@ -155,7 +155,7 @@ function readConfigFile(path: string): Json {
   }
   let value: unknown;
   try {
-    value = JSON.parse(text);
+    value = parseJson(text);
   } catch (err) {
     throw new ConfigError(`${path}: invalid JSON (${(err as Error).message})`);
   }
@@ -639,7 +639,7 @@ type RawConfig = Record<string, unknown>;
 function loadRaw(path: string): RawConfig {
   if (!existsSync(path)) return {};
   try {
-    const value = JSON.parse(readFileSync(path, "utf8"));
+    const value = parseJson(readFileSync(path, "utf8"));
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
       throw new Error("top level must be an object");
     }

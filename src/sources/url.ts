@@ -25,7 +25,9 @@
 // what a run that died leaves of these, `sweepUrlCache` clears – the engine calls it only
 // while it holds the sync lock, under which every resolve runs (spec §6.5).
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+// renameSync and rmSync are called through the module object so a test can fault them
+// (test/url-cache.test.ts): on Bun a named import of a builtin never follows a patched property.
+import fs, { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve as resolvePath, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { isExecutable } from "../fsutil.ts";
@@ -273,15 +275,15 @@ function publishEntries(dir: string, entries: TarEntry[], version: string): stri
     if (existsSync(dir)) {
       // A rename cannot replace a nonempty directory on supported filesystems.
       backup = mkdtempSync(`${dir}.backup-`);
-      renameSync(dir, join(backup, "tree"));
+      fs.renameSync(dir, join(backup, "tree"));
       oldMoved = true;
     }
     try {
-      renameSync(staging, dir);
+      fs.renameSync(staging, dir);
     } catch (err) {
       if (oldMoved) {
         try {
-          renameSync(join(backup!, "tree"), dir);
+          fs.renameSync(join(backup!, "tree"), dir);
           oldMoved = false;
         } catch (restoreError) {
           throw new Error(`cache publication failed (${(err as Error).message}); ` +
@@ -299,7 +301,7 @@ function publishEntries(dir: string, entries: TarEntry[], version: string): stri
     const obsolete = [staging, ...(backup && (!oldMoved || published) ? [backup] : [])];
     for (const path of obsolete) {
       try {
-        rmSync(path, { recursive: true, force: true });
+        fs.rmSync(path, { recursive: true, force: true });
       } catch (err) {
         cleanupWarnings.push(`cache cleanup failed for ${path} (${(err as Error).message})`);
       }
@@ -333,9 +335,9 @@ export function sweepUrlCache(cacheRoot: string): void {
       if (m[2] === "backup") {
         const dir = join(cacheRoot, m[1]!);
         const tree = join(path, "tree");
-        if (!existsSync(dir) && isRealDir(tree)) renameSync(tree, dir);
+        if (!existsSync(dir) && isRealDir(tree)) fs.renameSync(tree, dir);
       }
-      rmSync(path, { recursive: true, force: true });
+      fs.rmSync(path, { recursive: true, force: true });
     } catch {
       // left for the next run
     }

@@ -1,7 +1,9 @@
 // skilletor CLI entry point: argument parsing and dispatch (spec §7).
 import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import { homedir } from "node:os";
+// homedir is called through the module object so a test's preload can fault it (k164,
+// test/cli.test.ts): on Bun a named import of a builtin never follows a patched property.
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, join, resolve } from "node:path";
 import { claudeConfigDirOf } from "./fsutil.ts";
@@ -109,13 +111,15 @@ function parseFlags(args: string[]): Flags {
 }
 
 function makeContext(flags: Flags): EngineContext {
-  const home = homedir();
+  const home = os.homedir();
   let projectDir = flags.projectDir;
   try {
     // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd. A relative
     // --project-dir is taken from cwd: the scope's state is keyed by its absolute lock path (k254).
+    // process.cwd() is asked first: it throws ENOENT for a removed cwd on Node and Bun alike,
+    // where Bun's path.resolve would quietly take the Bun binary's directory instead (k278).
     if (projectDir === undefined) projectDir = projectRootOf(process.cwd());
-    else if (projectDir !== "" && !isAbsolute(projectDir)) projectDir = resolve(projectDir);
+    else if (projectDir !== "" && !isAbsolute(projectDir)) projectDir = resolve(process.cwd(), projectDir);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error("the current directory no longer exists; pass --project-dir <dir>");
@@ -390,7 +394,7 @@ async function runHookCommand(args: string[]): Promise<number> {
     } catch {
       // ignore malformed hook input
     }
-    const home = homedir();
+    const home = os.homedir();
     // Unset under Codex: runHook then takes the git top level of input.cwd (spec §14.5).
     const projectDir = process.env.SKILLETOR_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || undefined;
     const ctx: HookContext = {

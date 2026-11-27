@@ -15,7 +15,7 @@
     "build": "node scripts/build.mjs",
     "check-dist": "node scripts/check-dist.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --disable-warning=ExperimentalWarning --import ./test/setup.ts \"test/**/*.test.ts\""
+    "test": "bun test --preload ./test/setup.ts --parallel --timeout=60000 ./test/"
   },
   "dependencies": {
     "nunjucks": "^3.2.4"

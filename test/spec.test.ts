@@ -1,7 +1,7 @@
 // Table test for shorthand resolution (spec §4.2).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { resolveSpec, SpecError, type Probe } from "../src/spec.ts";
+import { resolveSpec, resolveSpecProbing, SpecError, type Probe } from "../src/spec.ts";
 
 // A probe that never runs; used for rows that must not be probed.
 const noProbe: Probe = () => {
@@ -357,6 +357,25 @@ test("generic host where nothing responds errors with both attempted addresses",
       return true;
     },
   );
+});
+
+// k278: `add`'s real probe fetches, so it is asynchronous. Asserts: resolveSpecProbing asks an
+// async probe once, for exactly the address resolveSpec asks, and resolves with its answer; an
+// address that needs no probe never calls it; a refusal is resolveSpec's, the probe's own throw
+// and a "nothing responded" answer come through unchanged.
+test("k278: resolveSpecProbing awaits the probe once, only for a generic host", async () => {
+  const asked: string[] = [];
+  const probe = async (url: string) => {
+    asked.push(url);
+    return { tarball: true };
+  };
+  assert.deepEqual(await resolveSpecProbing("mydir.com/x", probe), resolveSpec("mydir.com/x", () => ({ tarball: true })));
+  assert.deepEqual(asked, ["https://mydir.com/x"]);
+  assert.deepEqual(await resolveSpecProbing("Getty/karr", probe), resolveSpec("Getty/karr", () => ({})));
+  await assert.rejects(resolveSpecProbing("-x", probe), SpecError);
+  assert.deepEqual(asked, ["https://mydir.com/x"], "only the generic host was probed");
+  await assert.rejects(resolveSpecProbing("host.tld", async () => ({})), /neither https:\/\/host\.tld\/skills \(git\)/);
+  await assert.rejects(resolveSpecProbing("host.tld", () => { throw new Error("probe broke"); }), /probe broke/);
 });
 
 test("owner/repo with a dotted first segment is a generic host, not GitHub", () => {

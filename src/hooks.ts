@@ -21,7 +21,7 @@
 // UserPromptSubmit (`--harness codex|hermes`) does the same first, awaited, when the session's
 // cwd is not the one its hook last looked at (k149).
 import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { loadConfig, type Harness } from "./config.ts";
 import { State, SyncLockTimeoutError } from "./state.ts";
@@ -494,17 +494,41 @@ async function syncBackground(input: HookInput, ctx: HookContext): Promise<void>
 /** The spawn `defaultBackground` uses; a parameter so a test can pin the call. */
 export type BackgroundSpawn = (command: string, args: string[], options: SpawnOptions) => { unref(): void };
 
-/** Start `hook __sync-background` as a detached node process (the default `background`). */
+/** The variables the getty-bun starters remove from Bun's environment (contract, "Bun without the
+ *  project"): each adds a preload, starts the debugger, resolves modules outside the plugin or
+ *  picks a code cache directory. */
+export const BUN_DROPPED_ENV = [
+  "BUN_OPTIONS", "BUN_INSPECT_PRELOAD", "BUN_INSPECT", "BUN_INSPECT_CONNECT_TO", "NODE_PATH", "NODE_COMPILE_CACHE",
+  "BUN_RUNTIME_TRANSPILER_CACHE_PATH", "BUN_INTERNAL_WEBVIEW_HOST",
+];
+
+/** Start `hook __sync-background` as a detached process of the running runtime (the default
+ *  `background`). Under Bun it gets the starters' isolation (k278): the child inherits the
+ *  hook's cwd – the user's project – whose bunfig.toml and .env* files would otherwise reach it,
+ *  as would the variables in BUN_DROPPED_ENV. */
 export function defaultBackground(ctx: HookContext, spawnChild: BackgroundSpawn = spawn): void {
   if (!ctx.binPath) return;
-  const child = spawnChild(process.execPath, [ctx.binPath, "hook", "__sync-background"], {
+  const env: NodeJS.ProcessEnv = { ...process.env, SKILLETOR_PROJECT_DIR: ctx.projectDir ?? "" };
+  const flags: string[] = [];
+  if (process.versions.bun) {
+    flags.push("--no-install", `--config=${emptyBunConfig(ctx)}`, "--no-env-file");
+    for (const name of BUN_DROPPED_ENV) delete env[name];
+  }
+  const child = spawnChild(process.execPath, [...flags, ctx.binPath, "hook", "__sync-background"], {
     detached: true,
     stdio: "ignore",
     windowsHide: true, // detached on Windows means a console of its own: keep it hidden (k133)
-    env: {
-      ...process.env,
-      SKILLETOR_PROJECT_DIR: ctx.projectDir ?? "",
-    },
+    env,
   });
   child.unref();
+}
+
+/** An empty file for Bun's `--config`, which must exist: /dev/null, on Windows an empty file in
+ *  skilletor's state dir (the contract's rule for a Bun child process). */
+function emptyBunConfig(ctx: HookContext): string {
+  if (process.platform !== "win32") return "/dev/null";
+  const path = join(ctx.stateRoot, "empty-bunfig.toml");
+  mkdirSync(ctx.stateRoot, { recursive: true });
+  writeFileSync(path, "");
+  return path;
 }

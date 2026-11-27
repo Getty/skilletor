@@ -2,7 +2,6 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs, { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { syncBuiltinESMExports } from "node:module";
 import { basename, join } from "node:path";
 import { once } from "node:events";
 import { Worker } from "node:worker_threads";
@@ -99,7 +98,6 @@ for (const failAt of [1, 2]) {
       if (++renames === failAt) throw new Error("injected publication failure");
       return originalRename(...args);
     });
-    syncBuiltinESMExports();
     try {
       const fallback = await src.resolve();
       assert.equal(fallback.version, first.version);
@@ -110,7 +108,6 @@ for (const failAt of [1, 2]) {
       assert.equal(renames, failAt === 2 ? 3 : 1, "failed swap restores the backup by rename");
     } finally {
       mock.mock.restore();
-      syncBuiltinESMExports();
     }
   });
 }
@@ -132,7 +129,6 @@ for (const leftover of ["stage", "backup"]) {
       }
       return originalRemove(...args);
     });
-    syncBuiltinESMExports();
     try {
       const second = await src.resolve();
       assert.equal(failures, 1, "exercise cleanup after publication");
@@ -143,7 +139,6 @@ for (const leftover of ["stage", "backup"]) {
       assert.equal(readFileSync(join(second.dir, "skills/new/SKILL.md"), "utf8"), "New content.\n");
     } finally {
       mock.mock.restore();
-      syncBuiltinESMExports();
     }
   });
 }
@@ -161,7 +156,6 @@ test("if publication and restoration both fail, reject and preserve the last-goo
     if (++renames > 1) throw new Error("injected rename failure");
     return originalRename(...args);
   });
-  syncBuiltinESMExports();
   try {
     await assert.rejects(() => src.resolve(), /last good cache remains at/);
     assert.equal(existsSync(first.dir), false, "neither missing nor partial tree is reported as usable");
@@ -171,7 +165,6 @@ test("if publication and restoration both fail, reject and preserve the last-goo
     assert.equal(readFileSync(join(tmp.dir, remaining[0]!, "tree/skills/old/SKILL.md"), "utf8"), OLD);
   } finally {
     mock.mock.restore();
-    syncBuiltinESMExports();
   }
 });
 
@@ -243,12 +236,10 @@ test("k74: sweep restores a last good cache left only in a backup; offline resol
     if (++renames > 1) throw new Error("injected rename failure");
     return originalRename(...args);
   });
-  syncBuiltinESMExports();
   try {
     await assert.rejects(() => src.resolve(), /last good cache remains at/);
   } finally {
     mock.mock.restore();
-    syncBuiltinESMExports();
   }
   assert.equal(existsSync(first.dir), false);
   sweepUrlCache(tmp.dir);

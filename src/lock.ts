@@ -9,7 +9,7 @@
 // bytes and never rewrites the file. A lock without entries is not written: the
 // file is deleted, so a scope with nothing installed leaves none behind (spec §6.4).
 import { readFileSync, rmSync } from "node:fs";
-import { atomicWrite } from "./fsutil.ts";
+import { atomicWrite, parseJson } from "./fsutil.ts";
 
 export interface LockEntry {
   source: string;
@@ -49,7 +49,7 @@ export function readLock(path: string): Lock {
     throw new LockError(`${path}: cannot read lock (${(err as Error).message})`);
   }
   try {
-    const value = JSON.parse(text);
+    const value = parseJson(text);
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
       throw new Error("expected an object");
     }

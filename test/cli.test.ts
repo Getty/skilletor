@@ -947,9 +947,7 @@ test("k164: a hook whose setup throws exits 0 with one warning line", () => {
   const preload = join(tmp.dir, "k164-no-home.mjs");
   writeFileSync(preload, [
     'import os from "node:os";',
-    'import { syncBuiltinESMExports } from "node:module";',
-    'os.homedir = () => { throw new Error("no home directory (test fault)"); };',
-    "syncBuiltinESMExports();",
+    'os.homedir = () => { throw new Error("no home directory (test fault)"); };', // src/cli.ts calls os.homedir()
   ].join("\n"));
   for (const event of ["session-start", "user-prompt-submit"]) {
     const r = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, bundle, "hook", event], {
