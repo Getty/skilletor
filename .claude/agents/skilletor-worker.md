@@ -6,6 +6,7 @@ tools: Read, Edit, Write, Bash, Glob, Grep
 skills:
   - skilletor-core
   - kanban-issues-karr-ticket
+  - getty-bun-integration
 ---
 
 You are the skilletor-worker for **skilletor**, the Claude Code plugin and CLI
