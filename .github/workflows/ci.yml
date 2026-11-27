@@ -2,11 +2,15 @@
 # bundle against a rebuild, and on Linux the getty-bun starters against a fresh render
 # (scripts/check-starters.mjs, the same check SimpiCI runs from .cicd/).
 #
-# Decision of the main session (hub task agent-developer k5): ubuntu-latest is required.
-# macos-latest and windows-latest stay in the matrix, advisory (continue-on-error) and expected
-# red: macOS until agent-bun-runtime ships a darwin target (hub decision F5), Windows until its
-# .cmd polyglot starts the Claude Code hooks (F2). Codex and Hermes on Windows run through
-# getty-bun.ps1, so the Windows leg still gives signal.
+# Decision of the main session (hub task agent-developer k5): ubuntu-latest and windows-latest
+# are required. On Windows the Codex hook lines (commandWindows) and the Hermes adapter run
+# through getty-bun.ps1 against a ready slot (test/windows-starter.test.ts); the hook handler
+# itself (runHook, test/hooks.test.ts) runs there as on Linux. Claude Code's hook lines are not
+# run on Windows: hooks/hooks.json starts getty-bun.sh, and test/launcher.test.ts, which runs
+# them, skips on win32 because the sh starter does not run there. Their Windows path waits for
+# agent-bun-runtime's .cmd polyglot (hub decision F2).
+# macos-latest stays in the matrix, advisory (continue-on-error) and expected red, until
+# agent-bun-runtime ships a darwin target (hub decision F5); only an advisory leg's name says so.
 name: CI
 
 on:
@@ -25,7 +29,7 @@ jobs:
           - os: macos-latest
             advisory: true
           - os: windows-latest
-            advisory: true
+            advisory: false
     name: test (${{ matrix.os }})${{ matrix.advisory && ' advisory, expected red' || '' }}
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.advisory }}
