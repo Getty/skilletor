@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-11-27T07:13:52Z
+claimed_by: skilletor-worker-k281
+class: standard
+completed: 2026-11-27T07:13:52Z
+created: 2026-11-27T06:06:54Z
+id: 281
+priority: high
+started: 2026-11-27T07:13:52Z
+status: done
+tags:
+- getty-bun
+- starter
+title: Switch the plugin to the getty-bun starters
+updated: 2026-11-27T07:13:52Z
+---
+
+Switch the plugin to the getty-bun starters: bootstrap/getty-bun.sh and .ps1 (copied from the render, see K12), hooks/hooks.json and hooks/codex-hooks.json to the starter lines (timeout 600, codex commandWindows), host positional (F4); bin/skilletor becomes a sh wrapper `exec sh <root>/bootstrap/getty-bun.sh run dist/skilletor.js "$@"` that passes flags (F4); bin/skilletor-start goes.
+Hermes: find_cli loses the .exe branch, call positional host, ensure once with a long timeout before the hooks (F6); plugin.yaml without Node.
+install.sh: sh shim on the starter, json_has without node (F7).
+Windows (F2): Claude Code on Windows gets the .cmd polyglot built by agent-bun-runtime; until it exists the Windows path stays open on the branch (no winlaunch/node). winlaunch/bin/skilletor.exe: decide with F2.
+Branch getty-bun, hub task agent-developer k5.
+
+2026-11-27 07:00 Started on getty-bun at 9a1eddf: bootstrap/ copied from the k286 render (cmp equal; .gitattributes '* text=auto eol=lf' covers both). Next: host positional, hooks, bin wrapper, winlaunch out, Hermes ensure, install.sh without node.
+
+2026-11-27 07:11 Done on getty-bun (uncommitted, base 9a1eddf). bootstrap/getty-bun.{sh,ps1} copied from the k286 render (cmp equal, eol=lf via '* text=auto eol=lf'). Host positional: hook <event> claude-code|codex|hermes; --harness X / --harness=X kept as deprecated alias (old hook lines keep working); USAGE has no hook entry, so no usage change. hooks.json: exec form sh <root>/bootstrap/getty-bun.sh run dist/skilletor.js hook <event> claude-code, timeout 600 on all four. codex-hooks.json: quoted ${PLUGIN_ROOT} + commandWindows (powershell -File .ps1), timeout 600 - covers k244 (test runs the Codex lines from a root with a space). bin/skilletor = symlink-following sh wrapper exec'ing the starter; bin/skilletor-start, bin/skilletor.exe, winlaunch/, .cicd/ winlaunch script, test/starter.test.ts, test/windows-launcher.test.ts removed. Hermes: find_cli returns an argv (SKILLETOR_BIN | sh starter run dist | powershell -File .ps1 | PATH), no .exe; ensure runs once in the background (ENSURE_S 600, process-group kill), hooks wait for it only within their own 20/25 s (Hermes abandons callbacks after 30 s), failed ensure retried at next session start; plugin.yaml without Node. install.sh: no node - JSON via a POSIX awk flattener (also embedded in the shim), shim resolves the user-scope installPath and execs its starter; check_node and the skilletor-start branch gone. Tests use a pre-populated slot in a temp GETTY_HOME (test/helpers/gettybun.ts), no network. Gate: frozen install 0, typecheck 0, build 0, check-dist 0, cmp sh/ps1 0, bun run test 1339 pass / 12 skip (11 hermes-real: no Hermes; 1 Windows-only) / 0 fail. Hand test via the real starter in a temp HOME/GETTY_HOME: first bin/skilletor --version downloaded Bun in 5.3 s, warm ~90 ms; 4 Claude + 2 Codex hook lines exit 0, warm hooks 89-120 ms; install.sh --no-plugin and plugin-mode shim run with no node/bun on PATH; Hermes adapter ensure downloaded in 8.6 s inside the session-start limit. Open: README/skills/skilletor parity (Node, skilletor-start, winlaunch, --harness); simpici.yml now has no .cicd script (k282); Windows/macOS wait on provider (F2/F5), .ps1 '-' args (F4) affects hermes skilletor --json on Windows.
+
+Committed e5f5d20 (pushed). Reviewer: frozen install 0, typecheck 0, check-dist 0, starters cmp-equal, bun test 1339/12 skip/0 fail.
