@@ -834,8 +834,9 @@ not into `.claude/skills`. You commit the result: it is a file of the plugin (th
 `a file of the plugin: commit it`), and the lock owns it as `plugin:skills/<name>`, so sync
 updates it, `check` reports drift, a hand edit is a conflict and uninstalling removes it. A
 fresh checkout has no lock; files there that equal the render byte for byte, mode included,
-are taken over without a conflict. Only skills, only in a project, one named item (no pattern);
-a project without the plugin manifest is a config error. skilletor itself ships
+are taken over without a conflict (the report says `= plugin:skills/<name> (adopted: already on
+disk as rendered)`, `adopted` in `sync --json`). Only skills, only in a project, one named item
+(no pattern); a project without the plugin manifest is a config error. skilletor itself ships
 `skills/getty-bun-install/` this way, and its CI renders it again and compares.
 
 ### Sharing a project: require the plugin
@@ -1215,9 +1216,10 @@ catalog entry, so Hermes says "custom (unreviewed) source"; its install-time sca
 
 **The plugin needs the CLI**, which it does not bring: `$SKILLETOR_BIN`, else the getty-bun
 starter of a skilletor checkout it is linked into (`sh`, on Windows `powershell.exe -File`),
-else `skilletor` on `PATH`; without one it does nothing. Once per session it first runs the
-starter's `ensure` in the background (up to 600 seconds), so the first session can install Bun
-while each hook keeps its own short limit ([Which engine runs](#which-engine-runs)).
+else `skilletor` on `PATH`; without one it does nothing. Once per Hermes process its first
+hook starts the starter's `ensure` in the background (up to 600 seconds), so the first start can
+install Bun while each hook keeps its own short limit; until that is done, session starts and
+prompts deliver nothing, and after a failure the next session start tries again ([Which engine runs](#which-engine-runs)).
 [`install.sh`](#from-the-command-line) places a `skilletor` command in `~/.local/bin`. Hermes reads `$HERMES_HOME/.env` into
 its environment, so name the CLI there once:
 

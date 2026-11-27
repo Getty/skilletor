@@ -6,9 +6,9 @@ items each scope resolves to and, for sync cases, the files written for the sele
 the lock bytes and what `check` and `status` say afterwards; for `cli` steps, what a
 command line prints and exits with, byte for byte.
 
-Runner: `test/conformance.test.ts` (part of `npm test`). It runs the `cli` steps against this
-checkout's CLI by default and against any other on request (below), so one set of expectations
-holds the TS bundle and a packed binary to the same bytes.
+Runner: `test/conformance.test.ts` (part of `bun run test`). It runs the `cli` steps against
+this checkout's bundle by default and against any other CLI on request (below), so one set of
+expectations holds every CLI to the same bytes.
 
 The format is plain JSON and plain file trees, nothing language-specific: a runner needs a
 JSON parser, a directory copy, `git`, a way to run a program, and its engine.
@@ -277,11 +277,11 @@ a directory lies in a work tree (none under `${TMP}` does, but what `gitInit` ma
 
 Which CLI runs: `SKILLETOR_CONFORMANCE_CLI`, a JSON array of strings, is put before `argv`.
 Unset, the runner runs the running Bun and the bundle `buildTo` (`scripts/bundle.mjs`)
-makes of this checkout, as `test/cli.test.ts` does. Any other CLI – a packed binary, say – runs
+makes of this checkout, as `test/cli.test.ts` does. Any other CLI – another build of it, say – runs
 against the same expectations:
 
 ```bash
-SKILLETOR_CONFORMANCE_CLI='["'"$PWD"'/skilletor-binary"]' \
+SKILLETOR_CONFORMANCE_CLI='["'"$PWD"'/other-skilletor"]' \
   bun test --preload ./test/setup.ts ./test/conformance.test.ts
 ```
 
