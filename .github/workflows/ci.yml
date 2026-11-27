@@ -1,3 +1,12 @@
+# The TypeScript gates on the pinned Bun (k282): frozen install, typecheck, the suite, the dist
+# bundle against a rebuild, and on Linux the getty-bun starters against a fresh render
+# (scripts/check-starters.mjs, the same check SimpiCI runs from .cicd/).
+#
+# Decision of the main session (hub task agent-developer k5): ubuntu-latest is required.
+# macos-latest and windows-latest stay in the matrix, advisory (continue-on-error) and expected
+# red: macOS until agent-bun-runtime ships a darwin target (hub decision F5), Windows until its
+# .cmd polyglot starts the Claude Code hooks (F2). Codex and Hermes on Windows run through
+# getty-bun.ps1, so the Windows leg still gives signal.
 name: CI
 
 on:
@@ -10,17 +19,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Node 24: the test runner executes .ts directly via native type-stripping.
-        # The shipped bundle still targets Node 18 (esbuild target=node18).
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            advisory: false
+          - os: macos-latest
+            advisory: true
+          - os: windows-latest
+            advisory: true
+    name: test (${{ matrix.os }})${{ matrix.advisory && ' advisory, expected red' || '' }}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.advisory }}
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      # package.json gettyBun.bunVersion; the next step fails when the two disagree.
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: "24"
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run check-dist
+          bun-version: "1.4.5"
+      - run: bun -e "const pin = require('./package.json').gettyBun.bunVersion; if (Bun.version !== pin) { console.error('ci.yml sets up Bun ' + Bun.version + ', package.json gettyBun.bunVersion pins ' + pin); process.exit(1); }"
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run check-dist
+      - if: matrix.os == 'ubuntu-latest'
+        run: bun run check-starters
