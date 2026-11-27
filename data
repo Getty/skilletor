@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-11-27T14:17:54Z
+claimed_by: skilletor-release-manager-k285
+class: standard
+completed: 2026-11-27T14:17:54Z
+created: 2026-11-27T06:07:09Z
+id: 285
+priority: medium
+started: 2026-11-27T14:17:54Z
+status: done
+tags:
+- getty-bun
+- release
+title: Release notes for the getty-bun switch
+updated: 2026-11-27T14:17:54Z
+---
+
+Changes under {{$NEXT}} only: Node, Perl and binaries go; Bun via getty-bun; macOS and Claude Code on Windows wait for agent-bun-runtime (F2/F5); Codex users re-approve the hook; first start downloads Bun (600 s hook timeout); install.sh users rerun it. No version, no tag, no marketplace (publish gate).
+Branch getty-bun, hub task agent-developer k5.
+
+Changes {{$NEXT}} committed 6b8f768 (pushed). No version, tag or marketplace (publish gate).
