@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-11-27T06:43:40Z
+claimed_by: skilletor-worker-k279
+class: standard
+completed: 2026-11-27T06:43:40Z
+created: 2026-11-27T06:06:47Z
+id: 279
+priority: high
+started: 2026-11-27T06:43:40Z
+status: done
+tags:
+- getty-bun
+- build
+title: Build dist with bun build
+updated: 2026-11-27T06:43:40Z
+---
+
+Build dist/skilletor.js with bun build --target=bun (version define), check-dist = rebuild with the pinned Bun + cmp; package.json gains "gettyBun": {"contractVersion": 1, "bunVersion": "1.4.5"}, bun.lock committed, package-lock.json, esbuild and engines.node go.
+@getty/agent-bun-runtime 0.1.0 is not on npm (404 on 2026-11-27): built without the SDK for now; no git pin, no local tarball. Add the exact devDependency once it is published.
+Check byte stability of bun build across machines (CI vs local).
+Depends on K3. Branch getty-bun, hub task agent-developer k5.
+
+2026-11-27 06:41 Decision: Bun.build (scripts/bundle.mjs) chdirs to the checkout root - Bun names bundled modules by path relative to cwd, so this keeps the checkout path out of the bundle; tests build via buildTo() in a child Bun. Bun resolves symlinks and has no preserveSymlinks: a node_modules linked from outside the checkout would embed the link target's path, so the k220 claim (linked node_modules builds the same bundle) cannot hold; the build now refuses it (guard on metafile inputs), test replaced. Linked-worktree builds need a real bun install --frozen-lockfile per worktree. createRequire banner dropped: bun emits __require = import.meta.require; chokidar (nunjucks watch only) becomes a throw.
+
+2026-11-27 06:41 Done, uncommitted on getty-bun: scripts/bundle.mjs(+.d.mts) replaces esbuild.config; build.mjs/check-dist.mjs on Bun (check-dist: pinned-Bun check, rebuild to temp file, byte compare); package.json gettyBun {1, 1.4.5} (schema-checked), engines.node and esbuild gone; bun.lock migrated from package-lock.json (same versions), package-lock.json deleted; 6 test files on buildTo(); build.test.ts rewritten (7 tests incl. path-independence, check-dist stale + wrong-Bun). dist 472658 -> 454290 B, sha256 c8d6b1c4. Verified: install --frozen-lockfile 0, typecheck 0, build+check-dist 0, git diff --quiet dist/ after rebuild 0, test 1346 pass/25 skip/0 fail; two fresh copies (different paths, own bun install) build bytes identical to dist. Open: cross-machine stability (CI, k282); docs mention esbuild/package-lock (README, docs/release.md, conformance/README.md:279, design spec); ci.yml still npm (k282).
+
+Committed 30f40e7 (pushed). Reviewer run: frozen install 0, typecheck 0, rebuild byte-equal, check-dist 0, bun test 1346/25 skip/0 fail. SDK still unpublished: add as exact devDependency later.
