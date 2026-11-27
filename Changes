@@ -16,13 +16,21 @@ Revision history for skilletor and Skilletor, its Perl distribution
     the host as a word (`hook <event> codex`); `--harness` still works.
   - Install: install.sh needs only sh, awk and git. A `skilletor` script
     written by an older installer ran Node; run install.sh again.
-  - Hermes: the adapter runs the starter and calls `ensure` once per session
-    in the background (600 s).
+  - Hermes: the adapter runs the starter; its first hook in a Hermes process
+    starts `ensure` in the background (600 s); until it is done, session
+    starts and prompts deliver nothing, and after a failure the next session
+    start tries again.
   - Install entries: {"skill": "name@source", "into": "plugin"} (project
     scope, skills only) renders into the plugin repo's own shipped skills
     directory. The lock owns it as plugin:skills/<name>; identical files on a
-    fresh checkout are adopted. The plugin ships the skill getty-bun-install
-    (the rendered starters) that way.
+    fresh checkout are adopted. A file already on disk as rendered is
+    reported `adopted` (text line and `adopted` in sync --json). The plugin
+    ships the skill getty-bun-install (the rendered starters) that way.
+  - Windows: the executable bit is compared on POSIX only, so a sync on
+    Windows adopts an identical plugin copy and no longer rewrites
+    executable files on every run.
+  - install.sh: passes shellcheck and runs under mawk, gawk, busybox awk and
+    BWK awk.
   - Config: a JSON syntax error in a skilletor.json reads the same on every
     engine ("unexpected 'x' at line L column C" or "unexpected end of
     input").
