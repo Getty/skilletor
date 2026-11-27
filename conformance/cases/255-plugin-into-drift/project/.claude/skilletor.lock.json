@@ -1,0 +1,17 @@
+{
+  "plugin:skills/boot": {
+    "source": "shared",
+    "version": "git:7cafca7",
+    "files": {
+      "skills/boot/SKILL.md": "sha256:63f2809f737d412e0fcc15a229a2df60f5cb5025a5a828d8232752c4b8fd4f80",
+      "skills/boot/bin/run.sh": "sha256:411d0c8b21d050739d7b8330b32c94e3cdc8ff3b0f3dcb6df4ab22e5fb01a6a3"
+    }
+  },
+  "plugin:skills/old": {
+    "source": "shared",
+    "version": "git:7cafca7",
+    "files": {
+      "skills/old/SKILL.md": "sha256:7763c8ca8f464e6eb9f819d7c77f68ec682c592024646d3b239f449a2d86e1e2"
+    }
+  }
+}

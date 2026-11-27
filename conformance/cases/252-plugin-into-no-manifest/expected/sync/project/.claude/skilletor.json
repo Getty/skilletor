@@ -1,0 +1,10 @@
+{
+  "install": {
+    "skills": [
+      {
+        "skill": "boot@shared",
+        "into": "plugin"
+      }
+    ]
+  }
+}

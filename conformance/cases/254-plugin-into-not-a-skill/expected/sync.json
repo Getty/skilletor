@@ -1,0 +1,4 @@
+{
+  "error": "${PROJECT}/.claude/skilletor.json: install.agents[0]: an object entry installs a skill into the plugin; agents install into their harness roots only",
+  "scopes": []
+}

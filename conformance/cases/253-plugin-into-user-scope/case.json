@@ -1,0 +1,7 @@
+{
+  "description": "An install into the plugin (k286) declared in the user config is a config error: the plugin's skills directory lies in a project, so the entry is project scope only; nothing is written.",
+  "steps": [
+    { "id": "sync", "op": "sync", "tree": true },
+    { "id": "cli-sync", "op": "cli", "argv": ["sync"] }
+  ]
+}

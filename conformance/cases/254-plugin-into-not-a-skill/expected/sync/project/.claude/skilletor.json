@@ -1,0 +1,10 @@
+{
+  "install": {
+    "agents": [
+      {
+        "agent": "reviewer@shared",
+        "into": "plugin"
+      }
+    ]
+  }
+}

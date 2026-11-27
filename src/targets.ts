@@ -29,6 +29,9 @@ export interface RootContext {
   /** The Hermes home (spec §16.2); unset or empty means Hermes' default for `<home>`
    *  (`defaultHermesHome`; only the user scope uses it). */
   hermesHome?: string;
+  /** The project's plugin items root (k286, `pluginItemsRoot`): where `plugin:` keys' files live.
+   *  Unset outside the project scope, or when the project has no usable plugin manifest. */
+  pluginRoot?: string;
 }
 
 export interface TargetLayout {
@@ -402,6 +405,19 @@ export function selectTargets(
 
 const TYPE_OF_DIR: Record<string, ItemType> = { skills: "skill", agents: "agent", rules: "rule" };
 
+/** The lock-key prefix of a skill installed into the project's plugin skills directory (k286):
+ *  no harness, one copy whatever the targets. A version without k286 keeps such entries untouched. */
+export const PLUGIN_KEY_PREFIX = "plugin:";
+
+/** "skills/foo" installed into the plugin → its lock key. */
+export function pluginKey(target: string): string {
+  return PLUGIN_KEY_PREFIX + target;
+}
+
+export function isPluginKey(key: string): boolean {
+  return key.startsWith(PLUGIN_KEY_PREFIX);
+}
+
 /** "skills/foo" for harness h → its lock key. */
 export function lockKey(harness: Harness, target: string): string {
   return LAYOUTS[harness].keyPrefix + target;
@@ -434,6 +450,7 @@ export function rootOf(r: RootContext, harness: Harness, type: ItemType): string
 
 /** Absolute root a lock key's files live under; undefined for unknown or unsupported keys. */
 export function rootOfKey(r: RootContext, key: string): string | undefined {
+  if (isPluginKey(key)) return r.scope === "project" ? r.pluginRoot : undefined;
   const k = parseLockKey(key);
   return k.harness ? rootOf(r, k.harness, k.type) : undefined;
 }

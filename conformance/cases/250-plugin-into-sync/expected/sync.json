@@ -1,0 +1,45 @@
+{
+  "scopes": [
+    {
+      "added": [],
+      "conflicts": [],
+      "overwritten": [],
+      "removed": [],
+      "scope": "user",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    },
+    {
+      "added": [
+        {
+          "key": "plugin:skills/boot",
+          "name": "boot",
+          "source": "shared",
+          "type": "skill"
+        },
+        {
+          "key": "skills/helper",
+          "name": "helper",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
+      "conflicts": [],
+      "gitignoreUpdated": [
+        ".claude/.gitignore",
+        ".worktreeinclude"
+      ],
+      "overwritten": [],
+      "removed": [],
+      "scope": "project",
+      "skipped": [],
+      "trustRequests": [],
+      "unchanged": [],
+      "updated": [],
+      "warnings": []
+    }
+  ]
+}

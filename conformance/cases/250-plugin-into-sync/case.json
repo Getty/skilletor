@@ -1,0 +1,24 @@
+{
+  "description": "An install entry {\"skill\": \"boot@shared\", \"into\": \"plugin\"} (k286): before a sync check names the declared copy; the sync renders the skill once into the plugin skills directory the manifest names (skills/boot/, under the lock key plugin:skills/boot, the template's executable bit kept, no skill .gitignore), beside the harness copy of a plain entry; check is clean after it, status lists the plugin key, and through the CLI a resync changes nothing.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared",
+          "executable": [
+            "skills/boot/bin/run.sh.njk"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    { "id": "check-before", "op": "check" },
+    { "id": "sync", "op": "sync", "tree": true },
+    { "id": "check", "op": "check" },
+    { "id": "status", "op": "status" },
+    { "id": "cli-resync", "op": "cli", "argv": ["sync"] },
+    { "id": "cli-status", "op": "cli", "argv": ["status"] }
+  ]
+}

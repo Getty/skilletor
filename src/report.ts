@@ -5,7 +5,7 @@
 // (lock key `codex:…`, spec §14.4) carry their own, unmeasured-so-conservative hint,
 // Hermes items (`hermes:…`, spec §16.2) theirs.
 import type { BackendKind, Harness, ItemType } from "./config.ts";
-import { parseLockKey } from "./targets.ts";
+import { isPluginKey, parseLockKey } from "./targets.ts";
 import { skillsWarning, type SkillsMissing } from "./agent-skills.ts";
 
 export const ACTIVATION: Record<ItemType, string> = {
@@ -23,7 +23,12 @@ export const HERMES_ACTIVATION = "active from the next Hermes session";
 /** The hint of every item of a harness other than Claude Code. */
 const HARNESS_ACTIVATION: Partial<Record<Harness, string>> = { codex: CODEX_ACTIVATION, hermes: HERMES_ACTIVATION };
 
+/** A skill in the project's plugin skills directory (k286): a file of the repository, which
+ *  reaches a harness only as part of the plugin. */
+export const PLUGIN_ACTIVATION = "a file of the plugin: commit it";
+
 function activationOf(it: ItemChange): string {
+  if (isPluginKey(it.key)) return PLUGIN_ACTIVATION;
   const harness = parseLockKey(it.key).harness;
   return (harness && HARNESS_ACTIVATION[harness]) ?? ACTIVATION[it.type];
 }
@@ -247,7 +252,7 @@ export function reportHook(report: SyncReport): { systemMessage?: string; additi
     for (const it of changed) {
       // Claude Code's items are unmarked, as before targets; another harness's are named.
       const harness = parseLockKey(it.key).harness;
-      const mark = harness && harness !== "claude" ? ` (${harness})` : "";
+      const mark = isPluginKey(it.key) ? " (plugin)" : harness && harness !== "claude" ? ` (${harness})` : "";
       ctx.push(`- ${it.type} ${it.name}@${it.source}${mark}: ${activationOf(it)}`);
     }
   }

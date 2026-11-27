@@ -1,0 +1,20 @@
+{
+  "changed": true,
+  "declaredChanged": [
+    "project"
+  ],
+  "layoutChanged": [
+    "project"
+  ],
+  "sources": [
+    {
+      "changed": false,
+      "name": "shared",
+      "scope": "project"
+    }
+  ],
+  "varsChanged": [
+    "project"
+  ],
+  "warnings": []
+}

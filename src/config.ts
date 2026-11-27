@@ -8,7 +8,7 @@
 // Missing files are not an error; they read as an empty config. Everything
 // that can go wrong throws a ConfigError naming the file and the offending key.
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { atomicWrite, claudeConfigDirOf, innerSegments, parseJson } from "./fsutil.ts";
 
 export type ItemType = "skill" | "agent" | "rule";
@@ -73,6 +73,9 @@ export interface InstallItem {
   target: string;
   /** The raw declaration, for error messages. */
   raw: string;
+  /** `"plugin"`: the item installs into the project's plugin skills directory (k286), once,
+   *  whatever the targets, instead of into the harness roots. Project-scope skills only. */
+  into?: "plugin";
 }
 
 /** `*@source` or a pattern (`perl-*@source`) under one type: every item of that type in
@@ -341,11 +344,15 @@ function parseInstall(
     const list = install[key];
     if (list === undefined) continue;
     if (!Array.isArray(list)) throw new ConfigError(`${path}: install.${key} must be an array`);
-    list.forEach((entry, i) => {
-      if (typeof entry !== "string") {
-        throw new ConfigError(`${path}: install.${key}[${i}] must be a string`);
+    list.forEach((value, i) => {
+      const where = `install.${key}[${i}]`;
+      if (typeof value !== "string" && !isEntryObject(value)) {
+        throw new ConfigError(`${path}: ${where} must be a string or an object`);
       }
-      const item = parseEntry(entry, type, path, `install.${key}[${i}]`);
+      const item = typeof value === "string"
+        ? parseEntry(value, type, path, where)
+        : parseIntoEntry(value as Json, type, path, where, scope);
+      const entry = item.raw;
       if (overrides.has(item.source)) throw new ConfigError(overrideUse(path, entry, item.source));
       if (!known.has(item.source)) {
         throw new ConfigError(
@@ -434,6 +441,80 @@ function dedupeBundles(a: BundleItem[], b: BundleItem[], path: string): BundleIt
 /** Duplicate key: a name per type, ignoring case (k135), or a wildcard pattern per type and source. */
 function seenKey(item: { type: ItemType; name: string; source: string }): string {
   return item.name.includes(WILDCARD) ? `${item.type}/${item.name}@${item.source}` : `${item.type}/${nameKey(item.name)}`;
+}
+
+/** A JSON object, as an install entry may be one (k286). */
+function isEntryObject(value: unknown): boolean {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** The one destination an install entry may name besides the harness roots (k286). */
+const INTO_VALUES = ["plugin"] as const;
+
+/**
+ * Parse an object install entry, `{ "skill": "name@source", "into": "plugin" }` (k286): the
+ * skill installs into the project's plugin skills directory. Skills only, project scope only,
+ * one explicit name (no pattern); the key naming the entry is the list's type.
+ */
+function parseIntoEntry(obj: Json, type: ItemType, path: string, where: string, scope: "user" | "project"): InstallItem {
+  for (const key of Object.keys(obj)) {
+    if (key !== type && key !== "into") {
+      throw new ConfigError(`${path}: ${where} has unknown key "${key}" (allowed: ${type}, into)`);
+    }
+  }
+  if (type !== "skill") {
+    throw new ConfigError(`${path}: ${where}: an object entry installs a skill into the plugin; ${type}s install into their harness roots only`);
+  }
+  const value = obj[type];
+  if (typeof value !== "string") throw new ConfigError(`${path}: ${where}.${type} must be a string name@source`);
+  if (!(INTO_VALUES as readonly unknown[]).includes(obj.into)) {
+    throw new ConfigError(`${path}: ${where}.into ${JSON.stringify(obj.into)} must be ${INTO_VALUES.map((v) => `"${v}"`).join(" or ")}`);
+  }
+  if (scope !== "project") {
+    throw new ConfigError(`${path}: ${where}: "into": "plugin" is project scope only (the plugin's skills directory lies in the project)`);
+  }
+  const item = parseEntry(value, type, path, `${where}.${type}`);
+  if (item.name.includes(WILDCARD)) {
+    throw new ConfigError(`${path}: ${where}.${type} "${value}": "into": "plugin" takes one name, no pattern`);
+  }
+  return { ...item, into: "plugin" };
+}
+
+/** The plugin manifest an install `"into": "plugin"` reads (k286), relative to the project root. */
+export const PLUGIN_MANIFEST = ".claude-plugin/plugin.json";
+
+/**
+ * The root an install `"into": "plugin"` lands under (k286): the parent of the plugin's skills
+ * directory – the manifest's `skills` path, default `skills` – so a skill's files land in
+ * `<root>/skills/<name>/` as under every other root. Throws a ConfigError when the project has
+ * no plugin manifest, or one whose `skills` is no single relative path inside the project
+ * ending in a directory named `skills`.
+ */
+export function pluginItemsRoot(projectDir: string): string {
+  const file = join(projectDir, PLUGIN_MANIFEST);
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (err) {
+    const why = (err as NodeJS.ErrnoException).code === "ENOENT" ? "not found" : `cannot read (${(err as Error).message})`;
+    throw new ConfigError(`${file}: ${why}; an install with "into": "plugin" needs the project's plugin manifest`);
+  }
+  let manifest: unknown;
+  try {
+    manifest = parseJson(text);
+  } catch (err) {
+    throw new ConfigError(`${file}: invalid JSON (${(err as Error).message})`);
+  }
+  if (!isEntryObject(manifest)) throw new ConfigError(`${file}: top level must be a JSON object`);
+  const skills = (manifest as Json).skills ?? "skills";
+  const at = `${file}: "skills" ${JSON.stringify(skills)}`;
+  if (typeof skills !== "string") throw new ConfigError(`${at} must be one path for an install with "into": "plugin"`);
+  const segments = innerSegments(skills);
+  if (!Array.isArray(segments)) throw new ConfigError(`${at} must be a directory inside the project`);
+  if (segments.at(-1) !== "skills") {
+    throw new ConfigError(`${at}: an install with "into": "plugin" needs a skills directory named "skills"`);
+  }
+  return resolvePath(projectDir, ...segments.slice(0, -1));
 }
 
 /** Parse `[type:]name@source`. The array's type wins; an explicit prefix must match it. */
@@ -547,6 +628,8 @@ export function loadConfig(opts: LoadOptions): LoadedConfig {
       claudeSettings: boolOr(local.claudeSettings, boolOr(project.claudeSettings, userScope.claudeSettings!, projectPath, "claudeSettings"),
         localPath, "claudeSettings"),
     };
+    // An install into the plugin needs its manifest: without one the config is refused (k286).
+    if (projectScope.install.some((i) => i.into)) pluginItemsRoot(opts.projectDir!);
     const projectTargets = targetsOf(project.targets, projectPath);
     const localTargets = targetsOf(local.targets, localPath);
     if (localTargets ?? projectTargets) projectScope.targets = localTargets ?? projectTargets;
@@ -680,12 +763,20 @@ export function removeSource(path: string, name: string): void {
 
 const INSTALL_KEY: Record<ItemType, string> = { skill: "skills", agent: "agents", rule: "rules" };
 
+/** The `name@source` an install entry of `type`'s list declares: the string as written, or
+ *  an object entry's (k286) `type` value; undefined for anything else. */
+function entryText(e: unknown, type: ItemType): string | undefined {
+  if (typeof e === "string") return e;
+  const value = isEntryObject(e) ? (e as Json)[type] : undefined;
+  return typeof value === "string" ? value : undefined;
+}
+
 export function addInstallEntry(path: string, type: ItemType, entry: string): void {
   const cfg = loadRaw(path);
   const install = (cfg.install as Record<string, unknown>) ?? {};
   const key = INSTALL_KEY[type];
-  const list = Array.isArray(install[key]) ? (install[key] as string[]) : [];
-  if (!list.includes(entry)) list.push(entry);
+  const list = Array.isArray(install[key]) ? (install[key] as unknown[]) : [];
+  if (!list.some((e) => entryText(e, type) === entry)) list.push(entry);
   install[key] = list;
   cfg.install = install;
   saveRaw(path, cfg);
@@ -715,7 +806,10 @@ export function findInstallEntries(
   for (const t of type ? [type] : ITEM_TYPES) {
     const list = install[INSTALL_KEY[t]];
     if (!Array.isArray(list)) continue;
-    for (const e of list as string[]) if (typeof e === "string" && entryMatches(e, name, source)) out.push({ type: t, entry: e });
+    for (const e of list as unknown[]) {
+      const text = entryText(e, t);
+      if (text !== undefined && entryMatches(text, name, source)) out.push({ type: t, entry: text });
+    }
   }
   return out;
 }
@@ -726,11 +820,13 @@ export function removeInstallEntries(path: string, name: string, source?: string
   const install = cfg.install as Record<string, unknown> | undefined;
   if (!install) return 0;
   let removed = 0;
-  for (const key of type ? [INSTALL_KEY[type]] : Object.values(INSTALL_KEY)) {
+  for (const t of type ? [type] : ITEM_TYPES) {
+    const key = INSTALL_KEY[t];
     const list = install[key];
     if (!Array.isArray(list)) continue;
     const kept = (list as unknown[]).filter((e) => {
-      const match = typeof e === "string" && entryMatches(e, name, source);
+      const text = entryText(e, t);
+      const match = text !== undefined && entryMatches(text, name, source);
       if (match) removed++;
       return !match;
     });

@@ -23,7 +23,10 @@
       "getty-skill-library@getty",
       "kanban-issues-karr-coordination@karr",
       "kanban-issues-karr-ticket@karr",
-      "getty-bun-install@agent-bun-runtime",
+      {
+        "skill": "getty-bun-install@agent-bun-runtime",
+        "into": "plugin"
+      },
       "getty-bun-integration@agent-bun-runtime",
       "getty-bun@agent-bun-runtime"
     ],

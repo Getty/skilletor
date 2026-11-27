@@ -5915,11 +5915,11 @@ function jsonErrorAt(text) {
 import { execFileSync as execFileSync2 } from "child_process";
 import os, { hostname as hostname2, platform } from "os";
 import { existsSync as existsSync11, readFileSync as readFileSync12, realpathSync as realpathSync2, rmSync as rmSync7, statSync as statSync5 } from "fs";
-import { basename as basename4, dirname as dirname5, isAbsolute as isAbsolute3, join as join15, relative as relative4, resolve as resolvePath5, sep as sep5 } from "path";
+import { basename as basename4, dirname as dirname5, isAbsolute as isAbsolute3, join as join15, relative as relative4, resolve as resolvePath6, sep as sep5 } from "path";
 
 // src/config.ts
 import { existsSync, readFileSync } from "fs";
-import { join as join2 } from "path";
+import { join as join2, resolve as resolvePath } from "path";
 var ITEM_TYPES = ["skill", "agent", "rule"];
 var INSTALL_KEYS = { skills: "skill", agents: "agent", rules: "rule" };
 var HARNESSES = ["claude", "codex", "hermes"];
@@ -6103,11 +6103,13 @@ function parseInstall(obj, path, scope, known, overrides = new Set) {
       continue;
     if (!Array.isArray(list))
       throw new ConfigError(`${path}: install.${key} must be an array`);
-    list.forEach((entry, i) => {
-      if (typeof entry !== "string") {
-        throw new ConfigError(`${path}: install.${key}[${i}] must be a string`);
+    list.forEach((value, i) => {
+      const where = `install.${key}[${i}]`;
+      if (typeof value !== "string" && !isEntryObject(value)) {
+        throw new ConfigError(`${path}: ${where} must be a string or an object`);
       }
-      const item = parseEntry(entry, type, path, `install.${key}[${i}]`);
+      const item = typeof value === "string" ? parseEntry(value, type, path, where) : parseIntoEntry(value, type, path, where, scope);
+      const entry = item.raw;
       if (overrides.has(item.source))
         throw new ConfigError(overrideUse(path, entry, item.source));
       if (!known.has(item.source)) {
@@ -6185,6 +6187,64 @@ function dedupeBundles(a, b, path) {
 }
 function seenKey(item) {
   return item.name.includes(WILDCARD) ? `${item.type}/${item.name}@${item.source}` : `${item.type}/${nameKey(item.name)}`;
+}
+function isEntryObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+var INTO_VALUES = ["plugin"];
+function parseIntoEntry(obj, type, path, where, scope) {
+  for (const key of Object.keys(obj)) {
+    if (key !== type && key !== "into") {
+      throw new ConfigError(`${path}: ${where} has unknown key "${key}" (allowed: ${type}, into)`);
+    }
+  }
+  if (type !== "skill") {
+    throw new ConfigError(`${path}: ${where}: an object entry installs a skill into the plugin; ${type}s install into their harness roots only`);
+  }
+  const value = obj[type];
+  if (typeof value !== "string")
+    throw new ConfigError(`${path}: ${where}.${type} must be a string name@source`);
+  if (!INTO_VALUES.includes(obj.into)) {
+    throw new ConfigError(`${path}: ${where}.into ${JSON.stringify(obj.into)} must be ${INTO_VALUES.map((v) => `"${v}"`).join(" or ")}`);
+  }
+  if (scope !== "project") {
+    throw new ConfigError(`${path}: ${where}: "into": "plugin" is project scope only (the plugin's skills directory lies in the project)`);
+  }
+  const item = parseEntry(value, type, path, `${where}.${type}`);
+  if (item.name.includes(WILDCARD)) {
+    throw new ConfigError(`${path}: ${where}.${type} "${value}": "into": "plugin" takes one name, no pattern`);
+  }
+  return { ...item, into: "plugin" };
+}
+var PLUGIN_MANIFEST = ".claude-plugin/plugin.json";
+function pluginItemsRoot(projectDir) {
+  const file = join2(projectDir, PLUGIN_MANIFEST);
+  let text;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (err) {
+    const why = err.code === "ENOENT" ? "not found" : `cannot read (${err.message})`;
+    throw new ConfigError(`${file}: ${why}; an install with "into": "plugin" needs the project's plugin manifest`);
+  }
+  let manifest;
+  try {
+    manifest = parseJson(text);
+  } catch (err) {
+    throw new ConfigError(`${file}: invalid JSON (${err.message})`);
+  }
+  if (!isEntryObject(manifest))
+    throw new ConfigError(`${file}: top level must be a JSON object`);
+  const skills = manifest.skills ?? "skills";
+  const at = `${file}: "skills" ${JSON.stringify(skills)}`;
+  if (typeof skills !== "string")
+    throw new ConfigError(`${at} must be one path for an install with "into": "plugin"`);
+  const segments = innerSegments(skills);
+  if (!Array.isArray(segments))
+    throw new ConfigError(`${at} must be a directory inside the project`);
+  if (segments.at(-1) !== "skills") {
+    throw new ConfigError(`${at}: an install with "into": "plugin" needs a skills directory named "skills"`);
+  }
+  return resolvePath(projectDir, ...segments.slice(0, -1));
 }
 function parseEntry(entry, type, path, where) {
   const at = entry.lastIndexOf("@");
@@ -6279,6 +6339,8 @@ function loadConfig(opts) {
       gitignore: boolOr(local.gitignore ?? project.gitignore, true, projectPath, "gitignore"),
       claudeSettings: boolOr(local.claudeSettings, boolOr(project.claudeSettings, userScope.claudeSettings, projectPath, "claudeSettings"), localPath, "claudeSettings")
     };
+    if (projectScope.install.some((i) => i.into))
+      pluginItemsRoot(opts.projectDir);
     const projectTargets = targetsOf(project.targets, projectPath);
     const localTargets = targetsOf(local.targets, localPath);
     if (localTargets ?? projectTargets)
@@ -6388,12 +6450,18 @@ function removeSource(path, name) {
   }
 }
 var INSTALL_KEY = { skill: "skills", agent: "agents", rule: "rules" };
+function entryText(e, type) {
+  if (typeof e === "string")
+    return e;
+  const value = isEntryObject(e) ? e[type] : undefined;
+  return typeof value === "string" ? value : undefined;
+}
 function addInstallEntry(path, type, entry) {
   const cfg = loadRaw(path);
   const install = cfg.install ?? {};
   const key = INSTALL_KEY[type];
   const list = Array.isArray(install[key]) ? install[key] : [];
-  if (!list.includes(entry))
+  if (!list.some((e) => entryText(e, type) === entry))
     list.push(entry);
   install[key] = list;
   cfg.install = install;
@@ -6415,9 +6483,11 @@ function findInstallEntries(path, name, source, type) {
     const list = install[INSTALL_KEY[t]];
     if (!Array.isArray(list))
       continue;
-    for (const e of list)
-      if (typeof e === "string" && entryMatches(e, name, source))
-        out.push({ type: t, entry: e });
+    for (const e of list) {
+      const text = entryText(e, t);
+      if (text !== undefined && entryMatches(text, name, source))
+        out.push({ type: t, entry: text });
+    }
   }
   return out;
 }
@@ -6427,12 +6497,14 @@ function removeInstallEntries(path, name, source, type) {
   if (!install)
     return 0;
   let removed = 0;
-  for (const key of type ? [INSTALL_KEY[type]] : Object.values(INSTALL_KEY)) {
+  for (const t of type ? [type] : ITEM_TYPES) {
+    const key = INSTALL_KEY[t];
     const list = install[key];
     if (!Array.isArray(list))
       continue;
     const kept = list.filter((e) => {
-      const match = typeof e === "string" && entryMatches(e, name, source);
+      const text = entryText(e, t);
+      const match = text !== undefined && entryMatches(text, name, source);
       if (match)
         removed++;
       return !match;
@@ -7852,6 +7924,13 @@ function selectTargets(configured, detected, markers) {
   return { user: [...machine], project, warnings, ...projectUnresolved ? { projectUnresolved } : {} };
 }
 var TYPE_OF_DIR = { skills: "skill", agents: "agent", rules: "rule" };
+var PLUGIN_KEY_PREFIX = "plugin:";
+function pluginKey(target) {
+  return PLUGIN_KEY_PREFIX + target;
+}
+function isPluginKey(key) {
+  return key.startsWith(PLUGIN_KEY_PREFIX);
+}
 function lockKey(harness, target) {
   return LAYOUTS[harness].keyPrefix + target;
 }
@@ -7875,6 +7954,8 @@ function rootOf(r, harness, type) {
   return LAYOUTS[harness].roots[type]?.(r);
 }
 function rootOfKey(r, key) {
+  if (isPluginKey(key))
+    return r.scope === "project" ? r.pluginRoot : undefined;
   const k = parseLockKey(key);
   return k.harness ? rootOf(r, k.harness, k.type) : undefined;
 }
@@ -8402,7 +8483,7 @@ class LocalSource {
 import { execFile } from "child_process";
 import { createHash as createHash2 } from "crypto";
 import { existsSync as existsSync5, lstatSync as lstatSync4, mkdirSync as mkdirSync2, readdirSync as readdirSync2, rmSync as rmSync3 } from "fs";
-import { join as join7, resolve as resolvePath } from "path";
+import { join as join7, resolve as resolvePath2 } from "path";
 var DEFAULT_TIMEOUT_MS = 60000;
 var CHECKOUT_AS_IS = process.platform === "win32" ? ["-c", "core.autocrlf=false", "-c", "core.eol=lf", "-c", "core.longpaths=true"] : [];
 function gitCacheName(url, ref) {
@@ -8427,7 +8508,7 @@ class GitSource {
       execFile("git", [...CHECKOUT_AS_IS, ...args], {
         cwd: cwd || undefined,
         timeout: timeoutMs ?? this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        env: gitEnv({ ...cwd ? { GIT_CEILING_DIRECTORIES: resolvePath(cwd, "..") } : {}, ...env }),
+        env: gitEnv({ ...cwd ? { GIT_CEILING_DIRECTORIES: resolvePath2(cwd, "..") } : {}, ...env }),
         maxBuffer: 32 * 1024 * 1024
       }, (err, stdout, stderr) => {
         if (err)
@@ -8632,7 +8713,7 @@ function samePrefix(a, b) {
 // src/sources/url.ts
 import { createHash as createHash3 } from "crypto";
 import fs, { existsSync as existsSync6, lstatSync as lstatSync5, mkdirSync as mkdirSync3, mkdtempSync, readFileSync as readFileSync5, readdirSync as readdirSync3, writeFileSync as writeFileSync2 } from "fs";
-import { dirname as dirname2, join as join8, resolve as resolvePath2, sep as sep2 } from "path";
+import { dirname as dirname2, join as join8, resolve as resolvePath3, sep as sep2 } from "path";
 import { gunzipSync } from "zlib";
 class TarError extends Error {
   name = "TarError";
@@ -8884,9 +8965,9 @@ function isRealDir(path) {
   }
 }
 function writeEntries(dir, entries) {
-  const root = resolvePath2(dir);
+  const root = resolvePath3(dir);
   for (const e of entries) {
-    const dest = resolvePath2(join8(dir, e.name));
+    const dest = resolvePath3(join8(dir, e.name));
     if (dest !== root && !dest.startsWith(root + sep2)) {
       throw new TarError(`unsafe tar entry (escapes target): ${e.name}`);
     }
@@ -9289,16 +9370,16 @@ function readSourceMeta(dir) {
 // src/render.ts
 var import_nunjucks = __toESM(require_nunjucks(), 1);
 import { readFileSync as readFileSync7, statSync as statSync3 } from "fs";
-import { join as join10, posix as posix3, resolve as resolvePath3, sep as sep3 } from "path";
+import { join as join10, posix as posix3, resolve as resolvePath4, sep as sep3 } from "path";
 class RenderError extends Error {
   name = "RenderError";
 }
 function makeLoader(root, validate) {
-  const base = resolvePath3(root);
+  const base = resolvePath4(root);
   return {
     async: false,
     getSource(name) {
-      const path = resolvePath3(base, name);
+      const path = resolvePath4(base, name);
       if (path !== base && !path.startsWith(base + sep3)) {
         throw new RenderError(`template escapes source root: ${name}`);
       }
@@ -9375,7 +9456,7 @@ function rendersEmpty(item, output) {
 
 // src/apply.ts
 import { existsSync as existsSync8, lstatSync as lstatSync7, readFileSync as readFileSync9, readdirSync as readdirSync5, rmdirSync, rmSync as rmSync5 } from "fs";
-import { dirname as dirname3, join as join11, relative as relative3, resolve as resolvePath4, sep as sep4 } from "path";
+import { dirname as dirname3, join as join11, relative as relative3, resolve as resolvePath5, sep as sep4 } from "path";
 
 // src/lock.ts
 import { readFileSync as readFileSync8, rmSync as rmSync4 } from "fs";
@@ -9454,7 +9535,7 @@ function isValidItemName(name) {
   return NAME_RE.test(name);
 }
 function apply(plan, opts) {
-  const lockPath = join11(resolvePath4(opts.targetDir), "skilletor.lock.json");
+  const lockPath = join11(resolvePath5(opts.targetDir), "skilletor.lock.json");
   const oldLock = readLock(lockPath);
   const landed = new Map;
   try {
@@ -9466,7 +9547,7 @@ function apply(plan, opts) {
   }
 }
 function applyPlan(plan, opts, lockPath, oldLock, landed) {
-  const targetDir = resolvePath4(opts.targetDir);
+  const targetDir = resolvePath5(opts.targetDir);
   const newLock = {};
   const res = {
     added: [],
@@ -9480,7 +9561,7 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
     leftInPlace: []
   };
   const dirsTouched = new Map;
-  const rootFor = (key) => resolvePath4(opts.rootOf ? opts.rootOf(key) : targetDir);
+  const rootFor = (key) => resolvePath5(opts.rootOf ? opts.rootOf(key) : targetDir);
   const touched = (root) => {
     let set = dirsTouched.get(root);
     if (!set)
@@ -9544,6 +9625,8 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
       } else if (at.kind === "other" && (isOutput || !owned(rel))) {
         conflict(rel, true, false);
       } else if ((at.kind === "file" || at.kind === "link") && !owned(rel)) {
+        if (at.kind === "file" && isOutput && it.adoptIdentical && sameFileAs(root, rel, it.output.get(rel), it.executable?.has(rel) ?? false))
+          continue;
         conflict(rel, false, !isOutput);
       }
     }
@@ -9688,7 +9771,7 @@ function held(root, rel, holders) {
   return;
 }
 function safeJoin(root, rel) {
-  const abs = resolvePath4(join11(root, rel));
+  const abs = resolvePath5(join11(root, rel));
   if (abs !== root && !abs.startsWith(root + sep4)) {
     throw new ApplyError(`path escapes target: ${rel}`);
   }
@@ -9698,6 +9781,11 @@ function ownPath(key) {
   const colon = key.indexOf(":");
   const slash = key.indexOf("/");
   return colon !== -1 && (slash === -1 || colon < slash) ? key.slice(colon + 1) : key;
+}
+function sameFileAs(root, rel, buf, executable) {
+  const abs = safeJoin(root, rel);
+  const st = lstatOrUndefined(abs);
+  return st !== undefined && st.isFile() && isExecutable(st.mode) === executable && readFileSync9(abs).equals(buf);
 }
 function lstatOrUndefined(abs) {
   try {
@@ -10281,7 +10369,7 @@ function readObject(path) {
     return;
   }
 }
-function pluginKey(key) {
+function pluginKey2(key) {
   const at = key.lastIndexOf("@");
   if (at <= 0 || at === key.length - 1)
     return;
@@ -10294,7 +10382,7 @@ function skilletorInstalls(claudeDir) {
     return [];
   const out = [];
   for (const [key, value] of Object.entries(plugins)) {
-    const k = pluginKey(key);
+    const k = pluginKey2(key);
     if (k?.name !== PLUGIN)
       continue;
     for (const e of Array.isArray(value) ? value : [value]) {
@@ -10383,7 +10471,7 @@ function planClaudeSettings(a) {
   const known = readObject(join14(a.claudeDir, "plugins", "known_marketplaces.json")) ?? {};
   const sourceOf = (m) => isObject(known[m]) ? known[m].source : undefined;
   const NEEDS = "a committed file takes a github, git or url source";
-  if (!Object.keys(enabled).some((k) => pluginKey(k)?.name === PLUGIN)) {
+  if (!Object.keys(enabled).some((k) => pluginKey2(k)?.name === PLUGIN)) {
     const own = skilletorMarketplace(a.claudeDir, a.projectDir, a.pluginRoot);
     if (own.ambiguous) {
       plan.warnings.push(`skilletor is installed from several marketplaces (${own.ambiguous.join(", ")}); ` + `${a.label} does not get it \u2013 enable the one teammates should use`);
@@ -10399,13 +10487,13 @@ function planClaudeSettings(a) {
   const wanted = [...Object.entries(enabled).filter(([, on]) => on !== false).map(([k]) => k), ...plan.enabled];
   const seen = new Set;
   for (const key of wanted) {
-    const m = pluginKey(key)?.marketplace;
+    const m = pluginKey2(key)?.marketplace;
     if (m === undefined || seen.has(m))
       continue;
     seen.add(m);
     if (m === OFFICIAL_MARKETPLACE || Object.hasOwn(declared, m))
       continue;
-    const users = wanted.filter((k) => pluginKey(k)?.marketplace === m).join(", ");
+    const users = wanted.filter((k) => pluginKey2(k)?.marketplace === m).join(", ");
     if (known[m] === undefined) {
       plan.warnings.push(`marketplace "${m}" (${users}) is not known to Claude Code on this machine; not declared in ${a.label}`);
       continue;
@@ -10443,7 +10531,10 @@ var ACTIVATION = {
 var CODEX_ACTIVATION = "active from the next Codex session";
 var HERMES_ACTIVATION = "active from the next Hermes session";
 var HARNESS_ACTIVATION = { codex: CODEX_ACTIVATION, hermes: HERMES_ACTIVATION };
+var PLUGIN_ACTIVATION = "a file of the plugin: commit it";
 function activationOf(it) {
+  if (isPluginKey(it.key))
+    return PLUGIN_ACTIVATION;
   const harness = parseLockKey(it.key).harness;
   return (harness && HARNESS_ACTIVATION[harness]) ?? ACTIVATION[it.type];
 }
@@ -10584,7 +10675,7 @@ function reportHook(report) {
     ctx.push("skilletor synced items:");
     for (const it of changed) {
       const harness = parseLockKey(it.key).harness;
-      const mark = harness && harness !== "claude" ? ` (${harness})` : "";
+      const mark = isPluginKey(it.key) ? " (plugin)" : harness && harness !== "claude" ? ` (${harness})` : "";
       ctx.push(`- ${it.type} ${it.name}@${it.source}${mark}: ${activationOf(it)}`);
     }
   }
@@ -10646,10 +10737,23 @@ function recordedHermesHome(ctx) {
 }
 function hermesHomeOf(ctx) {
   const given = ctx.hermesHome ?? process.env.HERMES_HOME;
-  return given ? resolvePath5(expandHome(given, ctx.home)) : recordedHermesHome(ctx);
+  return given ? resolvePath6(expandHome(given, ctx.home)) : recordedHermesHome(ctx);
 }
 function rootContextOf(ctx, scope) {
-  return { base: baseOf(ctx, scope), scope, claudeDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), codexHome: codexHomeOf(ctx), hermesHome: hermesHomeOf(ctx) };
+  const rc = { base: baseOf(ctx, scope), scope, claudeDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), codexHome: codexHomeOf(ctx), hermesHome: hermesHomeOf(ctx) };
+  if (scope === "project") {
+    const root = pluginRootOf(ctx.projectDir);
+    if (root !== undefined)
+      rc.pluginRoot = root;
+  }
+  return rc;
+}
+function pluginRootOf(projectDir) {
+  try {
+    return pluginItemsRoot(projectDir);
+  } catch {
+    return;
+  }
 }
 function targetsOf2(ctx, config, includeProject = true) {
   const markers = ctx.markers ?? defaultMarkers(ctx.home, codexHomeOf(ctx), ctx.claudeConfigDir || process.env.CLAUDE_CONFIG_DIR || undefined);
@@ -10688,7 +10792,7 @@ function loadWithTargets(ctx, includeProject = true) {
   }
 }
 function localDir(path, home) {
-  const abs = resolvePath5(expandHome(path, home));
+  const abs = resolvePath6(expandHome(path, home));
   try {
     if (statSync5(abs).isDirectory())
       return { path: realpathSync2(abs), exists: true };
@@ -11006,7 +11110,12 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
     return cat;
   };
   const harnessesFor = (type) => receivers(harnesses, type, scope);
-  const keepIfLocked = (target, type) => {
+  const keepIfLocked = (target, type, into) => {
+    if (into) {
+      if (pluginKey(target) in oldLock)
+        keep.push(pluginKey(target));
+      return;
+    }
     for (const h of harnessesFor(type)) {
       const key = lockKey(h, target);
       if (key in oldLock)
@@ -11017,18 +11126,18 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
     const r = resolved.get(item.source);
     const cat = catalogOf(item.source);
     if (!r || !cat) {
-      keepIfLocked(item.target, item.type);
+      keepIfLocked(item.target, item.type, item.into);
       return;
     }
     const catItem = cat.items.find((ci) => ci.type === item.type && ci.name === item.name);
     if (!catItem) {
       rep.warnings.push(`item not found in source ${item.source}: ${item.type} ${item.name}`);
-      keepIfLocked(item.target, item.type);
+      keepIfLocked(item.target, item.type, item.into);
       return;
     }
     if (catItem.error !== undefined) {
       rep.warnings.push(`${item.type} ${item.name}@${item.source}: ${catItem.error}; an installed copy stays`);
-      keepIfLocked(item.target, item.type);
+      keepIfLocked(item.target, item.type, item.into);
       return;
     }
     return { r, cat, catItem };
@@ -11050,6 +11159,10 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
       if (extra.via?.length)
         ri.via = extra.via;
       collect.items.push(ri);
+      return;
+    }
+    if (item.into === "plugin") {
+      buildPluginItem(item);
       return;
     }
     const targets = harnessesFor(item.type);
@@ -11121,6 +11234,40 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
       }
       plan.push(planItem);
     }
+  };
+  const buildPluginItem = (item) => {
+    const key = pluginKey(item.target);
+    keyInfo.set(key, { key, type: item.type, name: item.name, source: item.source });
+    const root = rc.pluginRoot;
+    if (root === undefined) {
+      rep.warnings.push(`skill ${item.name}@${item.source}: no plugin manifest (${PLUGIN_MANIFEST}); an installed copy stays`);
+      if (key in oldLock)
+        keep.push(key);
+      return;
+    }
+    const found = lookup(item);
+    if (!found)
+      return;
+    const { r, cat, catItem } = found;
+    let output;
+    let executable;
+    try {
+      output = build(catItem, r.dir, () => makeContext(ctx, inputsOf(), scope, "claude", root, item, cat.meta.vars ?? {}));
+      executable = executables(catItem, r.dir);
+    } catch (err) {
+      rep.warnings.push(`template error in ${item.type} ${item.name} (plugin): ${err.message}`);
+      if (key in oldLock)
+        keep.push(key);
+      return;
+    }
+    const planItem = { key, type: item.type, name: item.name, source: item.source, version: r.version, output, adoptIdentical: true };
+    if (rendersEmpty(catItem, output)) {
+      planItem.output = new Map;
+      planItem.skipped = "renders-empty";
+    } else if (executable.size > 0) {
+      planItem.executable = executable;
+    }
+    plan.push(planItem);
   };
   const offers = new Map;
   const targetKey = (type, name) => `${TYPE_DIR[type]}/${nameKey(name)}`;
@@ -11324,7 +11471,7 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
     }
   }
   if (gitignoreOn) {
-    const written = result.written.map((w) => ({
+    const written = result.written.filter((w) => !isPluginKey(w.key)).map((w) => ({
       root: rootOfKey(rc, w.key) ?? targetDir,
       key: w.key,
       path: w.path
@@ -11778,7 +11925,15 @@ function declaredDrift(scopeCfg, scope, harnesses, lock, servedBy) {
   const out = [];
   const drift = (id, sources) => out.push({ kind: "declared", id, sources });
   const explicit = new Set;
+  const plugin = new Set;
   for (const item of scopeCfg.install) {
+    if (item.into === "plugin") {
+      const key = pluginKey(item.target);
+      plugin.add(key);
+      if (lock[key]?.source !== item.source)
+        drift(`missing:${key}@${item.source}`, [item.source]);
+      continue;
+    }
     explicit.add(item.target);
     for (const h of receivers(harnesses, item.type, scope)) {
       const key = lockKey(h, item.target);
@@ -11788,6 +11943,13 @@ function declaredDrift(scopeCfg, scope, harnesses, lock, servedBy) {
   }
   const covered = new Set;
   for (const [key, entry] of Object.entries(lock)) {
+    if (isPluginKey(key) && scope === "project") {
+      if (!plugin.has(key))
+        drift(`orphan:${key}`, []);
+      if (entry.partial)
+        drift(`partial:${key}`, [entry.source]);
+      continue;
+    }
     const k = parseLockKey(key);
     if (!k.harness || !receivers(harnesses, k.type, scope).includes(k.harness))
       continue;
@@ -11836,7 +11998,7 @@ function status(given, opts = {}) {
   for (const [scope, scopeCfg] of scopes) {
     const lock = readLock(join15(targetDirOf(ctx, scope), "skilletor.lock.json"));
     const active = targets[scope];
-    const rows = scopeCfg.install.flatMap((i) => receivers(active, i.type, scope).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
+    const rows = scopeCfg.install.flatMap((i) => i.into === "plugin" ? [{ key: pluginKey(i.target), source: i.source }] : receivers(active, i.type, scope).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
     const declaredKeys = new Set(rows.map((r) => r.key));
     const sourceVersions = {};
     for (const entry of Object.values(lock))
@@ -12523,7 +12685,7 @@ function installedSet(ctx, config) {
 // src/hooks.ts
 import { execFileSync as execFileSync4, spawn } from "child_process";
 import { existsSync as existsSync12, mkdirSync as mkdirSync5, readFileSync as readFileSync13, writeFileSync as writeFileSync4 } from "fs";
-import { join as join17, resolve as resolvePath6 } from "path";
+import { join as join17, resolve as resolvePath7 } from "path";
 function hookInputOf(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
 }
@@ -12554,7 +12716,7 @@ function projectRootOf(cwd) {
       timeout: 2000,
       env: gitEnv()
     }).trim();
-    return top ? resolvePath6(top) : cwd;
+    return top ? resolvePath7(top) : cwd;
   } catch {
     return cwd;
   }

@@ -1,0 +1,8 @@
+{
+  "description": "An install into the plugin (k286) in a project without .claude-plugin/plugin.json is a config error naming the manifest: the sync touches nothing, the user scope included; check and the CLI report the same error.",
+  "steps": [
+    { "id": "sync", "op": "sync", "tree": true },
+    { "id": "check", "op": "check" },
+    { "id": "cli-sync", "op": "cli", "argv": ["sync"] }
+  ]
+}

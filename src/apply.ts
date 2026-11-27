@@ -48,6 +48,10 @@ export interface PlanItem {
    *  its `.local.` file, spec §6.3). A file there that the item's lock entry does not
    *  own is a conflict like any other; with `force` it is deleted instead of adopted. */
   claims?: string[];
+  /** A file of the output already on disk with exactly its bytes and executable bit is adopted
+   *  rather than a conflict, though the lock does not own it: the item is committed to the
+   *  repository it lands in (a plugin item, k286), so a fresh checkout holds it without a lock. */
+  adoptIdentical?: true;
 }
 
 export interface ApplyOptions {
@@ -200,6 +204,7 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
       } else if (at.kind === "other" && (isOutput || !owned(rel))) {
         conflict(rel, true, false);
       } else if ((at.kind === "file" || at.kind === "link") && !owned(rel)) {
+        if (at.kind === "file" && isOutput && it.adoptIdentical && sameFileAs(root, rel, it.output.get(rel)!, it.executable?.has(rel) ?? false)) continue;
         conflict(rel, false, !isOutput);
       }
     }
@@ -376,6 +381,13 @@ function ownPath(key: string): string {
   const colon = key.indexOf(":");
   const slash = key.indexOf("/");
   return colon !== -1 && (slash === -1 || colon < slash) ? key.slice(colon + 1) : key;
+}
+
+/** Is the file at `rel` exactly `buf`, with the executable bit `executable`? */
+function sameFileAs(root: string, rel: string, buf: Buffer, executable: boolean): boolean {
+  const abs = safeJoin(root, rel);
+  const st = lstatOrUndefined(abs);
+  return st !== undefined && st.isFile() && isExecutable(st.mode) === executable && readFileSync(abs).equals(buf);
 }
 
 /** lstat that answers `undefined` for a missing path (also below a non-directory). */
