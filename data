@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-11-27T14:17:34Z
+claimed_by: skilletor-skill-author-k283
+class: standard
+completed: 2026-11-27T14:17:34Z
+created: 2026-11-27T06:07:02Z
+id: 283
+priority: medium
+started: 2026-11-27T14:17:34Z
+status: done
+tags:
+- getty-bun
+- skills
+title: Rewrite the repo's build/test truths for Bun
+updated: 2026-11-27T14:17:34Z
+---
+
+Rewrite the repo's build/test truths for Bun: CLAUDE.md, .claude/rules/skilletor-rules.md (hazards: never hand-edit the starter copy, starter exit 1), skilletor-core SKILL.md and hand-tests (GETTY_HOME), skilletor-worker and skilletor-release-manager agents (pins equal, starter copy). Audited by skilletor-skill-auditor.
+Branch getty-bun, hub task agent-developer k5.
+
+2026-11-27 07:28 Rewrote build/test truths for Bun: CLAUDE.md, skilletor-rules.md (lane list, Release/CI, hazards: bun test, module-object mocks, rendered starters, Bun bump, starter exit 1, GETTY_HOME), skilletor-core SKILL.md + hand-tests.md (positional host, bun dist/skilletor.js drive, temp GETTY_HOME/BUN_INSTALL), worker + release-manager agents (Bun gates, pins, starter cmp). Static check 0 errors. Verified with two fresh skilletor-worker runs; uncommitted.
+
+Committed ff26692 and e2c40c8 (pushed); audited by skilletor-skill-auditor (pass with fixes, fixes applied before commit).
