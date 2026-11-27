@@ -372,12 +372,12 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
   delete env.SKILLETOR_PROJECT_DIR;
 
   const input = JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: join(repo, "sub"), session_id: "s1" });
-  const r = runCli(["hook", "session-start", "--harness", "codex"], env, input);
+  const r = runCli(["hook", "session-start", "codex"], env, input);
   assert.equal(r.status, 0, r.stderr);
   const out = JSON.parse(r.stdout);
   assert.equal(out.hookSpecificOutput.hookEventName, "SessionStart");
   assert.match(out.hookSpecificOutput.additionalContext, /skill bar@s \(codex\): active from the next Codex session/);
-  // --harness codex: the user rules file leads the context, the report follows (spec §14.8).
+  // Host codex: the user rules file leads the context, the report follows (spec §14.8).
   const rules = readFileSync(join(codexHome, "skilletor-rules.md"), "utf8");
   assert.match(rules, /^<!-- skilletor:rules scope=user -->\n[\s\S]*<!-- skilletor:rule style source=s -->\nUse tabs\.\n$/);
   assert.ok(out.hookSpecificOutput.additionalContext.startsWith(rules + "\nskilletor synced items:\n"));
@@ -400,9 +400,21 @@ test("codex hook through the binary: project skill lands in <repo>/.agents/skill
   assert.ok(agents.includes("`" + join(codexHome, "skilletor-rules.md") + "` before you start a task"), agents);
   assert.doesNotMatch(agents, /Use tabs/);
   // resume: synced, but no second copy of the rules.
-  const resume = runCli(["hook", "session-start", "--harness", "codex"], env, input.replace("startup", "resume"));
+  const resume = runCli(["hook", "session-start", "codex"], env, input.replace("startup", "resume"));
   assert.equal(resume.status, 0, resume.stderr);
   assert.equal(resume.stdout, "");
+  // k281: the host is positional; `--harness codex` and `--harness=codex`, the spelling of hook
+  // lines written before, still mean Codex: a startup with nothing to sync is the rules alone.
+  // Without a host, or with claude-code, it is Claude Code's: nothing to say.
+  for (const args of [["codex"], ["--harness", "codex"], ["--harness=codex"]]) {
+    const again = runCli(["hook", "session-start", ...args], env, input);
+    assert.equal(again.status, 0, again.stderr);
+    assert.equal(JSON.parse(again.stdout).hookSpecificOutput.additionalContext, rules, args.join(" "));
+  }
+  for (const args of [[], ["claude-code"]]) {
+    const claude = runCli(["hook", "session-start", ...args], env, input);
+    assert.deepEqual([claude.status, claude.stdout], [0, ""], args.join(" "));
+  }
 
   const st = runCli(["status", "--project-dir", repo], env);
   assert.match(st.stdout, /^project scope \(codex\):$/m);
@@ -693,6 +705,8 @@ test("every documented option still works for its command", () => {
   // names no cwd, so the project is the spawn's cwd: ~, as for the commands above.
   const hook = runCli(["hook", "session-start", "--harness", "codex", "--whatever"], h.env, "{}", h.home);
   assert.equal(hook.status, 0);
+  const positional = runCli(["hook", "session-start", "codex", "--whatever"], h.env, "{}", h.home);
+  assert.equal(positional.status, 0);
   // k164: a --scope no command takes is the commands' exit 2, never the hook's.
   const scoped = runCli(["hook", "session-start", "--scope", "bogus"], h.env, "{}", h.home);
   assert.deepEqual([scoped.status, scoped.stderr], [0, ""]);
@@ -781,11 +795,11 @@ test("k147: hook cwd-changed syncs the checkout moved into, not CLAUDE_PROJECT_D
 });
 
 // k149 (spec §8, §14.5): Codex has no CwdChanged; its prompt hook notices the move. Asserts:
-// through the built bundle on a Codex-only machine, `hook session-start --harness codex` in
-// `main`, then `hook user-prompt-submit --harness codex` of the same session in a plain `git
+// through the built bundle on a Codex-only machine, `hook session-start codex` in
+// `main`, then `hook user-prompt-submit codex` of the same session in a plain `git
 // worktree add` of it syncs the worktree before it exits 0 – one JSON line, the line and a
 // context naming the worktree – and the next prompt there prints nothing.
-test("k149: hook user-prompt-submit --harness codex syncs the worktree the session moved into", () => {
+test("k149: hook user-prompt-submit codex syncs the worktree the session moved into", () => {
   const home = join(tmp.dir, "codex-move-home");
   const codexHome = join(home, ".codex");
   const src = join(tmp.dir, "codex-move-src");
@@ -803,7 +817,7 @@ test("k149: hook user-prompt-submit --harness codex syncs the worktree the sessi
   const { HERMES_HOME: _h, ...rest } = process.env;
   const env = { ...rest, ...homeEnv(home), CODEX_HOME: codexHome };
   const hook = (event: string, cwd: string, more: Record<string, string> = {}) =>
-    runCli(["hook", event, "--harness", "codex"], env, JSON.stringify({ cwd, session_id: "c1", ...more }), cwd);
+    runCli(["hook", event, "codex"], env, JSON.stringify({ cwd, session_id: "c1", ...more }), cwd);
 
   const started = hook("session-start", main, { hook_event_name: "SessionStart", source: "startup" });
   assert.equal(started.status, 0, started.stderr);

@@ -13384,11 +13384,19 @@ function readStdin() {
     process.stdin.on("error", () => resolve(data));
   });
 }
+function hookHost(args) {
+  const at = args.indexOf("--harness");
+  if (at !== -1)
+    return args[at + 1];
+  const legacy = args.find((x) => x.startsWith("--harness="));
+  if (legacy !== undefined)
+    return legacy.slice(10);
+  return args[1];
+}
 async function runHookCommand(args) {
   try {
     const event = args[0];
-    const at = args.indexOf("--harness");
-    const harness = at === -1 ? args.find((x) => x.startsWith("--harness="))?.slice(10) : args[at + 1];
+    const harness = hookHost(args);
     if (!event)
       return 0;
     let input = {};

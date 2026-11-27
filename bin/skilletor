@@ -1,20 +1,12 @@
 #!/bin/sh
-# skilletor: the command the plugin's hooks (hooks/hooks.json, hooks/codex-hooks.json), the
-# Hermes adapter in a checkout, npm and a link on PATH run. It hands over to bin/skilletor-start
-# beside it, which picks the engine: the cached release binary, else Node.js >= 18 with dist/
-# (k191). The hooks keep naming this file because Windows starts its .exe twin for it, and the
-# starter has none.
-#
-# On Windows, Claude Code and PowerShell/cmd start bin/skilletor.exe (winlaunch) instead, which
-# runs the bundle with the first node.exe on PATH - Windows stays on Node until winlaunch can try
-# several programs in turn (k169):
-# winlaunch: run node {root}/dist/skilletor.js
-#
-# No `set -e`/`set -u`: a hook exits 0 on every path (spec §8), as in the starter.
+# skilletor: the CLI on POSIX, for a link on PATH, install.sh's clone install and a checkout.
+# It runs the bundle through the getty-bun starter beside it (bootstrap/getty-bun.sh), which
+# installs the pinned Bun on first use; options pass through unchanged (k281). The plugin's
+# hooks call the starter themselves (hooks/hooks.json, hooks/codex-hooks.json).
 
 # Follow our own symlink chain (a link on PATH, npm link, npm install -g) to the real file: the
-# starter sits next to the checkout's bin/skilletor, not the link's. No `readlink -f` (macOS
-# sh has none); a relative target is relative to the directory of the link naming it.
+# starter sits in the checkout, not beside the link. No `readlink -f` (macOS sh has none); a
+# relative target is relative to the directory of the link naming it.
 self=$0
 while [ -L "$self" ]; do
   target=$(readlink -- "$self")
@@ -23,15 +15,5 @@ while [ -L "$self" ]; do
     *) self=$(dirname -- "$self")/$target ;;
   esac
 done
-start=$(CDPATH='' cd -P -- "$(dirname -- "$self")" && pwd)/skilletor-start
-if [ -x "$start" ]; then exec "$start" "$@"; fi
-
-# A plugin without its starter: the starter's own last resort - on `hook ...` the hook's one
-# warning line on stdout with exit 0, else the line on stderr with exit 1.
-message="skilletor: bin/skilletor-start is missing or not executable; reinstall skilletor."
-if [ "${1-}" = hook ]; then
-  printf '{"systemMessage":"%s"}\n' "$message"
-  exit 0
-fi
-printf '%s\n' "$message" >&2
-exit 1
+root=$(CDPATH='' cd -P -- "$(dirname -- "$self")/.." && pwd) || exit 1
+exec sh "$root/bootstrap/getty-bun.sh" run dist/skilletor.js "$@"

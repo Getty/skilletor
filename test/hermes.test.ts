@@ -732,14 +732,14 @@ test("CLI: under $HERMES_HOME a sync installs for Hermes; a later run without it
   }
 });
 
-test("CLI: hook session-start --harness hermes syncs and answers in the hook's JSON", () => {
+test("CLI: hook session-start hermes syncs and answers in the hook's JSON", () => {
   const m = machine();
   try {
     const src = source(m.tmp.dir, "s", { "skills/foo/SKILL.md": SKILL("foo") });
     writeFileSync(join(m.home, ".claude/skilletor.json"),
       JSON.stringify({ targets: ["hermes"], sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } }));
     const input = JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: m.cwd, session_id: "s1" });
-    const r = m.run(["hook", "session-start", "--harness", "hermes"], m.inHermes, input);
+    const r = m.run(["hook", "session-start", "hermes"], m.inHermes, input);
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(JSON.parse(r.stdout), {
       systemMessage: "skilletor: 1 item(s) updated",
@@ -749,7 +749,7 @@ test("CLI: hook session-start --harness hermes syncs and answers in the hook's J
       },
     });
     assert.equal(existsSync(join(m.hermesHome, "skills/foo/SKILL.md")), true);
-    const prompt = m.run(["hook", "user-prompt-submit", "--harness", "hermes"], m.inHermes,
+    const prompt = m.run(["hook", "user-prompt-submit", "hermes"], m.inHermes,
       JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd: m.cwd, session_id: "s1" }));
     assert.deepEqual([prompt.status, prompt.stdout], [0, ""]);
   } finally {
@@ -757,7 +757,7 @@ test("CLI: hook session-start --harness hermes syncs and answers in the hook's J
   }
 });
 
-test("CLI: hook session-start --harness hermes without hermes in targets says how to opt in, exit 0", () => {
+test("CLI: hook session-start hermes without hermes in targets says how to opt in, exit 0", () => {
   const m = machine();
   try {
     writeFileSync(join(m.home, ".claude.json"), "{}"); // Claude Code is in use
@@ -766,7 +766,7 @@ test("CLI: hook session-start --harness hermes without hermes in targets says ho
       JSON.stringify({ sources: { mine: { local: src } }, install: { skills: ["foo@mine"] } }));
     const input = JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd: m.cwd, session_id: "s1" });
     m.run(["sync"], m.plain);
-    const r = m.run(["hook", "session-start", "--harness", "hermes"], m.inHermes, input);
+    const r = m.run(["hook", "session-start", "hermes"], m.inHermes, input);
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(JSON.parse(r.stdout), { systemMessage: OPT_IN('["claude", "hermes"]') });
     assert.equal(existsSync(join(m.hermesHome, "skills")), false);

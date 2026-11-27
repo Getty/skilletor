@@ -987,7 +987,7 @@ test("k50: nothing changed: startup, clear and a missing source get exactly the 
   }
 });
 
-test("k50: user-prompt-submit never appends rules; without --harness codex session-start does not either", async () => {
+test("k50: user-prompt-submit never appends rules; without host codex session-start does not either", async () => {
   const e = env();
   try {
     const { ctx } = await codexRules(e);

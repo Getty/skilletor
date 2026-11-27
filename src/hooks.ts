@@ -9,16 +9,16 @@
 //
 // The same hooks serve Codex (spec §14.5). Codex sets no CLAUDE_PROJECT_DIR, so
 // without a project dir the git top level of the input's cwd (else cwd) is used.
-// With `--harness codex` (the Codex plugin's hooks file) SessionStart also injects
-// the Codex rules files, ahead of its report (spec §14.8). The Hermes plugin runs the
-// same two events with `--harness hermes` and hands the output on (spec §16.4); while
+// With host `codex` (`hook <event> codex`, the Codex plugin's hooks file) SessionStart also
+// injects the Codex rules files, ahead of its report (spec §14.8). The Hermes plugin runs the
+// same two events with host `hermes` and hands the output on (spec §16.4); while
 // `hermes` is no target, its SessionStart answer says how to opt in (spec §16.2).
 //
 // CwdChanged and PostToolUse (Claude Code only): a session that moves into another checkout gets
 // that checkout's project scope brought up to date (`syncMovedCheckout`, spec §8). CwdChanged
 // sees every move but is not awaited; PostToolUse, run on a Bash call with a `cd` only, is – the
 // next tool call finds the items there. Codex and Hermes have no such events; there
-// UserPromptSubmit (`--harness codex|hermes`) does the same first, awaited, when the session's
+// UserPromptSubmit (host `codex` or `hermes`) does the same first, awaited, when the session's
 // cwd is not the one its hook last looked at (k149).
 import { execFileSync, spawn, type SpawnOptions } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -53,7 +53,7 @@ export interface HookContext extends EngineContext {
   background?: (ctx: HookContext) => void;
   /** Absolute path to the bundled CLI, for the default background spawn. */
   binPath?: string;
-  /** The harness whose hooks file ran the hook (`--harness`); unset = Claude Code. */
+  /** The harness whose hooks file ran the hook (`hook <event> <host>`); unset = Claude Code. */
   harness?: Harness;
 }
 
@@ -67,9 +67,10 @@ const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined)
 
 const SESSION_START_TIMEOUT_MS = 5_000;
 const DEFAULT_INTERVAL = 600;
-/** SessionStart or a move's sync writes nothing once this has passed (spec §8): `hooks/hooks.json`
- *  and `hooks/codex-hooks.json` kill the hook at 30 s, which leaves the local rest of a sync
- *  10 s; the Hermes plugin at 25 s (`PROMPT_S`), below Hermes' own 30 s. Claude Code's two
+/** SessionStart or a move's sync writes nothing once this has passed (spec §8). `hooks/hooks.json`
+ *  and `hooks/codex-hooks.json` allow 600 s, room for the getty-bun starter's first Bun install
+ *  ahead of the entry (k281); the budget stays at 20 s for the Hermes plugin, which kills the
+ *  hook at 25 s (`PROMPT_S`), below Hermes' own 30 s. Claude Code's two
  *  move hooks wait for the sync lock up to it as well. The exported name predates SessionStart's
  *  use of the same budget. */
 export const MOVE_DEADLINE_MS = 20_000;
