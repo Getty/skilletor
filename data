@@ -1,0 +1,20 @@
+---
+class: standard
+completed: 2026-11-27T06:07:49Z
+created: 2026-11-13T23:32:07Z
+id: 201
+priority: low
+started: 2026-11-27T06:07:49Z
+status: done
+tags:
+- perl
+- divergence
+title: 'Perl: engine write errors worded unlike Node''s errno text'
+updated: 2026-11-27T06:07:49Z
+---
+
+Found by the k181 worker, pre-existing. Where a sync cannot write (a file where a directory should go, say), the Perl engine reports `mkpath failed for <path>: File exists`; the reference reports Node's errno text (`EEXIST: file already exists, mkdir '<path>'` and the like). The report line and the hook systemMessage differ in bytes.
+
+Decide per error class whether to word them as Node does (a small errno -> code/syscall table in Skilletor::FSUtil) or to note the divergence under engines.perl in the cases that hit it. A conformance case for one write error first.
+
+superseded by hub decision 2026-11-25 (no Perl runtime); removal in k275 on branch getty-bun
