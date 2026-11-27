@@ -1,0 +1,67 @@
+---
+class: standard
+completed: 2026-11-27T06:07:25Z
+created: 2026-11-13T20:41:54Z
+depends_on:
+- 159
+- 164
+- 165
+- 167
+- 168
+- 169
+- 170
+- 171
+- 172
+- 173
+- 174
+- 175
+- 176
+- 177
+- 178
+- 179
+- 180
+- 181
+- 182
+- 183
+- 184
+- 185
+- 186
+- 187
+- 188
+- 189
+- 190
+- 191
+id: 166
+priority: high
+started: 2026-11-27T06:07:25Z
+status: done
+tags:
+- perl
+- cli
+- binary
+- strand
+title: Perl CLI and standalone binaries (strand)
+updated: 2026-11-27T06:07:25Z
+---
+
+Strand card. Maintainer decision of 2026-11-13: skilletor ships in two implementations that do the same, TypeScript/JavaScript (the reference, as today) and Perl; no Python. The Perl one becomes per-platform binaries (Linux, macOS, Windows) that need neither Node nor Perl on the user's machine. They are published as GitHub release assets, not committed into the plugin repo. The plugin gets a small starter: it uses the binary when it is there, else downloads it once with a checksum check, else falls back to Node, else to Perl.
+
+Gate: nothing in this strand may change what today's plugin users run (hooks.json, codex-hooks.json, bin/skilletor, bin/skilletor.exe/winlaunch line, the Hermes adapter) until the maintainer says so (activation card). Never push, tag or release.
+
+Gap (scouted 2026-11-13, read-only): perl/ is a library (no bin/), sync/check/status for the Claude target only, reports with sorted keys. Missing: the CLI (argv, usage, version, exit codes, streams), the commands add/source/available/install/uninstall/trust, the hooks (session-start, user-prompt-submit, __sync-background, cwd-changed, post-tool-use, --harness codex|hermes), the Codex and Hermes targets, a Windows-capable process layer. conformance/ compares engine JSON as sorted data and file trees; no case runs a CLI, so only test/cli.test.ts (36 tests) and the in-process TS tests pin user-visible bytes today.
+
+Parity proof: a `cli` op in conformance/ that both runners run against either CLI (TS bundle, perl/bin/skilletor, later the packed binary) with byte-exact stdout, stderr, exit code and trees.
+
+Decisions waiting on the maintainer: see the cards tagged decision in this strand, and k159 (minimum Perl; binaries are built with Perl 5.40 or newer, which Text::Nunjucks needs).
+
+Cut 2026-11-13 from two read-only scouts. Order: k171 + k172 (parallel), then k173, k180, k174-k179 commands, k181, k182, k183 (parallel), k184, k185, k186, k187; then k188 Linux binary (step 3); k189 workflow + k190 starter prepared (step 4); k191 activation is the maintainer's gate. Decisions: k167 version + build vehicle, k168 starter trust anchor + location, k169 Windows starter, k170 CLI usage/config-error contract, k159 minimum Perl. TS drift found on the way: k164 (hook exit-0 contract), k165 (warning order).
+
+2026-11-15 maintainer direction: make the transition safe and make Perl the primary runtime, especially on systems without JavaScript. Read-only gap analysis started; distinguish runtime independence from development/test use of the TS reference. The existing binary-first design and Node/Perl fallback order must be revisited against this newer direction. Local preparation is requested; this is not permission to publish releases, assets or marketplace changes. Do not activate before parity, platform, integrity and performance gates are checked.
+
+Execution sequence recorded at docs/superpowers/plans/2026-11-15-perl-first-readiness.md in integration worktree. k159 and k229 are active, original k178 work must be recovered/reviewed before k179. Current activation blockers include CLI uninstall, no-Node installer, per-prompt provisioning behavior, Linux OpenSSL ABI/TLS portability, unrun platform matrix and Windows launcher. No release or main-checkout activation performed.
+
+Local readiness milestone verified in integration worktree: real packed Perl CLI (181 modules) passes source parity, local/git/loopback HTTPS backends and full extended CLI/hooks smoke with empty runtime PATH; real installer+starter fixture provisions it without node/perl on client PATH. No production artifact uploaded or launcher/hook activation performed. Binary lives under /tmp/skilletor-k219-packed.Lk170R. Release ABI/TLS portability, other platforms and startup-cost gates remain open.
+
+2026-11-16 18:49 Maintainer decision 2026-11-16 (via the perl-developer hub, design ~/dev/perl-developer/docs/superpowers/specs/2026-11-16-ack-paket-design.md): strand goes ahead: k167/k168/k169/k203 decided, k191 local activation now; k170 is not on the critical path. perl/ stays a subdirectory. TS stays reference and Node fallback for now.
+
+superseded by hub decision 2026-11-25 (no Perl runtime); removal in k275 on branch getty-bun
