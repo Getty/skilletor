@@ -6,8 +6,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor hook session-start --harness codex",
-            "timeout": 30,
+            "command": "sh \"${PLUGIN_ROOT}/bootstrap/getty-bun.sh\" run dist/skilletor.js hook session-start codex",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"${PLUGIN_ROOT}\\bootstrap\\getty-bun.ps1\" run dist/skilletor.js hook session-start codex",
+            "timeout": 600,
             "additionalContextLimit": 0
           }
         ]
@@ -18,8 +19,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor hook user-prompt-submit --harness codex",
-            "timeout": 30
+            "command": "sh \"${PLUGIN_ROOT}/bootstrap/getty-bun.sh\" run dist/skilletor.js hook user-prompt-submit codex",
+            "commandWindows": "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"${PLUGIN_ROOT}\\bootstrap\\getty-bun.ps1\" run dist/skilletor.js hook user-prompt-submit codex",
+            "timeout": 600
           }
         ]
       }

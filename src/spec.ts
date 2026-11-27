@@ -26,6 +26,9 @@ export interface ProbeResult {
 
 export type Probe = (baseUrl: string) => ProbeResult;
 
+/** A probe that may answer later: `add`'s real one fetches (src/probe.ts). */
+export type AsyncProbe = (baseUrl: string) => ProbeResult | Promise<ProbeResult>;
+
 export class SpecError extends Error {
   override name = "SpecError";
 }
@@ -278,6 +281,26 @@ function nameFromHelper(address: string): string {
 export function resolveSpec(spec: string, probe: Probe): ResolvedSpec {
   const r = resolveAddress(spec, probe);
   return isSourceName(r.derivedName) ? r : { ...r, derivedName: FALLBACK_NAME };
+}
+
+/** Thrown by resolveSpecProbing's first pass where the probe would be asked. */
+const PROBE_NEEDED = Symbol("probe needed");
+
+/** resolveSpec with a probe that may be asynchronous. A generic host – the one address that
+ *  is probed, once, as the last step – is resolved without the probe first; then the probe is
+ *  awaited and the address resolved again with its answer. */
+export async function resolveSpecProbing(spec: string, probe: AsyncProbe): Promise<ResolvedSpec> {
+  let asked: string | undefined;
+  try {
+    return resolveSpec(spec, (baseUrl) => {
+      asked = baseUrl;
+      throw PROBE_NEEDED;
+    });
+  } catch (err) {
+    if (err !== PROBE_NEEDED) throw err;
+  }
+  const result = await probe(asked!);
+  return resolveSpec(spec, () => result);
 }
 
 function resolveAddress(spec: string, probe: Probe): ResolvedSpec {

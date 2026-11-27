@@ -8,7 +8,7 @@ import {
   sourceFields, WILDCARD, type BackendKind, type ItemType, type LoadedConfig, type Origin, type SourceDef,
 } from "./config.ts";
 import { BundleError, expandBundle, matchesPattern, sameIdentity, type ForeignEntry } from "./bundles.ts";
-import { resolveSpec, type Probe, type ResolvedSpec } from "./spec.ts";
+import { resolveSpecProbing, type AsyncProbe, type ResolvedSpec } from "./spec.ts";
 import { makeProbe } from "./probe.ts";
 import {
   bundleLabel, servingSource, cacheRootOf, makeBackend, projectDirOf, resolveBackend, sourcesOf, sync, withSyncLock,
@@ -27,7 +27,7 @@ export interface Prompter {
 }
 
 export interface CommandContext extends EngineContext {
-  probe?: Probe;
+  probe?: AsyncProbe;
   /** Interactive questions; absent = no TTY (the CLI sets it only when stdin and stderr are TTYs). */
   prompt?: Prompter;
 }
@@ -83,7 +83,7 @@ export async function cmdAdd(
     throw new CommandError(`source name ${JSON.stringify(args.name)} is not valid (${SOURCE_NAME_RULE}); nothing was changed`);
   }
   const path = configPath(ctx, Boolean(args.project));
-  const resolved = resolveSpec(args.spec, ctx.probe ?? makeProbe());
+  const resolved = await resolveSpecProbing(args.spec, ctx.probe ?? makeProbe());
   const name = args.name ?? resolved.derivedName;
   let def: SourceDef =
     resolved.kind === "git" ? { git: resolved.value } : resolved.kind === "url" ? { url: resolved.value } : { local: resolved.value };

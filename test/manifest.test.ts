@@ -30,37 +30,48 @@ test("every path a manifest references exists", () => {
   }
 });
 
-test("hook commands go through the plugin root the harness sets (Codex sets CLAUDE_PLUGIN_ROOT too)", () => {
-  // Claude Code's in exec form: on Windows it starts bin/skilletor.exe (winlaunch) for
-  // bin/skilletor, without Git Bash; Linux and macOS start the sh launcher as before.
-  const hooks = json("hooks/hooks.json").hooks as Record<string, { hooks: { command: string; args?: string[] }[] }[]>;
+const STARTER = "bootstrap/getty-bun.sh";
+const POWERSHELL = "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File";
+
+// k281: every hook starts the getty-bun starter with the bundle, the event and the host as
+// positional arguments (entry arguments never begin with `-`), and allows 600 s: the first hook
+// after an install or a Bun bump installs Bun, behind the starter's lock wait.
+test("hook commands run the getty-bun starter from the plugin root the harness sets", () => {
+  const hooks = json("hooks/hooks.json").hooks as Record<string, { hooks: { command: string; args?: string[]; timeout: number }[] }[]>;
   assert.deepEqual(Object.keys(hooks).sort(), ["CwdChanged", "PostToolUse", "SessionStart", "UserPromptSubmit"]);
   for (const groups of Object.values(hooks)) {
     for (const g of groups) {
       for (const h of g.hooks) {
-        assert.equal(h.command, "${CLAUDE_PLUGIN_ROOT}/bin/skilletor");
-        assert.equal(h.args?.[0], "hook");
+        // Exec form: no shell, so no quoting; `sh` from PATH.
+        assert.equal(h.command, "sh");
+        assert.deepEqual(h.args?.slice(0, 4), [`\${CLAUDE_PLUGIN_ROOT}/${STARTER}`, "run", "dist/skilletor.js", "hook"]);
+        assert.equal(h.args?.[5], "claude-code");
+        assert.equal(h.args?.length, 6);
+        assert.equal(h.timeout, 600);
       }
     }
   }
-  const codexHooks = json("hooks/codex-hooks.json").hooks as Record<string, { hooks: { command: string }[] }[]>;
-  for (const groups of Object.values(codexHooks)) {
-    for (const g of groups) for (const h of g.hooks) assert.match(h.command, /^\$\{CLAUDE_PLUGIN_ROOT\}\/bin\/skilletor hook /);
-  }
+  assert.ok(existsSync(join(root, STARTER)));
+  assert.ok(existsSync(join(root, "bootstrap", "getty-bun.ps1")));
+  assert.equal(JSON.stringify(hooks).includes("--harness"), false);
 });
 
-test("on Windows bin/skilletor.exe runs the bundle the sh launcher runs", () => {
-  assert.ok(existsSync(join(root, "bin", "skilletor.exe")));
-  assert.match(readFileSync(join(root, "bin", "skilletor"), "utf8"), /^# winlaunch: run node \{root\}\/dist\/skilletor\.js$/m);
+// The starters are committed copies of the getty-bun-install render (k286), never edited here.
+test("bootstrap/ holds the rendered starters unchanged, and their pin is package.json's", () => {
+  for (const file of ["getty-bun.sh", "getty-bun.ps1"]) {
+    assert.ok(readFileSync(join(root, "bootstrap", file)).equals(
+      readFileSync(join(root, "skills", "getty-bun-install", "bootstrap", file))), file);
+  }
+  const bun = (pkg.gettyBun as { bunVersion: string }).bunVersion;
+  assert.match(readFileSync(join(root, STARTER), "utf8"), new RegExp(`^# version ${bun.replace(/\./g, "\\.")}$`, "m"));
 });
 
 // k50 (spec §14.5, §14.8): the Codex plugin has its own hooks file, the Claude one is untouched.
 // k147 (spec §8): CwdChanged and PostToolUse are Claude Code's alone – Codex has no CwdChanged,
 // and its Bash cwd never moves (k149). PostToolUse, the awaited move hook, runs on a Bash call
-// with a `cd` only, and gets the 30 s SessionStart and CwdChanged have.
-// k149 (spec §8, §14.5): under Codex the prompt hook syncs a checkout the session moved into,
-// awaited, so it gets the 30 s SessionStart and CwdChanged have; Claude Code's stays at 10 s.
-test("codex-hooks.json = hooks.json without CwdChanged and PostToolUse, with --harness codex, matcher startup|resume|clear, no context limit, a prompt hook of 30 s", () => {
+// with a `cd` only. k281: Codex runs a string in its session shell, so the plugin root is quoted
+// (k244), and Windows gets the PowerShell starter in commandWindows.
+test("codex-hooks.json = hooks.json without CwdChanged and PostToolUse, host codex, matcher startup|resume|clear, no context limit", () => {
   assert.equal(codex.hooks, "./hooks/codex-hooks.json");
   assert.equal(claude.hooks ?? "./hooks/hooks.json", "./hooks/hooks.json");
   type Groups = Record<string, { matcher?: string; hooks: Record<string, unknown>[] }[]>;
@@ -68,31 +79,30 @@ test("codex-hooks.json = hooks.json without CwdChanged and PostToolUse, with --h
   const forCodex = json("hooks/codex-hooks.json").hooks as Groups;
   assert.equal(forClaude.SessionStart![0]!.matcher, "startup|resume");
   assert.equal(JSON.stringify(forClaude).includes("additionalContextLimit"), false);
-  assert.equal(JSON.stringify(forClaude).includes("--harness"), false);
-  // Derive the expected Codex file from the Claude one: Codex reads no args, so they go
-  // back into the command text.
-  const expected = JSON.parse(JSON.stringify(forClaude)) as Groups;
-  assert.equal(forClaude.CwdChanged?.[0]?.hooks[0]?.timeout, forClaude.SessionStart![0]!.hooks[0]!.timeout);
   assert.deepEqual(forClaude.PostToolUse, [{
     matcher: "Bash",
     hooks: [{
-      type: "command", if: "Bash(cd *)", command: "${CLAUDE_PLUGIN_ROOT}/bin/skilletor", args: ["hook", "post-tool-use"],
-      timeout: forClaude.SessionStart![0]!.hooks[0]!.timeout,
+      type: "command", if: "Bash(cd *)", command: "sh",
+      args: [`\${CLAUDE_PLUGIN_ROOT}/${STARTER}`, "run", "dist/skilletor.js", "hook", "post-tool-use", "claude-code"],
+      timeout: 600,
     }],
   }]);
+  // Derive the expected Codex file from the Claude one: Codex reads no args, so they go into
+  // the command text, the root quoted, the host codex.
+  const expected = JSON.parse(JSON.stringify(forClaude)) as Groups;
   delete expected.CwdChanged;
   delete expected.PostToolUse;
   for (const groups of Object.values(expected)) {
     for (const g of groups) {
       for (const h of g.hooks) {
-        h.command = [h.command as string, ...((h.args as string[] | undefined) ?? []), "--harness", "codex"].join(" ");
+        const event = (h.args as string[])[4];
+        h.command = `sh "\${PLUGIN_ROOT}/${STARTER}" run dist/skilletor.js hook ${event} codex`;
+        h.commandWindows = `${POWERSHELL} "\${PLUGIN_ROOT}\\bootstrap\\getty-bun.ps1" run dist/skilletor.js hook ${event} codex`;
         delete h.args;
       }
     }
   }
   expected.SessionStart![0]!.matcher = "startup|resume|clear";
   expected.SessionStart![0]!.hooks[0]!.additionalContextLimit = 0;
-  assert.equal(forClaude.UserPromptSubmit![0]!.hooks[0]!.timeout, 10);
-  expected.UserPromptSubmit![0]!.hooks[0]!.timeout = forClaude.SessionStart![0]!.hooks[0]!.timeout;
   assert.deepEqual(forCodex, expected);
 });

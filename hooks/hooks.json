@@ -6,9 +6,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor",
-            "args": ["hook", "session-start"],
-            "timeout": 30
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh", "run", "dist/skilletor.js", "hook", "session-start", "claude-code"],
+            "timeout": 600
           }
         ]
       }
@@ -18,9 +18,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor",
-            "args": ["hook", "user-prompt-submit"],
-            "timeout": 10
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh", "run", "dist/skilletor.js", "hook", "user-prompt-submit", "claude-code"],
+            "timeout": 600
           }
         ]
       }
@@ -30,9 +30,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor",
-            "args": ["hook", "cwd-changed"],
-            "timeout": 30
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh", "run", "dist/skilletor.js", "hook", "cwd-changed", "claude-code"],
+            "timeout": 600
           }
         ]
       }
@@ -44,9 +44,9 @@
           {
             "type": "command",
             "if": "Bash(cd *)",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/skilletor",
-            "args": ["hook", "post-tool-use"],
-            "timeout": 30
+            "command": "sh",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh", "run", "dist/skilletor.js", "hook", "post-tool-use", "claude-code"],
+            "timeout": 600
           }
         ]
       }

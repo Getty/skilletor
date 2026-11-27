@@ -1,15 +1,15 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 // Static checks for skills, agents and rules — the mechanical half of the
 // skill-assessment rubric (criteria A5, B7, B8, B11, C3, E2, E3, E4, F1).
 //
-//   node skill-static-check.mjs [--inventory] [--home <dir>] <path>...
+//   bun skill-static-check.mjs [--inventory] [--home <dir>] <path>...
 //
 // A path may be a SKILL.md, an agent/rule .md, a skill directory, a skills/,
 // agents/ or rules/ directory, or a
 // directory holding skills/, agents/, rules/ (a .claude dir or a skilletor
 // source). Eval suites (`evals/`, a case dir, `graders/`) are checked as eval
 // files — prompt body present, grader `type:` set — never as skills. One line
-// per finding: "<path>: ERROR|WARN: <message>". Exit 1 when any ERROR was found. No dependencies; Node >= 18.
+// per finding: "<path>: ERROR|WARN: <message>". Exit 1 when any ERROR was found. No dependencies; runs on Bun.
 import { readFileSync, statSync, readdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";

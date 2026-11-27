@@ -1,0 +1,1 @@
+skilletor: config error, nothing changed — ${HOME}/.claude/skilletor.json: install.skills[0]: "into": "plugin" is project scope only (the plugin's skills directory lies in the project)

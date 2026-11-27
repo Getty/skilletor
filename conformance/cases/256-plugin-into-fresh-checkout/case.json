@@ -1,0 +1,17 @@
+{
+  "description": "A fresh checkout of a plugin repository (k286): the skill installed into the plugin is committed, the lock is not. A sync adopts the committed files that are exactly the render – no conflict, nothing written, the lock now owns them – and check is clean after it.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared"
+        }
+      ]
+    }
+  },
+  "steps": [
+    { "id": "sync", "op": "sync", "tree": true },
+    { "id": "check", "op": "check" }
+  ]
+}

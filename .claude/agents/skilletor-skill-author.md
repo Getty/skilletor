@@ -21,7 +21,7 @@ non-negotiable — apply silently, do not restate.
 
 Repo truths that live in no skill:
 
-- Run `node .claude/skills/skill-assessment/scripts/skill-static-check.mjs
+- Run `bun .claude/skills/skill-assessment/scripts/skill-static-check.mjs
   <path>` on every file you touched; hand back only at zero errors.
 - Agent files use `tools:` — `allowed-tools` is silently ignored by Claude
   Code on agents and leaves an auditor with write access.

@@ -1,0 +1,7 @@
+{
+  "description": "An object entry under install.agents (k286) is a config error: only skills install into the plugin, agents and rules into their harness roots; nothing is written.",
+  "steps": [
+    { "id": "sync", "op": "sync", "tree": true },
+    { "id": "cli-sync", "op": "cli", "argv": ["sync"] }
+  ]
+}

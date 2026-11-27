@@ -5,7 +5,15 @@
     },
     "karr": {
       "git": "https://github.com/Getty/karr"
+    },
+    "agent-bun-runtime": {
+      "git": "https://github.com/Getty/agent-bun-runtime",
+      "ref": "v0.1.0",
+      "path": "skills"
     }
+  },
+  "vars": {
+    "bun_version": "1.4.5"
   },
   "install": {
     "skills": [
@@ -15,7 +23,12 @@
       "getty-skill-library@getty",
       "kanban-issues-karr-coordination@karr",
       "kanban-issues-karr-ticket@karr",
-      "perl-par-binary-release@getty"
+      {
+        "skill": "getty-bun-install@agent-bun-runtime",
+        "into": "plugin"
+      },
+      "getty-bun-integration@agent-bun-runtime",
+      "getty-bun@agent-bun-runtime"
     ],
     "bundles": [
       "getty-house@getty"

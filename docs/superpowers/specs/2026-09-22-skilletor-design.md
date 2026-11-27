@@ -96,6 +96,20 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
   are read (k95). The one rule holds everywhere a name is made: `add` refuses another name
   before writing anything, the bundle prompt (§15.6) asks again, and a derived name (§4.2)
   always fits.
+- An entry of `install.skills` may be an object instead of a string (k286):
+  `{"skill": "name@source", "into": "plugin"}` renders that one skill, once and whatever the
+  targets, into the project's plugin skills directory – the `skills` path of
+  `.claude-plugin/plugin.json` at the project root, else `skills/` (a single relative path
+  inside the project ending in a directory named `skills`) – instead of `.claude/skills`. The
+  repository commits the result; the lock owns it under `plugin:skills/<name>`, so sync,
+  check, drift and uninstall work as for any owned file, without a skill `.gitignore` or a
+  harness conversion. A file not in the lock that equals the render byte for byte, mode
+  included, is adopted without a conflict (a fresh checkout has no lock, §6.3); an item that
+  wrote nothing else is reported `= plugin:skills/<name> (adopted: already on disk as
+  rendered)`, `adopted` in the scope's JSON report (absent when empty) instead of `unchanged`,
+  and no hook output: nothing on disk changed. Refused as a config error
+  naming file and entry: an object entry in the user config, under `agents` or `rules`, with a
+  pattern, an unknown key or another `into`; a project without the manifest.
 - `gitignore` (user or project/local, default `true`): see 6.4. In the user config it
   only switches the user-scope blocks off; a project's blocks follow the project/local value.
 - `claudeSettings` (user, project or local, default `true`): see 6.8. The project follows the
@@ -740,9 +754,14 @@ has recorded the new format, no further sync runs for it.
 
 - If a target path exists that is **not** in the lock (a hand-written skill, a
   manage-skills link), it is never overwritten → conflict in the report; `--force`
-  adopts it. A conflict blocks the **whole item** (k67): none of its files is written or
-  removed, and an installed copy stays as it was (files and lock entry) – so a
-  hand-written or linked skill of the same name never gets skilletor files mixed into it.
+  adopts it. The one exception: an `"into": "plugin"` item (lock key prefix `plugin:`,
+  project scope only, §3) adopts without `--force` a file at one of its exact output paths
+  whose bytes – on POSIX, and its executable bit – equal the render, reported `adopted`; a
+  link there stays a conflict, and since the lock then owns these committed files, a later
+  `uninstall` deletes them like any owned file. A conflict blocks the **whole item** (k67):
+  none of its files is written or removed, and an installed copy stays as it was (files and
+  lock entry) – so a hand-written or linked skill of the same name never gets skilletor
+  files mixed into it.
 - **Links.** skilletor never writes or deletes through a symbolic link at or below the
   item's own path. A skill directory `skills/<name>` (or a directory inside it) that is a
   link is a conflict even when the lock owns files in it; `--force` removes the link
@@ -1297,7 +1316,7 @@ whose `SessionStart` syncs as any; the app-server's `turn/start` with a new `cwd
 model's request and any tool call or spawn, under the same session id. On Hermes a terminal `cd`
 moves the terminal only; `/worktree new` and a gateway's re-anchor at turn end move the session,
 and the next `pre_llm_call`, awaited, is the first hook whose `resolve_agent_cwd()` names the new
-directory (§16.4). So under `--harness codex|hermes`, `user-prompt-submit` first calls the same
+directory (§16.4). So under the host `codex` or `hermes`, `user-prompt-submit` first calls the same
 core, awaited, with the input's `cwd`. The cwd a session's hook last looked at is kept per session
 id (`session-cwd.json` in the state dir, §6.5; the 256 sessions written last): `SessionStart`
 records it, and a prompt with the same cwd asks nothing – not even git. Another cwd goes to the
@@ -1367,11 +1386,13 @@ resolves – not the directory of each command it runs.
 
 ```
 .claude-plugin/plugin.json      hooks/hooks.json
-bin/skilletor                   # sh shim → bin/skilletor-start; follows its own symlinks; its .exe twin (winlaunch) on Windows
-bin/skilletor-start             # starter: pinned cached release binary, else node dist/skilletor.js, else Perl (k191)
-install.sh                      # setup from a plain shell: plugin + a stable `skilletor` on PATH (k141)
-dist/skilletor.js               # esbuild bundle incl. Nunjucks, committed
+bin/skilletor                   # sh wrapper → bootstrap/getty-bun.sh run dist/skilletor.js "$@"; follows its own symlinks (k281)
+bootstrap/getty-bun.{sh,ps1}    # getty-bun starters: copies of skills/getty-bun-install/bootstrap (k281)
+install.sh                      # setup from a plain shell: plugin + a stable `skilletor` on PATH (k141, k281)
+dist/skilletor.js               # bun build --target=bun bundle incl. Nunjucks, committed (k279)
 skills/skilletor/SKILL.md
+skills/getty-bun-install/       # rendered by skilletor itself ("into": "plugin", k286), committed
+scripts/bundle.mjs  scripts/check-dist.mjs  scripts/check-starters.mjs
 src/cli.ts                      # arguments, dispatch
 src/commands.ts                 # config edit commands (add/install/uninstall/trust/source)
 src/config.ts                   # load/merge/validate
@@ -1390,65 +1411,56 @@ src/lock.ts  src/state.ts       # lock; trust, last-check, pending-report, mutex
 src/hooks.ts  src/report.ts  src/fsutil.ts  src/gitenv.ts
 hermes/skilletor/               # native Hermes Agent plugin: plugin.yaml, __init__.py (§16.4)
 test/
-dist.ini  cpanfile  lib/  script/skilletor  t/   # the Perl port, CPAN dist Skilletor (docs/perl.md)
-.github/workflows/binaries.yml  # its standalone binaries, house route dzil-binary.yml (k242)
+.cicd/                          # SimpiCI jobs in oven/bun:<pin> (k282)
 ```
 
 Boundaries: `sources/*` knows nothing about templating, `render` nothing about the
 target filesystem, `apply` nothing about sources. TypeScript, the only runtime
-dependency is Nunjucks (bundled); user requirements: `git` and one engine, `node ≥ 18`, Perl
-≥ 5.40 with `cpanfile`'s modules, or the pinned release binary. Its own repo
-`Getty/skilletor`, an entry in `Getty/marketplace`, and the CPAN dist `Skilletor` from the
-same root (version x.yyyzzz ≡ plugin x.y.z, 0.008000 ≡ 0.8.0; tag the bare dist version);
-develop locally with `claude --plugin-dir .`.
+dependency is Nunjucks (bundled). The runtime is Bun, the version pinned in `package.json`
+(`gettyBun`, contract of agent-bun-runtime v0.1.0), installed per user by the getty-bun
+starter on first use; user requirements: `git` and a POSIX `sh` (Windows: PowerShell, for the
+Codex hooks and the Hermes adapter only). Node, the Perl port (CPAN `Skilletor`, retired at
+0.009000) and the release binaries are gone (hub task agent-developer k5). Its own repo
+`Getty/skilletor`, an entry in `Getty/marketplace`; develop locally with
+`claude --plugin-dir .`.
 
-**From a plain shell** (`install.sh`, POSIX sh, k141): outside a Claude Code session the
-plugin's `bin/` is not on `PATH`. With Node ≥ 18 and `claude` on `PATH`, the script adds `Getty/marketplace`
-when `claude plugin marketplace list --json` lacks `getty` (else `marketplace update getty`),
-installs `skilletor@getty` in user scope when `claude plugin list --json` has no user-scope
-entry (else `plugin update --scope user`), and writes `<bin dir>/skilletor` (default
-`~/.local/bin`): a script, not a link into the versioned plugin cache, that on every run
-reads `${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json` and execs the
-`bin/skilletor` of the user-scope `skilletor@getty` install (else another marketplace's
-user-scope `skilletor`; project-scope installs never). Without `claude`, or with
-`--no-plugin`, it clones the repository (`main`, as the plugin and Hermes install it) into
-`${XDG_DATA_HOME:-~/.local/share}/skilletor` — or takes the clone it runs from — and
-symlinks its `bin/skilletor`. A rerun updates the plugin or pulls the clone (`--ff-only`). It
-replaces only its own script or a symlink in the bin dir, never uses `sudo`, and runs every
-command on `/dev/null` (under `curl … | sh` stdin is the script). `npm install -g
-github:Getty/skilletor` is not a supported path: npm 11 (seen with 11.17) links a git
-package's temporary clone instead of copying it unless `--install-links` is given.
+**From a plain shell** (`install.sh`, POSIX sh, k141, k281): outside a Claude Code session the
+plugin's `bin/` is not on `PATH`. It needs `sh`, `awk` and `git` – no Node, no Bun, no JSON
+tool (a POSIX awk reader parses Claude Code's JSON). With `claude` on `PATH`, the script adds
+`Getty/marketplace` when `claude plugin marketplace list --json` lacks `getty` (else
+`marketplace update getty`), installs `skilletor@getty` in user scope when `claude plugin list
+--json` has no user-scope entry (else `plugin update --scope user`), and writes
+`<bin dir>/skilletor` (default `~/.local/bin`): a script, not a link into the versioned
+plugin cache, that on every run reads
+`${CLAUDE_CONFIG_DIR:-~/.claude}/plugins/installed_plugins.json` and execs the getty-bun
+starter of the user-scope `skilletor@getty` install (else another marketplace's user-scope
+`skilletor`; project-scope installs never). Without `claude`, or with `--no-plugin`, it
+clones the repository (`main`) into `${XDG_DATA_HOME:-~/.local/share}/skilletor` — or takes
+the clone it runs from — and symlinks its `bin/skilletor`. A rerun updates the plugin or pulls
+the clone (`--ff-only`). It replaces only its own script or a symlink in the bin dir, never
+uses `sudo`, and runs every command on `/dev/null`. Windows is refused.
 
-**Prepared no-Node path** (k230): without `node`, the installer neither invokes `claude` nor
-parses its plugin metadata. It uses a CLI-only checkout, runs `bin/skilletor-start --help`
-as a preflight (a command that provisions; `--version` never does), and links that starter only on success. Updating an installer-managed
-checkout uses a separate candidate; failed provisioning leaves the prior command, checkout
-and local files intact. Earlier checkouts are retained. A binary must match checksums pinned
-in that checkout; without an available verified binary or usable source-Perl fallback the
-preflight fails safely. No Python, jq or system Perl is required for the binary route itself.
+**Start** (k281): every hook runs the getty-bun starter itself – Claude Code in exec form
+(`sh ${CLAUDE_PLUGIN_ROOT}/bootstrap/getty-bun.sh run dist/skilletor.js hook <event>
+claude-code`), Codex as a string plus `commandWindows` (`powershell.exe … -File
+bootstrap\getty-bun.ps1 run …`), timeout 600 s for the first start's download under the
+starter's lock. The host is a positional word (`claude-code`, `codex`, `hermes`; missing:
+`claude-code`), because entry arguments never begin with `-` (the contract's rule for the
+PowerShell starter); `--harness` stays accepted as a deprecated spelling. `bin/skilletor` is
+the CLI on POSIX and passes flags through. The Hermes adapter runs the starter (or
+`$SKILLETOR_BIN`, else `skilletor` on `PATH`) and once per session `ensure` in the background
+with a 600 s limit. Offline without an installed Bun the starter exits 1 with a `getty-bun:`
+line before skilletor runs; the hooks' exit-0 rule holds from skilletor on. Claude Code on
+Windows (a `.cmd` starter) and macOS (a darwin target) wait for agent-bun-runtime.
 
-The starter (k190, wired in k191) is what every hook, npm, the Hermes adapter in a checkout
-and `install.sh` run, through `bin/skilletor`. It takes the first of: the release binary
-for this platform named in `bin/skilletor-binaries.sha256` (the release's `SHA256SUMS`,
-committed as is), cached under `<claudeConfigDir>/skilletor/bin/<version>/` and rechecked
-against its pinned hash on every start; `node ≥ 18` with `dist/skilletor.js`; Perl ≥ 5.40
-with `lib/`, once `cpanfile`'s modules load; else one line, which a hook prints as its
-warning with exit 0. Without the pinned file nothing is downloaded. The binary comes from
-`releases/download/<version>/skilletor-<version>-<platform>` (bare tags). An explicit CLI
-command provisions in the foreground. A SessionStart hook starts the provision detached
-(`setsid`, else Perl's `setsid()`, else a plain background start) and never waits for it:
-the session runs Node or Perl, the next one the binary. Other hooks never download, and
-neither do `--version`/`-v`, which print the answering engine's own version (binary and
-Perl the dist's, Node `package.json`'s). Failed SessionStart provisioning backs off for
-900 seconds per version/platform, with explicit CLI retry allowed immediately. Malformed
-retry timestamps do not break the hook's exit-0 contract. Binary startup requires
-`sha256sum` or `shasum`, provisioning also `curl` or `wget`. Windows stays on Node through
-`bin/skilletor.exe` (k169). No release pins binaries yet: the release sequence is
-`docs/release.md`.
+**Build and checks** (k279, k282): `bun build --target=bun` from the checkout root
+(`scripts/bundle.mjs`, no checkout path in the bundle); `check-dist` rebuilds with the pinned
+Bun and compares bytes; `check-starters` renders `getty-bun-install` afresh with this
+checkout's bundle and compares it with `skills/getty-bun-install/` and `bootstrap/`.
 
 ## 11. Tests
 
-TDD with `node:test`. Unit tests per module against temp directories; `spec.ts` as a
+TDD with `bun test` (per-file isolation, `--parallel`). Unit tests per module against temp directories; `spec.ts` as a
 table test over all shorthand rows; git sources against local bare repos (`file://`),
 URL sources against a local HTTP server with ETag; hooks as a black box (stdin JSON →
 stdout JSON). End-to-end: fixture source → `sync` → verify the tree + lock, then a second
@@ -1701,7 +1713,7 @@ once per target and names the targets in the scope header when they are not just
   no version) points at `./skills/` and
   `./hooks/codex-hooks.json`. Codex has the same `SessionStart`/`UserPromptSubmit` events and
   hook JSON shape and sets `CLAUDE_PLUGIN_ROOT` for plugin hook commands; the Codex file
-  differs from `./hooks/hooks.json` only by `--harness codex` on each command,
+  differs from `./hooks/hooks.json` only by the host word `codex` (and `commandWindows`) on each command,
   `"additionalContextLimit": 0` on `SessionStart` (§14.8), a Codex-only key, the missing
   `CwdChanged`, an event Codex does not have, the missing `PostToolUse` – Codex's Bash `cd` never
   moves the hook `cwd` (§8) – and 30 s instead of 10 s for
@@ -1823,10 +1835,10 @@ Applies when working with files matching: `k8s/**`, `*.yaml`.
 
 **Hook injection.** The Codex plugin gets its own hooks file, `hooks/codex-hooks.json`
 (`.codex-plugin/plugin.json` points at it; Claude Code keeps `hooks/hooks.json` unchanged).
-Its commands pass `--harness codex`; the `SessionStart` handler uses the matcher
+Its commands pass the host `codex`; the `SessionStart` handler uses the matcher
 `startup|resume|clear` and sets `"additionalContextLimit": 0`.
 
-- `skilletor hook session-start --harness codex` syncs as before, then – when the input's
+- `skilletor hook session-start codex` syncs as before, then – when the input's
   `source` is `startup` or `clear`, or missing – puts at the start of `additionalContext`
   the rules file of the user scope, then the one of the project scope (each only when
   present and Codex is a target of that scope), read from disk, so a failed or timed-out
@@ -1834,7 +1846,7 @@ Its commands pass `--harness codex`; the `SessionStart` handler uses the matcher
   message begins with `<!-- skilletor:rules` as the pointer says. On `resume` no rules are appended: the first copy is still
   in the resumed history and a second one would duplicate it.
 - `user-prompt-submit` never appends rules.
-- Without `--harness` (Claude Code) nothing changes.
+- With the host `claude-code` (the default) nothing changes.
 
 **Pointer in `AGENTS.md`.** Each scope whose rules file exists keeps one managed block in
 its `AGENTS.md` – `$CODEX_HOME/AGENTS.md` (user) or `<repo>/AGENTS.md` (project):

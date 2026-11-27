@@ -2,8 +2,10 @@
 // injectable. Nothing here uses CLAUDE_PLUGIN_DATA, so the CLI runs identically
 // without Claude Code.
 import { randomBytes } from "node:crypto";
-import {
-  existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, utimesSync,
+// readFileSync is called through the module object so a test can count the reads (k250,
+// test/helpers/reads.ts): on Bun a named import of a builtin never follows a patched property.
+import fs, {
+  existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmdirSync, rmSync, statSync, utimesSync,
   writeFileSync,
 } from "node:fs";
 import type { Stats } from "node:fs";
@@ -135,7 +137,7 @@ export class State {
     if (seen) return seen;
     let value: Record<string, unknown> = {};
     try {
-      const parsed: unknown = JSON.parse(readFileSync(this.path(name), "utf8"));
+      const parsed: unknown = JSON.parse(fs.readFileSync(this.path(name), "utf8"));
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) value = parsed as Record<string, unknown>;
     } catch {
       // unreadable: empty
@@ -438,7 +440,7 @@ export class State {
    *  age is another run's by now. Renamed away first, so no waiter sees it half removed. */
   private release(lockDir: string, ownerFile: string, token: string): void {
     try {
-      if ((JSON.parse(readFileSync(ownerFile, "utf8")) as { token?: unknown }).token !== token) return;
+      if ((JSON.parse(fs.readFileSync(ownerFile, "utf8")) as { token?: unknown }).token !== token) return;
     } catch {
       return;
     }
@@ -568,7 +570,7 @@ function judge(lockDir: string, ownerFile: string, staleMs: number, graceMs: num
 function deadOwner(ownerFile: string, age: number): boolean {
   let record: unknown;
   try {
-    record = JSON.parse(readFileSync(ownerFile, "utf8"));
+    record = JSON.parse(fs.readFileSync(ownerFile, "utf8"));
   } catch {
     return false;
   }

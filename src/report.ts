@@ -5,7 +5,7 @@
 // (lock key `codex:…`, spec §14.4) carry their own, unmeasured-so-conservative hint,
 // Hermes items (`hermes:…`, spec §16.2) theirs.
 import type { BackendKind, Harness, ItemType } from "./config.ts";
-import { parseLockKey } from "./targets.ts";
+import { isPluginKey, parseLockKey } from "./targets.ts";
 import { skillsWarning, type SkillsMissing } from "./agent-skills.ts";
 
 export const ACTIVATION: Record<ItemType, string> = {
@@ -23,7 +23,15 @@ export const HERMES_ACTIVATION = "active from the next Hermes session";
 /** The hint of every item of a harness other than Claude Code. */
 const HARNESS_ACTIVATION: Partial<Record<Harness, string>> = { codex: CODEX_ACTIVATION, hermes: HERMES_ACTIVATION };
 
+/** A skill in the project's plugin skills directory (k286): a file of the repository, which
+ *  reaches a harness only as part of the plugin. */
+export const PLUGIN_ACTIVATION = "a file of the plugin: commit it";
+
+/** An adopted plugin item (k286): the files were there already, the lock owns them now. */
+export const ADOPTED = "adopted: already on disk as rendered";
+
 function activationOf(it: ItemChange): string {
+  if (isPluginKey(it.key)) return PLUGIN_ACTIVATION;
   const harness = parseLockKey(it.key).harness;
   return (harness && HARNESS_ACTIVATION[harness]) ?? ACTIVATION[it.type];
 }
@@ -71,6 +79,10 @@ export interface ScopeReport {
   updated: ItemChange[];
   removed: ItemChange[];
   unchanged: ItemChange[];
+  /** Plugin items (k286) whose files were already on disk equal to the render and went into the
+   *  lock without `--force`, nothing written – a fresh checkout's committed copy (spec §6.3). Not
+   *  in `unchanged`; shown in the text report, never by the hooks. Absent when empty. */
+  adopted?: ItemChange[];
   /** Declared items that render empty (spec §5): not applicable, not an error.
    *  An item also in `removed` had an installed copy deleted this run. */
   skipped: ItemChange[];
@@ -165,12 +177,13 @@ export function reportText(r: SyncReport): string {
   if (r.error) return displaySafe(`skilletor: config error, nothing changed — ${r.error}`);
   const lines: string[] = [];
   for (const s of r.scopes) {
-    // Skips are informational: shown here, but not "notable" (the hook stays quiet).
-    if (!isNotable(s) && s.skipped.length === 0) continue;
+    // Skips and adoptions are informational: shown here, but not "notable" (the hook stays quiet).
+    if (!isNotable(s) && s.skipped.length === 0 && !s.adopted?.length) continue;
     const skipped = new Set(s.skipped.map((it) => it.key));
     lines.push(`skilletor: ${s.scope} scope`);
     for (const it of s.added) lines.push(`  + ${it.key} (${activationOf(it)})`);
     for (const it of s.updated) lines.push(`  ~ ${it.key} (${activationOf(it)})`);
+    for (const it of s.adopted ?? []) lines.push(`  = ${it.key} (${ADOPTED})`);
     for (const it of s.removed) lines.push(`  - ${it.key} (${skipped.has(it.key) ? "removed: renders empty" : "removed"})`);
     const removed = new Set(s.removed.map((it) => it.key));
     for (const it of s.skipped) if (!removed.has(it.key)) lines.push(`  · ${it.key} skipped (renders empty)`);
@@ -247,7 +260,7 @@ export function reportHook(report: SyncReport): { systemMessage?: string; additi
     for (const it of changed) {
       // Claude Code's items are unmarked, as before targets; another harness's are named.
       const harness = parseLockKey(it.key).harness;
-      const mark = harness && harness !== "claude" ? ` (${harness})` : "";
+      const mark = isPluginKey(it.key) ? " (plugin)" : harness && harness !== "claude" ? ` (${harness})` : "";
       ctx.push(`- ${it.type} ${it.name}@${it.source}${mark}: ${activationOf(it)}`);
     }
   }

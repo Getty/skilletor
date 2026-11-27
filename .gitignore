@@ -17,25 +17,3 @@ evals/results/
 
 # a Hermes that loads hermes/skilletor through a symlink compiles it here
 __pycache__/
-
-# Devel::NYTProf profile output
-nytprof.out
-
-# The Perl dist Skilletor (dist.ini): dzil build, its local binary check, make
-/.build/
-/Skilletor-*
-/binary-pp-args.txt
-_build/
-blib/
-/Build
-/Makefile
-/Makefile.old
-/pm_to_blib
-/MANIFEST.bak
-/MYMETA.*
-/cover_db/
-
-# Carton
-/local/
-/.carton/
-/cpanfile.snapshot

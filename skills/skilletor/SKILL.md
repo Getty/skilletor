@@ -1,22 +1,22 @@
 ---
 name: skilletor
-description: "skilletor CLI — installs and updates skills, agents and rules from remote sources for Claude Code, Codex and Hermes Agent. Use when adding a source, installing/uninstalling a skill/agent/rule, all of a type or a name pattern (`*@source`, `perl-*@source`) from a source, writing or installing a bundle (`bundles/<name>.yaml`, `bundle:name@source`, `install.bundles`), switching an item on/off per project via vars, editing a skilletor.json or its `targets`, running sync/check/status, asking 'where does this skill come from' or 'why did this file change', or before editing a file skilletor manages (including skilletor-rules.md and the skilletor pointer block in AGENTS.md)."
+description: "skilletor CLI — installs and updates skills, agents and rules from remote sources for Claude Code, Codex and Hermes Agent. Use when adding a source, installing/uninstalling a skill/agent/rule, all of a type or a name pattern (`*@source`, `perl-*@source`) from a source, writing or installing a bundle (`bundles/<name>.yaml`, `bundle:name@source`, `install.bundles`), switching an item on/off per project via vars, editing a skilletor.json or its `targets`, shipping a rendered skill inside a plugin repo (`\"into\": \"plugin\"`), running sync/check/status, a skilletor hook printing a `getty-bun: ` line or failing or hanging on its first start (Bun runtime, `~/.getty`), asking 'where does this skill come from' or 'why did this file change', or before editing a file skilletor manages (including skilletor-rules.md and the skilletor pointer block in AGENTS.md)."
 ---
 
 # skilletor — remote skills, agents and rules for Claude Code, Codex and Hermes Agent
 
 ## Running the CLI
 
-- **Claude Code:** the plugin's `bin/` is on the Bash tool's `PATH`; a separately installed CLI also works.
-- **Codex:** the plugin adds no `PATH` entry. A separately installed `skilletor` on `PATH`
-  works; otherwise use its launcher, `<plugin root>/bin/skilletor`, two directories
-  above this SKILL.md (`…/skilletor/<version>/skills/skilletor/SKILL.md` → `…/skilletor/<version>/bin/skilletor`).
-  Take `<version>` from that listed path, never from memory. Codex runs skilletor's hooks only
-  once trusted in `/hooks` (again after an update changes them); until then `sync` by hand.
-- **Engine:** `bin/skilletor` runs the first of a binary pinned in `bin/skilletor-binaries.sha256`
-  (fetched only if that file exists), Node.js ≥ 18, Perl ≥ 5.40 with the modules in the plugin's
-  `cpanfile`; on Windows, Node only. None: a hook warns once and exits 0, a command exits 1 —
-  install Node.js ≥ 18, or Perl ≥ 5.40 and those modules.
+- **Claude Code:** the plugin's `bin/` is on the Bash tool's `PATH`; `install.sh`'s `skilletor` also works.
+- **Codex:** no `PATH` entry: `skilletor` on `PATH`, else `<plugin root>/bin/skilletor`, two directories
+  above this SKILL.md (`…/skilletor/<version>/skills/skilletor/SKILL.md` → `…/skilletor/<version>/bin/skilletor`);
+  `<version>` from that listed path, never from memory. Codex runs skilletor's hooks only once
+  trusted in `/hooks`, again after an update changes them; until then `sync` by hand.
+- **Runtime:** Bun, pinned in the plugin's getty-bun starter (`bootstrap/getty-bun.sh`), installed
+  under `~/.getty` on first use — no Node, no Perl; a slow first hook after an install or update
+  is that download. Linux; Windows: Codex hooks from the installed plugin (`commandWindows` runs
+  `getty-bun.ps1`), Hermes from a checkout; Claude Code on Windows and macOS not supported yet.
+  `getty-bun: ` lines (the starter's) and the CLI on native Windows: [references/runtime.md](references/runtime.md).
 - **Hermes Agent:** `hermes skilletor <command>` runs the CLI the plugin uses; setup: [references/hermes.md](references/hermes.md).
 
 ## Do not hand-edit a managed file — change it in the source
@@ -36,7 +36,7 @@ Hermes Agent gets **skills only**: `<Hermes home>/skills/<name>/` (user), `.herm
 (project; none while `codex` is a target there) — [references/hermes.md](references/hermes.md).
 
 A file is managed when its path is in `<scope>/.claude/skilletor.lock.json` (Codex keys
-`codex:skills/<name>` etc., Hermes `hermes:skills/<name>`) — check the lock before editing;
+`codex:skills/<name>` etc., Hermes `hermes:skills/<name>`, plugin `plugin:skills/<name>`) — check the lock before editing;
 files not in it are yours. In `AGENTS.md` only the block between `<!-- skilletor:begin -->`
 and `<!-- skilletor:end -->` is managed; in a `.gitignore` and the project's `.worktreeinclude`
 only the one between `# >>> skilletor >>>` and `# <<< skilletor <<<`. A conflict blocks the
@@ -102,6 +102,7 @@ A worktree move triggers a sync attempt; ambiguous project targets leave that sc
 ```
 
 - Only `skill`, `agent`, `rule` are installable — never hooks, settings or MCP configs.
+- `{ "skill": "name@source", "into": "plugin" }` ships a skill in this plugin repo: [references/sync.md](references/sync.md).
 - `ref` (git) is a plain branch, tag or commit name — omit it, never `""`, for the remote's
   HEAD; `url` is `https://` only. `ref` and `path` merge project < user < local, replaced whole.
 - `gitignore` (default true: commit `skilletor.json` and each `.gitignore` the report names)
@@ -138,11 +139,10 @@ writing one, and on a bundle error or a `skills not installed` warning.
 
 A source file ending in `.njk` is rendered with Nunjucks (installed with `.njk` stripped);
 every other file is copied byte for byte. A `.njk` main file that renders empty (after its
-frontmatter) switches the item off in that scope and target, installed copy removed. A
-`{% if %}` in frontmatter opens with `{%-`, or its blank line silently truncates a
-`skills:` list. Read [references/templates.md](references/templates.md) before writing or
-debugging a template (context variables, undefined `vars.*`, `f` beside `f.njk`, the on/off
-pattern).
+frontmatter) switches the item off in that scope and target, installed copy removed. A `{% if %}`
+in frontmatter opens with `{%-`, or its blank line silently truncates a `skills:` list. Read
+[references/templates.md](references/templates.md) before writing or debugging a template
+(context variables, undefined `vars.*`, `f` beside `f.njk`, the on/off pattern).
 
 ## Trust
 

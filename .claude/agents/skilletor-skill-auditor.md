@@ -22,7 +22,7 @@ Repo truths that live in no skill:
 
 - The static checker is
   `.claude/skills/skill-assessment/scripts/skill-static-check.mjs` (execute
-  with `node`); run it before any reading so the mechanical fails are already
+  with `bun`); run it before any reading so the mechanical fails are already
   on the table.
 - Strength runs cost money and minutes. Use the fresh-subagent A/B by default;
   start a `claude plugin eval` only when the ticket asks for it, and never with

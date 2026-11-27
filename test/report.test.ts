@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  reportText, reportHook, hasChanges, hasNotable, emptyScopeReport, conflictHint, displaySafe, type SyncReport,
+  reportText, reportHook, reportJson, hasChanges, hasNotable, emptyScopeReport, conflictHint, displaySafe, type SyncReport,
 } from "../src/report.ts";
 
 function sample(): SyncReport {
@@ -263,4 +263,18 @@ test("k87: reportHook escapes them too: one systemMessage line, one context line
   assert.deepEqual(reportHook({ scopes: [], error: `sources.team${EVIL}: unknown key` }), {
     systemMessage: `skilletor: sources.team${SHOWN}: unknown key`,
   });
+});
+
+// N6 (k286): a plugin item adopted from disk gets its own text line and an `adopted` JSON field
+// (absent when empty), and no hook output – it changed nothing on disk.
+test("N6: adopted items get a text line and a JSON field, and no hook report", () => {
+  const s = emptyScopeReport("project");
+  assert.equal("adopted" in JSON.parse(reportJson({ scopes: [s] })).scopes[0], false);
+  s.adopted = [{ key: "plugin:skills/boot", type: "skill", name: "boot", source: "shared" }];
+  const r: SyncReport = { scopes: [s] };
+  assert.equal(reportText(r), "skilletor: project scope\n  = plugin:skills/boot (adopted: already on disk as rendered)");
+  assert.deepEqual(JSON.parse(reportJson(r)).scopes[0].adopted, [{ key: "plugin:skills/boot", type: "skill", name: "boot", source: "shared" }]);
+  assert.equal(hasNotable(r), false);
+  assert.equal(hasChanges(r), false);
+  assert.deepEqual(reportHook(r), {});
 });

@@ -1,0 +1,10 @@
+{
+  "skills/helper": {
+    "source": "shared",
+    "version": "git:7cafca7",
+    "files": {
+      "skills/helper/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/helper/SKILL.md": "sha256:637dcd989c2bb65448543757c19349ec8ad3c997ff9cb168815923af28a85f91"
+    }
+  }
+}

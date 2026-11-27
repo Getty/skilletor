@@ -1,7 +1,9 @@
 // skilletor CLI entry point: argument parsing and dispatch (spec §7).
 import { realpathSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
-import { homedir } from "node:os";
+// homedir is called through the module object so a test's preload can fault it (k164,
+// test/cli.test.ts): on Bun a named import of a builtin never follows a patched property.
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { isAbsolute, join, resolve } from "node:path";
 import { claudeConfigDirOf } from "./fsutil.ts";
@@ -109,13 +111,15 @@ function parseFlags(args: string[]): Flags {
 }
 
 function makeContext(flags: Flags): EngineContext {
-  const home = homedir();
+  const home = os.homedir();
   let projectDir = flags.projectDir;
   try {
     // Same resolution as the hooks (spec §14.5): the git top level of cwd, else cwd. A relative
     // --project-dir is taken from cwd: the scope's state is keyed by its absolute lock path (k254).
+    // process.cwd() is asked first: it throws ENOENT for a removed cwd on Node and Bun alike,
+    // where Bun's path.resolve would quietly take the Bun binary's directory instead (k278).
     if (projectDir === undefined) projectDir = projectRootOf(process.cwd());
-    else if (projectDir !== "" && !isAbsolute(projectDir)) projectDir = resolve(projectDir);
+    else if (projectDir !== "" && !isAbsolute(projectDir)) projectDir = resolve(process.cwd(), projectDir);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error("the current directory no longer exists; pass --project-dir <dir>");
@@ -373,15 +377,25 @@ function readStdin(): Promise<string> {
   });
 }
 
-/** `skilletor hook <event> [--harness codex|hermes]`: read stdin JSON, run the hook, print
- *  JSON, always exit 0. `--harness` is internal (the Codex plugin's hooks file, spec §14.8;
- *  the Hermes plugin, spec §16.4); any other value is Claude Code's behavior. Never rejects: a
- *  throw in its own setup (`homedir()`, k164) is the one warning line as well. */
+/** The host a hook line names: `hook <event> <host>`, positional because a getty-bun starter's
+ *  entry arguments never begin with `-` (k281). `--harness <host>` (or `=<host>`) is the
+ *  deprecated spelling of hook lines written before; it still works so they keep working. */
+function hookHost(args: string[]): string | undefined {
+  const at = args.indexOf("--harness");
+  if (at !== -1) return args[at + 1];
+  const legacy = args.find((x) => x.startsWith("--harness="));
+  if (legacy !== undefined) return legacy.slice(10);
+  return args[1];
+}
+
+/** `skilletor hook <event> [claude-code|codex|hermes]`: read stdin JSON, run the hook, print
+ *  JSON, always exit 0. The host is internal (the hooks files, spec §14.8; the Hermes plugin,
+ *  spec §16.4); none, `claude-code` or any other value is Claude Code's behavior. Never
+ *  rejects: a throw in its own setup (`homedir()`, k164) is the one warning line as well. */
 async function runHookCommand(args: string[]): Promise<number> {
   try {
     const event = args[0];
-    const at = args.indexOf("--harness");
-    const harness = at === -1 ? args.find((x) => x.startsWith("--harness="))?.slice(10) : args[at + 1];
+    const harness = hookHost(args);
     if (!event) return 0; // nothing to do, never disturb the session
     let input: HookInput = {};
     try {
@@ -390,7 +404,7 @@ async function runHookCommand(args: string[]): Promise<number> {
     } catch {
       // ignore malformed hook input
     }
-    const home = homedir();
+    const home = os.homedir();
     // Unset under Codex: runHook then takes the git top level of input.cwd (spec §14.5).
     const projectDir = process.env.SKILLETOR_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || undefined;
     const ctx: HookContext = {

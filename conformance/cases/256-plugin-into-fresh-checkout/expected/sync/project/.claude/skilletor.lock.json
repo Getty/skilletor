@@ -1,0 +1,18 @@
+{
+  "plugin:skills/boot": {
+    "source": "shared",
+    "version": "git:11e886d",
+    "files": {
+      "skills/boot/SKILL.md": "sha256:63f2809f737d412e0fcc15a229a2df60f5cb5025a5a828d8232752c4b8fd4f80",
+      "skills/boot/bin/run.sh": "sha256:411d0c8b21d050739d7b8330b32c94e3cdc8ff3b0f3dcb6df4ab22e5fb01a6a3"
+    }
+  },
+  "skills/helper": {
+    "source": "shared",
+    "version": "git:11e886d",
+    "files": {
+      "skills/helper/.gitignore": "sha256:fc8e72cc019d4536c45df00567078e36003f1d7183747e03283549741c3424c9",
+      "skills/helper/SKILL.md": "sha256:637dcd989c2bb65448543757c19349ec8ad3c997ff9cb168815923af28a85f91"
+    }
+  }
+}

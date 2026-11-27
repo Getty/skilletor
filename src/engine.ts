@@ -4,18 +4,20 @@
 // error falls back to the cache with a warning, a template error leaves the item
 // as it was.
 import { execFileSync } from "node:child_process";
-import { hostname, platform, userInfo } from "node:os";
+// userInfo is called through the module object so a test can fault it (k161, test/engine.test.ts):
+// on Bun a named import of a builtin never follows a patched property.
+import os, { hostname, platform } from "node:os";
 import { existsSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import {
-  HARNESSES, ITEM_TYPES, loadConfig, nameKey, pathList, WILDCARD, type BackendKind, type BundleItem, type Harness, type ItemType, type LoadedConfig, type Origin,
+  HARNESSES, ITEM_TYPES, loadConfig, nameKey, pathList, PLUGIN_MANIFEST, pluginItemsRoot, WILDCARD, type BackendKind, type BundleItem, type Harness, type ItemType, type LoadedConfig, type Origin,
   type ResolvedSource, type ScopeConfig, type WildcardItem,
 } from "./config.ts";
 import {
   BundleError, entryMiss, expandBundle, matchEntry, matchesPattern, sameIdentity, type Chain,
 } from "./bundles.ts";
 import {
-  defaultHermesHome, defaultMarkers, detectHarnesses, detectProjectHarnesses, lockKey, parseLockKey, placeOutput, receivers, rootOf, rootOfKey, selectTargets, servedVia, supports,
+  defaultHermesHome, defaultMarkers, detectHarnesses, detectProjectHarnesses, isPluginKey, lockKey, parseLockKey, placeOutput, pluginKey, receivers, rootOf, rootOfKey, selectTargets, servedVia, supports,
   targetGaps, allRoots, isBlockType, lacksLocalPrefix, LAYOUTS, type HarnessMarkers, type RootContext, type TargetSelection,
 } from "./targets.ts";
 import {
@@ -172,7 +174,23 @@ function hermesHomeOf(ctx: EngineContext): string {
 
 /** Where a scope's roots live (spec §14.2, §16.2). */
 function rootContextOf(ctx: EngineContext, scope: ScopeName): RootContext {
-  return { base: baseOf(ctx, scope), scope, claudeDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), codexHome: codexHomeOf(ctx), hermesHome: hermesHomeOf(ctx) };
+  const rc: RootContext = { base: baseOf(ctx, scope), scope, claudeDir: claudeConfigDirOf(ctx.home, ctx.claudeConfigDir), codexHome: codexHomeOf(ctx), hermesHome: hermesHomeOf(ctx) };
+  if (scope === "project") {
+    const root = pluginRootOf(ctx.projectDir!);
+    if (root !== undefined) rc.pluginRoot = root;
+  }
+  return rc;
+}
+
+/** The project's plugin items root (k286), or undefined without a usable plugin manifest: then
+ *  `plugin:` lock entries have no root and are kept untouched (config load refuses a declared
+ *  one). */
+function pluginRootOf(projectDir: string): string | undefined {
+  try {
+    return pluginItemsRoot(projectDir);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Active targets per scope (spec §14.1, k229); throws a TargetError when none apply.
@@ -465,7 +483,7 @@ function makeContext(
     harness,
     target: { dir: targetDir },
     host: ctx.host ?? { name: hostname(), os: platform() },
-    user: ctx.user ?? { name: userInfo().username, home: ctx.home },
+    user: ctx.user ?? { name: os.userInfo().username, home: ctx.home },
     item: { name: item.name, type: item.type, source: item.source },
   };
 }
@@ -743,33 +761,37 @@ async function syncScopeRun(
   /** The active harnesses that get a copy of this type (spec §14.2, §16.2). */
   const harnessesFor = (type: ItemType) => receivers(harnesses, type, scope);
   /** Keep the item's lock entries, for every active target, untouched. */
-  const keepIfLocked = (target: string, type: ItemType) => {
+  const keepIfLocked = (target: string, type: ItemType, into?: "plugin") => {
+    if (into) {
+      if (pluginKey(target) in oldLock) keep.push(pluginKey(target));
+      return;
+    }
     for (const h of harnessesFor(type)) {
       const key = lockKey(h, target);
       if (key in oldLock) keep.push(key);
     }
   };
 
-  type Declared = { type: ItemType; name: string; source: string; target: string };
+  type Declared = { type: ItemType; name: string; source: string; target: string; into?: "plugin" };
   /** What a declared item is built from, or undefined – warned, an installed copy kept – when
    *  its source is unavailable, or the item is missing from it or carries an error. */
   const lookup = (item: Declared): { r: { dir: string; version: string }; cat: Catalog; catItem: CatalogItem } | undefined => {
     const r = resolved.get(item.source);
     const cat = catalogOf(item.source);
     if (!r || !cat) {
-      keepIfLocked(item.target, item.type);
+      keepIfLocked(item.target, item.type, item.into);
       return undefined;
     }
     const catItem = cat.items.find((ci) => ci.type === item.type && ci.name === item.name);
     if (!catItem) {
       rep.warnings.push(`item not found in source ${item.source}: ${item.type} ${item.name}`);
-      keepIfLocked(item.target, item.type);
+      keepIfLocked(item.target, item.type, item.into);
       return undefined;
     }
     if (catItem.error !== undefined) {
       // An error of the item itself (spec §4.1, k100): it is not built, what it installed stays.
       rep.warnings.push(`${item.type} ${item.name}@${item.source}: ${catItem.error}; an installed copy stays`);
-      keepIfLocked(item.target, item.type);
+      keepIfLocked(item.target, item.type, item.into);
       return undefined;
     }
     return { r, cat, catItem };
@@ -789,6 +811,10 @@ async function syncScopeRun(
       };
       if (extra.via?.length) ri.via = extra.via;
       collect.items.push(ri);
+      return;
+    }
+    if (item.into === "plugin") {
+      buildPluginItem(item);
       return;
     }
     const targets = harnessesFor(item.type);
@@ -860,6 +886,47 @@ async function syncScopeRun(
       }
       plan.push(planItem);
     }
+  };
+
+  /**
+   * A skill installed into the project's plugin skills directory (k286): one copy whatever the
+   * targets, a file of the repository – rendered once, with no harness conversion, no `.local.`
+   * names and no skill `.gitignore`. Its template sees `harness` "claude" (the plugin manifest
+   * it lands by is Claude Code's) and the plugin items root as `target.dir`.
+   */
+  const buildPluginItem = (item: Declared) => {
+    const key = pluginKey(item.target);
+    keyInfo.set(key, { key, type: item.type, name: item.name, source: item.source });
+    const root = rc.pluginRoot;
+    if (root === undefined) {
+      // Config load refused a missing manifest; it went away since.
+      rep.warnings.push(`skill ${item.name}@${item.source}: no plugin manifest (${PLUGIN_MANIFEST}); an installed copy stays`);
+      if (key in oldLock) keep.push(key);
+      return;
+    }
+    const found = lookup(item);
+    if (!found) return;
+    const { r, cat, catItem } = found;
+    let output: Map<string, Buffer>;
+    let executable: Set<string>;
+    try {
+      output = build(catItem, r.dir, () => makeContext(ctx, inputsOf(), scope, "claude", root, item, cat.meta.vars ?? {}));
+      executable = executables(catItem, r.dir);
+    } catch (err) {
+      rep.warnings.push(`template error in ${item.type} ${item.name} (plugin): ${(err as Error).message}`);
+      if (key in oldLock) keep.push(key);
+      return;
+    }
+    // A fresh checkout holds the committed copy without the lock (which is not committed):
+    // files that are exactly the render are adopted, not conflicts.
+    const planItem: PlanItem = { key, type: item.type, name: item.name, source: item.source, version: r.version, output, adoptIdentical: true };
+    if (rendersEmpty(catItem, output)) {
+      planItem.output = new Map();
+      planItem.skipped = "renders-empty";
+    } else if (executable.size > 0) {
+      planItem.executable = executable;
+    }
+    plan.push(planItem);
   };
 
   // Expand wildcards and bundles (spec §3, §6.1, §15.2) into offers per target, its name
@@ -1111,7 +1178,8 @@ async function syncScopeRun(
   // Managed paths git still tracks (spec §6.4): only what this run wrote or adopted, and
   // git is asked only when there is some (the hook path stays fast).
   if (gitignoreOn) {
-    const written: Written[] = result.written.map((w) => ({
+    // A plugin item is a file of the repository (k286): committed, never asked about.
+    const written: Written[] = result.written.filter((w) => !isPluginKey(w.key)).map((w) => ({
       root: rootOfKey(rc, w.key) ?? targetDir, key: w.key, path: w.path,
     }));
     if (rules.written) written.push({ root: rootOf(rc, "codex", "rule")!, path: RULES_FILE });
@@ -1124,6 +1192,7 @@ async function syncScopeRun(
   rep.updated = result.updated.map(toChange);
   rep.removed = result.removed.map(toChange);
   rep.unchanged = result.unchanged.map(toChange);
+  if (result.adopted.length) rep.adopted = result.adopted.map(toChange);
   rep.skipped = result.skipped.map(toChange);
   // Claude paths stay relative to `.claude` as before; other roots are named (`.agents/…`).
   // A root outside the base (a CODEX_HOME elsewhere) is shown absolute.
@@ -1819,7 +1888,15 @@ function declaredDrift(
   const out: Drift[] = [];
   const drift = (id: string, sources: string[]) => out.push({ kind: "declared", id, sources });
   const explicit = new Set<string>();
+  const plugin = new Set<string>();
   for (const item of scopeCfg.install) {
+    if (item.into === "plugin") {
+      // One copy in the plugin skills directory, whatever the targets (k286).
+      const key = pluginKey(item.target);
+      plugin.add(key);
+      if (lock[key]?.source !== item.source) drift(`missing:${key}@${item.source}`, [item.source]);
+      continue;
+    }
     explicit.add(item.target);
     for (const h of receivers(harnesses, item.type, scope)) {
       const key = lockKey(h, item.target);
@@ -1828,6 +1905,11 @@ function declaredDrift(
   }
   const covered = new Set<WildcardItem | BundleItem>();
   for (const [key, entry] of Object.entries(lock)) {
+    if (isPluginKey(key) && scope === "project") {
+      if (!plugin.has(key)) drift(`orphan:${key}`, []);
+      if (entry.partial) drift(`partial:${key}`, [entry.source]);
+      continue;
+    }
     const k = parseLockKey(key);
     if (!k.harness || !receivers(harnesses, k.type, scope).includes(k.harness)) continue;
     const by = coverOf(scopeCfg, k, entry);
@@ -1899,8 +1981,9 @@ export function status(given: EngineContext, opts: SyncOptions = {}): StatusRepo
     const lock = readLock(join(targetDirOf(ctx, scope), "skilletor.lock.json"));
     const active = targets[scope];
     // One row per declared item and active target that gets a copy of its type.
-    const rows = scopeCfg.install.flatMap((i) =>
-      receivers(active, i.type, scope).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
+    const rows = scopeCfg.install.flatMap((i) => i.into === "plugin"
+      ? [{ key: pluginKey(i.target), source: i.source }] // one copy, whatever the targets (k286)
+      : receivers(active, i.type, scope).map((h) => ({ key: lockKey(h, i.target), source: i.source })));
     const declaredKeys = new Set(rows.map((r) => r.key));
     const sourceVersions: Record<string, string> = {};
     for (const entry of Object.values(lock)) sourceVersions[entry.source] = entry.version;

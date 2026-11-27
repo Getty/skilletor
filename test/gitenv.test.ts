@@ -3,11 +3,11 @@
 // steer the git skilletor runs: not in a source's cache, not `ls-remote`, not a question about
 // the project. Real git, local repos, temp dirs. process.env is set only around the call under
 // test and restored in `finally`; fixtures run git with the environment this file started with.
-// k93: `npm test` itself drops those variables before any test file runs (test/setup.ts).
+// k93: `bun run test` itself drops those variables before any test file runs (test/setup.ts).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -175,10 +175,25 @@ test("k91: the add probe with GIT_DIR exported asks the address it was given", a
   git(victim.dir, "config", `url.${repo.url}.insteadOf`, missing);
   const probe = makeProbe(5_000);
 
-  await withEnv({ GIT_DIR: victim.gitDir }, () => {
-    assert.deepEqual(probe(missing), {}, "a missing address probed as a git repo");
-    assert.deepEqual(probe(repo.url), { git: true });
+  await withEnv({ GIT_DIR: victim.gitDir }, async () => {
+    assert.deepEqual(await probe(missing), {}, "a missing address probed as a git repo");
+    assert.deepEqual(await probe(repo.url), { git: true });
   });
+});
+
+// k278: the tarball half of the probe fetches in-process, and Bun's fetch answers 200 for a
+// missing file: URL. Asserts: a file: address is a tarball exactly when its .tar.gz is a file.
+test("k278: the add probe takes a file: address for a tarball only when the file exists", async (t) => {
+  const tmp = makeTmpDir();
+  t.after(tmp.cleanup);
+  const probe = makeProbe(5_000);
+  const base = join(tmp.dir, "pkg");
+  assert.deepEqual(await probe(pathToFileURL(base).href), {}, "a missing .tar.gz");
+  mkdirSync(`${base}.tar.gz`);
+  assert.deepEqual(await probe(pathToFileURL(base).href), {}, "a directory");
+  rmSync(`${base}.tar.gz`, { recursive: true });
+  writeFileSync(`${base}.tar.gz`, "");
+  assert.deepEqual(await probe(pathToFileURL(base).href), { tarball: true });
 });
 
 /** A project repository tracking `tracked.txt`, with a subdirectory `sub`; the victim tracks `file.txt`. */
@@ -279,7 +294,7 @@ test("k91: with GIT_DIR exported, project.git_remote is the project's origin", a
   assert.match(readFileSync(skill, "utf8"), /^remote=https:\/\/example\.com\/proj\.git$/m);
 });
 
-// k93: `npm test` run from a git hook inherits the hook's GIT_DIR, and a fixture's `git init`,
+// k93: `bun run test` run from a git hook inherits the hook's GIT_DIR, and a fixture's `git init`,
 // `add` and `commit` in its temp dir acted on the repository GIT_DIR names – the developer's
 // checkout. Asserts, running a one-test file that builds such a fixture with the flags of
 // package.json's test script and GIT_DIR naming the victim: the victim's remotes, HEAD, index,
@@ -291,9 +306,9 @@ test("k93: npm test with GIT_DIR exported builds a fixture in its temp dir, not 
   const before = victim.snapshot();
   const root = fileURLToPath(new URL("..", import.meta.url));
   const script: string = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts.test;
-  const [node, ...flags] = script.split(/\s+/);
-  const glob = flags.pop();
-  assert.deepEqual([node, glob], ["node", '"test/**/*.test.ts"'], `unexpected test script: ${script}`);
+  const [bun, subcommand, ...flags] = script.split(/\s+/);
+  const dir = flags.pop();
+  assert.deepEqual([bun, subcommand, dir], ["bun", "test", "./test/"], `unexpected test script: ${script}`);
   const work = join(tmp.dir, "work");
   const fixture = join(tmp.dir, "fixture.test.mjs");
   writeFileSync(fixture, [
@@ -312,9 +327,8 @@ test("k93: npm test with GIT_DIR exported builds a fixture in its temp dir, not 
     '',
   ].join("\n"));
   const env: NodeJS.ProcessEnv = { ...G, GIT_DIR: victim.gitDir };
-  delete env.NODE_TEST_CONTEXT; // set for this file's own run; the nested runner must not see it
 
-  const r = spawnSync(process.execPath, [...flags, fixture], { cwd: root, env, encoding: "utf8" });
+  const r = spawnSync(process.execPath, ["test", ...flags, fixture], { cwd: root, env, encoding: "utf8" });
   assert.deepEqual(victim.snapshot(), before, "the repository GIT_DIR names changed");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(git(work, "log", "--format=%s"), "fixture", "the fixture's commit is not in its own repository");

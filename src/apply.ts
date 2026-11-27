@@ -18,7 +18,7 @@
 import { existsSync, lstatSync, readFileSync, readdirSync, rmdirSync, rmSync, type Stats } from "node:fs";
 import { dirname, join, relative, resolve as resolvePath, sep } from "node:path";
 import { nameKey, type ItemType } from "./config.ts";
-import { atomicWrite, hashBuffer, isExecutable, sameFile } from "./fsutil.ts";
+import { atomicWrite, executableMatches, hashBuffer, sameFile } from "./fsutil.ts";
 import { readLock, serializeLock, writeLock, type Lock, type LockEntry, type SkipReason } from "./lock.ts";
 
 export interface PlanItem {
@@ -48,6 +48,10 @@ export interface PlanItem {
    *  its `.local.` file, spec §6.3). A file there that the item's lock entry does not
    *  own is a conflict like any other; with `force` it is deleted instead of adopted. */
   claims?: string[];
+  /** A file of the output already on disk with exactly its bytes and executable bit is adopted
+   *  rather than a conflict, though the lock does not own it: the item is committed to the
+   *  repository it lands in (a plugin item, k286), so a fresh checkout holds it without a lock. */
+  adoptIdentical?: true;
 }
 
 export interface ApplyOptions {
@@ -69,6 +73,9 @@ export interface ApplyResult {
   updated: string[];
   removed: string[];
   unchanged: string[];
+  /** Items that took files on disk equal to the render into the lock without `force` and wrote
+   *  nothing (`adoptIdentical`, k286): in place of `unchanged`, `added` or `updated`. */
+  adopted: string[];
   /** Plan items marked skipped (also in `removed` if files were deleted). */
   skipped: string[];
   /** A conflict blocks its whole item (spec §6.3). */
@@ -125,7 +132,7 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
   const targetDir = resolvePath(opts.targetDir);
   const newLock: Lock = {};
   const res: ApplyResult = {
-    added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [], written: [],
+    added: [], updated: [], removed: [], unchanged: [], adopted: [], skipped: [], conflicts: [], overwritten: [], written: [],
     leftInPlace: [],
   };
   const dirsTouched = new Map<string, Set<string>>(); // root -> dirs deleted from
@@ -200,6 +207,7 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
       } else if (at.kind === "other" && (isOutput || !owned(rel))) {
         conflict(rel, true, false);
       } else if ((at.kind === "file" || at.kind === "link") && !owned(rel)) {
+        if (at.kind === "file" && isOutput && it.adoptIdentical && sameFileAs(root, rel, it.output.get(rel)!, it.executable?.has(rel) ?? false)) continue;
         conflict(rel, false, !isOutput);
       }
     }
@@ -216,6 +224,7 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
     let wrote = false;
     let removedFile = false;
     let tookOver = false; // a file held under another spelling is the item's now (k136)
+    let adopted = false; // a file equal to the render taken into the lock without force (k286)
     /** A path written or adopted: reported, and owned even if a later step throws. */
     const land = (rel: string, hash: string): void => {
       res.written.push({ key: it.key, path: rel });
@@ -234,10 +243,13 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
 
       if (st?.isFile()) {
         const diskHash = hashBuffer(readFileSync(abs));
-        if (diskHash === desired && isExecutable(st.mode) === executable) {
+        if (diskHash === desired && executableMatches(st.mode, executable)) {
           // Already correct; adopt into the lock (updates a stale hash silently).
           entryFiles[rel] = desired;
-          if (locked === undefined) land(rel, desired); // adopted (force)
+          if (locked === undefined) {
+            land(rel, desired); // adopted (force, or silently: adoptIdentical)
+            if (it.adoptIdentical) adopted = true;
+          }
           continue;
         }
         atomicWrite(abs, buf, executable);
@@ -268,9 +280,12 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
 
     if (existing === undefined) {
       if (wrote || tookOver) res.added.push(it.key);
+      else if (adopted) res.adopted.push(it.key);
       else res.unchanged.push(it.key); // fully conflicted, nothing installed
     } else if (wrote || removedFile || tookOver || existing.partial) {
       res.updated.push(it.key); // a partial entry: the run that left it never reported it
+    } else if (adopted) {
+      res.adopted.push(it.key);
     } else {
       res.unchanged.push(it.key);
     }
@@ -376,6 +391,13 @@ function ownPath(key: string): string {
   const colon = key.indexOf(":");
   const slash = key.indexOf("/");
   return colon !== -1 && (slash === -1 || colon < slash) ? key.slice(colon + 1) : key;
+}
+
+/** Is the file at `rel` exactly `buf`, with the executable bit `executable` (POSIX only)? */
+function sameFileAs(root: string, rel: string, buf: Buffer, executable: boolean): boolean {
+  const abs = safeJoin(root, rel);
+  const st = lstatOrUndefined(abs);
+  return st !== undefined && st.isFile() && executableMatches(st.mode, executable) && readFileSync(abs).equals(buf);
 }
 
 /** lstat that answers `undefined` for a missing path (also below a non-directory). */

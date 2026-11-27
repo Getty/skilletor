@@ -1,0 +1,21 @@
+{
+  "description": "A plugin copy the lock owns (k286) that was edited by hand, and one no entry declares any more: check names the project's declared drift (and layout drift: the seeded project has no .worktreeinclude yet); a sync overwrites the edited file and reports it, deletes the undeclared copy and leaves a hand-written skill beside them untouched; check is clean after it.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared",
+          "executable": [
+            "skills/boot/bin/run.sh.njk"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    { "id": "check-before", "op": "check" },
+    { "id": "sync", "op": "sync", "tree": true },
+    { "id": "check", "op": "check" }
+  ]
+}

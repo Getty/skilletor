@@ -98,6 +98,45 @@ every marketplace an enabled plugin there needs. The report says
   `{ "extraKnownMarketplaces": { "getty": { "source": { "source": "github", "repo": "Getty/marketplace" } } }, "enabledPlugins": { "skilletor@getty": true } }`.
 - Codex has no such file: Codex users install the plugin themselves.
 
+## Into the plugin — a skill the plugin repo ships
+
+In a plugin repository's project `skilletor.json`, an object entry renders a skill into the
+plugin's own skills directory, which the repo commits and ships:
+
+```json
+{ "install": { "skills": [ { "skill": "getty-bun-install@agent-bun-runtime", "into": "plugin" } ] } }
+```
+
+Steps: `skilletor add <source> --project` (the source offering the skill), add the object
+entry by hand (`skilletor install` writes only string entries), `skilletor sync`, commit
+`skilletor.json` and the rendered `skills/<name>/`. The plugin's users get the committed
+files; they need no skilletor for it.
+
+- Lands in `skills/<name>/` under the `skills` path of `.claude-plugin/plugin.json` (default
+  `skills`; one relative path whose last directory is named `skills`, not an array). Lock key
+  `plugin:skills/<name>`.
+- One copy whatever the `targets`, no harness copy beside it: no `.local.` names, no skill
+  `.gitignore`, the executable bit kept; a template sees `harness` = `"claude"`.
+- Commit it — the report says `+ plugin:skills/<name> (a file of the plugin: commit it)`. The
+  lock is not committed, so a fresh checkout has the files without it. There a committed file
+  identical to the render (bytes, and on POSIX the executable bit) is adopted into the lock
+  and reported `adopted`, no conflict. A committed file that differs — hand-edited, or the
+  source moved on — is a conflict (`already exists (use --force to adopt)`) that blocks the
+  item; `sync --force` overwrites it with the render. Once in the lock, a hand edit is
+  overwritten at the next sync like any managed file. Edit the source, not the copy.
+- `skilletor uninstall <name>@<source> --project` drops the entry and deletes the copy (an adopted one too); a
+  copy no entry declares any more is deleted at sync, a hand-written skill beside it stays.
+- Config error, nothing changes: no `.claude-plugin/plugin.json` in the project; the entry in
+  the user config (`"into": "plugin" is project scope only`); under `install.agents` or
+  `install.rules` (skills only); a `*` pattern; any key besides the type and `into`.
+- `plugin.json` `skills` as an array: config error `"skills" [ … ] must be one path for an
+  install with "into": "plugin"`. Use one string path (`"./skills"`); a skills directory not
+  named `skills` is refused too.
+- The plugin repo's own project sync is a project sync like any other: with Claude among its
+  targets it also adds `enabledPlugins."skilletor@<m>"` to the repo's committed
+  `.claude/settings.json` ("Sharing a project" above). Not wanted in a plugin repo:
+  `"claudeSettings": false` in its `skilletor.json`.
+
 ## Git — `gitignore`
 
 `gitignore` (default true) writes fixed ignore rules that never change with the items.

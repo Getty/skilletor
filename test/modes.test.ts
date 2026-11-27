@@ -165,6 +165,20 @@ test("k99: a url source's executable tar entries install executable", { skip: NO
   e.assertModes();
 });
 
+// Asserts: a url source's executable tar entries, synced twice, leave the second sync with
+// nothing to do on every OS – on Windows, where the installed file never shows the bit, too
+// (no rewrite of every executable file on every sync).
+test("k99: a url source's executable entries make a second sync a no-op on every OS", async (t) => {
+  const e = env(t);
+  const archive = makeTarGz(FILES.map((f) => ({ name: `pkg/${f.path}`, data: f.data, mode: f.exec ? 0o755 : 0o644 })));
+  t.mock.method(globalThis, "fetch", async () => new Response(new Uint8Array(archive), { headers: { etag: '"v1"' } }));
+  e.writeCfg({ url: "https://example.invalid/skills.tar.gz" });
+  assert.equal((await sync(e.ctx, { scope: "user" })).error, undefined);
+  const again = (await sync(e.ctx, { scope: "user" })).scopes[0]!;
+  assert.deepEqual([again.added, again.updated, again.overwritten, again.conflicts], [[], [], [], []]);
+  assert.deepEqual(again.unchanged.map((i) => i.key).sort(), ["skills/proj", "skills/pub"]);
+});
+
 // ---- installs an earlier version made (k107) --------------------------------------------
 
 /** What skilletor <= 0.4.1 recorded in render-inputs.json for a user scope without vars

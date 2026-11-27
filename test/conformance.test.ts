@@ -1,6 +1,6 @@
 // The TypeScript runner of the shared conformance cases (k143): `conformance/README.md` is the
-// format; the Perl port runs the same cases. TS is the reference, so
-// `SKILLETOR_CONFORMANCE_UPDATE=1 npm test` rewrites every expectation from this engine – review
+// format. TS is the reference, so
+// `SKILLETOR_CONFORMANCE_UPDATE=1 bun run test` rewrites every expectation from this engine – review
 // the diff by hand against the spec before keeping it: an expectation that only mirrors the code
 // proves nothing.
 //
@@ -8,7 +8,7 @@
 // own; nothing reads or writes the real home. Git sources are real repositories built from plain
 // trees, reached through `url.<file>.insteadOf` – fetch, cache naming and `check`'s ls-remote run
 // as for a remote, offline. A `cli` step runs a CLI – this checkout's bundle, or the one
-// SKILLETOR_CONFORMANCE_CLI names (the Perl port's, say) – in an environment built from nothing.
+// SKILLETOR_CONFORMANCE_CLI names (a packed binary, say) – in an environment built from nothing.
 import { after, test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -18,21 +18,17 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { buildToString } from "../scripts/esbuild.config.mjs";
+import { buildTo } from "../scripts/bundle.mjs";
 import { check, resolveItems, status, sync, type EngineContext, type ResolveReport } from "../src/engine.ts";
 import { homeEnv } from "./helpers/harness.ts";
 import { makeTmpDir } from "./helpers/tmp.ts";
 
 const ROOT = fileURLToPath(new URL("../conformance/cases", import.meta.url));
 const UPDATE = process.env.SKILLETOR_CONFORMANCE_UPDATE === "1";
-/**
- * The version a `cli` step that asks for it writes as `${VERSION}` (README: placeholders), in either
- * spelling: the plugin's (package.json, 0.8.0), which this CLI reports, and the Perl dist's
- * (`$VERSION` in lib/Skilletor.pm, 0.008000), which the Perl CLI reports.
- */
+/** The version a `cli` step that asks for it writes as `${VERSION}` (README: placeholders): the
+ *  plugin's (package.json), which this CLI reports. */
 const VERSIONS = [
   (JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version,
-  /^our \$VERSION = '([^']+)';$/m.exec(readFileSync(new URL("../lib/Skilletor.pm", import.meta.url), "utf8"))![1]!,
 ];
 /** The CLI of `cli` steps as a JSON argv prefix; unset, this checkout's bundle (README: which CLI). */
 const CLI_OVERRIDE = process.env.SKILLETOR_CONFORMANCE_CLI;
@@ -487,7 +483,7 @@ function cli(): Promise<string[]> {
     }
     bundleDir = mkdtempSync(join(tmpdir(), "skilletor-conformance-cli-"));
     const bundle = join(bundleDir, "skilletor.mjs"); // .mjs: Node runs the ESM bundle as ESM
-    writeFileSync(bundle, await buildToString());
+    buildTo(bundle);
     return [process.execPath, bundle];
   })();
   return cliPrefix;
@@ -507,9 +503,11 @@ function cliEnv(c: Case, step: Step, r: Roots): Record<string, string> {
     GIT_CONFIG_GLOBAL: join(r.tmp, "gitconfig"),
     GIT_CONFIG_NOSYSTEM: "1",
     LC_ALL: "C",
+    // Bun keeps its transpiler cache under HOME (`.bun/install/cache/@t@`), which every tree
+    // step would see; "0" turns it off, any other runtime ignores it (k278).
+    BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0",
   };
   if (process.platform === "win32") Object.assign(env, { TEMP: r.tmp, TMP: r.tmp });
-  if (process.env.PERL5LIB !== undefined) env.PERL5LIB = process.env.PERL5LIB; // a Perl CLI's modules
   for (const [k, v] of Object.entries(c.env ?? {})) env[k] = concrete(v, r);
   for (const [k, v] of Object.entries(step.env ?? {})) {
     if (v === null) delete env[k];
@@ -918,11 +916,10 @@ test("conformance: a cli step's CLI gets the README's environment, argv, cwd and
     assert.equal(got.stdin, JSON.stringify({ cwd: r.home, n: [1] }));
     const want: Record<string, string> = {
       PATH: process.env.PATH ?? "", ...homeEnv(r.home), CODEX_HOME: join(r.home, ".codex"),
-      GIT_CONFIG_GLOBAL: join(tmp, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1", LC_ALL: "C",
+      GIT_CONFIG_GLOBAL: join(tmp, "gitconfig"), GIT_CONFIG_NOSYSTEM: "1", LC_ALL: "C", BUN_RUNTIME_TRANSPILER_CACHE_PATH: "0",
       CLAUDE_CONFIG_DIR: concrete("${HOME}/cfg", r), EXTRA: concrete("${TMP}/e", r),
     };
     if (process.platform === "win32") Object.assign(want, { TEMP: r.tmp, TMP: r.tmp });
-    if (process.env.PERL5LIB !== undefined) want.PERL5LIB = process.env.PERL5LIB;
     const allowedRuntimeAdditions = new Set(process.platform === "darwin"
       ? ["__CF_USER_TEXT_ENCODING"]
       : process.platform === "win32"

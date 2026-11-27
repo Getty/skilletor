@@ -1,0 +1,5 @@
+skilletor: project scope
+  + skills/helper (active now)
+  + plugin:skills/boot (a file of the plugin: commit it)
+  .claude/.gitignore updated — commit it
+  .worktreeinclude updated — commit it

@@ -6,9 +6,10 @@ stdin, one JSON object:
             "adapter":  build an Adapter and run `steps` on it
   environ   the Adapter's environment (adapter mode)
   home, cwd what the Adapter's home and cwd lookups answer (adapter mode)
-  limits    {"session_start_s": …, "prompt_s": …} (adapter mode, optional)
+  limits    {"session_start_s": …, "prompt_s": …, "ensure_s": …} (adapter mode, optional)
   steps     [[method, kwargs], …] (adapter mode); ["_cd", {"cwd": …}] changes what the
-            cwd lookup answers from then on – a session moved between turns
+            cwd lookup answers from then on – a session moved between turns;
+            ["_sleep", {"s": …}] waits; ["_rm", {"path": …}] removes a file
   windows   find_cli as on Windows (adapter mode, optional; only the reported "cli")
   no_killpg os.killpg removed before the steps run, as on Windows (adapter mode, optional)
 stdout: one JSON object with what happened.
@@ -79,6 +80,14 @@ def main():
         for method, kwargs in job["steps"]:
             if method == "_cd":
                 where["cwd"] = kwargs["cwd"]
+                out["results"].append({"ret": None, "took": 0})
+                continue
+            if method == "_sleep":
+                time.sleep(kwargs["s"])
+                out["results"].append({"ret": None, "took": kwargs["s"]})
+                continue
+            if method == "_rm":
+                os.remove(kwargs["path"])
                 out["results"].append({"ret": None, "took": 0})
                 continue
             started = time.monotonic()

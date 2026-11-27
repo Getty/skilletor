@@ -21,7 +21,7 @@ Hermes Agent, and as a `skilletor` command for your shell.
 
 ## Install
 
-On the machine it needs `git` and Node.js ≥ 18 ([Requirements](#requirements)). What is released and what is tested where:
+On the machine it needs `git` and a POSIX `sh`; it runs on Bun, which it installs itself on first use ([Requirements](#requirements)). What is released and what is tested where:
 [Status](#status).
 
 ### In Claude Code
@@ -79,24 +79,21 @@ skilletor add Getty && skilletor install getty-perl-moo@getty
 ```
 
 Outside a Claude Code session the plugin's `bin/` is not on `PATH`; `install.sh` gives you a
-`skilletor` command that is. With Node.js ≥ 18 and `claude` on `PATH` it runs
+`skilletor` command that is. With `claude` on `PATH` it runs
 `claude plugin marketplace add Getty/marketplace` (or `marketplace update getty` when it is
 known) and `claude plugin install skilletor@getty` in user scope (or `plugin update` when it is
 installed), then writes `~/.local/bin/skilletor`: a small script that looks up the plugin's
 current user-scope install in Claude Code's `installed_plugins.json` and runs its
-`bin/skilletor`, so plugin updates do not break it. Without Claude Code (Codex or Hermes only),
+getty-bun starter, so plugin updates do not break it. Without Claude Code (Codex or Hermes only),
 or with `--no-plugin`, it clones this repository into `~/.local/share/skilletor`
 (`$XDG_DATA_HOME/skilletor`) and links the clone's `bin/skilletor` there instead. Run it again
 to update either one.
 
-**Without Node:** the installer leaves Claude Code's plugin state untouched and uses a
-CLI-only checkout. It first runs `bin/skilletor-start --help`, which fetches the pinned
-release binary if there is one, then installs a link to that starter only if the check
-succeeds. A downloaded binary must match a checksum pinned in the checkout. Updates are
-checked in a separate candidate checkout; a failed download or preflight leaves the existing
-command and its checkout working. Previous checkouts are kept. No release pins binaries yet
-([Status](#status)) and the Perl port is retired, so today this path finds no engine and
-installation fails safely.
+The installer needs neither Node.js nor Bun nor a JSON tool: `sh`, `awk` and `git`. The
+`skilletor --version` it ends with runs the getty-bun starter, which installs the pinned Bun
+under `~/.getty` (`$GETTY_HOME`) on its first run ([Which engine runs](#which-engine-runs)).
+A `skilletor` script written by an older installer ran Node: run the installer again after an
+update.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Getty/skilletor/main/install.sh | sh -s -- --no-plugin --bin-dir ~/bin
@@ -105,9 +102,8 @@ sh install.sh               # in a clone: the same, but the CLI-only path links 
 
 `--bin-dir DIR` (`SKILLETOR_BIN_DIR`) puts the command elsewhere, `--no-plugin`
 (`SKILLETOR_NO_PLUGIN=1`) leaves Claude Code alone, `SKILLETOR_REPO` clones another URL (a
-fork, a mirror). The normal plugin path needs Node.js ≥ 18 and `git`; the no-Node path
-needs `git` and a usable starter runtime. Binary startup requires `sha256sum` or `shasum`;
-provisioning additionally needs `curl` or `wget`. It never uses `sudo`, says what it did,
+fork, a mirror). The first start of the command downloads Bun with `curl` or `wget`. It
+never uses `sudo`, says what it did,
 warns when the directory is not on your `PATH`, and replaces no `skilletor` there that it did
 not write itself (a symlink excepted). Installing the plugin yourself (`claude plugin install …`
 in a dotfiles script, say)? Run the script afterwards for the command; it finds the plugin
@@ -117,9 +113,13 @@ installed and only updates it.
 its modules as empty stubs, and its `skilletor` command only says where to go instead. Remove it
 with `cpanm --uninstall Skilletor` and install skilletor one of the ways above.
 
-Windows: the script is for macOS and Linux. Install the plugin in Claude Code, and for
-PowerShell or cmd clone this repository and put its `bin\` on your `PATH` — `skilletor`
-there runs `bin\skilletor.exe` (see [Requirements](#requirements)); `git pull` updates it.
+Windows: the script is for Linux (macOS waits for getty-bun, see [Status](#status)). On
+Windows only the Codex hooks and the Hermes adapter run today, through
+`bootstrap\getty-bun.ps1`; Claude Code on Windows and a `skilletor` command for PowerShell are
+not supported yet ([Requirements](#requirements)). A command without options runs there
+through the starter: `powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy
+Bypass -File "<plugin root>\bootstrap\getty-bun.ps1" run dist/skilletor.js sync` (an argument
+beginning with `-` is not passed on safely yet).
 
 ## First steps
 
@@ -259,64 +259,49 @@ What is released, what is switched on, and what is tested where:
   CPAN, `Skilletor` 0.001 is the Perl library alone: Claude Code only, no template rendering,
   no `skilletor` command. The marketplace entries name no version, so Claude Code and Codex
   install this repository's `main` as it stands.
-- **Standalone binaries: prepared, not switched on.** The release workflow builds them for
-  linux-x86_64, linux-arm64, macos-arm64 and windows-x86_64, and no release has published them
-  yet. The starter downloads one only once `bin/skilletor-binaries.sha256` pins its checksum,
-  and that file is committed only after a release has published the binaries
-  ([docs/release.md](docs/release.md)). Until then the plugin and the command run Node.js,
-  else Perl ([Which engine runs](#which-engine-runs)).
-- **Tested.** On GitHub Actions, `ci.yml` runs the TypeScript tests on Ubuntu, macOS and
-  Windows with Node 24; the bundle is built for Node 18, the oldest version the launcher
-  accepts, which CI does not run. On Windows the native `bin/skilletor.exe` is run, and the
-  tests of the sh scripts (`install.sh`, the launcher, the starter) skip themselves, as do
-  those of the Hermes adapter, a Python plugin whose tests drive an sh script as a stand-in
-  CLI. `simpici.yml` rebuilds that `.exe` from `winlaunch/winlaunch.c` and checks that the
-  committed one is byte for byte that build. `perl.yml` runs the Perl tests on Linux with
-  Perl 5.40, including parity tests against the TypeScript engine. The Perl engine has no CI
-  run on macOS or Windows; the
-  `binaries` workflow smokes the packed binaries there when it runs (on a published release,
-  or started by hand). Both test suites run the shared conformance cases. The Hermes support
-  is tested against a real Hermes Agent on Linux only, on a machine that has one
+- **Runtime: Bun through getty-bun.** skilletor runs on the Bun version pinned in
+  `package.json` (`gettyBun.bunVersion`, 1.4.5), started by the getty-bun starters in
+  `bootstrap/` from [agent-bun-runtime](https://github.com/Getty/agent-bun-runtime). Node.js,
+  the Perl port and the planned release binaries are gone. getty-bun has no macOS target yet,
+  and Claude Code on Windows waits for its `.cmd` starter: until both exist this runtime is not
+  released ([Which engine runs](#which-engine-runs)).
+- **Tested.** On every push, SimpiCI (`.cicd/`) runs in the `oven/bun` image of the pinned
+  version: typecheck, the tests, a rebuild of `dist/skilletor.js` compared byte for byte with
+  the committed one, and `check-starters`, which renders `getty-bun-install` afresh and
+  compares it with `skills/getty-bun-install/` and with the copies in `bootstrap/`. `ci.yml`
+  runs the same gates on Ubuntu and Windows, both required; its macOS leg is advisory and
+  expected red until getty-bun has a darwin target. On Windows the tests of the sh scripts
+  (`install.sh`, `bin/skilletor`, Claude Code's hook lines) skip themselves, and the Codex hook
+  lines and the Hermes adapter run through `getty-bun.ps1` against an installed Bun. The Hermes support is
+  tested against a real Hermes Agent on Linux only, on a machine that has one
   (`test/hermes-real.test.ts`, skipped in CI). Live Claude Code, Codex and Hermes sessions are
   not part of CI.
-- **Windows** runs the plugin on Node.js through `bin/skilletor.exe`, whatever else is
-  installed; `install.sh` does not run there.
 
 ### Requirements
 
-- `git`, and one engine ([Which engine runs](#which-engine-runs)): Node.js ≥ 18, whose only
-  bundled runtime dependency is Nunjucks; or Perl ≥ 5.40 with the modules in `cpanfile`; or,
-  once a release pins it, the release binary for the platform, fetched with `curl` or `wget`
-  and checked with `sha256sum` or `shasum`.
-- Windows: Node.js ≥ 18 and `git`, without Git Bash. Claude Code starts the hooks through
-  `bin/skilletor.exe`, a small launcher next to the sh script that runs the bundle with
-  the first `node.exe` on `PATH` (without one it exits silently). It is also the
-  `skilletor` command in PowerShell and cmd once `bin/` is on `PATH`. Sources are checked
-  out with the repository's line endings, whatever `core.autocrlf` says, so a project
-  synced on Windows and on Linux gets the same files and lock.
+- `git` and a POSIX `sh`. Bun is not a requirement: the starter installs the pinned version
+  per user under `~/.getty` (`$GETTY_HOME`) on the first start, downloading it with `curl` or
+  `wget`, and every later start runs it from there without the network.
+- Linux. macOS: not yet (above).
+- Windows: the Codex hooks (`commandWindows`) and the Hermes adapter run
+  `bootstrap\getty-bun.ps1` through `powershell.exe -ExecutionPolicy Bypass -File`. Claude Code
+  on Windows and a `skilletor` command for PowerShell or cmd are not supported yet. Sources
+  are checked out with the repository's line endings, whatever `core.autocrlf` says, so a
+  project synced on Windows and on Linux gets the same files and lock.
 
 ### Which engine runs
 
-`bin/skilletor` (what every plugin hook, the Hermes adapter in a checkout, npm and
-`install.sh`'s link run) hands over to `bin/skilletor-start`, which takes the first of:
+One: `dist/skilletor.js`, bundled with `bun build`, on the pinned Bun. Every hook calls the
+starter itself (`sh bootstrap/getty-bun.sh run dist/skilletor.js hook <event> <host>`, the
+host `claude-code`, `codex` or `hermes` as a word, never a `--` flag); `bin/skilletor` — the
+command `install.sh` links, the Claude Code plugin puts on `PATH` and the Hermes adapter's
+fallback — is a small sh script that does the same with its arguments passed through.
 
-1. the release binary for this platform pinned in `bin/skilletor-binaries.sha256` (the
-   release's `SHA256SUMS`), cached under `<claudeConfigDir>/skilletor/bin/<version>/` and
-   checked against its pinned checksum on every start;
-2. Node.js ≥ 18 with `dist/skilletor.js`;
-3. Perl ≥ 5.40 with `lib/` and `script/skilletor`, once the modules in `cpanfile` load;
-4. else one line saying why: a hook prints it as its warning and exits 0, it never blocks.
-
-Only two things fetch the binary (`curl` or `wget`, checked with `sha256sum` or `shasum`): a
-CLI command, in the foreground, and a SessionStart hook, in the background. The session that
-starts it keeps running Node or Perl, the next one runs the binary. Other hooks never fetch.
-`--version` and `-v` never fetch either; they print the version of the engine that answers:
-`0.008000` from the binary and Perl, `0.8.0` from Node. A failed SessionStart fetch is retried
-after 15 minutes.
-
-Without the pinned file the starter downloads nothing, and no release has pinned one yet; until
-one does, a plugin install runs Node, else Perl. Windows runs Node through
-`bin/skilletor.exe` either way.
+The first start after an install, or after an update that moves the Bun pin, downloads Bun
+under a lock, so that hook can take a while: the hooks allow 600 seconds. Offline, with no Bun
+installed yet, the starter prints one `getty-bun: …` line and exits 1 before skilletor runs;
+once a Bun is installed nothing needs the network. Repairing the runtime: `sh
+<plugin>/bootstrap/getty-bun.sh status`, then `ensure` (the bundled skill has the details).
 
 ## How it works
 
@@ -835,6 +820,26 @@ change them in the source, not in place. A sync that stops on a write error (a f
 a permission) still records what it wrote, so the next sync picks up where it stopped;
 until then `status` marks the item `(partial: the last sync stopped midway)`.
 
+### Shipping a rendered skill in your plugin: `"into": "plugin"`
+
+A plugin repository can ship a skill skilletor renders: name the install as an object with
+`"into": "plugin"` in the project's `.claude/skilletor.json`.
+
+```json
+{ "install": { "skills": [ { "skill": "getty-bun-install@agent-bun-runtime", "into": "plugin" } ] } }
+```
+
+The skill is rendered once, with the project's vars, into the plugin's own skills directory —
+the `skills` path of `.claude-plugin/plugin.json`, else `skills/` — whatever the `targets`, and
+not into `.claude/skills`. You commit the result: it is a file of the plugin (the report says
+`a file of the plugin: commit it`), and the lock owns it as `plugin:skills/<name>`, so sync
+updates it, `check` reports drift, a hand edit is a conflict and uninstalling removes it. A
+fresh checkout has no lock; files there that equal the render byte for byte, mode included,
+are taken over without a conflict (the report says `= plugin:skills/<name> (adopted: already on
+disk as rendered)`, `adopted` in `sync --json`). Only skills, only in a project, one named item
+(no pattern); a project without the plugin manifest is a config error. skilletor itself ships
+`skills/getty-bun-install/` this way, and its CI renders it again and compares.
+
 ### Sharing a project: require the plugin
 
 Installed items are not committed, so a fresh checkout has `skilletor.json`, and skills or
@@ -1090,7 +1095,8 @@ Use kubectl carefully.
 
 The repository ships a Codex plugin manifest (`.codex-plugin/plugin.json`) next to the
 Claude one; both ship the bundled skill. The Codex manifest points at its own
-`hooks/codex-hooks.json` — the same hooks as `hooks/hooks.json`, run with `--harness codex`,
+`hooks/codex-hooks.json` — the same hooks as `hooks/hooks.json`, run with the host `codex`
+through the starter (`commandWindows` runs `bootstrap\getty-bun.ps1` on Windows),
 plus the rules delivery; `CwdChanged` is not among them, Codex has no such event, nor is
 `PostToolUse`: a Codex shell `cd` moves no session. A Codex
 session moves only between turns (an app-server turn with a new `cwd`; `/cd` starts a new
@@ -1108,14 +1114,13 @@ is on disk at once but listed by Codex only from the next session.
   makes Codex mark the hook as modified; trust it again in `/hooks`. skilletor does not
   detect that case — the entry is still there.
 - **Codex does not add a plugin's `bin/` to `PATH`.** A separately installed `skilletor`
-  can still be available there; use that CLI when present, including a verified no-Node
-  starter installation. Otherwise the bundled skill locates the current plugin's launcher
+  can still be available there; use that CLI when present. Otherwise the bundled skill locates the current plugin's launcher
   by absolute path: `$CODEX_HOME/plugins/cache/<marketplace>/skilletor/<version>/bin/skilletor`
-  (it runs whichever engine is there, [Which engine runs](#which-engine-runs)). In your own shell,
+  (it runs the getty-bun starter beside it, [Which engine runs](#which-engine-runs)). In your own shell,
   [`install.sh`](#from-the-command-line) puts a `skilletor` on `PATH`;
   or put that file or a clone of this repository there yourself, by a symlink
   (`ln -s ~/src/skilletor/bin/skilletor ~/.local/bin/skilletor`) or an alias
-  (`alias skilletor=~/src/skilletor/bin/skilletor`) — `dist/` is committed, no `npm install`
+  (`alias skilletor=~/src/skilletor/bin/skilletor`) — `dist/` is committed, no `bun install`
   needed; the launcher follows its own symlinks to find it.
 - Codex sets no `CLAUDE_PROJECT_DIR`; the hook takes the git top level of the session's
   working directory as the project root, so a session started in a subdirectory still
@@ -1210,11 +1215,13 @@ and enables it (without `--enable` it asks, or — not on a terminal — leaves 
 `hermes plugins remove skilletor` takes it out. It is a custom source to Hermes, not a
 catalog entry, so Hermes says "custom (unreviewed) source"; its install-time scan passes it.
 
-**The plugin needs the CLI**, which it does not bring: `$SKILLETOR_BIN`, else `skilletor`
-on `PATH`; without one it does nothing. A checkout's `bin/skilletor` runs whichever engine is
-there ([Which engine runs](#which-engine-runs)).
-[`install.sh`](#from-the-command-line) can place a checkout launcher, a preflighted starter,
-or the Node-backed plugin command in `~/.local/bin`. Hermes reads `$HERMES_HOME/.env` into
+**The plugin needs the CLI**, which it does not bring: `$SKILLETOR_BIN`, else the getty-bun
+starter of a skilletor checkout it is linked into (`sh`, on Windows `powershell.exe -File`),
+else `skilletor` on `PATH`; without one it does nothing. Once per Hermes process its first
+hook starts the starter's `ensure` in the background (up to 600 seconds), so the first start can
+install Bun while each hook keeps its own short limit; until that is done, session starts and
+prompts deliver nothing, and after a failure the next session start tries again ([Which engine runs](#which-engine-runs)).
+[`install.sh`](#from-the-command-line) places a `skilletor` command in `~/.local/bin`. Hermes reads `$HERMES_HOME/.env` into
 its environment, so name the CLI there once:
 
 ```bash
@@ -1356,34 +1363,37 @@ sync lock at <dir>`; run it again.
 
 ## Develop
 
-The TypeScript engine in `src/` is the reference implementation. Its bundle,
-`dist/skilletor.js`, is committed, so a checkout runs without `npm install`, and every change
-to `src/` ships with a rebuilt bundle (CI diffs it). The design spec is
+The engine is TypeScript in `src/`, run on Bun. Its bundle, `dist/skilletor.js`, is committed,
+so a checkout runs without `bun install`, and every change to `src/` ships with a rebuilt
+bundle (CI rebuilds it with the pinned Bun and compares the bytes). The design spec is
 [docs/superpowers/specs/2026-09-22-skilletor-design.md](docs/superpowers/specs/2026-09-22-skilletor-design.md);
-the release steps are in [docs/release.md](docs/release.md).
+the release steps are in [docs/release.md](docs/release.md). The Perl port that once lived at
+the root (CPAN `Skilletor`, last release 0.009000, a set of stubs) is gone from the tree and
+stays in the history.
 
-The repository root is also the CPAN distribution `Skilletor` (`lib/`, `script/skilletor`,
-`t/`, `cpanfile`, `dist.ini`), which used to be skilletor in Perl. That port is retired: the
-last release, 0.009000, ships its modules as empty stubs whose documentation names the
-replacement, so an upgrade replaces the earlier library code. Its design notes stay in
-[docs/perl.md](docs/perl.md) and in the history.
-
-Build and test:
+Build and test, with the Bun version in `package.json` (`gettyBun.bunVersion`):
 
 ```bash
-npm ci
-npm run typecheck && npm test && npm run build && npm run check-dist
+bun install --frozen-lockfile
+bun run typecheck && bun run test && bun run build && bun run check-dist
+bun run check-starters    # bootstrap/ and skills/getty-bun-install/ against a fresh render
 ```
+
+`bootstrap/getty-bun.sh` and `.ps1` are never edited by hand: `.claude/skilletor.json` renders
+`getty-bun-install@agent-bun-runtime` into `skills/getty-bun-install/` (`"into": "plugin"`),
+and `bootstrap/` holds copies of its two starters. A Bun bump changes `vars.bun_version` there
+and `gettyBun.bunVersion` in `package.json`, then syncs, copies the starters and rebuilds
+`dist/` in one commit.
 
 A CLI run from a checkout acts on your real `~/.claude`, Codex home and Hermes home, and on the
 project of the current directory (its git top level: in a checkout, the checkout itself). For
-a hand test, set a temporary `HOME` and `CODEX_HOME`, unset `CLAUDE_CONFIG_DIR` and
+a hand test, set a temporary `HOME`, `CODEX_HOME` and `GETTY_HOME`, unset `CLAUDE_CONFIG_DIR` and
 `HERMES_HOME`, and run it from a temporary directory, or with `--project-dir` pointing at one.
 
 `conformance/` holds cases the engine must pass: configs and source trees, plus the expected
 resolution and, for sync cases, the files, lock, check and status they should produce.
 `test/conformance.test.ts` runs them, and
-`SKILLETOR_CONFORMANCE_UPDATE=1 npm test` regenerates them from TypeScript, to be reviewed by
+`SKILLETOR_CONFORMANCE_UPDATE=1 bun run test` regenerates them from TypeScript, to be reviewed by
 hand.
 
 ## License

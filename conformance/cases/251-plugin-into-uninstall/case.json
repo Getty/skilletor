@@ -1,0 +1,21 @@
+{
+  "description": "uninstall --project of a skill installed into the plugin (k286): the object entry leaves the project config and the sync deletes the plugin copy it owned; the plain entry and its harness copy stay; check is clean after it.",
+  "git": {
+    "shared": {
+      "url": "https://conformance.invalid/shared.git",
+      "commits": [
+        {
+          "tree": "sources/shared",
+          "executable": [
+            "skills/boot/bin/run.sh.njk"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    { "id": "sync", "op": "cli", "argv": ["sync"], "tree": true },
+    { "id": "uninstall", "op": "cli", "argv": ["uninstall", "boot@shared", "--project"], "tree": true },
+    { "id": "check", "op": "check" }
+  ]
+}

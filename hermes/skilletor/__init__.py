@@ -4,13 +4,13 @@ Nothing is decided here. The skilletor CLI checks, syncs and reports; this
 module runs the two hook commands the Claude Code and Codex hook files run and
 hands their answer to Hermes:
 
-  on_session_start  `skilletor hook session-start --harness hermes`. Hermes
+  on_session_start  `skilletor hook session-start hermes`. Hermes
                     ignores what this hook returns, so the answer is kept for
                     the session.
   pre_llm_call      the kept answer; in a session this process did not start
                     (a resumed one fires no on_session_start) session-start,
                     now; on every later turn `skilletor hook
-                    user-prompt-submit --harness hermes`, which first syncs a
+                    user-prompt-submit hermes`, which first syncs a
                     checkout the session moved into since its last turn – it
                     then holds the turn as a session start does – starts a
                     background sync when one is due and delivers the report
@@ -28,14 +28,21 @@ PROMPT_S, are below Hermes' own for a hook callback
 and skips it for a minute; a child that runs into ours is killed.
 
 The CLI is $SKILLETOR_BIN if set – then that or nothing; Hermes loads the
-Hermes home's .env into the environment, so it can be set there. Else
-bin/skilletor of the checkout this directory is a symlink into – it runs the
-starter, which picks the engine (the release binary, Node, Perl); on Windows
-bin/skilletor.exe, the launcher Claude Code starts there (bin/skilletor is a sh
-script), which runs node with dist/skilletor.js, so only beside that – else
-`skilletor` on PATH. A copy `hermes plugins install` made is no checkout's: it
-has the first and the last. The child runs with the session's Hermes home as
-HERMES_HOME, and skilletor takes the project from the `cwd` it is sent.
+Hermes home's .env into the environment, so it can be set there. Else the
+checkout this directory is a symlink into, through its getty-bun starter:
+`sh bootstrap/getty-bun.sh run dist/skilletor.js …`, on Windows
+`powershell.exe … -File bootstrap\\getty-bun.ps1 run dist/skilletor.js …` –
+else `skilletor` on PATH. A copy `hermes plugins install` made is no
+checkout's: it has the first and the last. The child runs with the session's
+Hermes home as HERMES_HOME, and skilletor takes the project from the `cwd` it
+is sent.
+
+The starter installs the pinned Bun on its first call, which can take minutes
+(a download, a lock another process holds). So before the first hook, through
+the checkout's starter, the adapter runs the starter's `ensure` once, in the
+background, with a limit of its own (ENSURE_S); a hook waits for it only
+within the hook's own limit and is skipped while it runs or after it failed.
+A failed `ensure` is tried again at the next session start.
 
 Importing this module and register() start nothing and read nothing.
 """
@@ -48,13 +55,15 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
 
 HARNESS = "hermes"
-SESSION_START_S = 20    # hooks/hooks.json gives the same command 30 s
+SESSION_START_S = 20    # hooks/hooks.json gives 600 s to cover a Bun install; here ENSURE_S does
 PROMPT_S = 25           # a move's sync writes nothing after 20 s (spec §8); the rest is local
+ENSURE_S = 600          # the starter's lock wait (300 s) plus one Bun download, as the hooks files
 REAP_S = 0.2            # a killed child gets this long to go
 MAX_SESSIONS = 256      # sessions remembered per registration (a gateway runs for days)
 SUBAGENT = "subagent"   # tools/delegate_tool.py: the platform of a delegated child
@@ -70,19 +79,97 @@ WINDOWS = os.name == "nt"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+POWERSHELL = ["powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"]
+ENTRY = "dist/skilletor.js"     # relative to the checkout, written with / (the starter's rule)
+
+
+def find_starter(environ, here, windows=WINDOWS):
+    """The getty-bun starter of the checkout this plugin is linked into, as the
+    command that runs it, or None: with $SKILLETOR_BIN set, without a checkout
+    around the plugin, or without the bundle beside the starter."""
+    if environ.get("SKILLETOR_BIN"):
+        return None
+    root = os.path.dirname(os.path.dirname(os.path.realpath(here)))
+    starter = os.path.join(root, "bootstrap", "getty-bun.ps1" if windows else "getty-bun.sh")
+    if not (os.path.isfile(starter) and os.path.isfile(os.path.join(root, *ENTRY.split("/")))):
+        return None
+    return POWERSHELL + [starter] if windows else ["sh", starter]
+
+
 def find_cli(environ, here, windows=WINDOWS):
-    """The skilletor CLI this plugin adapts, or None."""
+    """The command that runs the skilletor CLI this plugin adapts, as an
+    argument list, or None."""
     named = environ.get("SKILLETOR_BIN")
     if named:
-        return named if os.path.isfile(named) and os.access(named, os.X_OK) else None
-    root = os.path.dirname(os.path.dirname(os.path.realpath(here)))
-    shim = os.path.join(root, "bin", "skilletor.exe" if windows else "skilletor")
-    # bin/skilletor runs the starter, which picks the engine there itself (the release binary,
-    # Node, Perl). bin/skilletor.exe runs node with dist/skilletor.js only (k169).
-    if os.path.isfile(shim) and os.access(shim, os.X_OK) and (
-            not windows or os.path.isfile(os.path.join(root, "dist", "skilletor.js"))):
-        return shim
-    return shutil.which("skilletor", path=environ.get("PATH"))
+        return [named] if os.path.isfile(named) and os.access(named, os.X_OK) else None
+    starter = find_starter(environ, here, windows)
+    if starter is not None:
+        return starter + ["run", ENTRY]
+    found = shutil.which("skilletor", path=environ.get("PATH"))
+    return [found] if found else None
+
+
+def run_child(argv, data, limit, **popen):
+    """(exit code, stdout) of argv fed data, or None when it outlived limit: then
+    it and its process group are killed – the starter and Bun, not the detached
+    background sync (a session of its own). Not waited for beyond a moment:
+    Hermes has a limit too. Without process groups (Windows) the child alone."""
+    proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            start_new_session=True, creationflags=NO_WINDOW, **popen)
+    try:
+        out, _ = proc.communicate(data, timeout=limit)
+    except subprocess.TimeoutExpired:
+        try:
+            if not hasattr(os, "killpg"):
+                raise OSError
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            proc.kill()
+        try:
+            proc.wait(timeout=REAP_S)
+        except subprocess.TimeoutExpired:
+            pass
+        return None
+    finally:
+        for pipe in (proc.stdin, proc.stdout):
+            try:
+                pipe.close()
+            except OSError:
+                pass
+    return proc.returncode, out
+
+
+class Ensure:
+    """One run of the starter's `ensure`, in a thread of its own."""
+
+    def __init__(self, argv, env, limit):
+        self.ok = False
+        self._done = threading.Event()
+        self._thread = threading.Thread(target=self._run, args=(argv, env, limit), daemon=True)
+        self._thread.start()
+
+    def _run(self, argv, env, limit):
+        try:
+            # stderr to stdout: ensure prints nothing else, and its failure is one
+            # "getty-bun: " line worth a log entry.
+            got = run_child(argv, b"", limit, stderr=subprocess.STDOUT, env=env,
+                            cwd=os.path.abspath(os.sep))
+            self.ok = got is not None and got[0] == 0
+            if not self.ok:
+                said = got[1].decode("utf-8", "replace").strip() if got else "no answer in %s s" % limit
+                logger.warning("skilletor: %s ensure failed: %s", argv[-1], said)
+        except Exception as exc:  # noqa: BLE001 — a failed ensure only skips hooks
+            logger.warning("skilletor: ensure failed: %s", exc)
+        finally:
+            self._done.set()
+
+    def wait(self, limit):
+        """True once it finished, waiting at most limit seconds."""
+        return self._done.wait(max(limit, 0))
+
+    @property
+    def failed(self):
+        return self._done.is_set() and not self.ok
 
 
 def hermes_home(environ):
@@ -129,16 +216,18 @@ class Adapter:
     """One registration: where the plugin lives, and which sessions it has seen."""
 
     def __init__(self, here, environ=None, home=hermes_home, cwd=session_cwd,
-                 session_start_s=SESSION_START_S, prompt_s=PROMPT_S):
+                 session_start_s=SESSION_START_S, prompt_s=PROMPT_S, ensure_s=ENSURE_S):
         self.here = here
         self.environ = os.environ if environ is None else environ
         self.home = home
         self.cwd = cwd
         self.session_start_s = session_start_s
         self.prompt_s = prompt_s
+        self.ensure_s = ensure_s
         self._lock = threading.Lock()
         self._sessions = OrderedDict()   # session id -> FRESH | SEEN
         self._kept = {}                  # session id -> the session-start message
+        self._ensure = None              # the starter's `ensure`, once started
 
     # --- the CLI ------------------------------------------------------------
 
@@ -152,45 +241,42 @@ class Adapter:
                 env.pop(name, None)
         return env
 
-    def hook(self, event, payload, limit):
-        """The answer of `skilletor hook <event>` to payload, or None: no CLI,
-        silence (nothing to say), no answer within limit, a non-zero exit,
-        anything that is not a JSON object."""
+    def ready(self, limit, again):
+        """True when the CLI can run within limit seconds: always for one that is
+        not the checkout's starter; else once the starter's `ensure` has
+        succeeded. The first call starts it; again (a session start) starts it
+        anew after a failure. Waits for it at most limit seconds."""
+        starter = find_starter(self.environ, self.here)
+        if starter is None:
+            return True
+        with self._lock:
+            job = self._ensure
+            if job is None or (again and job.failed):
+                job = self._ensure = Ensure(starter + ["ensure"], self.child_env(hook=True), self.ensure_s)
+        return job.wait(limit) and job.ok
+
+    def hook(self, event, payload, limit, again=False):
+        """The answer of `skilletor hook <event> hermes` to payload, or None: no
+        CLI, its Bun not installed in time, silence (nothing to say), no answer
+        within limit, a non-zero exit, anything that is not a JSON object."""
         cli = find_cli(self.environ, self.here)
         if cli is None:
             return None
-        cwd = payload.get("cwd")
-        proc = subprocess.Popen(
-            [cli, "hook", event, "--harness", HARNESS],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            env=self.child_env(hook=True),
-            cwd=cwd if cwd and os.path.isdir(cwd) else os.path.abspath(os.sep),
-            start_new_session=True, creationflags=NO_WINDOW)
-        try:
-            out, _ = proc.communicate(json.dumps(payload).encode("utf-8"), timeout=limit)
-        except subprocess.TimeoutExpired:
-            # The shim and its engine, not the detached background sync or the
-            # starter's background binary provision (each a session of its own). Not
-            # waited for beyond a moment: Hermes has a limit too. Without process
-            # groups (Windows) the launcher alone; its node finds the pipes closed.
-            try:
-                if not hasattr(os, "killpg"):
-                    raise OSError
-                os.killpg(proc.pid, signal.SIGKILL)
-            except OSError:
-                proc.kill()
-            try:
-                proc.wait(timeout=REAP_S)
-            except subprocess.TimeoutExpired:
-                pass
+        deadline = time.monotonic() + limit
+        if not self.ready(limit, again):
             return None
-        finally:
-            for pipe in (proc.stdin, proc.stdout):
-                try:
-                    pipe.close()
-                except OSError:
-                    pass
-        if proc.returncode != 0 or not out.strip():
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return None
+        cwd = payload.get("cwd")
+        got = run_child(
+            cli + ["hook", event, HARNESS], json.dumps(payload).encode("utf-8"), left,
+            stderr=subprocess.DEVNULL, env=self.child_env(hook=True),
+            cwd=cwd if cwd and os.path.isdir(cwd) else os.path.abspath(os.sep))
+        if got is None:
+            return None
+        code, out = got
+        if code != 0 or not out.strip():
             return None
         try:
             answer = json.loads(out.decode("utf-8"))
@@ -217,7 +303,7 @@ class Adapter:
                 self._kept.pop(gone, None)
         text = message_of(self.hook(
             "session-start", self.payload("SessionStart", session_id, source=source),
-            self.session_start_s))
+            self.session_start_s, again=True))
         if text:
             with self._lock:
                 if session_id in self._sessions:
@@ -265,7 +351,7 @@ class Adapter:
                   "Hermes home's .env; link this plugin to a skilletor checkout; or put "
                   "skilletor on PATH)", file=sys.stderr)
             raise SystemExit(1)
-        raise SystemExit(subprocess.call([cli] + list(args.args), env=self.child_env()))
+        raise SystemExit(subprocess.call(cli + list(args.args), env=self.child_env()))
 
 
 def setup_command(parser):

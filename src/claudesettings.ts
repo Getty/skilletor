@@ -7,7 +7,7 @@
 // is never written into a committed file. Never throws: what it cannot do is a warning.
 import { lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { samePath } from "./fsutil.ts";
+import { parseJson, samePath } from "./fsutil.ts";
 
 /** Claude Code's built-in marketplace: known everywhere, never declared. */
 export const OFFICIAL_MARKETPLACE = "claude-plugins-official";
@@ -155,7 +155,7 @@ export function planClaudeSettings(a: PlanInput): SettingsPlan {
   if (text !== undefined) {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(text);
+      parsed = parseJson(text);
     } catch (err) {
       return leave(`is not valid JSON (${(err as Error).message})`);
     }

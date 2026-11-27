@@ -1,0 +1,10 @@
+{
+  "vars": {
+    "bun_version": "1.4.5"
+  },
+  "install": {
+    "skills": [
+      "helper@shared"
+    ]
+  }
+}
