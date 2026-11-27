@@ -1,0 +1,18 @@
+---
+block_reason: '@getty/agent-bun-runtime 0.1.0 not published on npm (404, 2026-11-27)'
+blocked: true
+class: standard
+created: 2026-11-27T06:06:51Z
+id: 280
+priority: medium
+status: todo
+tags:
+- getty-bun
+- hooks
+title: Hook entry on the agent-bun-runtime SDK codecs
+updated: 2026-11-27T06:09:02Z
+---
+
+Hook entry on the SDK codecs (@getty/agent-bun-runtime): claude-code and codex via main() and effects, host positional (F4: hook session-start codex), Hermes positional over skilletor's own JSON I/O; document the SDK's exit 1 on empty/broken stdin; 1 MiB input limit vs large PostToolUse payloads.
+Blocked: the SDK 0.1.0 is not published on npm (2026-11-27). Until then K7 makes the host positional on the existing hand-written hook I/O.
+Branch getty-bun, hub task agent-developer k5.
