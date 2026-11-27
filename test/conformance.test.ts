@@ -1,6 +1,6 @@
 // The TypeScript runner of the shared conformance cases (k143): `conformance/README.md` is the
 // format. TS is the reference, so
-// `SKILLETOR_CONFORMANCE_UPDATE=1 npm test` rewrites every expectation from this engine – review
+// `SKILLETOR_CONFORMANCE_UPDATE=1 bun run test` rewrites every expectation from this engine – review
 // the diff by hand against the spec before keeping it: an expectation that only mirrors the code
 // proves nothing.
 //

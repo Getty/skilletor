@@ -61,7 +61,7 @@ from collections import OrderedDict
 logger = logging.getLogger(__name__)
 
 HARNESS = "hermes"
-SESSION_START_S = 20    # hooks/hooks.json gives the same command 30 s
+SESSION_START_S = 20    # hooks/hooks.json gives 600 s to cover a Bun install; here ENSURE_S does
 PROMPT_S = 25           # a move's sync writes nothing after 20 s (spec §8); the rest is local
 ENSURE_S = 600          # the starter's lock wait (300 s) plus one Bun download, as the hooks files
 REAP_S = 0.2            # a killed child gets this long to go

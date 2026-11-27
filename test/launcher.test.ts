@@ -1,5 +1,5 @@
 // The sh launcher bin/skilletor and the plugin's hook lines on the getty-bun starter (k281).
-// bin/skilletor, reached through a symlink – one on PATH, npm link, npm install -g – still finds
+// bin/skilletor, reached through a symlink – one on PATH, a global package install – still finds
 // the checkout it belongs to (k139), and runs dist/skilletor.js there through
 // bootstrap/getty-bun.sh with every argument, options included (F4). The hook lines of
 // hooks/hooks.json and hooks/codex-hooks.json, run as each host spells them, reach the entry as

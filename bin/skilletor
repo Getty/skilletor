@@ -4,7 +4,7 @@
 # installs the pinned Bun on first use; options pass through unchanged (k281). The plugin's
 # hooks call the starter themselves (hooks/hooks.json, hooks/codex-hooks.json).
 
-# Follow our own symlink chain (a link on PATH, npm link, npm install -g) to the real file: the
+# Follow our own symlink chain (a link on PATH, a global package install) to the real file: the
 # starter sits in the checkout, not beside the link. No `readlink -f` (macOS sh has none); a
 # relative target is relative to the directory of the link naming it.
 self=$0

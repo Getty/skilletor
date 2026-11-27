@@ -3,7 +3,7 @@
 // steer the git skilletor runs: not in a source's cache, not `ls-remote`, not a question about
 // the project. Real git, local repos, temp dirs. process.env is set only around the call under
 // test and restored in `finally`; fixtures run git with the environment this file started with.
-// k93: `npm test` itself drops those variables before any test file runs (test/setup.ts).
+// k93: `bun run test` itself drops those variables before any test file runs (test/setup.ts).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -294,7 +294,7 @@ test("k91: with GIT_DIR exported, project.git_remote is the project's origin", a
   assert.match(readFileSync(skill, "utf8"), /^remote=https:\/\/example\.com\/proj\.git$/m);
 });
 
-// k93: `npm test` run from a git hook inherits the hook's GIT_DIR, and a fixture's `git init`,
+// k93: `bun run test` run from a git hook inherits the hook's GIT_DIR, and a fixture's `git init`,
 // `add` and `commit` in its temp dir acted on the repository GIT_DIR names – the developer's
 // checkout. Asserts, running a one-test file that builds such a fixture with the flags of
 // package.json's test script and GIT_DIR naming the victim: the victim's remotes, HEAD, index,
