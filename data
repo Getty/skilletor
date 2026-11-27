@@ -1,0 +1,20 @@
+---
+class: standard
+completed: 2026-11-27T06:08:43Z
+created: 2026-11-18T18:42:26Z
+id: 256
+priority: low
+started: 2026-11-27T06:08:43Z
+status: done
+tags:
+- perl
+- windows
+- state
+- parity
+title: 'Windows: Perl spells lock-path state keys with / where Node uses \'
+updated: 2026-11-27T06:08:43Z
+---
+
+Found on k254 (2026-11-18), from code reading, not yet seen on a Windows run: the Perl port's path_join/path_resolve are POSIX-only, so on Windows it keys sources-read.json (and the other per-lock state files) with '/' where Node keys with '\'. The two engines would then keep separate records of one scope, so after switching engine the first check compares with the lock again (k80 fallback, safe but one extra sync). The k254 prune treats both spellings the same (File::Basename::dirname and win32 dirname take either separator). Done: confirmed or refuted on the native Windows CI leg; if confirmed, both engines write one spelling, with a parity test. Related: k209.
+
+superseded by hub decision 2026-11-25 (no Perl runtime); removal in k275 on branch getty-bun
