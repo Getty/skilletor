@@ -61,6 +61,9 @@ quiet_stdin() { "$@" </dev/null; }
 # `/plugins/skilletor@getty/0/scope<TAB>user`. Of a string's escapes it decodes \" \\ and \/;
 # the others stay as written. Exit 2 when stdin is no JSON document, or, with root '[', no
 # array. write_shim copies the program into the shim, so it holds no single quote.
+# The program is single-quoted on purpose: its $0 and backslash escapes are awk's, and the
+# shell must hand them to awk unexpanded.
+# shellcheck disable=SC2016 # awk program, not a shell expression; see above
 JSON_FLAT_AWK='
   function fail() { bad = 1; exit 2 }
   function ws() { while (pos <= n && index(" \t\r\n", substr(s, pos, 1)) > 0) pos++ }
@@ -217,7 +220,8 @@ candidates=$( { awk "$json_flat_awk" 2>/dev/null <"$plugins" || :; } | awk -v wa
     if (field == "installPath") path[entry] = substr($0, tab + 1)
   }
   END {
-    for (e in path) if (scope[e] == "user") printf "%d\t%s\t%s\n", owner[e] != want, e, path[e]
+    # The comparison in parentheses: POSIX awk takes none bare in a print list (BWK awk refuses it).
+    for (e in path) if (scope[e] == "user") printf "%d\t%s\t%s\n", (owner[e] != want), e, path[e]
   }
 ' | LC_ALL=C sort)
 tab=$(printf '\t')

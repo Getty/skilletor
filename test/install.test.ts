@@ -27,7 +27,8 @@ const SYSTEM_PATH = ["/usr/bin", "/bin"];
 const BARE_TOOLS = ["sh", "awk", "git", "uname", "mkdir", "mv", "rm", "chmod", "cmp", "ln", "readlink", "dirname", "grep", "sort", "cat"];
 
 let tmp: TmpDir;
-/** git, linked alone: its own directory may hold a real `claude`. */
+/** git and awk, linked alone: git's own directory may hold a real `claude`. awk is the one first
+ *  on the suite's PATH, so a run with another awk first there tests install.sh under it. */
 let tools: string;
 /** Only BARE_TOOLS, for the run that proves no Node and no Bun are needed. */
 let bareTools: string | undefined;
@@ -73,6 +74,7 @@ before(() => {
   tools = join(tmp.dir, "tools");
   mkdirSync(tools);
   symlinkSync(findOnPath("git"), join(tools, "git"));
+  symlinkSync(findOnPath("awk"), join(tools, "awk"));
   if (!bareSkip) {
     bareTools = join(tmp.dir, "bare-tools");
     mkdirSync(bareTools);
