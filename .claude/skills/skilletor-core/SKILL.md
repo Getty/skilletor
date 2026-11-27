@@ -153,8 +153,9 @@ bun run build && bun run check-dist   # dist/skilletor.js is committed; check-di
   portable). Path comparisons go through `realpathSync` (macOS `/var` →
   `/private/var`). Several tests create symlinks. CI: SimpiCI runs `.cicd/` (suite,
   `check-starters`; image `oven/bun:<pin>`) on every push; `ci.yml` (pushed from the
-  maintainer's side): Ubuntu required, macOS and Windows advisory until getty-bun supports
-  them. A spawned CLI's env comes from `homeEnv()` (`test/helpers/harness.ts`): on Windows the home is
+  maintainer's side): Ubuntu and Windows required (Windows runs the Codex hook lines and the
+  Hermes adapter through `getty-bun.ps1` in `test/windows-starter.test.ts`; Claude Code's
+  hook lines and the sh tests skip), macOS advisory until a darwin target exists. A spawned CLI's env comes from `homeEnv()` (`test/helpers/harness.ts`): on Windows the home is
   `USERPROFILE`, and `LOCALAPPDATA` holds Hermes' default home — `HOME` alone leaks.
 - **A CLI run from the checkout acts on the real `~/.claude/`, `~/.agents/`, Codex
   home, `~/.getty` and this repo's real `.claude/skilletor.json`.** Before a hand test, a hook

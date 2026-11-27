@@ -269,9 +269,10 @@ What is released, what is switched on, and what is tested where:
   version: typecheck, the tests, a rebuild of `dist/skilletor.js` compared byte for byte with
   the committed one, and `check-starters`, which renders `getty-bun-install` afresh and
   compares it with `skills/getty-bun-install/` and with the copies in `bootstrap/`. `ci.yml`
-  runs the same gates on Ubuntu; its macOS and Windows legs are advisory and expected red until
-  getty-bun supports those platforms. On Windows the tests of the sh scripts (`install.sh`,
-  `bin/skilletor`) skip themselves, as do those of the Hermes adapter. The Hermes support is
+  runs the same gates on Ubuntu and Windows, both required; its macOS leg is advisory and
+  expected red until getty-bun has a darwin target. On Windows the tests of the sh scripts
+  (`install.sh`, `bin/skilletor`, Claude Code's hook lines) skip themselves, and the Codex hook
+  lines and the Hermes adapter run through `getty-bun.ps1` against an installed Bun. The Hermes support is
   tested against a real Hermes Agent on Linux only, on a machine that has one
   (`test/hermes-real.test.ts`, skipped in CI). Live Claude Code, Codex and Hermes sessions are
   not part of CI.
