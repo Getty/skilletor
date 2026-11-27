@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-27T15:03:05Z
+id: 288
+priority: low
+status: backlog
+tags:
+- hermes
+- getty-bun
+title: Hermes adapter logs 'ensure ensure failed
+updated: 2026-11-27T15:03:05Z
+---
+
+hermes/skilletor/__init__.py around line 160 builds the failure log from argv[-1], which is 'ensure', so the line reads 'skilletor: ensure ensure failed: ...'. Found by the skill author on branch getty-bun (hub task agent-developer k5); docs match either way. Fix the wording and pin it in test/hermes-plugin.test.ts.
