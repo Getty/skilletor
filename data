@@ -1,0 +1,18 @@
+---
+class: standard
+created: 2026-11-27T06:06:28Z
+id: 274
+priority: medium
+status: backlog
+tags:
+- getty-bun
+- starter
+title: Hooks are silent on a Node-less host with Perl >= 5.40
+updated: 2026-11-27T07:13:56Z
+---
+
+Today the shipped hook chain (bin/skilletor -> bin/skilletor-start) on a host without Node but with Perl >= 5.40 ends in the retired Perl stub: exit 0, empty stdout, farewell text on stderr. The hooks silently do nothing (measured in hub task agent-developer k5, part A).
+
+Backlog only: on branch getty-bun, K1 (Perl removal) and K7 (getty-bun starters, bin/skilletor-start removed) settle this. Only needed on main if that branch is delayed: then drop find_perl from the starter.
+
+Settled on branch getty-bun: Perl removed in b27c438 (k275), bin/skilletor-start removed in e5f5d20 (k281).
