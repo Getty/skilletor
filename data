@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-11-27T06:56:40Z
+claimed_by: skilletor-worker-k286
+class: standard
+completed: 2026-11-27T06:56:40Z
+created: 2026-11-27T06:07:13Z
+id: 286
+priority: high
+started: 2026-11-27T06:56:40Z
+status: done
+tags:
+- getty-bun
+- feature
+title: 'Install target: the plugin repo''s own shipped skills/'
+updated: 2026-11-27T15:03:01Z
+---
+
+Hub decision F3 (Getty, 2026-11-27): an install in skilletor.json may name the shipped skills/ of the plugin repo itself as its destination. The rendered item is committed, owned by the lock, and CI checks it with cmp. New skilletor feature.
+Here: getty-bun-install@agent-bun-runtime renders into skills/getty-bun-install/; the starters reach bootstrap/ (plugin root = parent of bootstrap/, contract) by copy, CI cmp's bootstrap/ against the committed render and the render against a fresh sync.
+Conformance cases and docs with the feature. Branch getty-bun, hub task agent-developer k5.
+
+2026-11-27 06:46 Started (skilletor-worker). Plan: object install entry {"skill": "name@source", "into": "plugin"} under install.skills, project scope only; destination from .claude-plugin/plugin.json skills (default skills/); lock key prefix plugin:skills/<name> rooted at the parent of the plugin skills dir; rendered once, no per-skill .gitignore, independent of targets.
+
+2026-11-27 06:51 Implemented: config.ts object entry + pluginItemsRoot(); targets.ts plugin: key prefix, RootContext.pluginRoot; engine buildPluginItem, declared drift, status rows, no tracked-file warning for plugin keys; report activation 'a file of the plugin: commit it'. Tests: test/plugin-into.test.ts (8). Conformance cases 250-255 added (generated with UPDATE for those only, reviewed). Next: switch the repo's own entry and run the real sync.
+
+2026-11-27 06:54 Done, ready for review. Added beyond the brief: apply adoptIdentical for plugin items. The lock is git-ignored (.claude/.gitignore managed block), so without it a fresh clone would see the committed skills/<name>/ as foreign files and report a conflict every session. Files that are byte- and mode-identical to the render are now adopted; differing ones still conflict. Conformance 250-256 added, existing cases unchanged. Repo .claude/skilletor.json switched; real sync on Bun rendered skills/getty-bun-install/ (SKILL.md + bootstrap/getty-bun.sh/.ps1, cmp-identical to agent-bun-runtime v0.1.0 bootstrap/), lock key plugin:skills/getty-bun-install, stale .claude/skills/getty-bun-install removed. Gate: frozen install 0, typecheck 0, build 0, check-dist 0, bun test 1362 pass / 25 skip / 0 fail. Open: README/SKILL.md/spec parity for the object entry; CI cmp step (.github); 24 pre-existing unowned conflicts in the repo's .claude (getty/karr items not in the local lock).
+
+Committed 9a1eddf (pushed). Reviewer: typecheck 0, check-dist 0, bun test 1362/25 skip/0 fail; fresh copy without lock syncs with no diff in skills/. Starter copy to bootstrap/ stays a copy (contract: plugin root = parent of bootstrap/), CI cmp's bootstrap/ against skills/getty-bun-install/bootstrap/ (k281/k282).
+
+Follow-up N6: an adopted file is reported as adopted (text line, sync --json field), conformance 256 updated, spec 6.3 names the exception: 330502c.
