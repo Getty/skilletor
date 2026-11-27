@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-11-27T06:34:11Z
+claimed_by: skilletor-worker-k277
+class: standard
+completed: 2026-11-27T06:34:11Z
+created: 2026-11-27T06:06:40Z
+id: 277
+priority: high
+started: 2026-11-27T06:34:11Z
+status: done
+tags:
+- getty-bun
+- test
+title: Run the test suite on bun test
+updated: 2026-11-27T06:34:11Z
+---
+
+Run the suite on bun test (Bun 1.4.5): replace the npm test script, isolate per file, rework the 12 tests that rely on syncBuiltinESMExports to seams, fix the fetch-mock leak (k145 tests), the nested --test fixture, launcher and install.sh tests without node. Goal: 0 fail, every skip justified.
+Part A baseline: per-file 1236 pass / 123 fail / 14 skip.
+Branch getty-bun, hub task agent-developer k5.
+
+2026-11-27 06:20 Plan: test script = bun test --parallel (Bun 1.4.5: implies --isolate, fresh global + module registry per file; baseline with it = 1229/123/14, same failure set as part A's per-file run, k145 fetch leak gone). syncBuiltinESMExports tests: the faulted calls in src go through the builtin's module object (fs.renameSync, os.userInfo, ...), which both runtimes honour; named-import patching does not work on Bun. Launcher/install tests that need node skip naming k281.
+
+2026-11-27 06:32 Done, not committed. test script: bun test --preload ./test/setup.ts --parallel --timeout=60000 ./test/ (parallel implies --isolate; 60 s timeout because the slowest test takes ~4 s under load, Bun's default is 5 s). Seams: url.ts renameSync/rmSync, state.ts readFileSync, engine.ts os.userInfo, cli.ts os.homedir called through the module object; syncBuiltinESMExports gone from test/. k93 runs the nested fixture through 'bun test'. 11 launcher/install-shim tests skip naming k281. Full suite with k278: 1345 pass / 25 skip / 0 fail, 3 runs. Open for the main agent: CI workflow still runs node; skilletor-core's Verify section and the erasable-TS hazard (bun test no longer rejects enum etc.) need text updates.
+
+Committed 3d00bb8 on getty-bun (pushed). Reviewer run: typecheck 0, check-dist 0, bun test 1345 pass / 25 skip / 0 fail. Commit body misattributes some files (engine.ts vs hooks.ts for the background spawn; parseJson callers are catalog, claudesettings, config, lock).
