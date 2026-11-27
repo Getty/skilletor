@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-11-27T15:02:49Z
+claimed_by: skilletor-worker-k275
+class: standard
+completed: 2026-11-27T15:02:49Z
+created: 2026-11-27T06:06:32Z
+id: 275
+priority: high
+started: 2026-11-27T15:02:49Z
+status: done
+tags:
+- getty-bun
+- perl
+title: Remove the retired Perl port
+updated: 2026-11-27T15:02:49Z
+---
+
+Hub decision F1 (Getty, 2026-11-27): all Perl leaves the repo. Git history and CPAN 0.009000 stay.
+
+Remove: lib/, script/, t/, cpanfile, dist.ini, maint/, scripts/binary-*, scripts/*.pl, docs/perl.md, test/perl-ci-contract.test.ts, the Perl branch of bin/skilletor-start, conformance/README.md's t/60 references; .github/workflows/perl.yml in a separate commit at the end of the branch (hub pushes workflow commits).
+Text: CLAUDE.md and .claude/rules/skilletor-rules.md (Perl port, dzil, version tie), perl-par-binary-release dropped from .claude/skilletor.json (skill-author).
+Strand cards k166 k191 k247 k201 k207 k209 k215 k217 k223 k224 k256 k270 go to done: "superseded by hub decision 2026-11-25 (no Perl runtime)". k169 is superseded by F2.
+Branch getty-bun, hub task agent-developer k5.
+
+Code and text committed b27c438 on getty-bun (pushed). Left: .github/workflows/perl.yml removal in a workflow commit at the branch end (hub pushes).
+
+perl.yml removal: local commit 97c27a1 at the branch end, pushed by the hub.
+
+perl.yml removal 97c27a1 pushed by the hub.
