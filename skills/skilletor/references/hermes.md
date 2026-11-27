@@ -21,11 +21,13 @@ Hermes is never machine-detected; all three steps are needed:
 Check: `hermes skilletor status` (any CLI command after `hermes skilletor`) runs the CLI
 with that Hermes' home as `HERMES_HOME`.
 
-**First start.** Through a clone's starter the plugin runs the starter's `ensure` once, in
-the background (up to 600 s), before its first hook; hooks (20 s session start, 25 s per
-turn) are skipped while it runs or after it failed, so skills sync from the turn after Bun is
-installed. A failed `ensure` is logged as `skilletor: … ensure failed: getty-bun: …` and
-retried at the next session start. Through `SKILLETOR_BIN` or `PATH` there is no `ensure`:
+**First start.** Through a clone's starter the plugin runs the starter's `ensure` once per
+Hermes process, not per session: the first hook starts it in the background (limit 600 s). A
+hook waits for it only within its own limit (20 s session start, 25 s per turn) and is
+skipped while it still runs or after it failed — until `ensure` is done, session starts and
+prompts deliver nothing; skills sync from the first hook after Bun is installed. A failed
+`ensure` is logged as `skilletor: … ensure failed: getty-bun: …` and started again at the
+next session start. Through `SKILLETOR_BIN` or `PATH` there is no `ensure`:
 a hook cannot finish a Bun download within 20 s, so run `skilletor --version` once by hand
 (`install.sh` does).
 

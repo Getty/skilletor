@@ -62,9 +62,12 @@ claudesettings.ts  plan the project settings.json plugin requirement (§6.8); en
 - **The lock is the ownership boundary.** One lock per scope, always
   `<scope>/.claude/skilletor.lock.json`, for every harness. Claude keys stay
   unprefixed (`skills/foo`); the others carry their harness (`codex:skills/foo`,
-  `hermes:…`), paths relative to that key's root. Only paths in the lock are ever
+  `hermes:…`; an `"into": "plugin"` entry `plugin:skills/foo`), paths relative to that key's root. Only paths in the lock are ever
   overwritten or deleted; entries with an unknown prefix are kept untouched. A path on disk that is not in the lock
-  is a conflict (reported, untouched; `--force` adopts it). A managed file that
+  is a conflict (reported, untouched; `--force` overwrites it with the render and adopts it) —
+  except `adoptIdentical` (`plugin:` entries, project scope): an unlocked file at an exact output path whose bytes
+  (POSIX: and executable bit) equal the render is adopted without `--force`, reported `adopted`;
+  a link stays a conflict, and a later `uninstall` deletes those committed files. A managed file that
   diverged from its lock hash is overwritten and named in the report.
 - **Codex rules: the rules file is owned, `AGENTS.md` is shared.** Rules are
   `block: true` lock entries keyed on `skilletor-rules.md`; `apply` never touches disk

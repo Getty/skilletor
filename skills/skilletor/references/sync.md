@@ -117,11 +117,14 @@ files; they need no skilletor for it.
   `plugin:skills/<name>`.
 - One copy whatever the `targets`, no harness copy beside it: no `.local.` names, no skill
   `.gitignore`, the executable bit kept; a template sees `harness` = `"claude"`.
-- Commit it — the report says `+ plugin:skills/<name> (a file of the plugin: commit it)`. A
-  fresh checkout has the files but not the lock: files identical to the render are adopted,
-  so no conflict. Hand edits are overwritten at the next sync like any managed file; edit the
-  source.
-- `skilletor uninstall <name>@<source> --project` drops the entry and deletes the copy; a
+- Commit it — the report says `+ plugin:skills/<name> (a file of the plugin: commit it)`. The
+  lock is not committed, so a fresh checkout has the files without it. There a committed file
+  identical to the render (bytes, and on POSIX the executable bit) is adopted into the lock
+  and reported `adopted`, no conflict. A committed file that differs — hand-edited, or the
+  source moved on — is a conflict (`already exists (use --force to adopt)`) that blocks the
+  item; `sync --force` overwrites it with the render. Once in the lock, a hand edit is
+  overwritten at the next sync like any managed file. Edit the source, not the copy.
+- `skilletor uninstall <name>@<source> --project` drops the entry and deletes the copy (an adopted one too); a
   copy no entry declares any more is deleted at sync, a hand-written skill beside it stays.
 - Config error, nothing changes: no `.claude-plugin/plugin.json` in the project; the entry in
   the user config (`"into": "plugin" is project scope only`); under `install.agents` or
