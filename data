@@ -1,0 +1,21 @@
+---
+class: standard
+completed: 2026-11-27T06:07:57Z
+created: 2026-11-14T00:42:50Z
+depends_on:
+- 186
+id: 207
+priority: low
+started: 2026-11-27T06:07:57Z
+status: done
+tags:
+- perl
+- windows
+- bug
+title: 'Perl on Windows: a dead lock owner is only broken after the stale age'
+updated: 2026-11-27T06:07:57Z
+---
+
+From k186. Skilletor::State::_dead_owner decides a lock owner is gone when kill 0 fails with ESRCH; on Windows perl returns EINVAL for a pid that no longer exists, so a lock a crashed run left is broken only after stale_ms (300 s) instead of at once. Treat EINVAL as gone on MSWin32 (check what node does in the reference: process.kill(pid, 0) throws ESRCH there), with a test through the injected win32 seam.
+
+superseded by hub decision 2026-11-25 (no Perl runtime); removal in k275 on branch getty-bun
