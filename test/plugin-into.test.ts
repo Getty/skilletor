@@ -95,7 +95,8 @@ test("k286: the destination comes from the plugin manifest; without one the conf
     e.skill("boot", { "SKILL.md": "---\ndescription: boot\n---\nB\n" });
     e.cfg("project", { install: { skills: [INTO("boot@s")] } });
     const r = await sync(e.ctx);
-    assert.match(r.error ?? "", /\.claude-plugin\/plugin\.json: not found; an install with "into": "plugin" needs the project's plugin manifest/);
+    // The manifest's full path, as every config error names its file (separator of the OS).
+    assert.equal(r.error, `${join(e.projectDir, ".claude-plugin", "plugin.json")}: not found; an install with "into": "plugin" needs the project's plugin manifest`);
     assert.equal(existsSync(join(e.projectDir, "skills")), false);
     assert.equal(existsSync(join(e.projectDir, ".claude", "skilletor.lock.json")), false);
     assert.match((await check(e.ctx)).error ?? "", /plugin\.json: not found/);
@@ -141,7 +142,9 @@ test("k286: sync renders the skill into the plugin skills dir once, whatever the
     assert.deepEqual(proj.warnings, ["project targets (codex) are not in use on this machine (claude); nothing is installed for the project"]);
     const dir = join(e.projectDir, "skills", "boot");
     assert.equal(readFileSync(join(dir, "bin", "run.sh"), "utf8"), "#!/bin/sh\necho 1.4.5 claude\n");
-    assert.equal((statSync(join(dir, "bin", "run.sh")).mode & 0o100) !== 0, true, "the template's executable bit");
+    if (process.platform !== "win32") {
+      assert.equal((statSync(join(dir, "bin", "run.sh")).mode & 0o100) !== 0, true, "the template's executable bit");
+    }
     assert.equal(existsSync(join(dir, ".gitignore")), false, "a repository file: no skill .gitignore");
     assert.equal(existsSync(join(e.projectDir, ".claude", "skills")), false, "no harness copy");
     const lock = readLock(join(e.projectDir, ".claude", "skilletor.lock.json"));
@@ -273,11 +276,16 @@ test("k286: a fresh checkout holds the committed copy without a lock: files exac
     const c = (await sync(e.ctx)).scopes.find((s) => s.scope === "project")!;
     assert.deepEqual(c.conflicts.map((x) => x.path), ["skills/boot/notes.md"]);
     assert.equal("plugin:skills/boot" in readLock(lockPath), false, "a conflict blocks the whole item");
-    // The executable bit counts too: a committed copy without it is no copy of the render.
+    // The executable bit counts too: a committed copy without it is no copy of the render. On
+    // Windows no file carries the bit, so equal bytes are adopted there.
     chmodSync(join(e.src, "skills", "boot", "notes.md"), 0o755);
     writeFileSync(join(e.projectDir, "skills", "boot", "notes.md"), "N\n");
     const x = (await sync(e.ctx)).scopes.find((s) => s.scope === "project")!;
-    assert.deepEqual(x.conflicts.map((y) => y.path), ["skills/boot/notes.md"]);
+    if (process.platform === "win32") {
+      assert.deepEqual([x.conflicts, x.unchanged.map((i) => i.key)], [[], ["plugin:skills/boot"]]);
+    } else {
+      assert.deepEqual(x.conflicts.map((y) => y.path), ["skills/boot/notes.md"]);
+    }
   } finally {
     e.cleanup();
   }

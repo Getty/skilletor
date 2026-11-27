@@ -40,6 +40,13 @@ export function isExecutable(mode: number): boolean {
   return (mode & 0o100) !== 0;
 }
 
+/** Does a file on disk with `mode` carry the executable bit `executable` as skilletor wants
+ *  it? On Windows a file has no executable bit – its mode never shows one, a chmod does not
+ *  set it – so there any mode matches and bytes alone decide. */
+export function executableMatches(mode: number, executable: boolean, platform: NodeJS.Platform = process.platform): boolean {
+  return platform === "win32" || isExecutable(mode) === executable;
+}
+
 /** Write atomically: temp file in the same directory, then rename. An `executable` file is
  *  created with mode 0777 instead of 0666, both less the umask. */
 export function atomicWrite(path: string, data: string | Buffer, executable = false): void {

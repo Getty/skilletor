@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { buildTo } from "../scripts/bundle.mjs";
 import { claudeOnlyEnv, homeEnv } from "./helpers/harness.ts";
 import { makeTmpDir, type TmpDir } from "./helpers/tmp.ts";
@@ -964,7 +963,7 @@ test("k164: a hook whose setup throws exits 0 with one warning line", () => {
     'os.homedir = () => { throw new Error("no home directory (test fault)"); };', // src/cli.ts calls os.homedir()
   ].join("\n"));
   for (const event of ["session-start", "user-prompt-submit"]) {
-    const r = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, bundle, "hook", event], {
+    const r = spawnSync(process.execPath, ["--preload", preload, bundle, "hook", event], {
       encoding: "utf8", env: process.env, input: "{}", cwd: noProject,
     });
     assert.deepEqual([r.status, r.stderr], [0, ""], `${event}: ${r.stderr}`);

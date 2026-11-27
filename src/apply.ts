@@ -18,7 +18,7 @@
 import { existsSync, lstatSync, readFileSync, readdirSync, rmdirSync, rmSync, type Stats } from "node:fs";
 import { dirname, join, relative, resolve as resolvePath, sep } from "node:path";
 import { nameKey, type ItemType } from "./config.ts";
-import { atomicWrite, hashBuffer, isExecutable, sameFile } from "./fsutil.ts";
+import { atomicWrite, executableMatches, hashBuffer, sameFile } from "./fsutil.ts";
 import { readLock, serializeLock, writeLock, type Lock, type LockEntry, type SkipReason } from "./lock.ts";
 
 export interface PlanItem {
@@ -239,7 +239,7 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
 
       if (st?.isFile()) {
         const diskHash = hashBuffer(readFileSync(abs));
-        if (diskHash === desired && isExecutable(st.mode) === executable) {
+        if (diskHash === desired && executableMatches(st.mode, executable)) {
           // Already correct; adopt into the lock (updates a stale hash silently).
           entryFiles[rel] = desired;
           if (locked === undefined) land(rel, desired); // adopted (force)
@@ -383,11 +383,11 @@ function ownPath(key: string): string {
   return colon !== -1 && (slash === -1 || colon < slash) ? key.slice(colon + 1) : key;
 }
 
-/** Is the file at `rel` exactly `buf`, with the executable bit `executable`? */
+/** Is the file at `rel` exactly `buf`, with the executable bit `executable` (POSIX only)? */
 function sameFileAs(root: string, rel: string, buf: Buffer, executable: boolean): boolean {
   const abs = safeJoin(root, rel);
   const st = lstatOrUndefined(abs);
-  return st !== undefined && st.isFile() && isExecutable(st.mode) === executable && readFileSync(abs).equals(buf);
+  return st !== undefined && st.isFile() && executableMatches(st.mode, executable) && readFileSync(abs).equals(buf);
 }
 
 /** lstat that answers `undefined` for a missing path (also below a non-directory). */

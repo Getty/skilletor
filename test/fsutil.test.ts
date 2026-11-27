@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, symlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { parseJson, realOrResolved, samePath } from "../src/fsutil.ts";
+import { executableMatches, parseJson, realOrResolved, samePath } from "../src/fsutil.ts";
 import { makeTmpDir } from "./helpers/tmp.ts";
 import { NO_SYMLINKS } from "./helpers/symlink.ts";
 
@@ -50,5 +50,19 @@ test("k278: parseJson words every syntax error the same on every engine", () => 
       assert.equal(err.message, message, JSON.stringify(text));
       return true;
     });
+  }
+});
+
+// Asserts: on POSIX the owner's executable bit of a disk mode must equal the wanted one; on
+// Windows, whose files carry no such bit, every mode matches, so bytes alone decide.
+test("executableMatches compares the owner's bit on POSIX only", () => {
+  for (const platform of ["linux", "darwin"] as const) {
+    assert.equal(executableMatches(0o100755, true, platform), true);
+    assert.equal(executableMatches(0o100644, false, platform), true);
+    assert.equal(executableMatches(0o100644, true, platform), false);
+    assert.equal(executableMatches(0o100755, false, platform), false);
+  }
+  for (const [mode, executable] of [[0o100666, true], [0o100666, false], [0o100444, true], [0o100755, false]] as const) {
+    assert.equal(executableMatches(mode, executable, "win32"), true);
   }
 });

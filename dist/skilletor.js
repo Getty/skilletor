@@ -5724,6 +5724,9 @@ function hashBuffer(buf) {
 function isExecutable(mode) {
   return (mode & 64) !== 0;
 }
+function executableMatches(mode, executable, platform = process.platform) {
+  return platform === "win32" || isExecutable(mode) === executable;
+}
 function atomicWrite(path, data, executable = false) {
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true });
@@ -9661,7 +9664,7 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
         tookOver = true;
       if (st?.isFile()) {
         const diskHash = hashBuffer(readFileSync9(abs));
-        if (diskHash === desired && isExecutable(st.mode) === executable) {
+        if (diskHash === desired && executableMatches(st.mode, executable)) {
           entryFiles[rel] = desired;
           if (locked === undefined)
             land(rel, desired);
@@ -9785,7 +9788,7 @@ function ownPath(key) {
 function sameFileAs(root, rel, buf, executable) {
   const abs = safeJoin(root, rel);
   const st = lstatOrUndefined(abs);
-  return st !== undefined && st.isFile() && isExecutable(st.mode) === executable && readFileSync9(abs).equals(buf);
+  return st !== undefined && st.isFile() && executableMatches(st.mode, executable) && readFileSync9(abs).equals(buf);
 }
 function lstatOrUndefined(abs) {
   try {
