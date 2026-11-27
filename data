@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-11-27T07:25:50Z
+id: 287
+priority: low
+status: backlog
+tags:
+- docs
+title: 'README Status: the ''Released'' bullet still describes 0.8.0 as unreleased
+  and CPAN 0.001'
+updated: 2026-11-27T07:25:50Z
+---
+
+README.md, Status, first bullet: says the newest plugin release is 0.7.0 and the README describes an unreleased 0.8.0 with CPAN Skilletor 0.001. package.json is 0.9.0 and CPAN has 0.009000 (stubs). Found while rewriting the runtime bullets on branch getty-bun (hub task agent-developer k5); left alone there as out of scope.
