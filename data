@@ -1,0 +1,20 @@
+---
+class: standard
+completed: 2026-11-27T06:08:21Z
+created: 2026-11-14T02:16:39Z
+id: 217
+priority: low
+started: 2026-11-27T06:08:21Z
+status: done
+tags:
+- perl
+- divergence
+title: 'Perl: a failed atomic write is worded as Perl''s rename error, not Node''s'
+updated: 2026-11-27T06:08:21Z
+---
+
+From k184. When a file write fails at its rename (e.g. the target is a directory), the Perl port reports "rename <tmp>: Is a directory" where Node says "EISDIR: illegal operation on a directory, rename '<tmp>' -> '<file>'". It shows in a report as the warning `.codex/skilletor-rules.md: cannot write the Codex rules file (...)` and in every other write warning that quotes the error. The temp file name is random in both engines, so the bytes can never match fully; t/72-engine-codex.t masks that part. Fix: word atomic_write's errors (Skilletor::FSUtil) through node_fs_error as the rest of FSUtil does, so only the temp name differs; then note it as a known divergence on k143 (the temp name) or mask it in conformance.
+
+Same class as k201 (engine write errors worded unlike Node's errno text): work them together; k217 is the rename/EISDIR instance k184 hit in the Codex rules file warning.
+
+superseded by hub decision 2026-11-25 (no Perl runtime); removal in k275 on branch getty-bun
