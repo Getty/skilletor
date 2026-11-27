@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-11-27T06:34:18Z
+claimed_by: skilletor-worker-k278
+class: standard
+completed: 2026-11-27T06:34:18Z
+created: 2026-11-27T06:06:44Z
+id: 278
+priority: high
+started: 2026-11-27T06:34:18Z
+status: done
+tags:
+- getty-bun
+- engine
+title: Handle Bun's runtime differences in src
+updated: 2026-11-27T06:34:18Z
+---
+
+Bun runtime differences in src/ (part A probes):
+(a) JSON.parse error text differs from V8 (conformance 53/87/108/120): normalise, regenerate cases with SKILLETOR_CONFORMANCE_UPDATE=1, review by hand;
+(b) fetch on a missing file:// URL returns ok/200: check explicitly in the probe;
+(c) path.resolve in a deleted cwd resolves relative to the Bun binary's dir: detect the gone cwd first;
+(d) Bun transpiler cache writes ~/.bun/install/cache/@t@ into HOME: conformance sets BUN_RUNTIME_TRANSPILER_CACHE_PATH=0; starter stance is a provider question;
+(e) spawn of __sync-background gets the contract's isolation flags (--no-install --config=<empty> --no-env-file);
+(f) probe.ts headOk runs fetch in-process instead of execFileSync(process.execPath, -e).
+Depends on K3. Branch getty-bun, hub task agent-developer k5.
+
+2026-11-27 06:20 Plan: (a) parseJson in fsutil.ts throws a stable SyntaxError ('unexpected X at line L column C' / 'unexpected end of input', position from a small scanner run only on failure); (b)+(f) probe becomes async, headOk fetches in-process, file: URLs are stat-checked; resolveSpec stays sync, cmdAdd goes through a resolveSpecProbing wrapper; (c) cli resolves --project-dir against an explicit process.cwd() (Bun's path.resolve falls back to the binary dir, its process.cwd() throws ENOENT like Node); (d) conformance child env gets BUN_RUNTIME_TRANSPILER_CACHE_PATH=0; (e) background spawn adds --no-install --config=<empty> --no-env-file and drops the contract's variables under Bun.
+
+2026-11-27 06:32 Done, not committed. (a) fsutil.parseJson: 'unexpected end of input' / unexpected 'x' at line L column C; cases 53, 87, 108, 120 regenerated, only the JSON text changed (6 files). (b)+(f) probe async, in-process fetch with AbortSignal.timeout, file: stat-checked; cmdAdd uses spec.resolveSpecProbing. (c) cli resolves --project-dir against process.cwd(). (d) conformance child env + README: BUN_RUNTIME_TRANSPILER_CACHE_PATH=0. Starter stance is a provider question: the starters drop the variable, so Bun's default cache under ~/.bun applies. (e) background spawn under Bun: --no-install --config=/dev/null (win32: <stateRoot>/empty-bunfig.toml) --no-env-file, BUN_DROPPED_ENV removed; real-spawn test shows bunfig preload, .env, BUN_OPTIONS and NODE_PATH stay out (and fails with the isolation disabled).
+
+Committed 3d00bb8 on getty-bun (pushed). Reviewer run: typecheck 0, check-dist 0, bun test 1345 pass / 25 skip / 0 fail. Commit body misattributes some files (engine.ts vs hooks.ts for the background spawn; parseJson callers are catalog, claudesettings, config, lock).
