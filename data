@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-11-27T06:08:29Z
+created: 2026-11-14T04:01:33Z
+id: 223
+priority: low
+started: 2026-11-27T06:08:29Z
+status: done
+tags:
+- perl
+- refactor
+title: 'perl: one helper for the sync lock with its cache sweep'
+updated: 2026-11-27T06:08:29Z
+---
+
+Found by k177. The Perl port takes the sync lock and sweeps the url and git caches in three places now: Skilletor::Engine::sync, Skilletor::Resolver::resolve and Skilletor::Commands::_with_sync_lock (available). The reference has one withSyncLock. Done: one shared helper, the three callers on it, no behaviour change (the full prove and both conformance cross-runs green).
+
+superseded by hub decision 2026-11-25 (no Perl runtime); removal in k275 on branch getty-bun
