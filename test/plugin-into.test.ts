@@ -11,7 +11,7 @@ import { check, resolveItems, status, sync, type EngineContext } from "../src/en
 import { cmdUninstall } from "../src/commands.ts";
 import { addInstallEntry, ConfigError, findInstallEntries, loadConfig, pluginItemsRoot } from "../src/config.ts";
 import { readLock } from "../src/lock.ts";
-import { reportHook, reportText } from "../src/report.ts";
+import { reportHook, reportJson, reportText } from "../src/report.ts";
 
 /** `manifest` null: the project has no plugin manifest. */
 function env(manifest: unknown = {}) {
@@ -266,9 +266,18 @@ test("k286: a fresh checkout holds the committed copy without a lock: files exac
     // The clone: the committed files, no lock (it is git-ignored), one file differing.
     const lockPath = join(e.projectDir, ".claude", "skilletor.lock.json");
     writeFileSync(lockPath, "{}\n");
-    const r = (await sync(e.ctx)).scopes.find((s) => s.scope === "project")!;
-    assert.deepEqual([r.conflicts, r.added, r.overwritten], [[], [], []]);
-    assert.deepEqual(r.unchanged.map((i) => i.key), ["plugin:skills/boot"]);
+    const full = await sync(e.ctx);
+    const r = full.scopes.find((s) => s.scope === "project")!;
+    assert.deepEqual([r.conflicts, r.added, r.overwritten, r.unchanged], [[], [], [], []]);
+    // Reported as adopted, not unchanged (N6): in the text report and `--json`, never in a hook.
+    assert.deepEqual(r.adopted?.map((i) => i.key), ["plugin:skills/boot"]);
+    assert.match(reportText(full), /^ {2}= plugin:skills\/boot \(adopted: already on disk as rendered\)$/m);
+    assert.deepEqual(JSON.parse(reportJson(full)).scopes.find((s: { scope: string }) => s.scope === "project").adopted,
+      [{ key: "plugin:skills/boot", type: "skill", name: "boot", source: "s" }]);
+    assert.doesNotMatch(JSON.stringify(reportHook(full)), /adopted|plugin:skills\/boot/);
+    // Once owned, the next sync has nothing to adopt: unchanged, no `adopted` field.
+    const owned = (await sync(e.ctx)).scopes.find((s) => s.scope === "project")!;
+    assert.deepEqual([owned.unchanged.map((i) => i.key), "adopted" in owned], [["plugin:skills/boot"], false]);
     assert.deepEqual(Object.keys(readLock(lockPath)["plugin:skills/boot"]!.files).sort(), ["skills/boot/SKILL.md", "skills/boot/notes.md"]);
 
     writeFileSync(lockPath, "{}\n");
@@ -282,7 +291,7 @@ test("k286: a fresh checkout holds the committed copy without a lock: files exac
     writeFileSync(join(e.projectDir, "skills", "boot", "notes.md"), "N\n");
     const x = (await sync(e.ctx)).scopes.find((s) => s.scope === "project")!;
     if (process.platform === "win32") {
-      assert.deepEqual([x.conflicts, x.unchanged.map((i) => i.key)], [[], ["plugin:skills/boot"]]);
+      assert.deepEqual([x.conflicts, x.adopted?.map((i) => i.key)], [[], ["plugin:skills/boot"]]);
     } else {
       assert.deepEqual(x.conflicts.map((y) => y.path), ["skills/boot/notes.md"]);
     }

@@ -9557,6 +9557,7 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
     updated: [],
     removed: [],
     unchanged: [],
+    adopted: [],
     skipped: [],
     conflicts: [],
     overwritten: [],
@@ -9647,6 +9648,7 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
     let wrote = false;
     let removedFile = false;
     let tookOver = false;
+    let adopted = false;
     const land = (rel, hash) => {
       res.written.push({ key: it.key, path: rel });
       let l = landed.get(it.key);
@@ -9666,8 +9668,11 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
         const diskHash = hashBuffer(readFileSync9(abs));
         if (diskHash === desired && executableMatches(st.mode, executable)) {
           entryFiles[rel] = desired;
-          if (locked === undefined)
+          if (locked === undefined) {
             land(rel, desired);
+            if (it.adoptIdentical)
+              adopted = true;
+          }
           continue;
         }
         atomicWrite(abs, buf, executable);
@@ -9695,10 +9700,14 @@ function applyPlan(plan, opts, lockPath, oldLock, landed) {
     if (existing === undefined) {
       if (wrote || tookOver)
         res.added.push(it.key);
+      else if (adopted)
+        res.adopted.push(it.key);
       else
         res.unchanged.push(it.key);
     } else if (wrote || removedFile || tookOver || existing.partial) {
       res.updated.push(it.key);
+    } else if (adopted) {
+      res.adopted.push(it.key);
     } else {
       res.unchanged.push(it.key);
     }
@@ -10535,6 +10544,7 @@ var CODEX_ACTIVATION = "active from the next Codex session";
 var HERMES_ACTIVATION = "active from the next Hermes session";
 var HARNESS_ACTIVATION = { codex: CODEX_ACTIVATION, hermes: HERMES_ACTIVATION };
 var PLUGIN_ACTIVATION = "a file of the plugin: commit it";
+var ADOPTED = "adopted: already on disk as rendered";
 function activationOf(it) {
   if (isPluginKey(it.key))
     return PLUGIN_ACTIVATION;
@@ -10588,7 +10598,7 @@ function reportText(r) {
     return displaySafe(`skilletor: config error, nothing changed \u2014 ${r.error}`);
   const lines = [];
   for (const s of r.scopes) {
-    if (!isNotable(s) && s.skipped.length === 0)
+    if (!isNotable(s) && s.skipped.length === 0 && !s.adopted?.length)
       continue;
     const skipped = new Set(s.skipped.map((it) => it.key));
     lines.push(`skilletor: ${s.scope} scope`);
@@ -10596,6 +10606,8 @@ function reportText(r) {
       lines.push(`  + ${it.key} (${activationOf(it)})`);
     for (const it of s.updated)
       lines.push(`  ~ ${it.key} (${activationOf(it)})`);
+    for (const it of s.adopted ?? [])
+      lines.push(`  = ${it.key} (${ADOPTED})`);
     for (const it of s.removed)
       lines.push(`  - ${it.key} (${skipped.has(it.key) ? "removed: renders empty" : "removed"})`);
     const removed = new Set(s.removed.map((it) => it.key));
@@ -11488,6 +11500,8 @@ async function syncScopeRun(ctx, config, scopeCfg, scope, harnesses, opts, state
   rep.updated = result.updated.map(toChange);
   rep.removed = result.removed.map(toChange);
   rep.unchanged = result.unchanged.map(toChange);
+  if (result.adopted.length)
+    rep.adopted = result.adopted.map(toChange);
   rep.skipped = result.skipped.map(toChange);
   const shown = (c) => {
     const root = rootOfKey(rc, c.key) ?? targetDir;

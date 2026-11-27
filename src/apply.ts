@@ -73,6 +73,9 @@ export interface ApplyResult {
   updated: string[];
   removed: string[];
   unchanged: string[];
+  /** Items that took files on disk equal to the render into the lock without `force` and wrote
+   *  nothing (`adoptIdentical`, k286): in place of `unchanged`, `added` or `updated`. */
+  adopted: string[];
   /** Plan items marked skipped (also in `removed` if files were deleted). */
   skipped: string[];
   /** A conflict blocks its whole item (spec §6.3). */
@@ -129,7 +132,7 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
   const targetDir = resolvePath(opts.targetDir);
   const newLock: Lock = {};
   const res: ApplyResult = {
-    added: [], updated: [], removed: [], unchanged: [], skipped: [], conflicts: [], overwritten: [], written: [],
+    added: [], updated: [], removed: [], unchanged: [], adopted: [], skipped: [], conflicts: [], overwritten: [], written: [],
     leftInPlace: [],
   };
   const dirsTouched = new Map<string, Set<string>>(); // root -> dirs deleted from
@@ -221,6 +224,7 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
     let wrote = false;
     let removedFile = false;
     let tookOver = false; // a file held under another spelling is the item's now (k136)
+    let adopted = false; // a file equal to the render taken into the lock without force (k286)
     /** A path written or adopted: reported, and owned even if a later step throws. */
     const land = (rel: string, hash: string): void => {
       res.written.push({ key: it.key, path: rel });
@@ -242,7 +246,10 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
         if (diskHash === desired && executableMatches(st.mode, executable)) {
           // Already correct; adopt into the lock (updates a stale hash silently).
           entryFiles[rel] = desired;
-          if (locked === undefined) land(rel, desired); // adopted (force)
+          if (locked === undefined) {
+            land(rel, desired); // adopted (force, or silently: adoptIdentical)
+            if (it.adoptIdentical) adopted = true;
+          }
           continue;
         }
         atomicWrite(abs, buf, executable);
@@ -273,9 +280,12 @@ function applyPlan(plan: PlanItem[], opts: ApplyOptions, lockPath: string, oldLo
 
     if (existing === undefined) {
       if (wrote || tookOver) res.added.push(it.key);
+      else if (adopted) res.adopted.push(it.key);
       else res.unchanged.push(it.key); // fully conflicted, nothing installed
     } else if (wrote || removedFile || tookOver || existing.partial) {
       res.updated.push(it.key); // a partial entry: the run that left it never reported it
+    } else if (adopted) {
+      res.adopted.push(it.key);
     } else {
       res.unchanged.push(it.key);
     }

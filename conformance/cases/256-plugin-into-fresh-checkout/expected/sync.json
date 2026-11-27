@@ -21,6 +21,14 @@
           "type": "skill"
         }
       ],
+      "adopted": [
+        {
+          "key": "plugin:skills/boot",
+          "name": "boot",
+          "source": "shared",
+          "type": "skill"
+        }
+      ],
       "conflicts": [],
       "gitignoreUpdated": [
         ".claude/.gitignore",
@@ -31,14 +39,7 @@
       "scope": "project",
       "skipped": [],
       "trustRequests": [],
-      "unchanged": [
-        {
-          "key": "plugin:skills/boot",
-          "name": "boot",
-          "source": "shared",
-          "type": "skill"
-        }
-      ],
+      "unchanged": [],
       "updated": [],
       "warnings": []
     }

@@ -1192,6 +1192,7 @@ async function syncScopeRun(
   rep.updated = result.updated.map(toChange);
   rep.removed = result.removed.map(toChange);
   rep.unchanged = result.unchanged.map(toChange);
+  if (result.adopted.length) rep.adopted = result.adopted.map(toChange);
   rep.skipped = result.skipped.map(toChange);
   // Claude paths stay relative to `.claude` as before; other roots are named (`.agents/…`).
   // A root outside the base (a CODEX_HOME elsewhere) is shown absolute.

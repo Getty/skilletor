@@ -104,7 +104,10 @@ edits (`add`/`install`/`uninstall`/`source remove` with `--project`) fail with a
   repository commits the result; the lock owns it under `plugin:skills/<name>`, so sync,
   check, drift and uninstall work as for any owned file, without a skill `.gitignore` or a
   harness conversion. A file not in the lock that equals the render byte for byte, mode
-  included, is adopted silently (a fresh checkout has no lock). Refused as a config error
+  included, is adopted without a conflict (a fresh checkout has no lock, §6.3); an item that
+  wrote nothing else is reported `= plugin:skills/<name> (adopted: already on disk as
+  rendered)`, `adopted` in the scope's JSON report (absent when empty) instead of `unchanged`,
+  and no hook output: nothing on disk changed. Refused as a config error
   naming file and entry: an object entry in the user config, under `agents` or `rules`, with a
   pattern, an unknown key or another `into`; a project without the manifest.
 - `gitignore` (user or project/local, default `true`): see 6.4. In the user config it
@@ -751,9 +754,14 @@ has recorded the new format, no further sync runs for it.
 
 - If a target path exists that is **not** in the lock (a hand-written skill, a
   manage-skills link), it is never overwritten → conflict in the report; `--force`
-  adopts it. A conflict blocks the **whole item** (k67): none of its files is written or
-  removed, and an installed copy stays as it was (files and lock entry) – so a
-  hand-written or linked skill of the same name never gets skilletor files mixed into it.
+  adopts it. The one exception: an `"into": "plugin"` item (lock key prefix `plugin:`,
+  project scope only, §3) adopts without `--force` a file at one of its exact output paths
+  whose bytes – on POSIX, and its executable bit – equal the render, reported `adopted`; a
+  link there stays a conflict, and since the lock then owns these committed files, a later
+  `uninstall` deletes them like any owned file. A conflict blocks the **whole item** (k67):
+  none of its files is written or removed, and an installed copy stays as it was (files and
+  lock entry) – so a hand-written or linked skill of the same name never gets skilletor
+  files mixed into it.
 - **Links.** skilletor never writes or deletes through a symbolic link at or below the
   item's own path. A skill directory `skills/<name>` (or a directory inside it) that is a
   link is a conflict even when the lock owns files in it; `--force` removes the link

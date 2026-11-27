@@ -886,3 +886,37 @@ test("k136: a different file at a spelling equal ignoring case stays a conflict"
     tmp.cleanup();
   }
 });
+
+// N6 (k286): an adoptIdentical item that took files equal to the render into the lock and wrote
+// nothing is reported `adopted`, not `unchanged`. Asserts the three outcomes: all files adopted
+// (fresh, then a new file next to an owned entry) -> adopted; one file written -> added, the
+// write being what the report says; a plain item adopting with force stays as before.
+test("N6: an item that only adopted identical files is reported adopted", () => {
+  const tmp = makeTmpDir();
+  try {
+    const plugin = (files: Record<string, string>): PlanItem => ({ ...item("skill", "boot", files), adoptIdentical: true });
+    mkdirSync(join(tmp.dir, "skills/boot"), { recursive: true });
+    writeFileSync(join(tmp.dir, "skills/boot/SKILL.md"), "S");
+    const fresh = apply([plugin({ "skills/boot/SKILL.md": "S" })], { targetDir: tmp.dir });
+    assert.deepEqual([fresh.adopted, fresh.added, fresh.unchanged, fresh.conflicts], [["skills/boot"], [], [], []]);
+    assert.deepEqual(Object.keys(readLock(join(tmp.dir, "skilletor.lock.json"))["skills/boot"]!.files), ["skills/boot/SKILL.md"]);
+
+    writeFileSync(join(tmp.dir, "skills/boot/ref.md"), "R");
+    const more = apply([plugin({ "skills/boot/SKILL.md": "S", "skills/boot/ref.md": "R" })], { targetDir: tmp.dir });
+    assert.deepEqual([more.adopted, more.updated, more.unchanged], [["skills/boot"], [], []]);
+    const again = apply([plugin({ "skills/boot/SKILL.md": "S", "skills/boot/ref.md": "R" })], { targetDir: tmp.dir });
+    assert.deepEqual([again.adopted, again.unchanged], [[], ["skills/boot"]]);
+
+    rmSync(join(tmp.dir, "skilletor.lock.json"));
+    rmSync(join(tmp.dir, "skills/boot/ref.md"));
+    const mixed = apply([plugin({ "skills/boot/SKILL.md": "S", "skills/boot/ref.md": "R" })], { targetDir: tmp.dir });
+    assert.deepEqual([mixed.adopted, mixed.added], [[], ["skills/boot"]]);
+
+    mkdirSync(join(tmp.dir, "skills/moo"), { recursive: true });
+    writeFileSync(join(tmp.dir, "skills/moo/SKILL.md"), "M");
+    const forced = apply([item("skill", "moo", { "skills/moo/SKILL.md": "M" })], { targetDir: tmp.dir, force: true, keep: ["skills/boot"] });
+    assert.deepEqual([forced.adopted, forced.unchanged], [[], ["skills/moo"]]);
+  } finally {
+    tmp.cleanup();
+  }
+});
